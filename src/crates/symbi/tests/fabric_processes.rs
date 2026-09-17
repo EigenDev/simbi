@@ -185,6 +185,8 @@ fn run_worker(arm: &Arm, me: WorkerId, out: PathBuf) -> Result<(), FabricError> 
         me,
         coordinator: "127.0.0.1:0".parse().unwrap(),
         announce: Some(PathBuf::from(std::env::var("W_COORD").unwrap())),
+        bind: None,
+        advertise: None,
         identity: Identity {
             credential: 0xF00D,
             build_id: "fabric_processes".into(),

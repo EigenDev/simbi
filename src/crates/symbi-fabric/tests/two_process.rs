@@ -147,6 +147,8 @@ fn run_worker(s: &Scenario) -> Result<(), FabricError> {
         announce: Some(std::path::PathBuf::from(
             std::env::var("W_COORD").expect("rendezvous file"),
         )),
+        bind: None,
+        advertise: None,
         identity: identity(s.workers),
         startup: STARTUP_DEADLINE,
     };

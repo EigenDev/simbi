@@ -315,3 +315,73 @@ def test_workers_with_different_resolved_parameters_refuse_to_rendezvous(tmp_pat
     assert a.returncode != 0 and b.returncode != 0, f"worker exits {a.returncode}, {b.returncode}"
     assert "build or configuration disagreement" in err_a, err_a[-2000:]
     assert not list(out.glob("*.h5")), "a worker wrote output before the session was admitted"
+
+
+def _lan_address() -> str | None:
+    """an address of this host that is not loopback, if it has one."""
+    import socket
+
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as probe:
+            probe.connect(("10.255.255.255", 1))
+            address = probe.getsockname()[0]
+    except OSError:
+        return None
+    return None if address.startswith("127.") else address
+
+
+def test_workers_rendezvous_over_a_non_loopback_address(tmp_path: Path) -> None:
+    """the layout binds every worker on all interfaces and advertises this host's address:
+    the rendezvous file carries that address, and the run equals the reference."""
+    address = _lan_address()
+    if address is None:
+        pytest.skip("this host has no non-loopback address")
+    reference, _ = _reference(tmp_path / "single", STEPS)
+    layout = tmp_path / "lan.toml"
+    layout.write_text(
+        "[execution]\nworkers = 2\nbind = \"0.0.0.0\"\n"
+        f'advertise = "{address}"\n\n[partition]\nshape = [2, 1]\n\n[checkpoint]\nstaging_mb = 1\n'
+        "keep_rendezvous = true\n"
+    )
+    out = tmp_path / "lan"
+    launched = _launch(out, layout, STEPS, workers=2)
+    _assert_same_state(launched.final, reference, "non-loopback rendezvous")
+    kept = sorted(out.glob(".rendezvous-*.kept"))
+    assert kept, "the rendezvous record was not kept for inspection"
+    first = kept[0].read_text().splitlines()[0]
+    assert first.startswith(address + ":"), f"the coordinator advertised {first!r}, expected {address}"
+
+
+def test_scheduler_started_workers_rendezvous_through_the_restricted_file(tmp_path: Path) -> None:
+    """two workers started as a scheduler would, with rank and size in the environment and no
+    launcher parent: the coordinator writes its advertised address and a fresh credential into
+    a rendezvous file readable by its owner alone, the other worker reads it, and the run
+    equals the reference."""
+    reference, _ = _reference(tmp_path / "single", STEPS)
+    out = tmp_path / "sched"
+    layout = tmp_path / "sched.toml"
+    layout.write_text(
+        "[execution]\nmode = \"scheduler\"\nworkers = 2\n\n[partition]\nshape = [2, 1]\n\n"
+        f'[checkpoint]\nstaging_mb = 1\ndirectory = "{out}"\nkeep_rendezvous = true\n'
+    )
+    cmd = [
+        sys.executable, "-m", "simbi.cli", "launch", SCRIPT, "--layout", str(layout),
+        "--max-steps", str(STEPS), "--resolution", ",".join(str(r) for r in RESOLUTION),
+        "--data-directory", str(tmp_path / "ignored"), "--checkpoint-interval", "1e9",
+    ]
+    procs = []
+    for rank in range(2):
+        env = dict(os.environ, SLURM_PROCID=str(rank), SLURM_NTASKS="2")
+        procs.append(subprocess.Popen(cmd, env=env, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, text=True))
+    errs = [p.communicate(timeout=300)[1] for p in procs]
+    for rank, (p, err) in enumerate(zip(procs, errs)):
+        assert p.returncode == 0, f"scheduler-started worker {rank} failed:\n{err[-3000:]}"
+    finals = sorted(out.glob("*final*.h5"))
+    assert len(finals) == 1, f"expected one final checkpoint in {out}, found {finals}"
+    assert not list((tmp_path / "ignored").glob("*.h5")), "the layout's directory was not honored"
+    kept = out / ".rendezvous.kept"
+    assert kept.exists(), "the rendezvous record was not kept for inspection"
+    assert (kept.stat().st_mode & 0o777) == 0o600, "the rendezvous file is not owner-only"
+    lines = kept.read_text().splitlines()
+    assert len(lines) == 2 and int(lines[1]) != 0, "the file carries the address and a credential"
+    _assert_same_state(finals[0], reference, "scheduler-started workers")

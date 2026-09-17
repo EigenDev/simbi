@@ -876,16 +876,20 @@ def launch_worker(
     owner: Sequence[int],
     cuts: Sequence[Sequence[int]],
     rendezvous: str,
-    credential: int,
+    credential: int | None,
     staging_cells: int,
     max_steps: int = 0,
     compute_mode: str = "cpu",
+    bind: str = "127.0.0.1",
+    advertise: str | None = None,
 ) -> None:
     """
     evolve this worker's tiles of `problem` through the fabric: one process of a
     `simbi launch` session. the problem is prepared exactly as `run` prepares it;
     the partition is `cuts` per axis, `owner` names the worker holding each tile,
-    and the coordinator (worker 0) announces its address in `rendezvous`.
+    and the coordinator (worker 0) announces its advertised address and, when no
+    credential is given, a fresh session credential in the restricted file
+    `rendezvous`; every worker listens on `bind` and is reached at `advertise`.
     """
     from .checkpoint import merge_with_checkpoint
 
@@ -916,7 +920,9 @@ def launch_worker(
             "owner": [int(o) for o in owner],
             "cuts": [[int(c) for c in axis] for axis in cuts],
             "rendezvous": str(rendezvous),
-            "credential": int(credential),
+            "credential": int(credential) if credential is not None else 0,
+            "bind": str(bind),
+            "advertise": str(advertise or bind),
             "staging_cells": int(staging_cells),
         },
     )

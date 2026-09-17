@@ -10119,6 +10119,9 @@ struct WorkerLaunch {
     owner: Vec<usize>,
     rendezvous: String,
     credential: u64,
+    /// the address this worker listens on and the host its peers reach it at
+    bind: String,
+    advertise: String,
     staging_cells: usize,
     /// the digest of the effective execution configuration every worker must share
     config_digest: u64,
@@ -10280,10 +10283,16 @@ fn run_worker_process(cfg: &Config, prims: &[Vec<f64>], launch: &WorkerLaunch) -
     let exchange = PlanExchange::new(&plan, &placement, me);
     let budget = launch.staging_cells.max(1);
     let credit = block_credit_for(budget, 2);
+    let bind: std::net::IpAddr = launch
+        .bind
+        .parse()
+        .map_err(|e| format!("bind address '{}': {e}", launch.bind))?;
     let rendezvous = Rendezvous {
         me,
-        coordinator: "127.0.0.1:0".parse().expect("a loopback address"),
+        coordinator: std::net::SocketAddr::new(bind, 0),
         announce: Some(std::path::PathBuf::from(&launch.rendezvous)),
+        bind: Some(bind),
+        advertise: Some(launch.advertise.clone()),
         identity: Identity {
             credential: launch.credential,
             build_id: build_source_id(),
@@ -10606,8 +10615,9 @@ mod canon_tests {
 }
 
 /// one worker of a `simbi launch` session. `launch` carries the worker id, the worker count,
-/// the tile owner map, the per-axis cuts, the rendezvous file, the session credential, and the
-/// checkpoint block size in cells.
+/// the tile owner map, the per-axis cuts, the rendezvous file, the session credential (zero
+/// leaves it to the rendezvous file), the bind address and advertised host, and the checkpoint
+/// block size in cells.
 #[pyfunction]
 fn launch_worker(
     py: Python<'_>,
@@ -10630,19 +10640,26 @@ fn launch_worker(
         owner,
         rendezvous: get("rendezvous")?.extract()?,
         credential: get("credential")?.extract()?,
+        bind: get("bind")?.extract()?,
+        advertise: get("advertise")?.extract()?,
         staging_cells: get("staging_cells")?.extract()?,
         config_digest: effective_config_digest(sim_info, &cfg.config_sha256)?,
     };
     cfg.n_gpus = params.owner.len();
     cfg.decompose = cuts;
-    eprintln!(
-        "SIMBI provenance: backend={} config={} config_sha256={} worker={}/{}",
-        build_source_id(),
-        cfg.config_source,
-        cfg.config_sha256,
-        params.worker,
-        params.workers
-    );
+    // one write, so the lines of concurrent workers sharing a stream stay whole
+    {
+        use std::io::Write;
+        let line = format!(
+            "SIMBI provenance: backend={} config={} config_sha256={} worker={}/{}\n",
+            build_source_id(),
+            cfg.config_source,
+            cfg.config_sha256,
+            params.worker,
+            params.workers
+        );
+        let _ = std::io::stderr().write_all(line.as_bytes());
+    }
     let prims = drain_prims(prim_gen)?;
     py.detach(|| run_worker_process(&cfg, &prims, &params))
         .map_err(PyRuntimeError::new_err)

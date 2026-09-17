@@ -14,7 +14,9 @@ import sys
 from argparse import Namespace
 from typing import Optional, Sequence
 
-from simbi.simulation.launcher import Layout, spawn_workers
+from pathlib import Path
+
+from simbi.simulation.launcher import Layout, retire_rendezvous, scheduler_identity, scheduler_rendezvous, spawn_workers
 from simbi.simulation.problem import ConfigError
 
 from ..run.executor import _discover_problem_classes
@@ -46,25 +48,37 @@ def _build_problem(args: Namespace, argv: Optional[Sequence[str]]):
     return problem
 
 
-def launch_config(args: Namespace, argv: Optional[Sequence[str]] = None) -> None:
-    if args.worker is not None:
-        from simbi.simulation import runner
+def _run_worker_role(args: Namespace, problem, worker: int, workers: int, owner, cuts, rendezvous: str, credential, bind: str, advertise: str, staging_cells: int) -> None:
+    from simbi.simulation import runner
 
+    runner.launch_worker(
+        problem,
+        worker=worker,
+        workers=workers,
+        owner=owner,
+        cuts=cuts,
+        rendezvous=rendezvous,
+        credential=credential,
+        bind=bind,
+        advertise=advertise,
+        staging_cells=staging_cells,
+        max_steps=args.max_steps,
+    )
+
+
+def launch_config(args: Namespace, argv: Optional[Sequence[str]] = None) -> None:
+    if args.worker is not None and args.owner is not None:
+        # the worker role as the local launcher spawns it: every parameter on the command
+        # line. the launcher forwards its whole command line, the layout flag included, so
+        # the role is decided by the worker-role flags alone.
         problem = _build_problem(args, argv)
         if problem is None:
             return
         owner = [int(x) for x in args.owner.split(",")]
         cuts = [[int(c) for c in axis.split(",") if c] for axis in args.cuts.split(";")] if args.cuts else []
-        runner.launch_worker(
-            problem,
-            worker=args.worker,
-            workers=args.workers,
-            owner=owner,
-            cuts=cuts,
-            rendezvous=args.rendezvous,
-            credential=args.credential,
-            staging_cells=args.staging_cells,
-            max_steps=args.max_steps,
+        _run_worker_role(
+            args, problem, args.worker, args.workers, owner, cuts, args.rendezvous, args.credential,
+            args.bind or "127.0.0.1", args.advertise or args.bind or "127.0.0.1", args.staging_cells,
         )
         return
     problem = _build_problem(args, argv)
@@ -73,6 +87,26 @@ def launch_config(args: Namespace, argv: Optional[Sequence[str]] = None) -> None
     if args.layout is None:
         raise ConfigError("a layout is required.  usage: simbi launch <config> --layout <layout.toml>")
     layout = Layout.from_file(args.layout, problem.resolution)
+    if layout.mode == "scheduler":
+        # the worker role as a scheduler started it: identity from the scheduler, the session
+        # credential from the coordinator's restricted rendezvous file
+        if args.worker is not None:
+            worker, workers = args.worker, args.workers or layout.workers
+        else:
+            worker, workers = scheduler_identity(layout)
+        rendezvous = args.rendezvous or str(scheduler_rendezvous(layout, problem.data_directory))
+        if layout.checkpoint_directory:
+            problem = problem.model_copy(update={"data_directory": layout.checkpoint_directory})
+        try:
+            _run_worker_role(
+                args, problem, worker, workers, layout.owner, layout.cuts, rendezvous, args.credential,
+                layout.bind, layout.advertised, layout.staging_cells,
+            )
+        finally:
+            # the coordinator wrote the record; it retires it once its session has ended
+            if worker == 0:
+                retire_rendezvous(Path(rendezvous), layout.keep_rendezvous)
+        return
     code = spawn_workers(layout, sys.argv[1:], problem.data_directory)
     if code != 0:
         sys.exit(code)

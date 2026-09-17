@@ -364,6 +364,34 @@ simbi launch simbi_configs/examples/newtonian/kh.py --layout two.toml --resoluti
 simbi launch /path/to/problem.py --layout three.toml --checkpoint data/32x32.chkpt.final.h5
 ```
 
+Across hosts, a scheduler starts one process per worker and each runs the same
+command; the worker takes its id from the scheduler's environment
+(`SLURM_PROCID`, `PMI_RANK`, `OMPI_COMM_WORLD_RANK`). Every worker listens on
+`bind` and is reached at `advertise` (its host name when `bind` is all
+interfaces), and the coordinator publishes its address and a fresh session
+credential in an owner-only rendezvous file under the checkpoint directory,
+which must be on a filesystem every node shares:
+
+```toml
+[execution]
+mode = "scheduler"
+workers = 2
+bind = "0.0.0.0"
+
+[partition]
+shape = [2, 1]
+
+[checkpoint]
+directory = "/shared/run-001"
+```
+
+```bash
+srun --nodes=2 --ntasks=2 simbi launch /path/to/problem.py --layout two-node.toml
+```
+
+`scripts/fabric_two_node_gate.sh` runs this on two nodes and compares the result
+with a single-grid run. The transport is unencrypted TCP for a trusted allocation.
+
 Problem flags pass through as they do for `simbi run`. The launcher starts the
 workers, prints each worker's pid and exit code, and exits nonzero if any
 worker did; interrupting the launcher ends every worker. Checkpoints are

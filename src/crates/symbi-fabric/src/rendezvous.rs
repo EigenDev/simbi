@@ -10,6 +10,13 @@
 // workers complete a full mesh and the streams become the TCP link. no
 // simulation frame travels before the Welcome.
 //
+// every worker listens on `bind` and is reached by its peers at `advertise`,
+// a host name or address carried in its Hello and distributed in the Welcome
+// table, so the mesh spans hosts. the coordinator publishes its advertised
+// address in the rendezvous file, which it creates readable by its owner alone;
+// when the session credential is left to the file (zero), the coordinator
+// draws a fresh one and writes it there, and the other workers read it.
+//
 // a mismatch is refused by category: build or configuration, numerical plan,
 // or placement (a launcher error). every blocking step honors the startup
 // deadline.
@@ -23,7 +30,7 @@ use crate::frame::{HEADER_LEN, Header, Kind};
 use crate::ident::{Digest, Epoch, SessionId, WorkerId};
 use crate::tcp::TcpLink;
 use std::io::{Read, Write};
-use std::net::{SocketAddr, TcpListener, TcpStream};
+use std::net::{IpAddr, SocketAddr, TcpListener, TcpStream};
 use std::time::{Duration, Instant};
 
 pub const PROTOCOL: u16 = 1;
@@ -46,25 +53,88 @@ pub struct Identity {
 pub struct Rendezvous {
     pub me: WorkerId,
     /// where the coordinator listens. with `announce` set the coordinator binds this
-    /// address with port zero and publishes the bound address; the workers read it.
+    /// address with port zero and publishes the advertised address; the workers read it.
     pub coordinator: SocketAddr,
     /// the rendezvous file: written by the coordinator once bound, polled by the workers.
     pub announce: Option<std::path::PathBuf>,
+    /// the address this worker's listener binds; absent, the coordinator address's.
+    pub bind: Option<IpAddr>,
+    /// the host name or address peers reach this worker at; absent, the bound address,
+    /// which serves a single host.
+    pub advertise: Option<String>,
+    /// `identity.credential` zero leaves the credential to the rendezvous file: the
+    /// coordinator draws one and writes it, every other worker reads it.
     pub identity: Identity,
     pub startup: Duration,
 }
 
-/// the coordinator's bound address, from the rendezvous file once it appears.
+/// a session credential from the operating system's hash seed, never zero.
+fn fresh_credential() -> u64 {
+    use std::hash::{BuildHasher, Hasher};
+    loop {
+        let a = std::collections::hash_map::RandomState::new().build_hasher().finish();
+        let b = std::collections::hash_map::RandomState::new().build_hasher().finish();
+        let c = a ^ b.rotate_left(32);
+        if c != 0 {
+            return c & (u64::MAX >> 1);
+        }
+    }
+}
+
+/// write the rendezvous record, readable by its owner alone, under its final name at once:
+/// the advertised `host:port`, then the credential.
+fn publish(path: &std::path::Path, host: &str, port: u16, credential: u64) -> Result<(), FabricError> {
+    let tmp = path.with_extension("tmp");
+    let _ = std::fs::remove_file(&tmp);
+    let mut options = std::fs::OpenOptions::new();
+    options.write(true).create_new(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600);
+    }
+    let mut file = options.open(&tmp)?;
+    file.write_all(format!("{host}:{port}\n{credential}\n").as_bytes())?;
+    drop(file);
+    std::fs::rename(&tmp, path)?;
+    Ok(())
+}
+
+/// every address `host:port` resolves to, tried in turn until one connects or the startup
+/// deadline passes.
+fn connect_to(host: &str, port: u16, start: Instant, budget: Duration) -> Result<TcpStream, FabricError> {
+    use std::net::ToSocketAddrs;
+    loop {
+        let left = remaining(start, budget)?;
+        if let Ok(addrs) = (host, port).to_socket_addrs() {
+            for addr in addrs {
+                if let Ok(s) = TcpStream::connect_timeout(&addr, left.min(Duration::from_millis(200))) {
+                    return Ok(s);
+                }
+            }
+        }
+        std::thread::sleep(Duration::from_millis(5));
+    }
+}
+
+/// the coordinator's advertised host and port and the session credential, from the
+/// rendezvous file once it appears whole.
 fn announced(
     path: &std::path::Path,
     start: Instant,
     budget: Duration,
-) -> Result<SocketAddr, FabricError> {
+) -> Result<(String, u16, u64), FabricError> {
     loop {
         remaining(start, budget)?;
         if let Ok(text) = std::fs::read_to_string(path) {
-            if let Ok(addr) = text.trim().parse::<SocketAddr>() {
-                return Ok(addr);
+            let mut lines = text.lines();
+            let address = lines.next().and_then(|l| l.trim().rsplit_once(':'));
+            let credential = lines.next().and_then(|l| l.trim().parse::<u64>().ok());
+            if let (Some((host, port)), Some(credential)) = (address, credential) {
+                if let Ok(port) = port.parse::<u16>() {
+                    let host = host.trim_start_matches('[').trim_end_matches(']').to_string();
+                    return Ok((host, port, credential));
+                }
             }
         }
         std::thread::sleep(Duration::from_millis(5));
@@ -103,6 +173,16 @@ impl Cursor<'_> {
         self.1 += n;
         Ok(s)
     }
+    /// a length-prefixed host name of at most 255 bytes.
+    fn host(&mut self) -> Result<String, FabricError> {
+        let n = self.u16()? as usize;
+        if n == 0 || n > 255 {
+            return Err(FabricError::Rendezvous {
+                detail: format!("advertised host of {n} bytes"),
+            });
+        }
+        Ok(String::from_utf8_lossy(self.take(n)?).into_owned())
+    }
     fn u8(&mut self) -> Result<u8, FabricError> {
         Ok(self.take(1)?[0])
     }
@@ -129,6 +209,8 @@ struct Hello {
     protocol: u16,
     identity: Identity,
     port: u16,
+    /// the host peers reach this worker at
+    host: String,
     byte_order: u8,
 }
 
@@ -146,6 +228,8 @@ impl Hello {
         put_u32(&mut out, self.identity.workers);
         put_u32(&mut out, self.identity.block_credit);
         put_u16(&mut out, self.port);
+        put_u16(&mut out, self.host.len() as u16);
+        out.extend_from_slice(self.host.as_bytes());
         out.push(self.byte_order);
         out
     }
@@ -168,6 +252,7 @@ impl Hello {
         let workers = c.u32()?;
         let block_credit = c.u32()?;
         let port = c.u16()?;
+        let host = c.host()?;
         let byte_order = c.u8()?;
         Ok(Self {
             protocol,
@@ -182,6 +267,7 @@ impl Hello {
                 block_credit,
             },
             port,
+            host,
             byte_order,
         })
     }
@@ -352,38 +438,57 @@ pub fn connect(r: &Rendezvous, max_payload: usize) -> Result<(TcpLink, SessionId
     let start = Instant::now();
     let budget = r.startup;
     let workers = r.identity.workers as usize;
+    let bind_ip = r.bind.unwrap_or_else(|| r.coordinator.ip());
     let listener = if r.me == WorkerId(0) {
-        TcpListener::bind(r.coordinator)?
+        TcpListener::bind((bind_ip, r.coordinator.port()))?
     } else {
-        TcpListener::bind((r.coordinator.ip(), 0))?
+        TcpListener::bind((bind_ip, 0))?
     };
     let port = listener.local_addr()?.port();
-    let coordinator = match (&r.announce, r.me) {
+    let host = r
+        .advertise
+        .clone()
+        .unwrap_or_else(|| listener.local_addr().map(|a| a.ip().to_string()).unwrap_or_default());
+    let mut identity = r.identity.clone();
+    let (coordinator_host, coordinator_port) = match (&r.announce, r.me) {
         (Some(path), WorkerId(0)) => {
-            let bound = listener.local_addr()?;
-            let tmp = path.with_extension("tmp");
-            std::fs::write(&tmp, bound.to_string())?;
-            std::fs::rename(&tmp, path)?;
-            bound
+            if identity.credential == 0 {
+                identity.credential = fresh_credential();
+            }
+            publish(path, &host, port, identity.credential)?;
+            (host.clone(), port)
         }
-        (Some(path), _) => announced(path, start, budget)?,
-        (None, _) => r.coordinator,
+        (Some(path), _) => {
+            let (h, p, credential) = announced(path, start, budget)?;
+            if identity.credential == 0 {
+                identity.credential = credential;
+            }
+            (h, p)
+        }
+        (None, _) => (r.coordinator.ip().to_string(), r.coordinator.port()),
     };
+    if identity.credential == 0 {
+        return Err(FabricError::Rendezvous {
+            detail: "no session credential: give one or a rendezvous file".into(),
+        });
+    }
     let mine = Hello {
         protocol: PROTOCOL,
-        identity: r.identity.clone(),
+        identity,
         port,
+        host: host.clone(),
         byte_order: LITTLE_ENDIAN,
     };
+    let welcome_bound = HANDSHAKE_PAYLOAD.max(64 + workers * 320);
     let link = TcpLink::new(r.me, workers, max_payload);
-    let mut table: Vec<u16> = vec![0; workers];
+    let mut table: Vec<(String, u16)> = vec![(String::new(), 0); workers];
     let session;
 
     if r.me == WorkerId(0) {
         listener.set_nonblocking(true)?;
         let mut streams: Vec<Option<TcpStream>> = (0..workers).map(|_| None).collect();
         let mut hellos: Vec<Option<Hello>> = (0..workers).map(|_| None).collect();
-        table[0] = port;
+        table[0] = (host.clone(), port);
         let mut admitted = 1;
         while admitted < workers {
             remaining(start, budget)?;
@@ -426,7 +531,7 @@ pub fn connect(r: &Rendezvous, max_payload: usize) -> Result<(TcpLink, SessionId
                         }
                         return Err(FabricError::Rendezvous { detail });
                     }
-                    table[worker.0 as usize] = hello.port;
+                    table[worker.0 as usize] = (hello.host.clone(), hello.port);
                     hellos[worker.0 as usize] = Some(hello);
                     streams[worker.0 as usize] = Some(stream);
                     admitted += 1;
@@ -440,8 +545,10 @@ pub fn connect(r: &Rendezvous, max_payload: usize) -> Result<(TcpLink, SessionId
         session = fresh_session();
         let mut welcome = Vec::new();
         put_u64(&mut welcome, session.0);
-        for &p in &table {
-            put_u16(&mut welcome, p);
+        for (h, p) in &table {
+            put_u16(&mut welcome, h.len() as u16);
+            welcome.extend_from_slice(h.as_bytes());
+            put_u16(&mut welcome, *p);
         }
         let header = Header {
             kind: Kind::Welcome,
@@ -457,13 +564,7 @@ pub fn connect(r: &Rendezvous, max_payload: usize) -> Result<(TcpLink, SessionId
             }
         }
     } else {
-        let mut stream = loop {
-            let left = remaining(start, budget)?;
-            match TcpStream::connect_timeout(&coordinator, left.min(Duration::from_millis(200))) {
-                Ok(s) => break s,
-                Err(_) => std::thread::sleep(Duration::from_millis(5)),
-            }
-        };
+        let mut stream = connect_to(&coordinator_host, coordinator_port, start, budget)?;
         let payload = mine.encode();
         let header = Header {
             kind: Kind::Hello,
@@ -473,7 +574,7 @@ pub fn connect(r: &Rendezvous, max_payload: usize) -> Result<(TcpLink, SessionId
             payload_len: payload.len() as u32,
         };
         write_frame(&mut stream, header, &payload, start, budget)?;
-        let (header, payload) = read_frame(&mut stream, start, budget, HANDSHAKE_PAYLOAD)?;
+        let (header, payload) = read_frame(&mut stream, start, budget, welcome_bound)?;
         match header.kind {
             Kind::Welcome => {}
             Kind::Abort => {
@@ -490,20 +591,14 @@ pub fn connect(r: &Rendezvous, max_payload: usize) -> Result<(TcpLink, SessionId
         let mut c = Cursor(&payload, 0);
         session = SessionId(c.u64()?);
         for slot in table.iter_mut() {
-            *slot = c.u16()?;
+            let h = c.host()?;
+            *slot = (h, c.u16()?);
         }
         link.attach(WorkerId(0), stream)?;
         // the mesh among workers 1..n: connect to every lower id, accept every higher id.
         let me = r.me.0 as usize;
         for j in 1..me {
-            let addr = SocketAddr::new(coordinator.ip(), table[j]);
-            let mut s = loop {
-                let left = remaining(start, budget)?;
-                match TcpStream::connect_timeout(&addr, left.min(Duration::from_millis(200))) {
-                    Ok(s) => break s,
-                    Err(_) => std::thread::sleep(Duration::from_millis(5)),
-                }
-            };
+            let mut s = connect_to(&table[j].0, table[j].1, start, budget)?;
             let header = Header {
                 kind: Kind::Hello,
                 session,
@@ -574,6 +669,7 @@ mod tests {
             protocol: PROTOCOL,
             identity: identity(),
             port: 4242,
+            host: "127.0.0.1".into(),
             byte_order: LITTLE_ENDIAN,
         };
         assert_eq!(Hello::decode(&h.encode()).unwrap(), h);
@@ -585,6 +681,7 @@ mod tests {
             protocol: PROTOCOL,
             identity: identity(),
             port: 1,
+            host: "127.0.0.1".into(),
             byte_order: LITTLE_ENDIAN,
         };
         let mut plan = mine.clone();
@@ -613,6 +710,39 @@ mod tests {
 }
 
 #[cfg(test)]
+mod publish_tests {
+    use super::*;
+
+    #[test]
+    fn the_rendezvous_record_is_owner_only_and_round_trips() {
+        let path = std::env::temp_dir().join(format!("symbi_rv_publish_{}", std::process::id()));
+        let _ = std::fs::remove_file(&path);
+        let credential = fresh_credential();
+        assert_ne!(credential, 0);
+        assert_ne!(credential, fresh_credential(), "two draws differ");
+        publish(&path, "node-a.cluster", 40123, credential).unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mode = std::fs::metadata(&path).unwrap().permissions().mode() & 0o777;
+            assert_eq!(mode, 0o600);
+        }
+        let (host, port, read) = announced(&path, Instant::now(), Duration::from_secs(2)).unwrap();
+        assert_eq!((host.as_str(), port, read), ("node-a.cluster", 40123, credential));
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn a_half_written_record_is_not_accepted() {
+        let path = std::env::temp_dir().join(format!("symbi_rv_half_{}", std::process::id()));
+        std::fs::write(&path, "10.0.0.5:4000\n").unwrap();
+        let err = announced(&path, Instant::now(), Duration::from_millis(100)).unwrap_err();
+        assert!(matches!(err, FabricError::Deadline { phase: Deadline::Startup, .. }));
+        let _ = std::fs::remove_file(&path);
+    }
+}
+
+#[cfg(test)]
 mod trickle_tests {
     use super::*;
 
@@ -627,6 +757,8 @@ mod trickle_tests {
             me: WorkerId(0),
             coordinator: "127.0.0.1:0".parse().unwrap(),
             announce: Some(file.clone()),
+            bind: None,
+            advertise: None,
             identity: Identity {
                 credential: 1,
                 build_id: "trickle".into(),
@@ -645,7 +777,9 @@ mod trickle_tests {
             (result.err(), started.elapsed())
         });
         let addr = announced(&file, Instant::now(), Duration::from_secs(5)).unwrap();
-        let mut stream = TcpStream::connect(addr).unwrap();
+        let (host, port, credential) = addr;
+        assert_eq!(credential, 1, "the file carries the session credential");
+        let mut stream = TcpStream::connect((host.as_str(), port)).unwrap();
         let hello = Hello {
             protocol: PROTOCOL,
             identity: Identity {
@@ -659,6 +793,7 @@ mod trickle_tests {
                 block_credit: 1,
             },
             port: 1,
+            host: "127.0.0.1".into(),
             byte_order: LITTLE_ENDIAN,
         };
         let payload = hello.encode();
