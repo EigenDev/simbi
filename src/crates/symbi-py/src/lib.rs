@@ -6007,6 +6007,7 @@ macro_rules! build_and_run_hydro_decomposed_refined {
             let built = symbi::symbi_xpu::with_device(dev, || -> Result<Hier, String> {
                 let sim = Sim::build($regime, host_eos(cfg), $geom)
                     .cells(m)
+                    .ghosts(ghost_width(cfg))
                     .origin(origin)
                     .spacing(dx)
                     .coord_maps(tile_axis_maps::<$d>(cfg, tile_lo))
@@ -6156,6 +6157,7 @@ macro_rules! build_and_run_hydro_decomposed_refined {
         let mut global = symbi::symbi_xpu::with_device(0, || -> Result<Hier, String> {
             let groot = Sim::build($regime, host_eos(cfg), $geom)
                 .cells(n)
+                .ghosts(ghost_width(cfg))
                 .origin(std::array::from_fn(|ax| cfg.x_lo[ax]))
                 .spacing(dx)
                 .coord_maps(axis_maps::<$d>(cfg))
@@ -6281,6 +6283,7 @@ macro_rules! build_and_run_hydro_decomposed {
             let built = symbi::symbi_xpu::with_device(dev, || -> Result<(Sim, _), String> {
                 let sim = Sim::build($regime, host_eos(cfg), $geom)
                     .cells(m)
+                    .ghosts(ghost_width(cfg))
                     .origin(origin)
                     .spacing(spacing)
                     .coord_maps(tile_axis_maps::<$d>(cfg, tile_lo))
@@ -6354,9 +6357,13 @@ macro_rules! build_and_run_hydro_decomposed {
                 // clock + mesh motion per tile: every tile carries the identical a(t) law and
                 // the decomposed loop advances them in lockstep with the shared dt.
                 attach_motion(&mut sim, cfg)?;
+                // the reconstruction and its flatten as the single-grid build installs them:
+                // a tile left on the default reconstruction runs plm under a ppm request.
                 let sub = sim
                     .substrate()
                     .theta(theta)
+                    .reconstruction(build_recon(cfg))
+                    .ppm_flatten(cfg.ppm_flatten_onset, cfg.ppm_flatten_full)
                     .with_solver(solver)
                     .map_err(|e| format!("tile {flat} substrate/solver: {e:?}"))?;
                 // attach the user source per tile (two-pass via attach_runtime_source). each tile
@@ -6404,6 +6411,7 @@ macro_rules! build_and_run_hydro_decomposed {
         if cfg.n_tracers > 0 {
         let global = Sim::build($regime, host_eos(cfg), $geom)
             .cells(n)
+            .ghosts(ghost_width(cfg))
             .origin(std::array::from_fn(|ax| cfg.x_lo[ax]))
             .spacing(std::array::from_fn(|ax| cfg.dx[ax]))
             .coord_maps(axis_maps::<$d>(cfg))
@@ -8743,13 +8751,6 @@ fn dispatch_and_run(
                 "ppm reconstruction requires a flat cartesian chart; got ({}, {})",
                 cfg.coord_system, cfg.spacetime
             ));
-        }
-        if cfg.n_gpus > 1 {
-            return Err(
-                "ppm reconstruction with gpus > 1 awaits the decomposed cut-equivalence \
-                 gate for the widened (-3..+2) exchange"
-                    .to_string(),
-            );
         }
     }
     // the synge (taub-mathews) eos: baked for the flat rhd family only. every
