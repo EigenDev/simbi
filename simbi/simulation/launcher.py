@@ -55,14 +55,33 @@ SCHEDULER_RANK = ("SLURM_PROCID", "PMI_RANK", "OMPI_COMM_WORLD_RANK", "PMIX_RANK
 SCHEDULER_SIZE = ("SLURM_NTASKS", "PMI_SIZE", "OMPI_COMM_WORLD_SIZE")
 
 
+ADVERTISE_ENV = "SIMBI_ADVERTISE"
+
+
 def advertised_host(bind: str, advertise: str | None) -> str:
-    """the host peers connect to: the advertised name when given, the bind address when it
-    names one interface, and this host's name when the bind address is unspecified."""
+    """the host peers connect to: this process's `SIMBI_ADVERTISE` when set, the layout's
+    name when given, the bind address when it names one interface, and this host's name when
+    the bind address is unspecified."""
+    override = os.environ.get(ADVERTISE_ENV)
+    if override:
+        return override
     if advertise:
         return advertise
     if bind in ("0.0.0.0", "::", ""):
         return socket.gethostname()
     return bind
+
+
+def require_resolvable(host: str) -> None:
+    """peers reach this worker by resolving `host`; a name without an address would surface
+    only as a startup deadline on every other worker."""
+    try:
+        socket.getaddrinfo(host, None, proto=socket.IPPROTO_TCP)
+    except OSError as exc:
+        raise RuntimeError(
+            f"the advertised host {host!r} does not resolve ({exc}); set {ADVERTISE_ENV} on this "
+            "process to a name or address its peers can reach"
+        ) from None
 
 
 @dataclass
@@ -111,6 +130,11 @@ class Layout:
         mode = str(execution.get("mode", "local"))
         if mode not in ("local", "scheduler"):
             raise ValueError(f"execution mode {mode!r}; give local or scheduler")
+        if mode == "scheduler" and workers > 1 and execution.get("advertise"):
+            raise ValueError(
+                "a scheduler layout names one advertise host for every node; leave it unset so "
+                f"each worker advertises its own host name, or set {ADVERTISE_ENV} per process"
+            )
         layout = cls(
             workers=workers,
             cuts=cuts,

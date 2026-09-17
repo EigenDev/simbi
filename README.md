@@ -389,8 +389,10 @@ directory = "/shared/run-001"
 srun --nodes=2 --ntasks=2 simbi launch /path/to/problem.py --layout two-node.toml
 ```
 
-`scripts/fabric_two_node_gate.sh` runs this on two nodes and compares the result
-with a single-grid run. The transport is unencrypted TCP for a trusted allocation.
+`scripts/fabric_two_node_gate.sh <fresh-shared-dir>`, submitted with
+`sbatch --nodes=2 --ntasks-per-node=1`, runs this on two nodes and compares the
+result with `simbi run` of the same problem, recording each worker's host,
+backend hash, and exit code. The transport is unencrypted TCP for a trusted allocation.
 
 Problem flags pass through as they do for `simbi run`. The launcher starts the
 workers, prints each worker's pid and exit code, and exits nonzero if any

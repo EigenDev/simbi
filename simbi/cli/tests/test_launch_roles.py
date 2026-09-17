@@ -93,3 +93,18 @@ def test_the_launcher_marks_its_children_and_bounds_their_number(tmp_path, monke
     too_many = launcher.Layout(workers=launcher.MAX_LOCAL_WORKERS + 1, cuts=[[], []], owner=[])
     with pytest.raises(ValueError, match="at most"):
         launcher.spawn_workers(too_many, ["launch", "x.py"], str(tmp_path))
+
+
+def test_an_unresolvable_advertised_host_fails_by_name() -> None:
+    with pytest.raises(RuntimeError, match="does not resolve"):
+        launcher.require_resolvable("no-such-host.invalid")
+    launcher.require_resolvable("127.0.0.1")
+
+
+def test_a_scheduler_layout_refuses_one_advertise_host_for_every_node(tmp_path, monkeypatch) -> None:
+    path = tmp_path / "bad.toml"
+    path.write_text('[execution]\nmode = "scheduler"\nworkers = 2\nadvertise = "node-a"\n\n[partition]\nshape = [2, 1]\n')
+    with pytest.raises(ValueError, match="one advertise host"):
+        launcher.Layout.from_file(str(path), (32, 32))
+    monkeypatch.setenv(launcher.ADVERTISE_ENV, "10.1.2.3")
+    assert launcher.advertised_host("0.0.0.0", None) == "10.1.2.3"

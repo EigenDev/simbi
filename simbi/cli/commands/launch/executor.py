@@ -16,7 +16,14 @@ from typing import Optional, Sequence
 
 from pathlib import Path
 
-from simbi.simulation.launcher import Layout, retire_rendezvous, scheduler_identity, scheduler_rendezvous, spawn_workers
+from simbi.simulation.launcher import (
+    Layout,
+    require_resolvable,
+    retire_rendezvous,
+    scheduler_identity,
+    scheduler_rendezvous,
+    spawn_workers,
+)
 from simbi.simulation.problem import ConfigError
 
 from ..run.executor import _discover_problem_classes
@@ -50,6 +57,8 @@ def _build_problem(args: Namespace, argv: Optional[Sequence[str]]):
 
 def _run_worker_role(args: Namespace, problem, worker: int, workers: int, owner, cuts, rendezvous: str, credential, bind: str, advertise: str, staging_cells: int) -> None:
     from simbi.simulation import runner
+
+    require_resolvable(advertise)
 
     runner.launch_worker(
         problem,

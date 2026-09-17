@@ -29,7 +29,19 @@ from simbi.simulation import launcher
 from simbi.simulation.runner import _load_backend, to_execution_dict
 from simbi_configs.examples.newtonian.kh import KelvinHelmholtz
 
+from simbi.simulation.tests.process_guard import ProcessGuard, descendants
+
 pytestmark = pytest.mark.simulation
+
+
+@pytest.fixture(autouse=True)
+def bounded_processes():
+    """every gate here re-executes the command line: the descendants of this test process are
+    bounded, and a gate that passes the bound fails with its processes killed."""
+    with ProcessGuard(limit=16) as guard:
+        yield guard
+    assert not guard.tripped, f"the test started more than {guard.limit} processes (peak {guard.peak})"
+    assert not [p for p in descendants(os.getpid())], "the test left processes behind"
 
 RESOLUTION = (32, 32)
 STEPS = 8
@@ -385,3 +397,25 @@ def test_scheduler_started_workers_rendezvous_through_the_restricted_file(tmp_pa
     lines = kept.read_text().splitlines()
     assert len(lines) == 2 and int(lines[1]) != 0, "the file carries the address and a credential"
     _assert_same_state(finals[0], reference, "scheduler-started workers")
+
+
+def test_the_guard_kills_its_own_descendants_alone() -> None:
+    """a bystander started outside the guarded root survives a trip; the root's descendants
+    end."""
+    bystander = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)"])
+    root = subprocess.Popen(
+        [sys.executable, "-c", "import subprocess, sys, time\nps = [subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(30)']) for _ in range(4)]\ntime.sleep(30)"]
+    )
+    try:
+        with ProcessGuard(limit=2, root=root.pid) as guard:
+            deadline = time.monotonic() + 10
+            while not guard.tripped and time.monotonic() < deadline:
+                time.sleep(0.05)
+        assert guard.tripped and guard.peak >= 3
+        time.sleep(0.3)
+        assert not descendants(root.pid), "the guarded descendants survived"
+        assert bystander.poll() is None, "the guard reached a process outside its root"
+    finally:
+        for p in (root, bystander):
+            p.kill()
+            p.wait()

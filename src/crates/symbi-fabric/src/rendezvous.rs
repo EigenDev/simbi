@@ -105,7 +105,16 @@ fn publish(path: &std::path::Path, host: &str, port: u16, credential: u64) -> Re
 fn connect_to(host: &str, port: u16, start: Instant, budget: Duration) -> Result<TcpStream, FabricError> {
     use std::net::ToSocketAddrs;
     loop {
-        let left = remaining(start, budget)?;
+        let left = match remaining(start, budget) {
+            Ok(left) => left,
+            Err(_) => {
+                return Err(FabricError::Rendezvous {
+                    detail: format!(
+                        "no connection to {host}:{port} within the startup deadline of {budget:?}"
+                    ),
+                });
+            }
+        };
         if let Ok(addrs) = (host, port).to_socket_addrs() {
             for addr in addrs {
                 if let Ok(s) = TcpStream::connect_timeout(&addr, left.min(Duration::from_millis(200))) {
