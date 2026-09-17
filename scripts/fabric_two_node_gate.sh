@@ -7,8 +7,8 @@
 # a fixed end time, and their final checkpoint is compared, interior cell for
 # interior cell, against `simbi run` of the same problem to the same end time
 # on one node. the script is the batch step of a two-node allocation: it
-# writes the layout once, starts one task per node, runs the reference, and
-# compares. it records each worker's hostname, backend hash, and exit code and
+# writes the layout and the task step once into the shared output directory,
+# starts one task per node, runs the reference, and compares. it records each worker's hostname, backend hash, and exit code and
 # fails unless the workers occupied two distinct nodes, every exit code is
 # zero, every backend hash equals the reference's, and each arm left exactly
 # one final checkpoint in a fresh output directory on a shared filesystem.
@@ -29,20 +29,6 @@ PROBLEM_FLAGS=(--resolution "$RESOLUTION" --end-time "$END_TIME" --checkpoint-in
 
 die() { echo "two-node gate: $*" >&2; exit 1; }
 
-# ---- the task step: one worker, started by the srun below -------------------
-if [[ "${1:-}" == "--task" ]]; then
-    OUT="$2"
-    rank="${SLURM_PROCID:?the task step runs under srun}"
-    hostname > "$OUT/records/worker-$rank.host"
-    set +e
-    python -m simbi.cli launch "$CONFIG" --layout "$OUT/two-node.toml" "${PROBLEM_FLAGS[@]}" \
-        --data-directory "$OUT/launched" > "$OUT/records/worker-$rank.out" 2> "$OUT/records/worker-$rank.err"
-    code=$?
-    set -e
-    echo "$code" > "$OUT/records/worker-$rank.exit"
-    exit "$code"
-fi
-
 # ---- the batch step ----------------------------------------------------------
 OUT="${1:?usage: fabric_two_node_gate.sh <fresh output directory on a shared filesystem>}"
 [[ -n "${SLURM_JOB_ID:-}" ]] || die "run inside a two-node slurm allocation (sbatch or salloc)"
@@ -52,7 +38,6 @@ if [[ -e "$OUT" ]]; then
 fi
 mkdir -p "$OUT/records"
 OUT="$(cd "$OUT" && pwd)"
-SELF="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/$(basename "${BASH_SOURCE[0]}")"
 
 # the layout, written once, before any worker exists
 cat > "$OUT/two-node.toml" <<TOML
@@ -69,16 +54,32 @@ directory = "$OUT/launched"
 staging_mb = 4
 TOML
 
-export CONFIG RESOLUTION END_TIME
+# the task step, written to the shared output directory: a batch script lives in the batch
+# node's spool directory alone, so the other node cannot execute it by path
+CONFIG_ABS="$CONFIG"; [[ -e "$CONFIG" ]] && CONFIG_ABS="$(cd "$(dirname "$CONFIG")" && pwd)/$(basename "$CONFIG")"
+cat > "$OUT/task.sh" <<TASK
+#!/usr/bin/env bash
+set -uo pipefail
+cd "$PWD"
+rank="\${SLURM_PROCID:?the task step runs under srun}"
+hostname > "$OUT/records/worker-\$rank.host"
+python -m simbi.cli launch "$CONFIG_ABS" --layout "$OUT/two-node.toml" ${PROBLEM_FLAGS[*]} \\
+    --data-directory "$OUT/launched" > "$OUT/records/worker-\$rank.out" 2> "$OUT/records/worker-\$rank.err"
+code=\$?
+echo "\$code" > "$OUT/records/worker-\$rank.exit"
+exit "\$code"
+TASK
+chmod +x "$OUT/task.sh"
+
 set +e
-srun --nodes=2 --ntasks=2 --ntasks-per-node=1 "$SELF" --task "$OUT"
+srun --nodes=2 --ntasks=2 --ntasks-per-node=1 "$OUT/task.sh"
 srun_code=$?
 set -e
 echo "$srun_code" > "$OUT/records/srun.exit"
 
 # the reference: the public single-grid command on this node, its streams kept
 set +e
-python -m simbi.cli run "$CONFIG" --mode cpu "${PROBLEM_FLAGS[@]}" --data-directory "$OUT/single" \
+python -m simbi.cli run "$CONFIG_ABS" --mode cpu "${PROBLEM_FLAGS[@]}" --data-directory "$OUT/single" \
     > "$OUT/records/reference.out" 2> "$OUT/records/reference.err"
 reference_code=$?
 set -e
