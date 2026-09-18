@@ -26,7 +26,12 @@
 # arm and the source provenance are archived as faults-archive.tar.gz.
 #
 # usage:
-#   sbatch --nodes=2 --ntasks-per-node=1 scripts/fabric_two_node_faults.sh /shared/fresh-dir
+#   sbatch --nodes=2 --ntasks-per-node=1 --cpus-per-task=<cores per node> \
+#       scripts/fabric_two_node_faults.sh /shared/fresh-dir
+#
+# the cpus per task matter: srun gives a task one cpu unless the job names
+# more, and a worker whose thread pool shares one core reports compute and
+# collective times that measure the starvation. each task records its cpus.
 #
 # environment: CONFIG (a 2D cartesian newtonian config), RESOLUTION, STEPS,
 # FAULT_STEP, TIMING_RESOLUTION, TIMING_STEPS, LIMIT_SECONDS.
@@ -89,6 +94,8 @@ set -uo pipefail
 cd "$PWD"
 rank="\${SLURM_PROCID:?the task step runs under srun}"
 hostname > "$dir/records/worker-\$rank.host"
+# the cpus this task may run on: a worker starved to one core inflates every time it reports
+{ echo "nproc: \$(nproc)"; grep -i cpus_allowed_list /proc/self/status 2>/dev/null; echo "SLURM_CPUS_PER_TASK: \${SLURM_CPUS_PER_TASK:-unset}"; } > "$dir/records/worker-\$rank.cpus"
 [[ "$fault" != none ]] && export SIMBI_FABRIC_INJECT="$fault"
 start=\$(python -c "import time; print(time.time())")
 python -m simbi.cli launch "$CONFIG_ABS" --layout "$dir/layout.toml" --resolution "$resolution" \\
@@ -102,7 +109,9 @@ exit "\$code"
 TASK
     chmod +x "$dir/task.sh"
     set +e
-    srun --nodes=2 --ntasks=2 --ntasks-per-node=1 --kill-on-bad-exit=0 "$dir/task.sh"
+    # every cpu the job holds per task, which srun's default of one cpu per task would withhold
+    srun --nodes=2 --ntasks=2 --ntasks-per-node=1 --cpus-per-task="${SLURM_CPUS_PER_TASK:-1}" \
+        --kill-on-bad-exit=0 "$dir/task.sh"
     echo "$?" > "$dir/records/srun.exit"
     set -e
 }
@@ -122,6 +131,7 @@ shape = [1, 1]
 staging_mb = 4
 TOML
     local start end code
+    { echo "nproc: $(nproc)"; grep -i cpus_allowed_list /proc/self/status 2>/dev/null; echo "SLURM_CPUS_PER_TASK: ${SLURM_CPUS_PER_TASK:-unset}"; } > "$dir/records/reference.cpus"
     start=$(python -c "import time; print(time.time())")
     set +e
     if [[ "$fault" != none ]]; then
@@ -273,6 +283,13 @@ for name, info in (("rejection", rejection), ("bad_cfl", bad_cfl), ("lost", lost
     spans = {k: round(v, 2) for k, v in info["spans"].items()}
     print(f"  {name}: hosts {info['hosts']} exits {info['exits']} seconds {spans}")
 print(f"  backend: {sorted(backends)}")
+def cpus(path: Path) -> str:
+    return " ".join(text(path).split()) or "unrecorded"
+
+print("cpus")
+for k in (0, 1):
+    print(f"  two nodes, worker {k}: {cpus(out / 'timing' / 'records' / f'worker-{k}.cpus')}")
+print(f"  one worker: {cpus(out / 'timing' / 'records' / 'reference.cpus')}")
 print("timing (seconds)")
 for k, s in sorted(timing["summaries"].items()):
     print(f"  two nodes, worker {k}: steps {s[2]} compute {s[4]} collectives {s[5]} exchange {s[6]} final checkpoint {s[7]}; process wall {timing['spans'].get(k, float('nan')):.2f}")
