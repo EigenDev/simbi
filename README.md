@@ -1268,7 +1268,7 @@ SIMBI was developed at the Center for Cosmology and Particle Physics (CCPP) at N
 
 ## Further reading on physics and numerical methods
 
-- **[Marti & Muller 1994](https://ui.adsabs.harvard.edu/abs/2003LRR.....6....7M/abstract)**: The relativistic shock-tube work that got me started. I found it while learning relativistic hydrodynamics as a graduate student, and it remains a good entry point.
+- **[Marti & Muller 1994](https://ui.adsabs.harvard.edu/abs/2003LRR.....6....7M/abstract)**: The relativistic shock-tube work that got me started. Andrew recommended I read it while learning relativistic hydrodynamics as a graduate student, and it remains a good entry point.
 - **[Font 2007](https://ui.adsabs.harvard.edu/abs/2008LRR....11....7F/abstract)**: A review of numerical methods for relativistic magnetohydrodynamics.
 - **[Andersson & Comer 2021](https://link.springer.com/article/10.1007/s41114-021-00031-6)**: A modern review of relativistic fluid dynamics with a particularly good introduction.
 - **[Moseley et al. 2026](https://arxiv.org/abs/2604.23041)**: A method for evolving Lagrangian tracer particles in an Eulerian fluid simulation. I learned about this work directly from Romain Teyssier and found it very useful for SIMBI.
