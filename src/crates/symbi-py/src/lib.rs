@@ -10241,7 +10241,12 @@ fn validate_launch_scope(cfg: &Config) -> Result<(), String> {
 /// restricted to the tiles this worker holds, the rendezvous under the session credential,
 /// the worker loop with the coordinator-written checkpoints at the linear cadence, and the
 /// final checkpoint before the session ends. worker 0 reports through the decomposed table.
-fn run_worker_process(cfg: &Config, prims: &[Vec<f64>], launch: &WorkerLaunch) -> Result<(), String> {
+fn run_worker_process(
+    cfg: &Config,
+    prims: &[Vec<f64>],
+    launch: &WorkerLaunch,
+    drained: std::time::Duration,
+) -> Result<(), String> {
     use symbi::sim::decomp::{LocalCopy, plan_schema, unflatten};
     use symbi_fabric::rendezvous::{Identity, Rendezvous, connect};
     use symbi_fabric::{Fabric, WorkerId};
@@ -10260,6 +10265,7 @@ fn run_worker_process(cfg: &Config, prims: &[Vec<f64>], launch: &WorkerLaunch) -
     if prims.len() != total {
         return Err(format!("prim_gen yielded {} cells, expected {total}", prims.len()));
     }
+    let build_clock = std::time::Instant::now();
     let partition = tile_partition(n, cfg)?;
     let counts = partition.counts();
     if launch.owner.len() != partition.n_tiles() {
@@ -10333,6 +10339,7 @@ fn run_worker_process(cfg: &Config, prims: &[Vec<f64>], launch: &WorkerLaunch) -
     for (sim, _) in tiles.iter_mut() {
         sim.time = cfg.start_time;
     }
+    let built = build_clock.elapsed();
     let identity = PhysicsIdentity::of(&tiles[0].0);
     let tile_ids: Vec<TileId> = mine.iter().map(|&f| TileId(f as u32)).collect();
     let my_offsets: Vec<[isize; 2]> = mine.iter().map(|&f| offsets[f]).collect();
@@ -10366,7 +10373,23 @@ fn run_worker_process(cfg: &Config, prims: &[Vec<f64>], launch: &WorkerLaunch) -
     let deadline = std::time::Duration::from_secs(600);
     let lens = exchange.lens();
     let max_payload = (lens.iter().max().copied().unwrap_or(0) * 8).max(credit as usize);
+    let connect_clock = std::time::Instant::now();
     let (link, session) = connect(&rendezvous, max_payload).map_err(|e| e.to_string())?;
+    // the startup timeline, one write: the generator drain (python, under the interpreter
+    // lock), the tile build with its kernel compilation, and the rendezvous
+    {
+        use std::io::Write;
+        let line = format!(
+            "SIMBI launch startup: worker={}/{} drain={:.3}s build={:.3}s connect={:.3}s cpus={}\n",
+            launch.worker,
+            launch.workers,
+            drained.as_secs_f64(),
+            built.as_secs_f64(),
+            connect_clock.elapsed().as_secs_f64(),
+            std::thread::available_parallelism().map_or(0, |n| n.get()),
+        );
+        let _ = std::io::stderr().write_all(line.as_bytes());
+    }
     let mut fabric = Fabric::new(link, me, session, launch.workers, 2, &lens, exchange.sends_per_peer_axis())
         .with_block_credit(credit);
     let devices = vec![0i32; partition.n_tiles()];
@@ -10741,8 +10764,10 @@ fn launch_worker(
         );
         let _ = std::io::stderr().write_all(line.as_bytes());
     }
+    let drain_clock = std::time::Instant::now();
     let prims = drain_prims(prim_gen)?;
-    py.detach(|| run_worker_process(&cfg, &prims, &params))
+    let drained = drain_clock.elapsed();
+    py.detach(|| run_worker_process(&cfg, &prims, &params, drained))
         .map_err(PyRuntimeError::new_err)
 }
 

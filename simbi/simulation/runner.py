@@ -891,8 +891,12 @@ def launch_worker(
     credential is given, a fresh session credential in the restricted file
     `rendezvous`; every worker listens on `bind` and is reached at `advertise`.
     """
+    import sys
+    import time
+
     from .checkpoint import merge_with_checkpoint
 
+    clock = time.monotonic()
     if problem.checkpoint_file:
         checkpoint_path = Path(problem.checkpoint_file)
         if not checkpoint_path.exists():
@@ -911,6 +915,14 @@ def launch_worker(
     _require_backend_features(problem, backend)
     prim_iterator, _bfield_iterators = _get_iterators(problem)
     prim_iterator = _check_first_tuple(problem, prim_iterator)
+    # the python side of the startup timeline; the backend reports the drain, build, and
+    # rendezvous on its own line
+    print(
+        f"SIMBI launch startup: worker={worker}/{workers} python={time.monotonic() - clock:.3f}s "
+        f"cpus_visible={os.cpu_count()}",
+        file=sys.stderr,
+        flush=True,
+    )
     backend.launch_worker(
         prim_gen=prim_iterator,
         sim_info=exec_dict,
