@@ -97,6 +97,8 @@ struct Scenario {
     /// three workers: 1 and 2 exchange after a collective whose result the coordinator
     /// delays to worker 2, so worker 1's grant reaches worker 2 before its own result
     race: bool,
+    /// two workers run one thousand consecutive collectives and report the mean latency
+    latency: bool,
     /// worker 1 streams blocks of varying size to a slow coordinator under a credit that
     /// admits two small blocks while a large one still occupies the outbox
     blocks: bool,
@@ -119,6 +121,7 @@ impl Scenario {
             expect_partial_reads: env_u64("W_EXPECT_PARTIAL_READS", 0) == 1,
             expect_early_grant: env_u64("W_EXPECT_EARLY_GRANT", 0) == 1,
             race: env_u64("W_RACE", 0) == 1,
+            latency: env_u64("W_LATENCY", 0) == 1,
             blocks: env_u64("W_BLOCKS", 0) == 1,
         }
     }
@@ -238,6 +241,32 @@ fn run_blocks(s: &Scenario, fabric: &mut Fabric<symbi_fabric::TcpLink>) -> Resul
     fabric.finish(TRANSFER_DEADLINE)
 }
 
+/// the latency scenario: one thousand Min collectives back to back, the mean cost printed by
+/// every worker. the floor a coordinator round trip costs on this host's loopback, against
+/// which a cross-node measurement is read.
+fn run_latency(
+    s: &Scenario,
+    fabric: &mut Fabric<symbi_fabric::TcpLink>,
+) -> Result<(), FabricError> {
+    const ROUNDS: u32 = 1000;
+    let start = Instant::now();
+    for i in 0..ROUNDS {
+        let mine = (1.0 + f64::from(s.me.0) + f64::from(i)).to_bits();
+        let got = fabric.collective(OpKind::Min, mine, TRANSFER_DEADLINE)?;
+        if f64::from_bits(got) != 1.0 + f64::from(i) {
+            eprintln!("round {i}: min gave {}", f64::from_bits(got));
+            std::process::exit(4);
+        }
+    }
+    let each = start.elapsed().as_secs_f64() / f64::from(ROUNDS);
+    println!(
+        "LATENCY worker={} mean_collective_us={:.1}",
+        s.me.0,
+        each * 1e6
+    );
+    fabric.finish(TRANSFER_DEADLINE)
+}
+
 /// the race scenario: worker 0 coordinates and holds worker 2's result for 300 ms; workers
 /// 1 and 2 contribute, then exchange transfers 0 (1 -> 2) and 1 (2 -> 1) on axis 0. worker 1
 /// gets its result at once, opens, and grants worker 2, whose result is still on hold.
@@ -314,6 +343,9 @@ fn run_phases(
 ) -> Result<(), FabricError> {
     if s.race {
         return run_race(s, fabric);
+    }
+    if s.latency {
+        return run_latency(s, fabric);
     }
     if s.blocks {
         return run_blocks(s, fabric);
@@ -507,6 +539,7 @@ fn wait_ready(s: &mut Spawned) {
 struct Outcome {
     code: Option<i32>,
     stderr: String,
+    stdout: String,
     elapsed: Duration,
 }
 
@@ -530,6 +563,7 @@ fn collect(mut spawned: Vec<Spawned>) -> Vec<Outcome> {
                     out[i] = Some(Outcome {
                         code: status.code(),
                         stderr,
+                        stdout: rest,
                         elapsed: start.elapsed(),
                     });
                 }
@@ -851,4 +885,20 @@ fn variable_sized_blocks_complete_under_backpressure() {
         &blocks,
         &blocks,
     ));
+}
+
+/// the loopback floor of a collective: recorded, not judged.
+#[test]
+fn collective_latency_on_the_loopback() {
+    if in_worker_role() {
+        worker_main();
+    }
+    let flags = [("W_LATENCY", "1".to_string())];
+    let outcomes = run_pair("collective_latency_on_the_loopback", &flags, &flags);
+    assert_all_ok(&outcomes);
+    for o in &outcomes {
+        for line in o.stdout.lines().filter(|l| l.contains("LATENCY")) {
+            println!("{line}");
+        }
+    }
 }
