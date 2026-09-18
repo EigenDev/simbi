@@ -897,6 +897,7 @@ def launch_worker(
     from .checkpoint import merge_with_checkpoint
 
     clock = time.monotonic()
+    entered = time.time()
     if problem.checkpoint_file:
         checkpoint_path = Path(problem.checkpoint_file)
         if not checkpoint_path.exists():
@@ -917,9 +918,11 @@ def launch_worker(
     prim_iterator = _check_first_tuple(problem, prim_iterator)
     # the python side of the startup timeline; the backend reports the drain, build, and
     # rendezvous on its own line
+    # `entered` is the epoch time this call began: against the process start it measures
+    # the imports and the problem construction, which come before it
     print(
-        f"SIMBI launch startup: worker={worker}/{workers} python={time.monotonic() - clock:.3f}s "
-        f"cpus_visible={os.cpu_count()}",
+        f"SIMBI launch startup: worker={worker}/{workers} entered={entered:.3f} "
+        f"python={time.monotonic() - clock:.3f}s cpus_visible={os.cpu_count()}",
         file=sys.stderr,
         flush=True,
     )
