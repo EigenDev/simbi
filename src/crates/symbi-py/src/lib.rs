@@ -10255,7 +10255,7 @@ fn run_worker_process(
     use symbi_sim::distributed_checkpoint::{CheckpointRequest, block_credit_for, distributed_checkpoint};
     use symbi_sim::plan_exchange::PlanExchange;
     use symbi_sim::substrate_seam::RegimeKind;
-    use symbi_sim::worker::{Injection, WorkerConfig, WorkerError, evolve_worker};
+    use symbi_sim::worker::{WorkerConfig, WorkerError, evolve_worker};
 
     validate_launch_scope(cfg)?;
     let fault = LaunchFault::from_env(launch.worker)?;
