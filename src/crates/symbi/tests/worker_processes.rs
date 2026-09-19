@@ -303,10 +303,14 @@ fn run_worker(arm: &Arm, me: WorkerId, out: PathBuf) -> Result<(), WorkerError> 
     }
     std::fs::write(out.with_extension("den"), den).unwrap();
     println!(
-        "REPORT steps={} rejections={} time={} dts={}",
+        "REPORT steps={} rejections={} time={} exchanges={} neighbor={} troubled={} frozen={} dts={}",
         report.steps,
         report.rejections,
         report.time.to_bits(),
+        report.troubled_exchanges,
+        report.neighbor_corrections,
+        report.troubled_cells,
+        report.frozen_cells,
         report
             .dt_sequence
             .iter()
@@ -380,6 +384,12 @@ struct Report {
     steps: u64,
     rejections: u64,
     time: u64,
+    /// stages whose flags crossed the cuts
+    exchanges: u64,
+    /// corrections run on a clean tile because a neighbor's trouble reached its cut ghosts
+    neighbor: u64,
+    troubled: u64,
+    frozen: u64,
     dts: Vec<u64>,
 }
 
@@ -403,6 +413,10 @@ fn parse_report(stdout: &str) -> Option<Report> {
         steps: field("steps")?.parse().ok()?,
         rejections: field("rejections")?.parse().ok()?,
         time: field("time")?.parse().ok()?,
+        exchanges: field("exchanges")?.parse().ok()?,
+        neighbor: field("neighbor")?.parse().ok()?,
+        troubled: field("troubled")?.parse().ok()?,
+        frozen: field("frozen")?.parse().ok()?,
         dts: field("dts")?
             .split(',')
             .filter(|s| !s.is_empty())
@@ -717,10 +731,14 @@ fn trouble_on_one_side_of_a_cut_matches_the_uncut_run() {
     let clean = run_arm(test, "clean", &uncut, &[]);
     assert_all_ok(&clean);
     let clean_density = global_density(&clean);
-    for (label, cell, arm) in [
+    // `neighbors` lists the workers that hold no troubled cell and must still correct: the
+    // one across the cut, and in the corner arm the two across either cut plus the diagonal
+    // one, which learns of the cell through the second axis of the flag exchange.
+    for (label, cell, neighbors, arm) in [
         (
             "two workers, cell against the cut",
             (31u64, 10u64),
+            vec![1usize],
             Arm {
                 cuts0: vec![32],
                 cuts1: vec![],
@@ -731,6 +749,7 @@ fn trouble_on_one_side_of_a_cut_matches_the_uncut_run() {
         (
             "four workers, cell in a tile corner",
             (31, 31),
+            vec![1, 2, 3],
             Arm {
                 cuts0: vec![32],
                 cuts1: vec![32],
@@ -759,6 +778,23 @@ fn trouble_on_one_side_of_a_cut_matches_the_uncut_run() {
 
         let outcomes = run_arm(test, &format!("cut_{tag}"), &arm, &inject);
         assert_all_ok(&outcomes);
+        // the premises: one troubled cell in the whole run, on worker 0; the freeze tier
+        // silent everywhere, so the corrected update is conservative by construction; and
+        // every listed neighbor ran exactly one correction on a clean tile.
+        let reports: Vec<&Report> =
+            outcomes.iter().map(|o| o.report.as_ref().expect("report")).collect();
+        let uncut_report = reference[0].report.as_ref().expect("report");
+        assert_eq!((uncut_report.troubled, uncut_report.frozen), (1, 0), "{label}: uncut census");
+        for (w, r) in reports.iter().enumerate() {
+            assert_eq!(r.frozen, 0, "{label}: worker {w} froze a cell");
+            assert_eq!(r.exchanges, 1, "{label}: worker {w} flag exchanges");
+            assert_eq!(r.troubled, u64::from(w == 0), "{label}: worker {w} troubled cells");
+            assert_eq!(
+                r.neighbor,
+                u64::from(neighbors.contains(&w)),
+                "{label}: worker {w} corrections on a clean tile"
+            );
+        }
         let got = global_density(&outcomes);
         assert!(
             drift(&got) < 1e-13,

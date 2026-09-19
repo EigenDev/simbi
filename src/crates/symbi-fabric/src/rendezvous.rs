@@ -33,7 +33,8 @@ use std::io::{Read, Write};
 use std::net::{IpAddr, SocketAddr, TcpListener, TcpStream};
 use std::time::{Duration, Instant};
 
-pub const PROTOCOL: u16 = 1;
+/// the handshake states the one wire protocol version.
+pub const PROTOCOL: u16 = crate::frame::VERSION;
 const LITTLE_ENDIAN: u8 = 1;
 
 /// what a worker must agree on with every other worker before the session commits.
@@ -693,6 +694,13 @@ mod tests {
             host: "127.0.0.1".into(),
             byte_order: LITTLE_ENDIAN,
         };
+        let mut previous = mine.clone();
+        previous.protocol = 1;
+        assert!(
+            disagreement(&mine, &previous, WorkerId(1))
+                .unwrap()
+                .contains("protocol 1 against 2")
+        );
         let mut plan = mine.clone();
         plan.identity.plan_digest = Digest(9);
         assert!(

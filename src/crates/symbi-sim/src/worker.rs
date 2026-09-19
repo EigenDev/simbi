@@ -78,6 +78,14 @@ pub struct WorkerReport {
     /// wall time by activity; the buckets are disjoint and sum to the march's wall time
     /// less the step callback
     pub timing: WorkerTiming,
+    /// stages in which some worker was troubled and the flags crossed the cuts
+    pub troubled_exchanges: u64,
+    /// corrections this worker ran on a tile with a clean interior, because a neighbor's
+    /// troubled cell reached that tile's cut ghosts
+    pub neighbor_corrections: u64,
+    /// the troubled and frozen cells of this worker's accepted steps
+    pub troubled_cells: u64,
+    pub frozen_cells: u64,
 }
 
 /// where a worker's wall time went. `collectives` and `exchange` include the time spent
@@ -333,7 +341,7 @@ where
         }
     }
 
-    let _guard_scope = crate::guard_ledger::open_scope();
+    let guard_scope = crate::guard_ledger::open_scope();
     let mut report = WorkerReport::default();
     let mut t = cfg.start_time;
     let mut iter: u64 = 0;
@@ -431,7 +439,14 @@ where
                 // corrects with a clean interior. every flag ghost on a cut is rewritten here,
                 // so none survives from an earlier stage or attempt.
                 let mut cut_trouble = vec![false; n];
+                let mut clean = vec![false; n];
                 if any_troubled != 0 {
+                    report.troubled_exchanges += 1;
+                    for k in 0..n {
+                        clean[k] = with_device(dev(k), || {
+                            kernels[k].fofc_flags_in(sh[k], &sh[k].geom.interior) == 0
+                        });
+                    }
                     exchange_point(
                         exchange,
                         tiles,
@@ -467,6 +482,7 @@ where
                         )
                     });
                     retry |= outcome == StageOutcome::RetryStep;
+                    report.neighbor_corrections += u64::from(cut_trouble[k] && clean[k]);
                 }
                 if attempt == 0 && cfg.injection.reject_at == Some((iter, stage.index)) {
                     retry = true;
@@ -573,5 +589,8 @@ where
         .elapsed()
         .saturating_sub(timing.collectives + timing.exchange + in_callback);
     report.timing = timing;
+    let accepted = guard_scope.accepted();
+    report.troubled_cells = accepted.troubled_cells.total;
+    report.frozen_cells = accepted.frozen_cells.total;
     Ok(report)
 }

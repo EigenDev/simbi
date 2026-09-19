@@ -147,7 +147,47 @@ fn identity(workers: u32) -> Identity {
 /// transfers: 0 is A -> B on axis 0 (len0), 1 is B -> A on axis 0 (len 3), 2 is A -> B on
 /// axis 1 (len 2), 3 is B -> A on axis 1 (len 2). a third worker, when present, exchanges
 /// nothing and only takes part in the handshake.
+/// a peer built against protocol version 1: it reads the coordinator's address from the
+/// rendezvous record and sends one well-formed header that states version 1, then waits for
+/// the coordinator to close the stream.
+fn speak_the_previous_protocol() -> ! {
+    use std::io::Write;
+    let path = std::env::var("W_COORD").expect("rendezvous file");
+    let start = Instant::now();
+    let address = loop {
+        if let Ok(text) = std::fs::read_to_string(&path) {
+            if let Some(line) = text.lines().next().filter(|l| l.contains(':')) {
+                break line.to_string();
+            }
+        }
+        if start.elapsed() > STARTUP_DEADLINE {
+            eprintln!("no rendezvous record appeared");
+            std::process::exit(4);
+        }
+        std::thread::sleep(Duration::from_millis(5));
+    };
+    let mut stream = std::net::TcpStream::connect(&address).expect("coordinator reachable");
+    let header = symbi_fabric::Header {
+        kind: symbi_fabric::Kind::Hello,
+        session: symbi_fabric::SessionId(0),
+        epoch: epoch(0, 0),
+        id: 0,
+        payload_len: 0,
+    };
+    let mut bytes = [0u8; symbi_fabric::HEADER_LEN];
+    header.encode(&mut bytes);
+    bytes[4..6].copy_from_slice(&1u16.to_le_bytes());
+    stream.write_all(&bytes).expect("header written");
+    let mut rest = Vec::new();
+    let _ = stream.read_to_end(&mut rest);
+    eprintln!("previous-protocol peer: the coordinator closed the stream");
+    std::process::exit(3);
+}
+
 fn run_worker(s: &Scenario) -> Result<(), FabricError> {
+    if env_u64("W_OLD_PROTOCOL", 0) == 1 {
+        speak_the_previous_protocol();
+    }
     let r = Rendezvous {
         me: s.me,
         coordinator: "127.0.0.1:0".parse().expect("socket address"),
@@ -896,6 +936,31 @@ fn mismatched_placement_digest_refused() {
         outcomes[0].stderr.contains("launcher"),
         "{}",
         outcomes[0].stderr
+    );
+}
+
+/// a peer speaking the previous protocol version is refused on its first frame: the
+/// coordinator names the version and exits before the handshake completes, so no worker
+/// reaches READY and no simulation frame is ever interpreted under the wrong byte meanings.
+#[test]
+fn a_peer_on_the_previous_protocol_version_is_refused_at_the_handshake() {
+    if in_worker_role() {
+        worker_main();
+    }
+    let outcomes = run_pair(
+        "a_peer_on_the_previous_protocol_version_is_refused_at_the_handshake",
+        &[],
+        &[("W_OLD_PROTOCOL", "1".into())],
+    );
+    assert_all_refused(&outcomes, STARTUP_DEADLINE * 2);
+    assert!(
+        outcomes[0].stderr.contains("version 1"),
+        "{}",
+        outcomes[0].stderr
+    );
+    assert!(
+        outcomes.iter().all(|o| !o.stdout.contains("READY")),
+        "a worker completed the handshake with a previous-version peer"
     );
 }
 

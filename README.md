@@ -340,6 +340,19 @@ Match Slurm's `--gpus-per-task` to SIMBI's `--ngpus`, keeping one task for the r
 You can check the configuration before submission with
 `simbi run /path/to/problem.py --ngpus 8 --validate`.
 
+#### Known limitation: refinement with several tiles
+
+When a cell fails its high-order update, SIMBI redoes it with first-order fluxes
+on every face of that cell. A face on a tile boundary belongs to two tiles, and
+both must use the same flux there. Single-level runs on several GPUs and
+`simbi launch` runs share this decision across tile boundaries. Runs that combine
+mesh refinement with `--ngpus` greater than one make the decision per tile, so
+when the correction fires in a cell against a tile boundary, the two tiles can
+advance with different fluxes on that face, and mass, momentum, and energy are
+conserved to truncation error there instead of round-off. Runs in which the
+correction stays away from tile boundaries are unaffected. The correction
+counters printed with the run summary show whether it fired.
+
 ### Multi-process runs on one host
 
 `simbi launch` evolves one problem across worker processes that exchange
