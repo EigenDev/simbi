@@ -2,13 +2,18 @@
 // worker.rs
 //
 // the evolution loop of one worker over the tiles it holds. the step is the
-// decomposed step of `evolve_scheduled` with its three cross-tile operations
+// decomposed step of `evolve_scheduled` with its four cross-tile operations
 // carried by the fabric: the timestep is the fabric minimum of every worker's
-// owned-tile candidate, a stage's rejection is the fabric any over every
-// worker's outcome and is decided before that stage's halos move, and every
-// halo exchange runs the compiled plan across workers under grants. the tile
-// operations themselves are the same kernel calls in the same order, so the
-// owned tiles of a worker match the single-process reference bitwise.
+// owned-tile candidate; a stage's troubled cells are marked on every owned
+// tile, the fabric any over every worker's count decides whether the flags
+// cross the cuts, and a tile whose cut ghosts received a set flag corrects
+// with a clean interior, so a face two tiles share takes one flux; a stage's
+// rejection is the fabric any over every worker's outcome and is decided
+// before that stage's halos move; and every exchange runs the compiled plan
+// across workers under grants. each worker issues one collective per
+// decision whatever number of tiles it holds. the tile operations themselves
+// are the same kernel calls in the same order, so the owned tiles of a worker
+// match the single-process reference bitwise.
 //
 // the first release evolves single-level cartesian hydro: a store carrying
 // bodies, tracers, mesh motion, magnetic fields, or excision is refused at
@@ -27,7 +32,7 @@ use crate::driver::{
     retry_timestep, select_timestep, stage_schedule,
 };
 use crate::plan_exchange::PlanExchange;
-use crate::stage::{StageArgs, StageOutcome, fold_stage};
+use crate::stage::{StageArgs, StageOutcome, fold_stage_from_correction, fold_stage_through_mark};
 use crate::state::{FieldStore, Timestepping};
 use crate::substrate_seam::{KernelSet, RegimeKind};
 use std::ops::ControlFlow;
@@ -44,6 +49,10 @@ pub struct Injection {
     /// report a NaN timestep candidate from this worker's first tile at this step, leaving
     /// its other tiles' candidates valid
     pub invalid_cfl_at: Option<u64>,
+    /// raise the troubled-cell flag on a global cell at (step, stage) on the first attempt,
+    /// on whichever worker holds it; the first `D` entries index the cell. the cell's state
+    /// stays physical, so the correction it triggers is the conservative first-order redo.
+    pub trouble_at: Option<(u64, usize, [isize; 3])>,
 }
 
 #[derive(Debug, Clone)]
@@ -204,7 +213,7 @@ where
             let epoch = PlanExchange::<D>::epoch(point, step, attempt, axis);
             exchange.open_axis(&fields, devices, transport, fabric, epoch)?;
             fabric.wait(deadline)?;
-            exchange.finish_axis(&fields, fabric, axis)?;
+            exchange.finish_axis_at(&fields, fabric, axis, point)?;
         }
         Ok(())
     };
@@ -215,6 +224,11 @@ where
 
 /// a local fatal error: every peer is told before it is returned.
 fn fail<L: Link>(fabric: &mut Fabric<L>, err: WorkerError) -> WorkerError {
+    // the step in progress ends here: its guard acts are discarded, so the run scope closes
+    // resolved and the error reaches the caller instead of the ledger's unresolved-step halt.
+    if crate::guard_ledger::scope_is_open() {
+        crate::guard_ledger::step_discard();
+    }
     match &err {
         WorkerError::Fabric(FabricError::PeerAborted { .. } | FabricError::Disconnected { .. }) => {
         }
@@ -375,20 +389,80 @@ where
             for stage in &schedule {
                 let sh = shared!();
                 let mut retry = false;
+                let args = StageArgs {
+                    dt,
+                    a0: stage.a0,
+                    ac: stage.ac,
+                    stage: stage.index,
+                    n_stages: stages.len(),
+                    injection_weight: downstream_injection_weight(stages, stage.index),
+                    allow_elision: false,
+                };
+                // the stage runs in two spans. the first ends with every owned tile's troubled
+                // cells marked; the worker then makes one vote for all of them, so workers
+                // holding different numbers of tiles issue the same collective sequence.
+                let mut troubled = 0u64;
+                for k in 0..n {
+                    troubled += with_device(dev(k), || {
+                        fold_stage_through_mark(sh[k], kernels[k], args, &mut |_| {})
+                    });
+                }
+                if attempt == 0 {
+                    if let Some((at_step, at_stage, cell)) = cfg.injection.trouble_at {
+                        if (at_step, at_stage) == (iter, stage.index) {
+                            let cell: [isize; D] = std::array::from_fn(|ax| cell[ax]);
+                            for k in 0..n {
+                                if let Some(local) = exchange.local_cell(tiles[k], cell) {
+                                    *sh[k].workspace.fofc_flag.view_mut().at_mut(local) = 1.0;
+                                    troubled += 1;
+                                }
+                            }
+                        }
+                    }
+                }
+                let clock = Instant::now();
+                let any_troubled = fabric
+                    .collective(OpKind::Any, u64::from(troubled > 0), deadline)
+                    .map_err(|e| fail(fabric, e.into()))?;
+                timing.collectives += clock.elapsed();
+                // a face on a cut takes the first-order flux when either cell sharing it is
+                // troubled, and those cells sit on different tiles: the flags cross the cuts
+                // before any tile corrects, and a tile whose cut ghosts received a set flag
+                // corrects with a clean interior. every flag ghost on a cut is rewritten here,
+                // so none survives from an earlier stage or attempt.
+                let mut cut_trouble = vec![false; n];
+                if any_troubled != 0 {
+                    exchange_point(
+                        exchange,
+                        tiles,
+                        &sh,
+                        n_tiles,
+                        devices,
+                        transport,
+                        fabric,
+                        ExchangePoint::Troubled(stage.index as u8),
+                        iter,
+                        attempt,
+                        deadline,
+                        &mut timing.exchange,
+                    )
+                    .map_err(|e| fail(fabric, e.into()))?;
+                    for k in 0..n {
+                        cut_trouble[k] = with_device(dev(k), || {
+                            exchange
+                                .trouble_regions(tiles[k])
+                                .iter()
+                                .any(|region| kernels[k].fofc_flags_in(sh[k], region) > 0)
+                        });
+                    }
+                }
                 for k in 0..n {
                     let outcome = with_device(dev(k), || {
-                        fold_stage(
+                        fold_stage_from_correction(
                             sh[k],
                             kernels[k],
-                            StageArgs {
-                                dt,
-                                a0: stage.a0,
-                                ac: stage.ac,
-                                stage: stage.index,
-                                n_stages: stages.len(),
-                                injection_weight: downstream_injection_weight(stages, stage.index),
-                                allow_elision: false,
-                            },
+                            args,
+                            cut_trouble[k],
                             &mut |_| {},
                         )
                     });

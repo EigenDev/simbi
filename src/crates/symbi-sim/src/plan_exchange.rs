@@ -14,7 +14,7 @@
 //
 // usage:
 //  let exchange = PlanExchange::new(&plan, &placement, me);
-//  let mut fabric = Fabric::new(link, me, session, workers, D, &exchange.lens(), exchange.sends_per_peer_axis());
+//  let mut fabric = exchange.fabric(link, session);
 //  exchange.open_axis(&fields, &devices, &LocalCopy, &mut fabric, epoch)?;
 //  while fabric.progress()? == Progress::Pending {}
 //  exchange.finish_axis(&fields, &mut fabric, axis)?;
@@ -68,10 +68,56 @@ impl<'p, const D: usize> PlanExchange<'p, D> {
         lens
     }
 
-    /// the transfers this worker sends to `[peer][axis]`.
+    /// the transfers this worker sends to `[peer][axis]` at the state exchange points.
     pub fn sends_per_peer_axis(&self) -> Vec<Vec<u32>> {
+        self.sends_at(ExchangePoint::Prime)
+    }
+
+    /// the transfers this worker sends to `[peer][axis]` at a `Troubled` exchange point.
+    pub fn trouble_sends_per_peer_axis(&self) -> Vec<Vec<u32>> {
+        self.sends_at(ExchangePoint::Troubled(0))
+    }
+
+    /// the fabric endpoint for this plan: every transfer's buffer, the send counts a grant
+    /// must carry at the state points, and the counts of the `Troubled` points.
+    pub fn fabric<L: Link>(&self, link: L, session: symbi_fabric::SessionId) -> Fabric<L> {
+        Fabric::new(
+            link,
+            self.me,
+            session,
+            self.placement.workers as usize,
+            D,
+            &self.lens(),
+            self.sends_per_peer_axis(),
+        )
+        .with_point_sends(
+            ExchangePoint::is_troubled_wire,
+            self.trouble_sends_per_peer_axis(),
+        )
+    }
+
+    /// the ghost regions of `tile` that a `Troubled` exchange writes, from every neighbor,
+    /// local or remote: where a neighbor's troubled cell shows up on this tile.
+    pub fn trouble_regions(&self, tile: TileId) -> Vec<symbi_algebra::Domain<D>> {
+        self.plan
+            .transfers()
+            .filter(|t| t.dst == tile && self.plan.moves_at(t, ExchangePoint::Troubled(0)))
+            .map(|t| domain_of(&t.dst_region))
+            .collect()
+    }
+
+    /// the local index of global cell `cell` on `tile`, when the tile's interior holds it.
+    pub fn local_cell(&self, tile: TileId, cell: [isize; D]) -> Option<[isize; D]> {
+        let layout = &self.plan.tiles[tile.0 as usize];
+        let local: [isize; D] = std::array::from_fn(|ax| cell[ax] - layout.offset[ax]);
+        (0..D)
+            .all(|ax| layout.interior[ax].lo <= local[ax] && local[ax] < layout.interior[ax].hi)
+            .then_some(local)
+    }
+
+    fn sends_at(&self, point: ExchangePoint) -> Vec<Vec<u32>> {
         let mut counts = vec![vec![0u32; D]; self.placement.workers as usize];
-        for t in self.plan.transfers() {
+        for t in self.plan.transfers().filter(|t| self.plan.moves_at(t, point)) {
             if self.owns(t.src) && !self.owns(t.dst) {
                 counts[self.placement.owner_of(t.dst).0 as usize][t.axis as usize] += 1;
             }
@@ -91,9 +137,10 @@ impl<'p, const D: usize> PlanExchange<'p, D> {
         epoch: Epoch,
     ) -> Result<(), FabricError> {
         let phase = &self.plan.axes[epoch.axis as usize];
+        let point = ExchangePoint::from_wire(epoch.point).expect("an exchange epoch names a point");
         let mut sends = Vec::new();
         let mut receives = Vec::new();
-        for t in &phase.transfers {
+        for t in phase.transfers.iter().filter(|t| self.plan.moves_at(t, point)) {
             let (src, dst) = (t.src.0 as usize, t.dst.0 as usize);
             let f = t.field as usize;
             match (self.owns(t.src), self.owns(t.dst)) {
@@ -128,7 +175,22 @@ impl<'p, const D: usize> PlanExchange<'p, D> {
         fabric: &mut Fabric<L>,
         axis: usize,
     ) -> Result<(), FabricError> {
-        for t in &self.plan.axes[axis].transfers {
+        self.finish_axis_at(fields, fabric, axis, ExchangePoint::Prime)
+    }
+
+    /// `finish_axis` for the phase opened at `point`, which selects the fields that moved.
+    pub fn finish_axis_at<M: MemorySpace, L: Link>(
+        &self,
+        fields: &[Vec<&Field<f64, D, M>>],
+        fabric: &mut Fabric<L>,
+        axis: usize,
+        point: ExchangePoint,
+    ) -> Result<(), FabricError> {
+        let moved = self.plan.axes[axis]
+            .transfers
+            .iter()
+            .filter(|t| self.plan.moves_at(t, point));
+        for t in moved {
             if self.owns(t.dst) && !self.owns(t.src) {
                 let field = fields[t.dst.0 as usize][t.field as usize];
                 scatter(field, &t.dst_region, fabric.payload(t.id)?);

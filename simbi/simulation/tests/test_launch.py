@@ -199,6 +199,26 @@ def test_a_launch_resumed_onto_three_uneven_workers_matches(tmp_path: Path) -> N
     _assert_same_state(resumed.final, reference, "resumed on three workers")
 
 
+def test_trouble_on_one_side_of_a_cut_matches_the_one_worker_launch(tmp_path: Path, monkeypatch) -> None:
+    """a troubled cell in the column against the cut, its neighbor across the cut clean: both
+    workers take the first-order flux on the shared face, so two workers equal one bitwise and
+    the corrected run differs from the clean one."""
+    cell = (RESOLUTION[0] // 2 - 1, RESOLUTION[1] // 3)
+    one = _layout(tmp_path / "one.toml", workers=1, shape=(1, 1))
+    two = _layout(tmp_path / "two.toml", workers=2, shape=(2, 1))
+    clean = _launch(tmp_path / "clean", one, STEPS, workers=1)
+    monkeypatch.setenv("SIMBI_FABRIC_INJECT", f"trouble:3:0:{cell[0]}:{cell[1]}")
+    reference = _launch(tmp_path / "one", one, STEPS, workers=1)
+    launched = _launch(tmp_path / "two", two, STEPS, workers=2)
+    with h5py.File(clean.final, "r") as fc, h5py.File(reference.final, "r") as fr:
+        xs, ys = _interior(fc), _interior(fr)
+        assert any(not np.array_equal(xs[name], ys[name]) for name in xs), (
+            "the troubled cell left the one-worker run unchanged; the gate is vacuous"
+        )
+    assert launched.backend == reference.backend
+    _assert_same_state(launched.final, reference.final, "two workers, trouble against the cut")
+
+
 def test_a_ppm_launch_matches_the_single_grid_ppm_run(tmp_path: Path) -> None:
     """the requested reconstruction reaches the workers: a ppm launch equals a ppm single-grid
     run, and differs from the plm reference."""

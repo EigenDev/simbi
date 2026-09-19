@@ -17,7 +17,7 @@ use symbi::sim::decomp::{LocalCopy, Partition, Topology, plan_schema};
 use symbi::sim::state::*;
 use symbi::sim::substrate_seam::{RegimeKind, WithViscosity};
 use symbi_algebra::Tensor;
-use symbi_fabric::{Fabric, Loopback, SessionId, WorkerId};
+use symbi_fabric::{Loopback, SessionId, WorkerId};
 use symbi_geometry::{Cartesian, Geometry, Spacetime};
 use symbi_grid::Field;
 use symbi_hydro::eos::IdealGas;
@@ -71,15 +71,7 @@ fn run2(sim: &mut Sim2, kern: &Kern2, regime: RegimeKind) -> Result<(), WorkerEr
     let plan = ExchangePlan::compile(&partition, &Topology::open(), &schema, sim.geom.ng).unwrap();
     let placement = Placement::new(1, vec![WorkerId(0)]).unwrap();
     let exchange = PlanExchange::new(&plan, &placement, WorkerId(0));
-    let mut fabric = Fabric::new(
-        Loopback::new(),
-        WorkerId(0),
-        SessionId(1),
-        1,
-        2,
-        &exchange.lens(),
-        exchange.sends_per_peer_axis(),
-    );
+    let mut fabric = exchange.fabric(Loopback::new(), SessionId(1));
     let mut stores = [&mut **sim];
     evolve_worker(
         &[TileId(0)],
@@ -186,15 +178,7 @@ fn a_one_dimensional_grid_is_refused() {
     let plan = ExchangePlan::compile(&partition, &Topology::open(), &schema, sim.geom.ng).unwrap();
     let placement = Placement::new(1, vec![WorkerId(0)]).unwrap();
     let exchange = PlanExchange::new(&plan, &placement, WorkerId(0));
-    let mut fabric = Fabric::new(
-        Loopback::new(),
-        WorkerId(0),
-        SessionId(1),
-        1,
-        1,
-        &exchange.lens(),
-        exchange.sends_per_peer_axis(),
-    );
+    let mut fabric = exchange.fabric(Loopback::new(), SessionId(1));
     let mut stores = [&mut *sim];
     let result = evolve_worker(
         &[TileId(0)],

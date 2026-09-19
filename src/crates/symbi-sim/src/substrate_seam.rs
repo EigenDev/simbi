@@ -290,6 +290,24 @@ where
         FofcReport::inactive()
     }
 
+    /// decode the recovery status of the stage just completed into the troubled-cell flag over
+    /// the interior and return the number of troubled interior cells. a decomposed driver
+    /// marks every tile, shares the flags across the cuts, and only then calls `fofc`, which
+    /// decodes the same status again. default: no correction, no troubled cells.
+    fn fofc_mark(&self, _store: &FieldStore<NDIM, DOF, Mem, Sc>) -> u64 {
+        0
+    }
+
+    /// the number of set troubled-cell flags inside `region`, ghost cells included: how a
+    /// decomposed driver learns that a neighbor's trouble reached this tile's cut ghosts.
+    fn fofc_flags_in(
+        &self,
+        _store: &FieldStore<NDIM, DOF, Mem, Sc>,
+        _region: &symbi_algebra::Domain<NDIM>,
+    ) -> u64 {
+        0
+    }
+
     /// whether this kernel set runs FOFC (`fofc` is non-trivial). when true the driver also takes the
     /// per-stage `u_stage` snapshot every substage (FOFC restores `cons <- u_stage` to reconstruct the
     /// first-order fluxes from the physical stage input). default: false.

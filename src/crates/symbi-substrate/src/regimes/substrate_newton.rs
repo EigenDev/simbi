@@ -772,6 +772,17 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize, const
         self.viscosity != 0.0 || self.alpha != 0.0
     }
 
+    fn fofc_mark(&self, sim: &FieldStore<D, DOF, Mem, Sc>) -> u64 {
+        if DOF != D {
+            return 0;
+        }
+        crate::regimes::fofc::fofc_mark(sim)
+    }
+
+    fn fofc_flags_in(&self, sim: &FieldStore<D, DOF, Mem, Sc>, region: &symbi_algebra::Domain<D>) -> u64 {
+        crate::regimes::fofc::fofc_flags_in(sim, region)
+    }
+
     fn fofc(
         &self,
         sim: &FieldStore<D, DOF, Mem, Sc>,

@@ -10148,7 +10148,9 @@ struct WorkerLaunch {
 /// a fault a validation run asks one worker to produce, from `SIMBI_FABRIC_INJECT`:
 /// `reject:WORKER:STEP:STAGE` reports a stage rejection, `bad_cfl:WORKER:STEP` reports an
 /// invalid timestep candidate, `exit:WORKER:STEP` ends the process after that step as a lost
-/// node would. unset, every worker runs clean.
+/// node would. `trouble:STEP:STAGE:I:J` names a global cell and no worker: whichever worker
+/// holds the cell raises its troubled flag at that stage, so the same value drives a run on
+/// any partition. unset, every worker runs clean.
 #[derive(Default)]
 struct LaunchFault {
     injection: symbi_sim::worker::Injection,
@@ -10168,6 +10170,14 @@ impl LaunchFault {
                 .ok_or_else(|| format!("SIMBI_FABRIC_INJECT='{spec}': field {i} is not a number"))
         };
         let mut fault = Self::default();
+        if parts[0] == "trouble" {
+            fault.injection.trouble_at = Some((
+                number(1)?,
+                number(2)? as usize,
+                [number(3)? as isize, number(4)? as isize, 0],
+            ));
+            return Ok(fault);
+        }
         if number(1)? as usize != me {
             match parts[0] {
                 "reject" | "bad_cfl" | "exit" => return Ok(fault),
@@ -10391,7 +10401,8 @@ fn run_worker_process(
         let _ = std::io::stderr().write_all(line.as_bytes());
     }
     let sends_per_peer_axis = exchange.sends_per_peer_axis();
-    let mut fabric = Fabric::new(link, me, session, launch.workers, 2, &lens, sends_per_peer_axis.clone())
+    let mut fabric = exchange
+        .fabric(link, session)
         .with_block_credit(credit);
     let devices = vec![0i32; partition.n_tiles()];
 

@@ -655,6 +655,14 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize> Kerne
         true
     }
 
+    fn fofc_mark(&self, sim: &FieldStore<D, D, Mem, Sc>) -> u64 {
+        crate::regimes::fofc::fofc_mark(sim)
+    }
+
+    fn fofc_flags_in(&self, sim: &FieldStore<D, D, Mem, Sc>, region: &symbi_algebra::Domain<D>) -> u64 {
+        crate::regimes::fofc::fofc_flags_in(sim, region)
+    }
+
     fn fofc(
         &self,
         sim: &FieldStore<D, D, Mem, Sc>,

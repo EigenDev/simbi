@@ -312,8 +312,13 @@ pub struct Fabric<L: Link> {
     link: L,
     grants: GrantTable,
     slots: Vec<Slot>,
-    /// the number of transfers this worker sends to `[peer][axis]` in any exchange point
+    /// the number of transfers this worker sends to `[peer][axis]` at an exchange point with
+    /// no entry in `point_sends`
     sends_per_peer_axis: Vec<Vec<u32>>,
+    /// exchange points whose phases move a different set of transfers: a selector over the
+    /// point byte with its own `[peer][axis]` send counts, against which a grant for such a
+    /// point is validated.
+    point_sends: Vec<(fn(u8) -> bool, Vec<Vec<u32>>)>,
     phase: Phase,
     scratch: Vec<u8>,
     inbox: Vec<u8>,
@@ -386,6 +391,7 @@ impl<L: Link> Fabric<L> {
                 })
                 .collect(),
             sends_per_peer_axis,
+            point_sends: Vec::new(),
             phase: Phase {
                 open: false,
                 epoch: none_epoch(),
@@ -416,6 +422,16 @@ impl<L: Link> Fabric<L> {
                 granted: vec![0; workers],
             },
         }
+    }
+
+    /// give the exchange points whose byte `selects` accepts their own `[peer][axis]` send
+    /// counts: a grant for such a point must carry that count, and one for a peer and axis
+    /// with a zero count is refused, exactly as for every other point.
+    pub fn with_point_sends(mut self, selects: fn(u8) -> bool, counts: Vec<Vec<u32>>) -> Self {
+        assert_eq!(counts.len(), self.workers);
+        assert!(counts.iter().all(|p| p.len() == self.axes));
+        self.point_sends.push((selects, counts));
+        self
     }
 
     /// set the block credit agreed at the handshake: the bytes a worker may have in flight
@@ -692,8 +708,12 @@ impl<L: Link> Fabric<L> {
         match header.kind {
             Kind::Grant => {
                 let axis = header.epoch.axis as usize;
+                let point = header.epoch.point;
                 let expected = self
-                    .sends_per_peer_axis
+                    .point_sends
+                    .iter()
+                    .find(|(selects, _)| selects(point))
+                    .map_or(&self.sends_per_peer_axis, |(_, counts)| counts)
                     .get(from.0 as usize)
                     .and_then(|p| p.get(axis))
                     .copied()

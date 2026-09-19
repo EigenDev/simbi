@@ -52,6 +52,12 @@ where
         *sim.workspace.stage_writes.lock().unwrap() = Some(Default::default());
         Self(sim)
     }
+
+    /// take over the ledger a stage's first span left armed, so the second span's reads are
+    /// checked against the first span's writes and the ledger disarms when the stage ends.
+    fn resume(sim: &'a FieldStore<D, DOF, Mem, Sc>) -> Self {
+        Self(sim)
+    }
 }
 
 #[cfg(debug_assertions)]
@@ -283,6 +289,18 @@ pub enum StageOutcome {
     RetryStep,
 }
 
+/// the part of the canonical pipeline one fold call runs. a decomposed driver folds a stage in
+/// two spans so that every tile's troubled cells are marked before any tile corrects: the
+/// flags cross the cuts between the spans, and a face two tiles share takes one flux.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum StageSpan {
+    Whole,
+    /// every phase before the correction, then the troubled-cell mark
+    ThroughMark,
+    /// the correction and every phase after it
+    FromCorrection,
+}
+
 /// fold one RK stage of the canonical pipeline over a kernel set.
 pub fn fold_stage<const D: usize, const DOF: usize, Mem, Sc, K>(
     sim: &FieldStore<D, DOF, Mem, Sc>,
@@ -290,6 +308,64 @@ pub fn fold_stage<const D: usize, const DOF: usize, Mem, Sc, K>(
     args: StageArgs,
     hook: &mut impl FnMut(HookPoint),
 ) -> StageOutcome
+where
+    Mem: MemorySpace,
+    Sc: Scalar + OrderedNumeric,
+    K: KernelSet<D, DOF, Mem, Sc> + ?Sized,
+{
+    fold_span(sim, kernels, args, StageSpan::Whole, hook).0
+}
+
+/// the first span of a stage folded in two: every phase up to the conserved-to-primitive
+/// recovery, then the troubled-cell mark. returns the number of troubled interior cells, zero
+/// for a kernel set that runs no correction. `fold_stage_from_correction` must follow.
+pub fn fold_stage_through_mark<const D: usize, const DOF: usize, Mem, Sc, K>(
+    sim: &FieldStore<D, DOF, Mem, Sc>,
+    kernels: &K,
+    args: StageArgs,
+    hook: &mut impl FnMut(HookPoint),
+) -> u64
+where
+    Mem: MemorySpace,
+    Sc: Scalar + OrderedNumeric,
+    K: KernelSet<D, DOF, Mem, Sc> + ?Sized,
+{
+    fold_span(sim, kernels, args, StageSpan::ThroughMark, hook).1
+}
+
+/// the second span of a stage folded in two: the correction and every phase after it.
+/// `cut_trouble` says a neighboring tile's troubled cell lies in this tile's first ghost layer,
+/// whose flags the driver has already written into the cut ghosts; the correction then runs
+/// here even with a clean interior.
+pub fn fold_stage_from_correction<const D: usize, const DOF: usize, Mem, Sc, K>(
+    sim: &FieldStore<D, DOF, Mem, Sc>,
+    kernels: &K,
+    args: StageArgs,
+    cut_trouble: bool,
+    hook: &mut impl FnMut(HookPoint),
+) -> StageOutcome
+where
+    Mem: MemorySpace,
+    Sc: Scalar + OrderedNumeric,
+    K: KernelSet<D, DOF, Mem, Sc> + ?Sized,
+{
+    let mark = &sim.workspace.fofc_cut_trouble;
+    mark.store(cut_trouble, std::sync::atomic::Ordering::Relaxed);
+    let outcome = fold_span(sim, kernels, args, StageSpan::FromCorrection, hook).0;
+    mark.store(false, std::sync::atomic::Ordering::Relaxed);
+    sim.workspace
+        .fofc_marked
+        .store(false, std::sync::atomic::Ordering::Relaxed);
+    outcome
+}
+
+fn fold_span<const D: usize, const DOF: usize, Mem, Sc, K>(
+    sim: &FieldStore<D, DOF, Mem, Sc>,
+    kernels: &K,
+    args: StageArgs,
+    span: StageSpan,
+    hook: &mut impl FnMut(HookPoint),
+) -> (StageOutcome, u64)
 where
     Mem: MemorySpace,
     Sc: Scalar + OrderedNumeric,
@@ -326,12 +402,39 @@ where
     // describes a state that no longer exists — so each stage starts from an empty ledger and every
     // read of one is checked against this stage's producers. the guard disarms on every exit path,
     // including the fofc retry.
+    // a stage folded in two keeps one ledger: the first span leaves it armed and the second
+    // takes it over, so the correction's flux reads are checked against the first span's writes.
     #[cfg(debug_assertions)]
-    let _audit = StageWriteAudit::arm(sim);
+    let audit = match span {
+        StageSpan::Whole | StageSpan::ThroughMark => StageWriteAudit::arm(sim),
+        StageSpan::FromCorrection => StageWriteAudit::resume(sim),
+    };
 
     let tag = stage_tag(args.stage, args.n_stages);
-    let mut have = FieldSet::CONS.or(FieldSet::PRIM);
+    let mut have = match span {
+        StageSpan::Whole | StageSpan::ThroughMark => FieldSet::CONS.or(FieldSet::PRIM),
+        StageSpan::FromCorrection => FieldSet::CONS
+            .or(FieldSet::PRIM)
+            .or(FieldSet::FLUX)
+            .or(FieldSet::USTAGE),
+    };
+    let mut reached_correction = false;
     for ph in STAGE_PIPELINE {
+        if ph.kind == PhaseKind::Fofc {
+            reached_correction = true;
+            if span == StageSpan::ThroughMark {
+                let troubled = if fofc { kernels.fofc_mark(sim) } else { 0 };
+                sim.workspace
+                    .fofc_marked
+                    .store(fofc, std::sync::atomic::Ordering::Relaxed);
+                #[cfg(debug_assertions)]
+                std::mem::forget(audit);
+                return (StageOutcome::Accepted, troubled);
+            }
+        }
+        if span == StageSpan::FromCorrection && !reached_correction {
+            continue;
+        }
         if !ph.gate.active(additive, bodies, fofc, chi) {
             continue;
         }
@@ -407,7 +510,7 @@ where
                     crate::guard_ledger::record(&report.guards());
                 }
                 if report.decision() == crate::substrate_seam::FofcDecision::RetryStep {
-                    return StageOutcome::RetryStep;
+                    return (StageOutcome::RetryStep, report.troubled());
                 }
             }
             PhaseKind::ChiUpdate => prof("chi_update", || {
@@ -423,5 +526,5 @@ where
         }
         have = have.or(ph.writes);
     }
-    StageOutcome::Accepted
+    (StageOutcome::Accepted, 0)
 }

@@ -447,6 +447,33 @@ pub(crate) fn fofc_splice<const D: usize, const DOF: usize, Mem, Sc>(
     );
 }
 
+/// decode the recovery status into the troubled-cell flag over the interior and count it:
+/// the first half of a correction pass, which a decomposed driver runs on every tile before
+/// the flags cross the cuts.
+pub(crate) fn fofc_mark<const D: usize, const DOF: usize, Mem, Sc>(
+    sim: &FieldStore<D, DOF, Mem, Sc>,
+) -> u64
+where
+    Mem: MemorySpace + Sync,
+    Sc: Scalar + OrderedNumeric,
+{
+    let flag = &sim.workspace.fofc_flag;
+    troubled_from_status(sim, flag);
+    fofc_flag_count(sim, flag)
+}
+
+/// the number of set troubled-cell flags inside `region`, ghost cells included.
+pub(crate) fn fofc_flags_in<const D: usize, const DOF: usize, Mem, Sc>(
+    sim: &FieldStore<D, DOF, Mem, Sc>,
+    region: &symbi_algebra::Domain<D>,
+) -> u64
+where
+    Mem: MemorySpace,
+    Sc: Scalar + OrderedNumeric,
+{
+    field_reduce(&sim.workspace.fofc_flag, region, ReductionOp::Add) as u64
+}
+
 /// the constrained-transport hooks of the FOFC redo, carried as one value: four
 /// same-signature closures traveled as positional arguments, so transposing two of
 /// them typechecked and linked while corrupting `bcell` only on FOFC cells. hydro
@@ -562,9 +589,19 @@ where
     // on every non-fallback face), so with none the whole pass is a no-op — skip it. a clean
     // substage costs one pointwise decode + a reduction, skipping the flux sweep + two extra
     // c2p passes.
-    troubled_from_status(sim, flag);
-    let troubled = fofc_flag_count(sim, flag);
-    if troubled == 0 {
+    // a stage folded in two marked the flag before the flags crossed the cuts; the flag then
+    // stands as marked and is only counted here.
+    let troubled = if ws.fofc_marked.swap(false, Ordering::Relaxed) {
+        fofc_flag_count(sim, flag)
+    } else {
+        fofc_mark(sim)
+    };
+    // a neighboring tile's troubled cell in this tile's first ghost layer puts a face the two
+    // tiles share on the first-order flux; this tile then runs the pass with a clean interior
+    // so both sides of that face take the same flux. the driver that raised the mark has
+    // already written the neighbor's flags into the cut ghosts.
+    let cut_trouble = ws.fofc_cut_trouble.load(Ordering::Relaxed);
+    if troubled == 0 && !cut_trouble {
         advance_freeze_streak(freeze_streak, 0);
         return FofcReport::of_pass(
             0,
@@ -574,7 +611,9 @@ where
             FofcDecision::Accept,
         );
     }
-    post_first_fallback(sim, flag);
+    if troubled > 0 {
+        post_first_fallback(sim, flag);
+    }
     // boundary-consistent ghosts for the flag: a face straddling the periodic wrap (or any boundary)
     // must take one first-order decision from both of its cells, else the splice re-creates the very
     // non-conservation it exists to remove.

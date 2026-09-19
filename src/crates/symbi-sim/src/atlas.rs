@@ -126,6 +126,10 @@ impl<const D: usize> TileLayout<D> {
 pub enum FieldKind {
     Cell,
     Face(u8),
+    /// a cell field whose exchange covers the `h` ghost layers next to the interior, whatever
+    /// halo it is allocated with. it moves at the `Troubled` exchange points and no other:
+    /// the troubled-cell flag, which decides the flux on the faces two tiles share.
+    CellBand(u8),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -155,6 +159,15 @@ impl FieldSchema {
         self.entries.push(FieldEntry {
             name: name.to_string(),
             kind: FieldKind::Cell,
+            element: Element::F64,
+        });
+        self
+    }
+
+    pub fn cell_band(mut self, name: &str, h: u8) -> Self {
+        self.entries.push(FieldEntry {
+            name: name.to_string(),
+            kind: FieldKind::CellBand(h),
             element: Element::F64,
         });
         self
@@ -199,6 +212,17 @@ impl<const D: usize> FieldLayout<D> {
                 allocated: tile.allocated,
                 halo: [tile.ng; D],
             },
+            FieldKind::CellBand(h) => {
+                let h = h as usize;
+                Self {
+                    interior: tile.interior,
+                    allocated: std::array::from_fn(|ax| Span {
+                        lo: tile.interior[ax].lo - h as isize,
+                        hi: tile.interior[ax].hi + h as isize,
+                    }),
+                    halo: [h; D],
+                }
+            }
             FieldKind::Face(d) => {
                 let d = d as usize;
                 let t = Self::FACE_TRANSVERSE_HALO as isize;
@@ -237,6 +261,21 @@ impl<const D: usize> FieldLayout<D> {
         )
     }
 
+    /// a cell field exchanged over the `h` ghost layers next to the interior, whatever halo it
+    /// is allocated with: the layout's allocated span is the interior grown by `h`, so a ghost
+    /// strip of width `h` starts at the interior's edge.
+    pub fn cell_band_of_geometry(geom: &PartitionGeometry<D>, h: usize) -> Self {
+        let interior = spans_of(&geom.interior);
+        Self {
+            interior,
+            allocated: std::array::from_fn(|ax| Span {
+                lo: interior[ax].lo - h as isize,
+                hi: interior[ax].hi + h as isize,
+            }),
+            halo: [h; D],
+        }
+    }
+
     pub fn face_of_geometry(geom: &PartitionGeometry<D>, d: usize) -> Self {
         Self::of(
             &TileLayout::of_geometry(TileId(0), geom, [0; D]),
@@ -254,16 +293,30 @@ impl<const D: usize> FieldLayout<D> {
 pub enum ExchangePoint {
     Prime,
     Stage(u8),
+    /// inside stage `k`, between the troubled-cell mark and the correction: the flags cross
+    /// the cuts so both tiles sharing a face take one flux there.
+    Troubled(u8),
     Rollback,
 }
 
 impl ExchangePoint {
     pub const ROLLBACK_WIRE: u8 = 0xF0;
+    /// the largest stage index the wire byte holds below the rollback byte.
+    pub const MAX_STAGE: u8 = (Self::ROLLBACK_WIRE - 2) / 2 - 1;
+
+    /// whether a wire byte names a `Troubled` point: the odd bytes below the rollback byte.
+    pub fn is_troubled_wire(byte: u8) -> bool {
+        byte < Self::ROLLBACK_WIRE && byte % 2 == 1
+    }
 
     pub fn to_wire(self) -> u8 {
         match self {
             ExchangePoint::Prime => 0,
-            ExchangePoint::Stage(k) => 1 + k,
+            // the bytes rise in the order the points occur inside one attempt, which is the
+            // order the grant table requires of successive phases: stage k's flags cross
+            // before stage k's halos.
+            ExchangePoint::Troubled(k) => 1 + 2 * k,
+            ExchangePoint::Stage(k) => 2 + 2 * k,
             ExchangePoint::Rollback => Self::ROLLBACK_WIRE,
         }
     }
@@ -273,7 +326,8 @@ impl ExchangePoint {
             0 => Some(ExchangePoint::Prime),
             Self::ROLLBACK_WIRE => Some(ExchangePoint::Rollback),
             Epoch::NO_POINT => None,
-            k if k < Self::ROLLBACK_WIRE => Some(ExchangePoint::Stage(k - 1)),
+            k if Self::is_troubled_wire(k) => Some(ExchangePoint::Troubled((k - 1) / 2)),
+            k if k < Self::ROLLBACK_WIRE => Some(ExchangePoint::Stage((k - 2) / 2)),
             _ => None,
         }
     }
@@ -432,6 +486,16 @@ impl<const D: usize> ExchangePlan<D> {
         Ok(Self { digest, ..plan })
     }
 
+    /// whether `transfer` moves at `point`: a banded cell field at the `Troubled` points, every
+    /// other field at every other point.
+    pub fn moves_at(&self, transfer: &Transfer<D>, point: ExchangePoint) -> bool {
+        let banded = matches!(
+            self.schema.entries[transfer.field as usize].kind,
+            FieldKind::CellBand(_)
+        );
+        banded == matches!(point, ExchangePoint::Troubled(_))
+    }
+
     fn validate(&self) -> Result<(), PlanError> {
         for t in self.transfers() {
             if t.len == 0 {
@@ -492,6 +556,10 @@ impl<const D: usize> ExchangePlan<D> {
                 FieldKind::Face(d) => {
                     h.u8(1);
                     h.u8(d);
+                }
+                FieldKind::CellBand(band) => {
+                    h.u8(2);
+                    h.u8(band);
                 }
             }
             h.u8(0);
@@ -700,7 +768,8 @@ mod tests {
     fn plan_regions_equal_leg_regions() {
         for ng in [2usize, 3] {
             let p = ragged();
-            let plan = ExchangePlan::compile(&p, &Topology::open(), &mhd_schema(), ng).unwrap();
+            let schema = mhd_schema().cell_band("fofc_flag", 1);
+            let plan = ExchangePlan::compile(&p, &Topology::open(), &schema, ng).unwrap();
             let tiles: Vec<Mhd> = (0..p.n_tiles()).map(|f| mhd_tile(&p, f, ng)).collect();
             let schedule = Schedule::derive(p.counts(), ng, &Topology::open());
             let mut seen = 0;
@@ -715,6 +784,10 @@ mod tests {
                         FieldKind::Face(d) => (
                             FieldLayout::face_of_geometry(&tiles[leg.lo].geom, d as usize),
                             FieldLayout::face_of_geometry(&tiles[leg.hi].geom, d as usize),
+                        ),
+                        FieldKind::CellBand(band) => (
+                            FieldLayout::cell_band_of_geometry(&tiles[leg.lo].geom, band as usize),
+                            FieldLayout::cell_band_of_geometry(&tiles[leg.hi].geom, band as usize),
                         ),
                     };
                     let h = lo.halo[leg.axis].min(ng);
@@ -862,13 +935,70 @@ mod tests {
     fn exchange_point_round_trips_the_wire_byte() {
         for p in [
             ExchangePoint::Prime,
+            ExchangePoint::Troubled(0),
             ExchangePoint::Stage(0),
+            ExchangePoint::Troubled(1),
             ExchangePoint::Stage(1),
+            ExchangePoint::Troubled(ExchangePoint::MAX_STAGE),
+            ExchangePoint::Stage(ExchangePoint::MAX_STAGE),
             ExchangePoint::Rollback,
         ] {
             assert_eq!(ExchangePoint::from_wire(p.to_wire()), Some(p));
         }
         assert_eq!(ExchangePoint::from_wire(Epoch::NO_POINT), None);
+    }
+
+    /// a banded cell field moves the one ghost layer next to the interior under a three-cell
+    /// allocation, at the `Troubled` points and no other; every other field moves at every
+    /// other point.
+    #[test]
+    fn a_banded_field_fills_the_layer_next_to_the_interior_at_troubled_points_only() {
+        let p = ragged();
+        let schema = FieldSchema::new().cell("rho").cell_band("fofc_flag", 1);
+        let plan = ExchangePlan::compile(&p, &Topology::open(), &schema, 3).unwrap();
+        let mut banded = 0;
+        for t in plan.transfers() {
+            let is_band = t.field == 1;
+            assert_eq!(plan.moves_at(t, ExchangePoint::Troubled(0)), is_band);
+            assert_eq!(plan.moves_at(t, ExchangePoint::Stage(0)), !is_band);
+            assert_eq!(plan.moves_at(t, ExchangePoint::Prime), !is_band);
+            assert_eq!(plan.moves_at(t, ExchangePoint::Rollback), !is_band);
+            if !is_band {
+                continue;
+            }
+            banded += 1;
+            let ax = t.axis as usize;
+            let interior = plan.tiles[t.dst.0 as usize].interior[ax];
+            let ghost = t.dst_region[ax];
+            assert_eq!(ghost.size(), 1);
+            assert!(
+                ghost.lo == interior.hi || ghost.hi == interior.lo,
+                "ghost {ghost:?} is not the layer next to the interior {interior:?}"
+            );
+        }
+        assert!(banded > 0, "the plan carries no banded transfer");
+    }
+
+    /// the grant table accepts successive phases in rising epoch order, so the point bytes
+    /// rise in the order the points occur inside one attempt: prime, then per stage the flag
+    /// exchange before the halo exchange, then the rollback.
+    #[test]
+    fn exchange_point_bytes_rise_in_the_order_the_points_occur() {
+        let order = [
+            ExchangePoint::Prime,
+            ExchangePoint::Troubled(0),
+            ExchangePoint::Stage(0),
+            ExchangePoint::Troubled(1),
+            ExchangePoint::Stage(1),
+            ExchangePoint::Troubled(2),
+            ExchangePoint::Stage(2),
+            ExchangePoint::Rollback,
+        ];
+        let bytes: Vec<u8> = order.iter().map(|p| p.to_wire()).collect();
+        assert_eq!(bytes, vec![0, 1, 2, 3, 4, 5, 6, 0xF0]);
+        assert!(ExchangePoint::Stage(ExchangePoint::MAX_STAGE).to_wire() < ExchangePoint::ROLLBACK_WIRE);
+        assert!(ExchangePoint::is_troubled_wire(1) && !ExchangePoint::is_troubled_wire(2));
+        assert!(!ExchangePoint::is_troubled_wire(ExchangePoint::ROLLBACK_WIRE));
     }
 
     /// over every tile and field kind, the owned boxes are pairwise disjoint and cover the global

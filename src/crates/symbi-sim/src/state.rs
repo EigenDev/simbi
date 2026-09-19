@@ -1072,6 +1072,15 @@ pub struct RkWorkspaceGeneric<
     /// reference path: a reference run evolves the same state both ways and asserts a bit-identical
     /// trajectory, which pins the elision to the physics. `true` (elide) in production.
     pub elide_stage_snapshot: std::sync::atomic::AtomicBool,
+    /// set by a decomposed driver for one stage when a neighboring tile's troubled cell lies in
+    /// this tile's first ghost layer: the correction then runs on this tile even with a clean
+    /// interior, so the faces the two tiles share take one flux. the troubled flag's cut ghosts
+    /// hold the neighbor's flags for that stage.
+    pub fofc_cut_trouble: std::sync::atomic::AtomicBool,
+    /// set when a stage folded in two has already decoded this stage's recovery status into the
+    /// troubled-cell flag: the correction then counts the flag as it stands, cut ghosts and all,
+    /// and leaves the decode to the mark that ran before the flags crossed the cuts.
+    pub fofc_marked: std::sync::atomic::AtomicBool,
     /// first-order flux-correction scratch: the high-order per-direction conserved fluxes, saved
     /// before FOFC redoes the substage at first order (which overwrites `fields.flux`). the
     /// face-based splice reads HO here and FO from the live `fields.flux`, choosing per face by the
@@ -2869,6 +2878,8 @@ where
             u_stage: ConsFieldsGeneric::zeros_with_energy(&allocated, has_energy)?,
             stage_input_is_un: std::sync::atomic::AtomicBool::new(false),
             elide_stage_snapshot: std::sync::atomic::AtomicBool::new(true),
+            fofc_cut_trouble: std::sync::atomic::AtomicBool::new(false),
+            fofc_marked: std::sync::atomic::AtomicBool::new(false),
             flux_ho: array_cons_zeros_with_energy(&allocated, has_energy)?,
             fofc_flag: Field::zeros(&allocated)?,
             freeze_applied: Field::zeros(&allocated)?,

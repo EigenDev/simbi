@@ -167,18 +167,7 @@ fn assert_matches<const DOF: usize, S, F>(
         .collect();
     let mut fabrics: Vec<Fabric<Loopback>> = exchanges
         .iter()
-        .enumerate()
-        .map(|(w, ex)| {
-            Fabric::new(
-                link.clone(),
-                WorkerId(w as u32),
-                SessionId(7),
-                workers as usize,
-                2,
-                &ex.lens(),
-                ex.sends_per_peer_axis(),
-            )
-        })
+        .map(|ex| ex.fabric(link.clone(), SessionId(7)))
         .collect();
 
     let mut restore: Option<Box<dyn Fn(&[&FieldStore<2, DOF, HostMemory, f64>])>> = None;

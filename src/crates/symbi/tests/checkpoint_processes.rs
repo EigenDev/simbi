@@ -25,7 +25,7 @@ use symbi::sim::decomp::{
 use symbi::sim::state::*;
 use symbi_algebra::Tensor;
 use symbi_fabric::rendezvous::{Identity, Rendezvous, connect};
-use symbi_fabric::{Digest, Fabric, WorkerId};
+use symbi_fabric::{Digest, WorkerId};
 use symbi_geometry::Cartesian;
 use symbi_hydro::eos::IdealGas;
 use symbi_hydro::newtonian::Newtonian;
@@ -240,15 +240,7 @@ fn run_worker(arm: &Arm, me: WorkerId, out: PathBuf) -> Result<(), WorkerError> 
     let lens = exchange.lens();
     let max_payload = (lens.iter().max().copied().unwrap_or(0) * 8).max(credit as usize);
     let (link, session) = connect(&r, max_payload)?;
-    let mut fabric = Fabric::new(
-        link,
-        me,
-        session,
-        arm.workers() as usize,
-        2,
-        &lens,
-        exchange.sends_per_peer_axis(),
-    )
+    let mut fabric = exchange.fabric(link, session)
     .with_block_credit(credit);
     let cfg = WorkerConfig {
         regime: RegimeKind::of::<f64, 2, Newtonian>(),

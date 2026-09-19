@@ -26,7 +26,7 @@ use symbi::sim::decomp::{
 use symbi::sim::state::*;
 use symbi_algebra::Tensor;
 use symbi_fabric::rendezvous::{Identity, Rendezvous, connect};
-use symbi_fabric::{Digest, Fabric, WorkerId};
+use symbi_fabric::{Digest, WorkerId};
 use symbi_geometry::Cartesian;
 use symbi_hydro::eos::IdealGas;
 use symbi_hydro::newtonian::Newtonian;
@@ -130,11 +130,14 @@ fn tile(arm: &Arm, flat: usize) -> (Sim, Kern) {
     let counts = p.counts();
     let tc = unflatten(flat, counts);
     let ext = p.tile_extents(tc);
-    // a cut face is filled by the exchange; a domain face on a wrapped axis is a cut too
+    // a cut face is filled by the exchange; a domain face on a wrapped axis is a cut too when
+    // the axis is cut, and the tile's own periodic fill when it is not
     let bnd = Boundaries(std::array::from_fn(|a| {
         let edge = |at_edge: bool| {
             if at_edge && !arm.periodic[a] {
                 BoundaryType::Outflow
+            } else if arm.periodic[a] && counts[a] == 1 {
+                BoundaryType::Periodic
             } else {
                 BoundaryType::CoarseFine
             }
@@ -195,6 +198,18 @@ fn injection_from_env(me: WorkerId) -> Injection {
     if env_u64("W_BAD_CFL_WORKER") == Some(u64::from(me.0)) {
         injection.invalid_cfl_at = env_u64("W_BAD_CFL_STEP");
     }
+    // every worker carries the troubled cell; the one holding it raises the flag
+    if let Some(step) = env_u64("W_TROUBLE_STEP") {
+        injection.trouble_at = Some((
+            step,
+            env_u64("W_TROUBLE_STAGE").unwrap() as usize,
+            [
+                env_u64("W_TROUBLE_I").unwrap() as isize,
+                env_u64("W_TROUBLE_J").unwrap() as isize,
+                0,
+            ],
+        ));
+    }
     injection
 }
 
@@ -234,15 +249,7 @@ fn run_worker(arm: &Arm, me: WorkerId, out: PathBuf) -> Result<(), WorkerError> 
     let lens = exchange.lens();
     let max_payload = lens.iter().max().copied().unwrap_or(0) * 8;
     let (link, session) = connect(&r, max_payload.max(64))?;
-    let mut fabric = Fabric::new(
-        link,
-        me,
-        session,
-        arm.workers() as usize,
-        2,
-        &lens,
-        exchange.sends_per_peer_axis(),
-    );
+    let mut fabric = exchange.fabric(link, session);
     let cfg = WorkerConfig {
         regime: RegimeKind::of::<f64, 2, Newtonian>(),
         timestepping: Timestepping::Rk2,
@@ -279,7 +286,22 @@ fn run_worker(arm: &Arm, me: WorkerId, out: PathBuf) -> Result<(), WorkerError> 
             bytes.extend_from_slice(&v.to_bits().to_le_bytes());
         }
     }
-    std::fs::write(out, bytes).unwrap();
+    std::fs::write(&out, bytes).unwrap();
+    // the conserved density of every owned cell under its global index, so the parent can
+    // assemble one grid from any partition
+    let mut den = Vec::new();
+    for (flat, (sim, _)) in mine.iter().zip(&built) {
+        let ext = partition.tile_extents(unflatten(*flat, partition.counts()));
+        let lo: [isize; 2] = std::array::from_fn(|a| sim.geom.interior.spaces[a].lo);
+        let view = sim.fields.cons.den.view();
+        for c in sim.geom.interior.iter() {
+            let g: [u64; 2] = std::array::from_fn(|a| (ext[a].0 as isize + c[a] - lo[a]) as u64);
+            den.extend_from_slice(&g[0].to_le_bytes());
+            den.extend_from_slice(&g[1].to_le_bytes());
+            den.extend_from_slice(&view.at(c).to_bits().to_le_bytes());
+        }
+    }
+    std::fs::write(out.with_extension("den"), den).unwrap();
     println!(
         "REPORT steps={} rejections={} time={} dts={}",
         report.steps,
@@ -366,6 +388,8 @@ struct Outcome {
     stderr: String,
     report: Option<Report>,
     tiles: Vec<(usize, Vec<f64>)>,
+    /// (global i, global j, conserved density bits) of every cell this worker holds
+    density: Vec<(usize, usize, u64)>,
 }
 
 fn parse_report(stdout: &str) -> Option<Report> {
@@ -440,11 +464,25 @@ fn run_arm(test: &str, tag: &str, arm: &Arm, extra: &[(&str, String)]) -> Vec<Ou
                     tiles.push((flat, values));
                 }
             }
+            let density = std::fs::read(s.out.with_extension("den"))
+                .map(|bytes| {
+                    bytes
+                        .chunks_exact(24)
+                        .map(|c| {
+                            let word = |k: usize| {
+                                u64::from_le_bytes(c[8 * k..8 * k + 8].try_into().unwrap())
+                            };
+                            (word(0) as usize, word(1) as usize, word(2))
+                        })
+                        .collect()
+                })
+                .unwrap_or_default();
             Outcome {
                 code: status.code(),
                 stderr,
                 report: parse_report(&stdout),
                 tiles,
+                density,
             }
         })
         .collect();
@@ -635,6 +673,100 @@ fn a_rejection_on_one_worker_rolls_back_all() {
                 "{workers} workers: report"
             );
         }
+    }
+}
+
+/// the conserved density of an arm on the global grid, every cell written exactly once.
+fn global_density(outcomes: &[Outcome]) -> Vec<u64> {
+    let mut grid = vec![None; N * N];
+    for o in outcomes {
+        for &(i, j, bits) in &o.density {
+            assert!(grid[i * N + j].replace(bits).is_none(), "cell ({i},{j}) written twice");
+        }
+    }
+    grid.into_iter()
+        .map(|c| c.expect("a cell no worker wrote"))
+        .collect()
+}
+
+fn total_mass(density: &[u64]) -> f64 {
+    density.iter().map(|b| f64::from_bits(*b)).sum()
+}
+
+/// a troubled cell against a cut, with the neighbor across the cut clean: the corrected
+/// face on the cut takes the first-order flux on both workers, so the run equals the uncut
+/// one-worker run bitwise and conserves mass. the corner arm puts the cell in a tile corner
+/// of a four-worker layout, where the diagonal tile learns of it through the second axis.
+#[test]
+fn trouble_on_one_side_of_a_cut_matches_the_uncut_run() {
+    if in_worker_role() {
+        worker_main();
+    }
+    let test = "trouble_on_one_side_of_a_cut_matches_the_uncut_run";
+    let uncut = Arm {
+        cuts0: vec![],
+        cuts1: vec![],
+        periodic: [true, true],
+        owner: vec![0],
+    };
+    let initial_mass: f64 = {
+        let (sim, _) = tile(&uncut, 0);
+        let view = sim.fields.cons.den.view();
+        sim.geom.interior.iter().map(|c| *view.at(c)).sum()
+    };
+    let clean = run_arm(test, "clean", &uncut, &[]);
+    assert_all_ok(&clean);
+    let clean_density = global_density(&clean);
+    for (label, cell, arm) in [
+        (
+            "two workers, cell against the cut",
+            (31u64, 10u64),
+            Arm {
+                cuts0: vec![32],
+                cuts1: vec![],
+                periodic: [true, true],
+                owner: vec![0, 1],
+            },
+        ),
+        (
+            "four workers, cell in a tile corner",
+            (31, 31),
+            Arm {
+                cuts0: vec![32],
+                cuts1: vec![32],
+                periodic: [true, true],
+                owner: vec![0, 1, 2, 3],
+            },
+        ),
+    ] {
+        let inject = vec![
+            ("W_TROUBLE_STEP", "3".to_string()),
+            ("W_TROUBLE_STAGE", "0".to_string()),
+            ("W_TROUBLE_I", cell.0.to_string()),
+            ("W_TROUBLE_J", cell.1.to_string()),
+        ];
+        let tag = format!("c{}_{}", cell.0, cell.1);
+        let reference = run_arm(test, &format!("uncut_{tag}"), &uncut, &inject);
+        assert_all_ok(&reference);
+        let want = global_density(&reference);
+        let changed = want.iter().zip(&clean_density).filter(|(a, b)| a != b).count();
+        assert!(
+            changed > 0,
+            "{label}: the troubled cell left the uncut run unchanged; the gate is vacuous"
+        );
+        let drift = |d: &[u64]| ((total_mass(d) - initial_mass) / initial_mass).abs();
+        assert!(drift(&want) < 1e-13, "{label}: uncut mass drift {:e}", drift(&want));
+
+        let outcomes = run_arm(test, &format!("cut_{tag}"), &arm, &inject);
+        assert_all_ok(&outcomes);
+        let got = global_density(&outcomes);
+        assert!(
+            drift(&got) < 1e-13,
+            "{label}: mass drift {:e}; a cut face carried two different fluxes",
+            drift(&got)
+        );
+        let differing = got.iter().zip(&want).filter(|(a, b)| a != b).count();
+        assert_eq!(differing, 0, "{label}: {differing} cells differ from the uncut run");
     }
 }
 

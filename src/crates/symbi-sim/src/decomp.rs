@@ -508,7 +508,8 @@ fn prim_fields<const D: usize, const DOF: usize, M: MemorySpace>(
 }
 
 /// the fields a compiled exchange plan moves, in schema order: the primitive set as
-/// `prim_fields` lists it, then the staggered face-normal fields for MHD.
+/// `prim_fields` lists it, then the staggered face-normal fields for MHD, then the
+/// troubled-cell flag.
 pub fn plan_fields<const D: usize, const DOF: usize, M: MemorySpace>(
     store: &FieldStore<D, DOF, M>,
 ) -> Vec<&Field<f64, D, M>> {
@@ -516,6 +517,7 @@ pub fn plan_fields<const D: usize, const DOF: usize, M: MemorySpace>(
     if let Some(mhd) = store.fields.mhd.as_ref() {
         fields.extend(mhd.bface.b.iter());
     }
+    fields.push(&store.workspace.fofc_flag);
     fields
 }
 
@@ -542,6 +544,9 @@ pub fn plan_schema<const D: usize, const DOF: usize, M: MemorySpace>(
             schema = schema.face(&format!("bface{d}"), d as u8);
         }
     }
+    // the troubled-cell flag rides last, over the ghost layer next to the interior, and
+    // moves at the `Troubled` points only.
+    schema = schema.cell_band("fofc_flag", TROUBLE_REACH as u8);
     debug_assert_eq!(schema.len(), plan_fields(store).len());
     schema
 }
@@ -1384,6 +1389,38 @@ pub fn exchange_grid<const D: usize, const DOF: usize, M: MemorySpace, T: HaloTr
     transport: &T,
 ) {
     exchange_grid_set(tiles, schedule, devices, transport, ExchangeSet::Prim)
+}
+
+/// the ghost layers of the troubled-cell flag that decide a correction on shared data: a
+/// face on a cut takes the first-order flux when either cell sharing it is troubled.
+pub const TROUBLE_REACH: usize = 1;
+
+/// carry every tile's troubled-cell flags into its neighbors' first ghost layer, axis by
+/// axis so tile-corner diagonals arrive through the second axis, and return per tile the
+/// ghost regions it received. every leg is written in full each call, so a ghost flag left
+/// by an earlier stage is replaced. a tile with a set flag inside a received region runs the
+/// correction even with a clean interior.
+pub fn exchange_trouble<const D: usize, const DOF: usize, M: MemorySpace, T: HaloTransport>(
+    tiles: &[&FieldStore<D, DOF, M>],
+    schedule: &Schedule<D>,
+    devices: &[i32],
+    transport: &T,
+) -> Vec<Vec<Domain<D>>> {
+    let mut received = vec![Vec::new(); tiles.len()];
+    for axis in 0..D {
+        for leg in schedule.legs().iter().filter(|l| l.axis == axis) {
+            let (lo, hi) = (tiles[leg.lo], tiles[leg.hi]);
+            let lo_layout = FieldLayout::cell_band_of_geometry(&lo.geom, TROUBLE_REACH);
+            let hi_layout = FieldLayout::cell_band_of_geometry(&hi.geom, TROUBLE_REACH);
+            let r = leg_regions(&lo_layout, &hi_layout, leg, TROUBLE_REACH);
+            let (fl, fh) = (&lo.workspace.fofc_flag, &hi.workspace.fofc_flag);
+            transport.copy_region(fh, &r.hi_src, fl, &r.lo_ghost, devices[leg.hi], devices[leg.lo]);
+            transport.copy_region(fl, &r.lo_src, fh, &r.hi_ghost, devices[leg.lo], devices[leg.hi]);
+            received[leg.lo].push(r.lo_ghost);
+            received[leg.hi].push(r.hi_ghost);
+        }
+    }
+    received
 }
 
 /// which process holds each tile. every transfer in a schedule has a source tile and a
@@ -2446,39 +2483,56 @@ where
                 // (stage_tag: euler = 0, rk2 = 1 then 2). a per-driver `sidx + 1`
                 // instead labels forward-euler as tag 1, which is the rk2-predictor
                 // identity — the shared fold makes that divergence unrepresentable.
+                // the full per-stage pipeline (stage.rs STAGE_PIPELINE), folded in two spans.
+                // wave_speeds / efield / post_godunov are the MHD constrained-transport hooks,
+                // no-op defaults for hydro + iso; snapshot_stage / source_apply are the additive
+                // source pass; body_source is the forward immersed-body pass, pointwise from
+                // the body's global position so each tile applies it to its own cells. this
+                // loop never elides the stage-input copy (no cross-tile alias tracking).
+                //
+                // the first span ends with every tile's troubled cells marked. a face on a cut
+                // takes the first-order flux when either cell sharing it is troubled, and those
+                // cells sit on different tiles, so the flags cross the cuts before any tile
+                // corrects, and a tile whose neighbor's trouble reached its cut ghosts corrects
+                // with a clean interior. a stage with no troubled cell anywhere moves nothing.
+                let args = crate::stage::StageArgs {
+                    dt,
+                    a0: stage.a0,
+                    ac: stage.ac,
+                    stage: stage.index,
+                    n_stages: stages.len(),
+                    injection_weight: crate::driver::downstream_injection_weight(
+                        stages,
+                        stage.index,
+                    ),
+                    allow_elision: false,
+                };
+                let mut troubled = 0u64;
+                for i in 0..n {
+                    troubled += symbi_xpu::with_device(devices[i], || {
+                        crate::stage::fold_stage_through_mark(sh[i], kernels[i], args, &mut |_| {})
+                    });
+                }
+                let mut cut_trouble = vec![false; n];
+                if troubled > 0 {
+                    drain_devices::<M>(devices);
+                    let received = exchange_trouble(&sh, &schedule, devices, transport);
+                    drain_devices::<M>(devices);
+                    for i in 0..n {
+                        cut_trouble[i] = symbi_xpu::with_device(devices[i], || {
+                            received[i]
+                                .iter()
+                                .any(|region| kernels[i].fofc_flags_in(sh[i], region) > 0)
+                        });
+                    }
+                }
                 for i in 0..n {
                     let outcome = symbi_xpu::with_device(devices[i], || {
-                        // the full per-stage pipeline (evolve.rs STAGE_PIPELINE). wave_speeds / efield
-                        // / post_godunov are the MHD constrained-transport hooks; they are no-op
-                        // defaults for hydro + iso, so this is byte-identical to the prior sequence
-                        // there, and drives the CT curl (edge emf -> bface -> bcell) for mhd.
-                        // snapshot_stage / source_apply are the additive (non-fused) source pass: gated
-                        // on `has_additive_source`, so source-free runs of every regime skip them and
-                        // stay byte-identical. body_source is the forward immersed-body pass (gravity +
-                        // accretion sink), pointwise from the body's global position so each tile
-                        // applies it to its own cells -- no cross-tile coupling. all of these are
-                        // pointwise/local; the only cross-tile work is the post-stage halo exchange.
-                        // the shared stage table (symbi-sim::stage): identical
-                        // phase sequence to every other driver. this loop never
-                        // elides the stage-input copy (no cross-tile alias
-                        // tracking); the halo exchange + second ghost fill
-                        // follow outside the fold — the decomposed sequence's
-                        // documented delta.
-                        crate::stage::fold_stage(
+                        crate::stage::fold_stage_from_correction(
                             sh[i],
                             kernels[i],
-                            crate::stage::StageArgs {
-                                dt,
-                                a0: stage.a0,
-                                ac: stage.ac,
-                                stage: stage.index,
-                                n_stages: stages.len(),
-                                injection_weight: crate::driver::downstream_injection_weight(
-                                    stages,
-                                    stage.index,
-                                ),
-                                allow_elision: false,
-                            },
+                            args,
+                            cut_trouble[i],
                             &mut |_| {},
                         )
                     });

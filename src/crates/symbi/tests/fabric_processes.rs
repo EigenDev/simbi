@@ -202,15 +202,7 @@ fn run_worker(arm: &Arm, me: WorkerId, out: PathBuf) -> Result<(), FabricError> 
     let lens = exchange.lens();
     let max_payload = lens.iter().max().copied().unwrap_or(0) * 8;
     let (link, session) = connect(&r, max_payload.max(64))?;
-    let mut fabric = Fabric::new(
-        link,
-        me,
-        session,
-        arm.workers() as usize,
-        2,
-        &lens,
-        exchange.sends_per_peer_axis(),
-    );
+    let mut fabric = exchange.fabric(link, session);
     let result = run_phases(&exchange, &fields, &devices, &mut fabric, me);
     if let Err(e) = &result {
         fabric.abort(&e.to_string());
