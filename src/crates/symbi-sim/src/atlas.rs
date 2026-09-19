@@ -297,16 +297,39 @@ pub enum ExchangePoint {
     /// the cuts so both tiles sharing a face take one flux there.
     Troubled(u8),
     Rollback,
+    /// after the named exchange: each tile below a cut sends its copy of the shared
+    /// interface face to the tile above, which compares it with its own bit for bit. the
+    /// audit reads both copies and writes neither.
+    Audit(AuditAt),
+}
+
+/// the exchange an interface audit follows.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum AuditAt {
+    Prime,
+    Stage(u8),
+    Rollback,
+    /// before a checkpoint is opened, after the step's last exchange
+    Checkpoint,
 }
 
 impl ExchangePoint {
     pub const ROLLBACK_WIRE: u8 = 0xF0;
+    pub const CHECKPOINT_AUDIT_WIRE: u8 = 0xF8;
+    /// stage `k` owns three bytes from `STAGE_BASE + 3k`: its flag exchange, its halos, its
+    /// audit.
+    const STAGE_BASE: u8 = 2;
     /// the largest stage index the wire byte holds below the rollback byte.
-    pub const MAX_STAGE: u8 = (Self::ROLLBACK_WIRE - 2) / 2 - 1;
+    pub const MAX_STAGE: u8 = (Self::ROLLBACK_WIRE - Self::STAGE_BASE) / 3 - 1;
 
-    /// whether a wire byte names a `Troubled` point: the odd bytes below the rollback byte.
+    /// whether a wire byte names a `Troubled` point.
     pub fn is_troubled_wire(byte: u8) -> bool {
-        byte < Self::ROLLBACK_WIRE && byte % 2 == 1
+        matches!(Self::from_wire(byte), Some(ExchangePoint::Troubled(_)))
+    }
+
+    /// whether a wire byte names an `Audit` point.
+    pub fn is_audit_wire(byte: u8) -> bool {
+        matches!(Self::from_wire(byte), Some(ExchangePoint::Audit(_)))
     }
 
     pub fn to_wire(self) -> u8 {
@@ -315,9 +338,14 @@ impl ExchangePoint {
             // the bytes rise in the order the points occur inside one attempt, which is the
             // order the grant table requires of successive phases: stage k's flags cross
             // before stage k's halos.
-            ExchangePoint::Troubled(k) => 1 + 2 * k,
-            ExchangePoint::Stage(k) => 2 + 2 * k,
+            // before stage k's halos, and every audit follows the exchange it audits.
+            ExchangePoint::Audit(AuditAt::Prime) => 1,
+            ExchangePoint::Troubled(k) => Self::STAGE_BASE + 3 * k,
+            ExchangePoint::Stage(k) => Self::STAGE_BASE + 3 * k + 1,
+            ExchangePoint::Audit(AuditAt::Stage(k)) => Self::STAGE_BASE + 3 * k + 2,
             ExchangePoint::Rollback => Self::ROLLBACK_WIRE,
+            ExchangePoint::Audit(AuditAt::Rollback) => Self::ROLLBACK_WIRE + 1,
+            ExchangePoint::Audit(AuditAt::Checkpoint) => Self::CHECKPOINT_AUDIT_WIRE,
         }
     }
 
@@ -326,8 +354,20 @@ impl ExchangePoint {
             0 => Some(ExchangePoint::Prime),
             Self::ROLLBACK_WIRE => Some(ExchangePoint::Rollback),
             Epoch::NO_POINT => None,
-            k if Self::is_troubled_wire(k) => Some(ExchangePoint::Troubled((k - 1) / 2)),
-            k if k < Self::ROLLBACK_WIRE => Some(ExchangePoint::Stage((k - 2) / 2)),
+            1 => Some(ExchangePoint::Audit(AuditAt::Prime)),
+            k if k == Self::ROLLBACK_WIRE + 1 => Some(ExchangePoint::Audit(AuditAt::Rollback)),
+            Self::CHECKPOINT_AUDIT_WIRE => Some(ExchangePoint::Audit(AuditAt::Checkpoint)),
+            k if k < Self::ROLLBACK_WIRE => {
+                let stage = (k - Self::STAGE_BASE) / 3;
+                if stage > Self::MAX_STAGE {
+                    return None;
+                }
+                Some(match (k - Self::STAGE_BASE) % 3 {
+                    0 => ExchangePoint::Troubled(stage),
+                    1 => ExchangePoint::Stage(stage),
+                    _ => ExchangePoint::Audit(AuditAt::Stage(stage)),
+                })
+            }
             _ => None,
         }
     }
@@ -346,6 +386,9 @@ pub struct Transfer<const D: usize> {
     pub src_region: [Span; D],
     pub dst_region: [Span; D],
     pub len: usize,
+    /// an interface audit: the source's copy of a shared interface face, which the
+    /// destination compares with its own copy of the same face and never stores.
+    pub audit: bool,
 }
 
 /// the transfers of one axis, in order. an axis closes before the next opens.
@@ -446,6 +489,33 @@ impl<const D: usize> ExchangePlan<D> {
                 // both tiles, never a halo.
                 if let FieldKind::Face(d) = entry.kind {
                     if d as usize == leg.axis {
+                        // the audit of that interface: the lower tile's closing face against
+                        // the upper tile's opening face, over the faces both tiles own.
+                        let lo = &fields[leg.lo][f];
+                        let hi = &fields[leg.hi][f];
+                        let face = |tile: usize, at: isize| -> [Span; D] {
+                            std::array::from_fn(|ax| {
+                                if ax == leg.axis {
+                                    Span { lo: at, hi: at + 1 }
+                                } else {
+                                    tiles[tile].interior[ax]
+                                }
+                            })
+                        };
+                        let src_region = face(leg.lo, lo.interior[leg.axis].hi - 1);
+                        let dst_region = face(leg.hi, hi.interior[leg.axis].lo);
+                        axes[leg.axis].transfers.push(Transfer {
+                            id: TransferId(next),
+                            axis: leg.axis as u8,
+                            src: TileId(leg.lo as u32),
+                            dst: TileId(leg.hi as u32),
+                            field: f as u16,
+                            len: volume(&dst_region),
+                            src_region,
+                            dst_region,
+                            audit: true,
+                        });
+                        next += 1;
                         continue;
                     }
                 }
@@ -466,6 +536,7 @@ impl<const D: usize> ExchangePlan<D> {
                             len: volume(&dst_region),
                             src_region,
                             dst_region,
+                            audit: false,
                         });
                         next += 1;
                     };
@@ -486,14 +557,18 @@ impl<const D: usize> ExchangePlan<D> {
         Ok(Self { digest, ..plan })
     }
 
-    /// whether `transfer` moves at `point`: a banded cell field at the `Troubled` points, every
-    /// other field at every other point.
+    /// whether `transfer` moves at `point`: an interface audit at the `Audit` points, a banded
+    /// cell field at the `Troubled` points, every other transfer at every other point.
     pub fn moves_at(&self, transfer: &Transfer<D>, point: ExchangePoint) -> bool {
         let banded = matches!(
             self.schema.entries[transfer.field as usize].kind,
             FieldKind::CellBand(_)
         );
-        banded == matches!(point, ExchangePoint::Troubled(_))
+        match point {
+            ExchangePoint::Audit(_) => transfer.audit,
+            ExchangePoint::Troubled(_) => banded,
+            _ => !banded && !transfer.audit,
+        }
     }
 
     fn validate(&self) -> Result<(), PlanError> {
@@ -581,6 +656,7 @@ impl<const D: usize> ExchangePlan<D> {
             h.u32(t.src.0);
             h.u32(t.dst.0);
             h.u16(t.field);
+            h.u8(u8::from(t.audit));
             h.u64(t.len as u64);
             for ax in 0..D {
                 h.i64(t.src_region[ax].lo as i64);
@@ -816,7 +892,8 @@ mod tests {
                     seen += 2;
                 }
             }
-            assert_eq!(seen, plan.transfers().count(), "every transfer was matched");
+            let halos = plan.transfers().filter(|t| !t.audit).count();
+            assert_eq!(seen, halos, "every halo transfer was matched");
             assert!(seen > 0);
         }
     }
@@ -827,7 +904,7 @@ mod tests {
     fn destinations_are_ghosts_and_sources_are_interior() {
         let p = ragged();
         let plan = ExchangePlan::compile(&p, &Topology::open(), &mhd_schema(), 3).unwrap();
-        for t in plan.transfers() {
+        for t in plan.transfers().filter(|t| !t.audit) {
             let ax = t.axis as usize;
             let dst = &plan.fields[t.dst.0 as usize][t.field as usize];
             let src = &plan.fields[t.src.0 as usize][t.field as usize];
@@ -840,6 +917,50 @@ mod tests {
                 t.id
             );
         }
+    }
+
+    /// every cut along a face field's own axis carries exactly one audit of that field: the
+    /// lower tile's closing face against the upper tile's opening face, the same global
+    /// faces, over the transverse interior both tiles own. an audit moves at the audit points
+    /// and no other, and no halo transfer moves there.
+    #[test]
+    fn each_interface_is_audited_once_over_the_faces_both_tiles_own() {
+        let p = ragged();
+        let plan = ExchangePlan::compile(&p, &Topology::open(), &mhd_schema(), 3).unwrap();
+        let schedule = Schedule::derive(p.counts(), 3, &Topology::open());
+        let mut audits = 0;
+        for t in plan.transfers() {
+            for point in [ExchangePoint::Prime, ExchangePoint::Stage(0), ExchangePoint::Troubled(0)] {
+                assert_eq!(plan.moves_at(t, point), !t.audit && point != ExchangePoint::Troubled(0));
+            }
+            assert_eq!(plan.moves_at(t, ExchangePoint::Audit(AuditAt::Checkpoint)), t.audit);
+            if !t.audit {
+                continue;
+            }
+            audits += 1;
+            let ax = t.axis as usize;
+            assert_eq!(plan.schema.entries[t.field as usize].kind, FieldKind::Face(t.axis));
+            let (below, above) = (&plan.tiles[t.src.0 as usize], &plan.tiles[t.dst.0 as usize]);
+            assert_eq!(t.src_region[ax], Span { lo: below.interior[ax].hi, hi: below.interior[ax].hi + 1 });
+            assert_eq!(t.dst_region[ax], Span { lo: above.interior[ax].lo, hi: above.interior[ax].lo + 1 });
+            for other in (0..2).filter(|o| *o != ax) {
+                assert_eq!(t.src_region[other], below.interior[other]);
+                assert_eq!(t.dst_region[other], above.interior[other]);
+                assert_eq!(
+                    below.offset[other] + t.src_region[other].lo,
+                    above.offset[other] + t.dst_region[other].lo,
+                    "the two regions name different global faces"
+                );
+            }
+            assert_eq!(
+                below.offset[ax] + t.src_region[ax].lo,
+                above.offset[ax] + t.dst_region[ax].lo,
+                "the two regions name different global faces"
+            );
+        }
+        let cuts_along = |d: usize| schedule.legs().iter().filter(|l| l.axis == d).count();
+        assert_eq!(audits, cuts_along(0) + cuts_along(1), "one audit per cut per normal field");
+        assert!(audits > 0);
     }
 
     #[test]
@@ -986,18 +1107,25 @@ mod tests {
     fn exchange_point_bytes_rise_in_the_order_the_points_occur() {
         let order = [
             ExchangePoint::Prime,
+            ExchangePoint::Audit(AuditAt::Prime),
             ExchangePoint::Troubled(0),
             ExchangePoint::Stage(0),
+            ExchangePoint::Audit(AuditAt::Stage(0)),
             ExchangePoint::Troubled(1),
             ExchangePoint::Stage(1),
-            ExchangePoint::Troubled(2),
-            ExchangePoint::Stage(2),
+            ExchangePoint::Audit(AuditAt::Stage(1)),
             ExchangePoint::Rollback,
+            ExchangePoint::Audit(AuditAt::Rollback),
+            ExchangePoint::Audit(AuditAt::Checkpoint),
         ];
         let bytes: Vec<u8> = order.iter().map(|p| p.to_wire()).collect();
-        assert_eq!(bytes, vec![0, 1, 2, 3, 4, 5, 6, 0xF0]);
+        assert_eq!(bytes, vec![0, 1, 2, 3, 4, 5, 6, 7, 0xF0, 0xF1, 0xF8]);
+        for p in order {
+            assert_eq!(ExchangePoint::from_wire(p.to_wire()), Some(p));
+        }
         assert!(ExchangePoint::Stage(ExchangePoint::MAX_STAGE).to_wire() < ExchangePoint::ROLLBACK_WIRE);
-        assert!(ExchangePoint::is_troubled_wire(1) && !ExchangePoint::is_troubled_wire(2));
+        assert!(ExchangePoint::is_troubled_wire(2) && !ExchangePoint::is_troubled_wire(3));
+        assert!(ExchangePoint::is_audit_wire(1) && ExchangePoint::is_audit_wire(4));
         assert!(!ExchangePoint::is_troubled_wire(ExchangePoint::ROLLBACK_WIRE));
     }
 

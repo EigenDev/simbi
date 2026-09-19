@@ -342,3 +342,123 @@ fn source_free_after_pack() {
         })
     });
 }
+
+/// four magnetized tiles whose face fields come from one function of the global face
+/// index, so the two copies of every shared interface face agree. worker 0 holds the low-x
+/// tiles and worker 1 the high-x tiles: the cuts along x cross workers, the cuts along y,
+/// the periodic seam among them, sit inside one worker.
+fn audited_tiles() -> (Partition<2>, Vec<Mhd>, Topology<2>, &'static [u32]) {
+    let partition = Partition::explicit([N, N], [vec![32], vec![32]]).unwrap();
+    let tiles: Vec<Mhd> = (0..partition.n_tiles())
+        .map(|f| mhd_tile(&partition, f, 2))
+        .collect();
+    for (flat, tile) in tiles.iter().enumerate() {
+        let ext = partition.tile_extents(unflatten(flat, partition.counts()));
+        let mhd = tile.fields.mhd.as_ref().unwrap();
+        for d in 0..2 {
+            let mut view = mhd.bface.b[d].view_mut();
+            for c in mhd.bface.b[d].domain().iter() {
+                let g = [ext[0].0 as isize + c[0], ext[1].0 as isize + c[1]];
+                // periodic along y: the closing face of the last row is the opening face of
+                // the first, so the value depends on the global index modulo the period
+                let gy = g[1].rem_euclid(N as isize);
+                *view.at_mut(c) = 0.5 + 0.013 * g[0] as f64 + 0.0071 * gy as f64 + d as f64;
+            }
+        }
+    }
+    (partition, tiles, Topology::wrapping([false, true]), &[0, 0, 1, 1])
+}
+
+/// run one audit over every worker of the in-process link; the first error of any worker.
+fn run_audit(
+    partition: &Partition<2>,
+    tiles: &[Mhd],
+    topology: &Topology<2>,
+    owner: &[u32],
+) -> Result<Vec<symbi_sim::plan_exchange::AuditCost>, symbi_sim::plan_exchange::AuditError> {
+    use symbi_sim::atlas::AuditAt;
+    use symbi_sim::plan_exchange::AuditCost;
+    let stores: Vec<&FieldStore<2, 3, HostMemory, f64>> = tiles.iter().map(|s| &**s).collect();
+    let fields: Vec<Vec<_>> = stores.iter().map(|s| plan_fields(s)).collect();
+    let plan = ExchangePlan::compile(partition, topology, &plan_schema(stores[0]), 2).unwrap();
+    let workers = owner.iter().max().unwrap() + 1;
+    let placement = Placement::new(workers, owner.iter().map(|&w| WorkerId(w)).collect()).unwrap();
+    let link = Loopback::new();
+    let exchanges: Vec<PlanExchange<'_, 2>> = (0..workers)
+        .map(|w| PlanExchange::new(&plan, &placement, WorkerId(w)))
+        .collect();
+    let mut fabrics: Vec<Fabric<Loopback>> = exchanges
+        .iter()
+        .map(|ex| ex.fabric(link.clone(), SessionId(7)))
+        .collect();
+    let mut costs = vec![AuditCost::default(); workers as usize];
+    for axis in 0..2 {
+        let epoch =
+            PlanExchange::<2>::epoch(ExchangePoint::Audit(AuditAt::Prime), 0, 0, axis);
+        for ((ex, fabric), cost) in exchanges.iter().zip(fabrics.iter_mut()).zip(&mut costs) {
+            ex.audit_open_axis(&fields, fabric, epoch, cost)?;
+        }
+        let mut rounds = 0;
+        while fabrics
+            .iter_mut()
+            .map(|f| f.progress().unwrap())
+            .any(|p| p == Progress::Pending)
+        {
+            rounds += 1;
+            assert!(rounds < 64, "audit axis {axis} made no progress");
+        }
+        for ((ex, fabric), cost) in exchanges.iter().zip(fabrics.iter_mut()).zip(&mut costs) {
+            ex.audit_finish_axis(&fields, fabric, axis, cost)?;
+        }
+    }
+    Ok(costs)
+}
+
+/// equal copies pass, every shared face is compared exactly once, only the cuts that cross
+/// workers put bytes on the link, and the audit leaves every field bit for bit as it was.
+#[test]
+fn the_interface_audit_passes_equal_copies_and_writes_nothing() {
+    let (partition, tiles, topology, owner) = audited_tiles();
+    let stores: Vec<&FieldStore<2, 3, HostMemory, f64>> = tiles.iter().map(|s| &**s).collect();
+    let before = all_values(&stores);
+    let costs = run_audit(&partition, &tiles, &topology, owner).unwrap();
+    let after = all_values(&stores);
+    assert!(before.iter().zip(&after).all(|(a, b)| a.to_bits() == b.to_bits()));
+    // two cuts along x of 32 faces each cross workers; along y each worker holds one interior
+    // cut and one periodic seam of 32 faces
+    let faces: u64 = costs.iter().map(|c| c.faces).sum();
+    assert_eq!(faces, 2 * 32 + 4 * 32);
+    assert_eq!(costs[0].wire_bytes, 2 * 32 * 8, "the lower worker sends its two closing faces");
+    assert_eq!(costs[1].wire_bytes, 0);
+}
+
+/// one unit in the last place on one side of one shared face is reported with the field,
+/// both tiles, the face, and both values: across workers, inside one worker, and on the
+/// periodic seam.
+#[test]
+fn the_interface_audit_names_a_one_bit_disagreement() {
+    use symbi_sim::plan_exchange::AuditError;
+    // (tile perturbed, field axis, local face, expected lower tile, expected upper tile)
+    let cases: [(usize, usize, [isize; 2], u32, u32); 3] = [
+        (2, 0, [0, 5], 0, 2),   // upper side of an x cut that crosses workers
+        (0, 1, [7, 32], 0, 1),  // lower side of a y cut inside worker 0
+        (3, 1, [9, 32], 3, 2),  // lower side of the periodic y seam inside worker 1
+    ];
+    for (tile, d, face, below, above) in cases {
+        let (partition, tiles, topology, owner) = audited_tiles();
+        let field = &tiles[tile].fields.mhd.as_ref().unwrap().bface.b[d];
+        let old = *field.view().at(face);
+        *field.view_mut().at_mut(face) = f64::from_bits(old.to_bits() + 1);
+        let err = run_audit(&partition, &tiles, &topology, owner).unwrap_err();
+        let AuditError::Mismatch(m) = err else {
+            panic!("expected a mismatch, got {err:?}");
+        };
+        assert_eq!((m.below.0, m.above.0, m.axis as usize), (below, above, d), "{m}");
+        assert_eq!(m.field, format!("bface{d}"));
+        assert_eq!(
+            m.below_value.to_bits().abs_diff(m.above_value.to_bits()),
+            1,
+            "{m}"
+        );
+    }
+}

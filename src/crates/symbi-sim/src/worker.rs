@@ -25,13 +25,13 @@
 //      &LocalCopy, &mut fabric, &cfg, |iter, t, owned, fabric| Ok(ControlFlow::Continue(())))?;
 // =============================================================================
 
-use crate::atlas::{ExchangePoint, TileId};
+use crate::atlas::{AuditAt, ExchangePoint, TileId};
 use crate::decomp::{HaloTransport, plan_fields};
 use crate::driver::{
     advance_clock, advance_state_clock, downstream_injection_weight, needs_step_snapshot,
     retry_timestep, select_timestep, stage_schedule,
 };
-use crate::plan_exchange::PlanExchange;
+use crate::plan_exchange::{AuditCost, AuditError, PlanExchange};
 use crate::stage::{StageArgs, StageOutcome, fold_stage_from_correction, fold_stage_through_mark};
 use crate::state::{FieldStore, Timestepping};
 use crate::substrate_seam::{KernelSet, RegimeKind};
@@ -66,6 +66,9 @@ pub struct WorkerConfig {
     pub max_steps: u64,
     pub deadline: Duration,
     pub injection: Injection,
+    /// audit the shared interface faces after every exchange point, where the default audits
+    /// them after the prime exchange alone
+    pub audit_every_point: bool,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -86,6 +89,9 @@ pub struct WorkerReport {
     /// the troubled and frozen cells of this worker's accepted steps
     pub troubled_cells: u64,
     pub frozen_cells: u64,
+    /// interface audits run, and what they cost this worker in total
+    pub audits: u64,
+    pub audit_cost: AuditCost,
 }
 
 /// where a worker's wall time went. `collectives` and `exchange` include the time spent
@@ -106,6 +112,8 @@ pub enum WorkerError {
     Numerics(String),
     Refused(String),
     Checkpoint(String),
+    /// two tiles hold different values for a shared interface face
+    Interface(crate::plan_exchange::InterfaceMismatch),
 }
 
 impl std::fmt::Display for WorkerError {
@@ -115,6 +123,7 @@ impl std::fmt::Display for WorkerError {
             WorkerError::Numerics(d) => write!(f, "numerics: {d}"),
             WorkerError::Refused(d) => write!(f, "refused: {d}"),
             WorkerError::Checkpoint(d) => write!(f, "checkpoint: {d}"),
+            WorkerError::Interface(m) => write!(f, "interface: {m}"),
         }
     }
 }
@@ -230,6 +239,42 @@ where
     result
 }
 
+/// audit the shared interface faces after the exchange `at`, booking the cost. a plan with
+/// no face field along a cut has nothing to audit and opens no phase.
+#[allow(clippy::too_many_arguments)]
+fn audit_point<const D: usize, const DOF: usize, M, L>(
+    exchange: &PlanExchange<'_, D>,
+    tiles: &[TileId],
+    stores: &[&FieldStore<D, DOF, M, f64>],
+    n_tiles: usize,
+    fabric: &mut Fabric<L>,
+    at: AuditAt,
+    step: u64,
+    attempt: u16,
+    deadline: Duration,
+    report: &mut WorkerReport,
+) -> Result<(), WorkerError>
+where
+    M: MemorySpace,
+    L: Link,
+{
+    if !exchange.has_audits() {
+        return Ok(());
+    }
+    let fields = field_lists(tiles, stores, n_tiles);
+    let cost = exchange
+        .audit(&fields, fabric, at, step, attempt, deadline)
+        .map_err(|e| match e {
+            AuditError::Fabric(e) => WorkerError::Fabric(e),
+            AuditError::Mismatch(m) => WorkerError::Interface(m),
+        })?;
+    report.audits += 1;
+    report.audit_cost.faces += cost.faces;
+    report.audit_cost.wire_bytes += cost.wire_bytes;
+    report.audit_cost.elapsed += cost.elapsed;
+    Ok(())
+}
+
 /// a local fatal error: every peer is told before it is returned.
 fn fail<L: Link>(fabric: &mut Fabric<L>, err: WorkerError) -> WorkerError {
     // the step in progress ends here: its guard acts are discarded, so the run scope closes
@@ -299,8 +344,11 @@ where
     let multistage = needs_step_snapshot(stages);
     let schedule = stage_schedule(stages);
 
+    let mut report = WorkerReport::default();
+
     // prime: primitives and physical ghosts, the cut halos, the physical ghosts again at the
-    // cut corners, then the initial-condition check.
+    // cut corners, the audit of every shared interface face as the workers seeded it, then
+    // the initial-condition check.
     {
         let sh = shared!();
         for k in 0..n {
@@ -327,6 +375,10 @@ where
         for k in 0..n {
             with_device(dev(k), || kernels[k].ghost_fill(sh[k]));
         }
+        audit_point(
+            exchange, tiles, &sh, n_tiles, fabric, AuditAt::Prime, 0, 0, deadline, &mut report,
+        )
+        .map_err(|e| fail(fabric, e))?;
         for (k, store) in sh.iter().enumerate() {
             let err = crate::hydro_ops::scan_c2p_errors(store);
             if err.is_err() {
@@ -342,7 +394,6 @@ where
     }
 
     let guard_scope = crate::guard_ledger::open_scope();
-    let mut report = WorkerReport::default();
     let mut t = cfg.start_time;
     let mut iter: u64 = 0;
     while t < cfg.t_final && (cfg.max_steps == 0 || iter < cfg.max_steps) {
@@ -516,6 +567,14 @@ where
                 for k in 0..n {
                     with_device(dev(k), || kernels[k].ghost_fill(sh[k]));
                 }
+                if cfg.audit_every_point {
+                    let at = AuditAt::Stage(stage.index as u8);
+                    audit_point(
+                        exchange, tiles, &sh, n_tiles, fabric, at, iter, attempt, deadline,
+                        &mut report,
+                    )
+                    .map_err(|e| fail(fabric, e))?;
+                }
             }
             if !rejected {
                 crate::guard_ledger::step_commit();
@@ -554,6 +613,13 @@ where
                 .map_err(|e| fail(fabric, e.into()))?;
                 for k in 0..n {
                     with_device(dev(k), || kernels[k].ghost_fill(sh[k]));
+                }
+                if cfg.audit_every_point {
+                    audit_point(
+                        exchange, tiles, &sh, n_tiles, fabric, AuditAt::Rollback, iter, attempt,
+                        deadline, &mut report,
+                    )
+                    .map_err(|e| fail(fabric, e))?;
                 }
             }
             dt =

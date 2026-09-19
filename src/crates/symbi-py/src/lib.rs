@@ -10484,6 +10484,9 @@ fn run_worker_process(
             max_steps: cfg.max_steps,
             deadline,
             injection: fault.injection,
+            // SIMBI_FABRIC_AUDIT=all audits the shared interface faces after every exchange
+            // point; the default audits them after the prime exchange
+            audit_every_point: std::env::var("SIMBI_FABRIC_AUDIT").is_ok_and(|v| v == "all"),
         };
         let report = evolve_worker(
             &tile_ids,

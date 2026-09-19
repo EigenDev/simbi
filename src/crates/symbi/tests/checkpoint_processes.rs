@@ -250,6 +250,7 @@ fn run_worker(arm: &Arm, me: WorkerId, out: PathBuf) -> Result<(), WorkerError> 
         max_steps,
         deadline: TRANSFER_DEADLINE,
         injection: Injection::default(),
+        audit_every_point: false,
     };
     let ckpt_step = env_u64("W_CKPT_STEP");
     let ckpt_path = std::env::var("W_CKPT_PATH").unwrap_or_default();

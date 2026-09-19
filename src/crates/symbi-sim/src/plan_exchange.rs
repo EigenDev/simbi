@@ -20,7 +20,7 @@
 //  exchange.finish_axis(&fields, &mut fabric, axis)?;
 // =============================================================================
 
-use crate::atlas::{ExchangePlan, ExchangePoint, Placement, Span, TileId, domain_of};
+use crate::atlas::{AuditAt, ExchangePlan, ExchangePoint, Placement, Span, TileId, domain_of};
 use crate::decomp::HaloTransport;
 use symbi_fabric::{Epoch, Fabric, FabricError, Link, PhaseSpec, TransferId, WorkerId};
 use symbi_grid::Field;
@@ -94,6 +94,104 @@ impl<'p, const D: usize> PlanExchange<'p, D> {
             ExchangePoint::is_troubled_wire,
             self.trouble_sends_per_peer_axis(),
         )
+        .with_point_sends(
+            ExchangePoint::is_audit_wire,
+            self.sends_at(ExchangePoint::Audit(AuditAt::Prime)),
+        )
+    }
+
+    /// audit every shared interface face after the exchange `at`: the tile below each cut
+    /// sends its copy of the face, the tile above compares it with its own bit for bit, and
+    /// neither copy is written. both copies are the output of each tile's own curl of the
+    /// edge EMFs, so they agree exactly when the two tiles started from the same face values
+    /// and computed the same EMFs on the cut; the first differing face is returned as the
+    /// error. a pair of tiles held by one worker is compared in place.
+    pub fn audit<M: MemorySpace, L: Link>(
+        &self,
+        fields: &[Vec<&Field<f64, D, M>>],
+        fabric: &mut Fabric<L>,
+        at: AuditAt,
+        step: u64,
+        attempt: u16,
+        deadline: std::time::Duration,
+    ) -> Result<AuditCost, AuditError> {
+        let clock = std::time::Instant::now();
+        let mut cost = AuditCost::default();
+        for axis in 0..D {
+            let epoch = Self::epoch(ExchangePoint::Audit(at), step, attempt, axis);
+            self.audit_open_axis(fields, fabric, epoch, &mut cost)?;
+            fabric.wait(deadline)?;
+            self.audit_finish_axis(fields, fabric, axis, &mut cost)?;
+        }
+        cost.elapsed = clock.elapsed();
+        Ok(cost)
+    }
+
+    /// open the audit phase of `epoch.axis`: compare the interfaces whose two tiles this
+    /// worker holds, pack the lower copies bound for another worker, post the receives.
+    pub fn audit_open_axis<M: MemorySpace, L: Link>(
+        &self,
+        fields: &[Vec<&Field<f64, D, M>>],
+        fabric: &mut Fabric<L>,
+        epoch: Epoch,
+        cost: &mut AuditCost,
+    ) -> Result<(), AuditError> {
+        let mut sends = Vec::new();
+        let mut receives = Vec::new();
+        for t in self.audits(epoch.axis as usize) {
+            let f = t.field as usize;
+            match (self.owns(t.src), self.owns(t.dst)) {
+                (true, true) => {
+                    let mut below = vec![0.0; t.len];
+                    gather(fields[t.src.0 as usize][f], &t.src_region, &mut below);
+                    compare(self.plan, t, fields[t.dst.0 as usize][f], &below)?;
+                    cost.faces += t.len as u64;
+                }
+                (true, false) => {
+                    let field = fields[t.src.0 as usize][f];
+                    fabric.pack(t.id, |buf| gather(field, &t.src_region, buf))?;
+                    sends.push((t.id, self.placement.owner_of(t.dst)));
+                    cost.wire_bytes += 8 * t.len as u64;
+                }
+                (false, true) => receives.push((t.id, self.placement.owner_of(t.src))),
+                (false, false) => {}
+            }
+        }
+        Ok(fabric.open(PhaseSpec {
+            epoch,
+            sends: &sends,
+            receives: &receives,
+        })?)
+    }
+
+    /// compare every landed lower copy of `axis` with this worker's upper copy and close
+    /// the phase.
+    pub fn audit_finish_axis<M: MemorySpace, L: Link>(
+        &self,
+        fields: &[Vec<&Field<f64, D, M>>],
+        fabric: &mut Fabric<L>,
+        axis: usize,
+        cost: &mut AuditCost,
+    ) -> Result<(), AuditError> {
+        for t in self.audits(axis) {
+            if self.owns(t.dst) && !self.owns(t.src) {
+                let field = fields[t.dst.0 as usize][t.field as usize];
+                compare(self.plan, t, field, fabric.payload(t.id)?)?;
+                fabric.mark_unpacked(t.id)?;
+                cost.faces += t.len as u64;
+            }
+        }
+        Ok(fabric.close()?)
+    }
+
+    /// whether the plan audits any interface: true exactly when it carries a face field
+    /// and a cut along that field's axis. a plan-wide fact, so every worker agrees on it.
+    pub fn has_audits(&self) -> bool {
+        self.plan.transfers().any(|t| t.audit)
+    }
+
+    fn audits(&self, axis: usize) -> impl Iterator<Item = &crate::atlas::Transfer<D>> {
+        self.plan.axes[axis].transfers.iter().filter(|t| t.audit)
     }
 
     /// the ghost regions of `tile` that a `Troubled` exchange writes, from every neighbor,
@@ -199,6 +297,92 @@ impl<'p, const D: usize> PlanExchange<'p, D> {
         }
         fabric.close()
     }
+}
+
+/// what one interface audit cost this worker.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct AuditCost {
+    /// faces this worker compared
+    pub faces: u64,
+    /// payload bytes this worker sent
+    pub wire_bytes: u64,
+    pub elapsed: std::time::Duration,
+}
+
+/// two tiles hold different values for one shared interface face.
+#[derive(Debug, Clone, PartialEq)]
+pub struct InterfaceMismatch {
+    pub below: TileId,
+    pub above: TileId,
+    pub axis: u8,
+    pub field: String,
+    /// the face's index in the upper tile's local index space
+    pub face: Vec<isize>,
+    pub below_value: f64,
+    pub above_value: f64,
+}
+
+impl std::fmt::Display for InterfaceMismatch {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "shared-face mismatch on {} across axis {}: tile {:?} holds {:e} ({:#018x}) and tile \
+             {:?} holds {:e} ({:#018x}) at face {:?} of the upper tile",
+            self.field,
+            self.axis,
+            self.below,
+            self.below_value,
+            self.below_value.to_bits(),
+            self.above,
+            self.above_value,
+            self.above_value.to_bits(),
+            self.face
+        )
+    }
+}
+
+#[derive(Debug)]
+pub enum AuditError {
+    Fabric(FabricError),
+    Mismatch(InterfaceMismatch),
+}
+
+impl From<FabricError> for AuditError {
+    fn from(e: FabricError) -> Self {
+        AuditError::Fabric(e)
+    }
+}
+
+impl From<InterfaceMismatch> for AuditError {
+    fn from(e: InterfaceMismatch) -> Self {
+        AuditError::Mismatch(e)
+    }
+}
+
+/// compare the lower tile's copy `theirs` of an audited face with the upper tile's own copy
+/// in `field`, bit for bit, in region iteration order.
+fn compare<const D: usize, M: MemorySpace>(
+    plan: &ExchangePlan<D>,
+    t: &crate::atlas::Transfer<D>,
+    field: &Field<f64, D, M>,
+    theirs: &[f64],
+) -> Result<(), InterfaceMismatch> {
+    let view = field.view();
+    for (c, below) in domain_of(&t.dst_region).iter().zip(theirs) {
+        let above = *view.at(c);
+        if above.to_bits() != below.to_bits() {
+            return Err(InterfaceMismatch {
+                below: t.src,
+                above: t.dst,
+                axis: t.axis,
+                field: plan.schema.entries[t.field as usize].name.clone(),
+                face: c.to_vec(),
+                below_value: *below,
+                above_value: above,
+            });
+        }
+    }
+    Ok(())
 }
 
 /// read `region` of `field` into `buf` in region iteration order.

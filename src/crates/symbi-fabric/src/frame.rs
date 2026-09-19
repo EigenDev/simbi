@@ -31,10 +31,11 @@ pub const MAGIC: [u8; 4] = *b"SFAB";
 /// the version of the wire protocol: the frame layout, the handshake, and the meaning of
 /// every header byte, the exchange-point byte included. every frame carries it and the
 /// rendezvous Hello states it, so a worker built against another version is refused on its
-/// first frame, before any simulation traffic. version 2 orders the exchange-point bytes by
-/// occurrence (prime 0, stage k's flag exchange 1 + 2k, stage k's halos 2 + 2k); version 1
+/// first frame, before any simulation traffic. version 3 orders the exchange-point bytes by
+/// occurrence with an audit after each exchange (prime 0, its audit 1, then per stage k from
+/// 2 + 3k: flag exchange, halos, audit); version 2 had no audit points and version 1
 /// numbered stage k's halos 1 + k.
-pub const VERSION: u16 = 2;
+pub const VERSION: u16 = 3;
 pub const HEADER_LEN: usize = 36;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -204,11 +205,13 @@ mod tests {
         let mut v = bytes;
         v[4] = 9;
         assert!(matches!(Header::decode(&v), Err(FrameError::Version(_))));
-        // the previous protocol version, whose exchange-point bytes mean different points
-        let mut old = bytes;
-        old[4..6].copy_from_slice(&1u16.to_le_bytes());
-        assert!(matches!(Header::decode(&old), Err(FrameError::Version(1))));
-        assert_eq!(VERSION, 2, "a change of wire meaning takes a new version and a new pin");
+        // the previous protocol versions, whose exchange-point bytes mean different points
+        for previous in [1u16, 2] {
+            let mut old = bytes;
+            old[4..6].copy_from_slice(&previous.to_le_bytes());
+            assert!(matches!(Header::decode(&old), Err(FrameError::Version(v)) if v == previous));
+        }
+        assert_eq!(VERSION, 3, "a change of wire meaning takes a new version and a new pin");
         let mut k = bytes;
         k[6] = 200;
         assert!(matches!(Header::decode(&k), Err(FrameError::Kind(200))));

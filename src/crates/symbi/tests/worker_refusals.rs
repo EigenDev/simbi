@@ -61,6 +61,7 @@ fn config(regime: RegimeKind) -> WorkerConfig {
         max_steps: 1,
         deadline: Duration::from_secs(2),
         injection: Injection::default(),
+        audit_every_point: false,
     }
 }
 

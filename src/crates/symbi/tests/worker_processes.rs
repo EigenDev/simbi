@@ -258,6 +258,7 @@ fn run_worker(arm: &Arm, me: WorkerId, out: PathBuf) -> Result<(), WorkerError> 
         max_steps: STEPS,
         deadline: TRANSFER_DEADLINE,
         injection: injection_from_env(me),
+        audit_every_point: false,
     };
     let mut stores: Vec<&mut Store> = Vec::new();
     let mut kernels: Vec<&Kern> = Vec::new();
