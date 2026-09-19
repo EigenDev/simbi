@@ -293,6 +293,11 @@ print(f"  one worker: {cpus(out / 'timing' / 'records' / 'reference.cpus')}")
 print("timing (seconds)")
 for k, s in sorted(timing["summaries"].items()):
     print(f"  two nodes, worker {k}: steps {s[2]} compute {s[4]} collectives {s[5]} exchange {s[6]} final checkpoint {s[7]}; process wall {timing['spans'].get(k, float('nan')):.2f}")
+print("link counters")
+for k in sorted(timing["err"]):
+    for line in timing["err"][k].splitlines():
+        if line.startswith("SIMBI launch link:"):
+            print("  " + line.removeprefix("SIMBI launch link: "))
 if timing.get("reference_summary"):
     s = timing["reference_summary"]
     print(f"  one worker: steps {s[2]} compute {s[4]} collectives {s[5]} exchange {s[6]} final checkpoint {s[7]}; process wall {timing.get('reference_span', float('nan')):.2f}")

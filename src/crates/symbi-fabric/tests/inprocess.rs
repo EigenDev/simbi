@@ -11,10 +11,12 @@
 // run: cargo test -p symbi-fabric --test inprocess
 // =============================================================================
 
+use std::cell::Cell;
+use std::time::{Duration, Instant};
 use symbi_fabric::frame::encode_f64s;
 use symbi_fabric::{
-    Epoch, Fabric, FabricError, Header, Kind, Loopback, OpKind, PhaseSpec, Progress, SessionId,
-    TransferId, WorkerId,
+    Epoch, Fabric, FabricError, Header, Kind, Link, Loopback, OpKind, PhaseSpec, Progress,
+    SessionId, TransferId, WorkerId,
 };
 
 const S: SessionId = SessionId(99);
@@ -781,4 +783,85 @@ fn finish_refuses_with_a_collective_pending() {
     let (mut a, _b) = pair2(&link);
     a.begin_collective(OpKind::Any, 0).unwrap();
     assert!(a.begin_finish().unwrap_err().is_protocol());
+}
+
+/// a link whose byte count rises on every drive while no frame ever completes: a peer that
+/// trickles a frame forever.
+#[derive(Default)]
+struct Restless {
+    moved: Cell<u64>,
+}
+
+impl Link for Restless {
+    fn send(&self, _: WorkerId, _: WorkerId, _: Header, _: &[u8]) -> Result<(), FabricError> {
+        Ok(())
+    }
+
+    fn poll(&self, _: WorkerId, _: &mut Vec<u8>) -> Result<Option<(WorkerId, Header)>, FabricError> {
+        Ok(None)
+    }
+
+    fn drive(&self, _: WorkerId) -> Result<(), FabricError> {
+        self.moved.set(self.moved.get() + 1);
+        Ok(())
+    }
+
+    fn bytes_moved(&self) -> u64 {
+        self.moved.get()
+    }
+}
+
+fn is_deadline(e: &FabricError) -> bool {
+    matches!(e, FabricError::Deadline { .. })
+}
+
+/// a wait whose every pass moves bytes runs without pausing, and its deadline still ends it.
+#[test]
+fn the_deadline_ends_a_wait_whose_every_pass_advances() {
+    let mut a = Fabric::new(
+        Restless::default(),
+        A,
+        S,
+        2,
+        2,
+        &LENS,
+        vec![vec![0, 0], vec![1, 1]],
+    );
+    a.open(PhaseSpec {
+        epoch: epoch(0, 1, 0),
+        sends: &[],
+        receives: &[(T1, B)],
+    })
+    .unwrap();
+    let start = Instant::now();
+    let err = a.wait(Duration::from_millis(100)).unwrap_err();
+    assert!(is_deadline(&err), "{err}");
+    assert!(start.elapsed() < Duration::from_secs(2));
+    let st = a.stats();
+    assert!(
+        st.advancing_passes > 0,
+        "the link never reported progress; the gate is vacuous"
+    );
+    assert_eq!(st.idle_pauses, 0, "a pass that moved bytes paused");
+}
+
+/// a send held back by a missing grant is pending work: no byte moves and no state changes,
+/// so every waiting pass pauses.
+#[test]
+fn pending_work_alone_pauses_every_pass() {
+    let link = Loopback::new();
+    let (mut a, _b) = pair(&link);
+    a.pack(T0, |buf| buf.fill(1.0)).unwrap();
+    a.open(PhaseSpec {
+        epoch: epoch(0, 1, 0),
+        sends: &[(T0, B)],
+        receives: &[],
+    })
+    .unwrap();
+    let err = a.wait(Duration::from_millis(50)).unwrap_err();
+    assert!(is_deadline(&err), "{err}");
+    let st = a.stats();
+    assert!(st.grant_waits > 0, "the send never waited for its grant");
+    assert!(st.idle_pauses > 0);
+    assert_eq!(st.advancing_passes, 0, "a pass with only pending work counted as progress");
 }

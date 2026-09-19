@@ -102,6 +102,9 @@ struct Scenario {
     /// worker 1 streams blocks of varying size to a slow coordinator under a credit that
     /// admits two small blocks while a large one still occupies the outbox
     blocks: bool,
+    /// two workers run many axis phases of several small transfers each way and report the
+    /// mean phase cost with the waiting-loop counters
+    exchange: bool,
 }
 
 impl Scenario {
@@ -123,6 +126,7 @@ impl Scenario {
             race: env_u64("W_RACE", 0) == 1,
             latency: env_u64("W_LATENCY", 0) == 1,
             blocks: env_u64("W_BLOCKS", 0) == 1,
+            exchange: env_u64("W_EXCHANGE", 0) == 1,
         }
     }
 }
@@ -155,6 +159,9 @@ fn run_worker(s: &Scenario) -> Result<(), FabricError> {
         identity: identity(s.workers),
         startup: STARTUP_DEADLINE,
     };
+    if s.exchange {
+        return run_exchange(s, &r);
+    }
     let lens = [s.len0, 3, 2, 2];
     let max_payload = (lens.iter().max().copied().unwrap() * 8).max(BLOCK_CREDIT as usize);
     let (link, session) = connect(&r, max_payload)?;
@@ -265,6 +272,84 @@ fn run_latency(
         each * 1e6
     );
     fabric.finish(TRANSFER_DEADLINE)
+}
+
+const EXCHANGE_EACH_WAY: u32 = 8;
+const EXCHANGE_VALUES: usize = 32;
+const EXCHANGE_ROUNDS: u32 = 2000;
+
+/// the exchange scenario: each round is one axis phase in which either worker sends the
+/// other eight transfers of thirty-two values, the shape of a four-field cut with a
+/// periodic wrap on a sixteen-cell edge. every payload is checked, and each worker prints
+/// the mean phase cost, the frames it moved, and how its waiting passes divided between
+/// advancing and idle.
+fn run_exchange(s: &Scenario, r: &Rendezvous) -> Result<(), FabricError> {
+    let n = EXCHANGE_EACH_WAY;
+    let lens = vec![EXCHANGE_VALUES; 2 * n as usize];
+    let (link, session) = connect(r, EXCHANGE_VALUES * 8)?;
+    println!("READY");
+    let peer = WorkerId(1 - s.me.0);
+    let mut per_peer = vec![vec![0u32; 1]; 2];
+    per_peer[peer.0 as usize][0] = n;
+    let mut fabric = Fabric::new(link, s.me, session, 2, 1, &lens, per_peer);
+    // worker 0 sends transfers 0..n and worker 1 sends n..2n
+    let first = |w: WorkerId| w.0 * n;
+    let sends: Vec<_> = (0..n).map(|k| (TransferId(first(s.me) + k), peer)).collect();
+    let receives: Vec<_> = (0..n).map(|k| (TransferId(first(peer) + k), peer)).collect();
+    let result = (|| {
+        let start = Instant::now();
+        for round in 0..EXCHANGE_ROUNDS {
+            let e = Epoch {
+                step: u64::from(round),
+                attempt: 0,
+                point: 1,
+                axis: 0,
+            };
+            for &(id, _) in &sends {
+                fabric.pack(id, |buf| {
+                    for (i, v) in buf.iter_mut().enumerate() {
+                        *v = value(s.me.0, id.0, i) + f64::from(round);
+                    }
+                })?;
+            }
+            fabric.open(PhaseSpec {
+                epoch: e,
+                sends: &sends,
+                receives: &receives,
+            })?;
+            fabric.wait(TRANSFER_DEADLINE)?;
+            for &(id, _) in &receives {
+                let got = fabric.payload(id)?;
+                for (i, v) in got.iter().enumerate() {
+                    if *v != value(peer.0, id.0, i) + f64::from(round) {
+                        eprintln!("round {round}: transfer {id:?} value {i} is {v}");
+                        std::process::exit(4);
+                    }
+                }
+                fabric.mark_unpacked(id)?;
+            }
+            fabric.close()?;
+        }
+        let each = start.elapsed().as_secs_f64() / f64::from(EXCHANGE_ROUNDS);
+        let st = fabric.stats();
+        println!(
+            "EXCHANGE worker={} mean_phase_us={:.1} frames_sent_per_phase={} \
+             frames_received_per_phase={} passes_per_phase={:.1} idle_pauses_per_phase={:.2} \
+             advancing_passes_per_phase={:.2}",
+            s.me.0,
+            each * 1e6,
+            st.halo_frames_sent / u64::from(EXCHANGE_ROUNDS),
+            st.halo_frames_received / u64::from(EXCHANGE_ROUNDS),
+            st.passes as f64 / f64::from(EXCHANGE_ROUNDS),
+            st.idle_pauses as f64 / f64::from(EXCHANGE_ROUNDS),
+            st.advancing_passes as f64 / f64::from(EXCHANGE_ROUNDS),
+        );
+        fabric.finish(TRANSFER_DEADLINE)
+    })();
+    if let Err(e) = &result {
+        fabric.abort(&e.to_string());
+    }
+    result
 }
 
 /// the race scenario: worker 0 coordinates and holds worker 2's result for 300 ms; workers
@@ -885,6 +970,22 @@ fn variable_sized_blocks_complete_under_backpressure() {
         &blocks,
         &blocks,
     ));
+}
+
+/// the loopback cost of an axis phase of several small transfers: recorded, not judged.
+#[test]
+fn small_transfer_phase_cost_on_the_loopback() {
+    if in_worker_role() {
+        worker_main();
+    }
+    let flags = [("W_EXCHANGE", "1".to_string())];
+    let outcomes = run_pair("small_transfer_phase_cost_on_the_loopback", &flags, &flags);
+    assert_all_ok(&outcomes);
+    for o in &outcomes {
+        for line in o.stdout.lines().filter(|l| l.contains("EXCHANGE")) {
+            println!("{line}");
+        }
+    }
 }
 
 /// the loopback floor of a collective: recorded, not judged.

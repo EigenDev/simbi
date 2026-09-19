@@ -58,6 +58,7 @@ pub struct Outbox {
     free_control: Vec<usize>,
     raw: Vec<u8>,
     queue: VecDeque<Queued>,
+    written: u64,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -78,6 +79,7 @@ impl Outbox {
             free_control: (0..CONTROL_QUEUE).rev().collect(),
             raw: Vec::new(),
             queue: VecDeque::with_capacity(CONTROL_QUEUE + 2),
+            written: 0,
         }
     }
 
@@ -88,6 +90,11 @@ impl Outbox {
 
     pub fn pending(&self) -> bool {
         !self.queue.is_empty()
+    }
+
+    /// the bytes the stream has accepted from this outbox since construction.
+    pub fn written(&self) -> u64 {
+        self.written
     }
 
     /// the bytes this outbox holds, fixed at construction.
@@ -149,12 +156,18 @@ impl Outbox {
     /// `Ok(true)` when the queue is empty afterwards.
     pub fn write_to(&mut self, stream: &mut impl Write) -> io::Result<bool> {
         while let Some(front) = self.queue.front().copied() {
-            let bytes = self.bytes_of(front.slot);
             let mut sent = front.sent;
-            while sent < bytes.len() {
+            loop {
+                let bytes = self.bytes_of(front.slot);
+                if sent == bytes.len() {
+                    break;
+                }
                 match stream.write(&bytes[sent..]) {
                     Ok(0) => return Err(io::Error::from(ErrorKind::WriteZero)),
-                    Ok(n) => sent += n,
+                    Ok(n) => {
+                        sent += n;
+                        self.written += n as u64;
+                    }
                     Err(e) if e.kind() == ErrorKind::WouldBlock => {
                         self.queue.front_mut().expect("front exists").sent = sent;
                         return Ok(false);
@@ -191,6 +204,7 @@ pub struct Inbox {
     payload_have: usize,
     complete: bool,
     max_payload: usize,
+    read: u64,
 }
 
 #[derive(Debug)]
@@ -216,6 +230,7 @@ impl Inbox {
             payload_have: 0,
             complete: false,
             max_payload,
+            read: 0,
         }
     }
 
@@ -232,6 +247,11 @@ impl Inbox {
         self.payload.capacity()
     }
 
+    /// the bytes taken from the stream since construction.
+    pub fn read(&self) -> u64 {
+        self.read
+    }
+
     /// read toward one complete frame. a complete frame is held until `take`, and the
     /// stream is left unread meanwhile, which is the backpressure toward the sender.
     pub fn read_from(&mut self, stream: &mut impl Read) -> Result<ReadOutcome, ReadError> {
@@ -242,7 +262,10 @@ impl Inbox {
             if self.header.is_none() {
                 match stream.read(&mut self.header_bytes[self.header_have..]) {
                     Ok(0) => return Ok(ReadOutcome::Eof),
-                    Ok(n) => self.header_have += n,
+                    Ok(n) => {
+                        self.header_have += n;
+                        self.read += n as u64;
+                    }
                     Err(e) if e.kind() == ErrorKind::WouldBlock => return Ok(ReadOutcome::Blocked),
                     Err(e) if e.kind() == ErrorKind::Interrupted => continue,
                     Err(e) => return Err(e.into()),
@@ -265,7 +288,10 @@ impl Inbox {
             while self.payload_have < want {
                 match stream.read(&mut self.payload[self.payload_have..want]) {
                     Ok(0) => return Ok(ReadOutcome::Eof),
-                    Ok(n) => self.payload_have += n,
+                    Ok(n) => {
+                        self.payload_have += n;
+                        self.read += n as u64;
+                    }
                     Err(e) if e.kind() == ErrorKind::WouldBlock => return Ok(ReadOutcome::Blocked),
                     Err(e) if e.kind() == ErrorKind::Interrupted => continue,
                     Err(e) => return Err(e.into()),
@@ -298,6 +324,8 @@ pub struct LinkStats {
     pub partial_writes: u64,
     /// drive passes that left a frame partially read
     pub partial_reads: u64,
+    /// bytes every peer's stream has accepted and delivered, detached peers included
+    pub bytes_moved: u64,
 }
 
 struct Peer {
@@ -398,12 +426,16 @@ impl TcpLink {
         peer: &mut Peer,
         stats: &mut LinkStats,
     ) -> Result<(), FabricError> {
-        match peer.outbox.write_to(&mut peer.stream) {
+        let before = peer.outbox.written() + peer.inbox.read();
+        let wrote = peer.outbox.write_to(&mut peer.stream);
+        let read = peer.inbox.read_from(&mut peer.stream);
+        stats.bytes_moved += peer.outbox.written() + peer.inbox.read() - before;
+        match wrote {
             Ok(true) => {}
             Ok(false) => stats.partial_writes += 1,
             Err(e) => return Err(io_to_fabric(e, peer_id)),
         }
-        match peer.inbox.read_from(&mut peer.stream) {
+        match read {
             Ok(ReadOutcome::Complete) => Ok(()),
             Ok(ReadOutcome::Blocked) => {
                 if peer.inbox.mid_frame() {
@@ -486,6 +518,10 @@ impl Link for TcpLink {
             .iter()
             .flatten()
             .any(|p| p.outbox.pending())
+    }
+
+    fn bytes_moved(&self) -> u64 {
+        self.stats.borrow().bytes_moved
     }
 }
 
@@ -688,6 +724,47 @@ mod tests {
         assert_eq!(out, payload);
         r.block_next = false;
         assert_eq!(inbox.read_from(&mut r).unwrap(), ReadOutcome::Eof);
+    }
+
+    /// one peer with fifty frames waiting and another with one: a drive takes one frame
+    /// from each, so the quiet peer's frame is among the first two handed over.
+    #[test]
+    fn a_busy_peer_leaves_the_quiet_peer_served_on_the_same_pass() {
+        use std::net::TcpListener;
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        let link = TcpLink::new(WorkerId(0), 3, 64);
+        let mut far = Vec::new();
+        for peer in [1u32, 2] {
+            let theirs = TcpStream::connect(addr).unwrap();
+            let (mine, _) = listener.accept().unwrap();
+            link.attach(WorkerId(peer), mine).unwrap();
+            far.push(theirs);
+        }
+        let busy: Vec<u8> = (0..50)
+            .flat_map(|k| encoded(header(Kind::Credit, k, 0), &[]))
+            .collect();
+        far[0].write_all(&busy).unwrap();
+        far[1]
+            .write_all(&encoded(header(Kind::Credit, 999, 0), &[]))
+            .unwrap();
+        let mut order = Vec::new();
+        let mut payload = Vec::new();
+        let start = std::time::Instant::now();
+        while order.len() < 51 {
+            link.drive(WorkerId(0)).unwrap();
+            while let Some((from, _)) = link.poll(WorkerId(0), &mut payload).unwrap() {
+                order.push(from);
+            }
+            assert!(start.elapsed() < std::time::Duration::from_secs(5), "{order:?}");
+        }
+        let quiet = order.iter().position(|w| *w == WorkerId(2)).unwrap();
+        let busy_before = order[..quiet].iter().filter(|w| **w == WorkerId(1)).count();
+        assert!(order.contains(&WorkerId(1)), "the busy peer never delivered");
+        assert!(
+            busy_before <= 1,
+            "{busy_before} frames of the busy peer preceded the quiet peer's one"
+        );
     }
 
     #[test]

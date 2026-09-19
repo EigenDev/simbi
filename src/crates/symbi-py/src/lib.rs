@@ -10390,7 +10390,8 @@ fn run_worker_process(
         );
         let _ = std::io::stderr().write_all(line.as_bytes());
     }
-    let mut fabric = Fabric::new(link, me, session, launch.workers, 2, &lens, exchange.sends_per_peer_axis())
+    let sends_per_peer_axis = exchange.sends_per_peer_axis();
+    let mut fabric = Fabric::new(link, me, session, launch.workers, 2, &lens, sends_per_peer_axis.clone())
         .with_block_credit(credit);
     let devices = vec![0i32; partition.n_tiles()];
 
@@ -10529,6 +10530,22 @@ fn run_worker_process(
                 t.collectives.as_secs_f64(),
                 t.exchange.as_secs_f64(),
                 io,
+            );
+            let _ = std::io::stderr().write_all(line.as_bytes());
+            // the halo frames one exchange point sends each peer on each axis, and how the
+            // session's waiting passes divided between advancing and idle
+            let st = fabric.stats();
+            let line = format!(
+                "SIMBI launch link: worker={}/{} sends_per_peer_axis={:?} halo_frames_sent={} \
+                 halo_frames_received={} passes={} advancing_passes={} idle_pauses={}\n",
+                launch.worker,
+                launch.workers,
+                sends_per_peer_axis,
+                st.halo_frames_sent,
+                st.halo_frames_received,
+                st.passes,
+                st.advancing_passes,
+                st.idle_pauses,
             );
             let _ = std::io::stderr().write_all(line.as_bytes());
         }

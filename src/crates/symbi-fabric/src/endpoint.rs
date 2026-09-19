@@ -73,6 +73,12 @@ pub trait Link {
     fn outbound_pending(&self) -> bool {
         false
     }
+
+    /// the bytes this link has read and written so far, a count that only grows. a link
+    /// whose frames move whole reports zero and the frame count alone measures progress.
+    fn bytes_moved(&self) -> u64 {
+        0
+    }
 }
 
 type Queued = (WorkerId, WorkerId, Header, Vec<u8>);
@@ -178,6 +184,14 @@ pub struct Stats {
     /// progress passes in which a send waited for the link to accept a frame
     pub link_waits: u64,
     pub passes: u64,
+    /// frames taken from the link plus halo frames handed to it
+    pub transitions: u64,
+    pub halo_frames_sent: u64,
+    pub halo_frames_received: u64,
+    /// waiting passes that moved no byte and changed no state, each followed by a pause
+    pub idle_pauses: u64,
+    /// waiting passes that advanced, each followed at once by the next pass
+    pub advancing_passes: u64,
 }
 
 /// a global operation. every worker issues the same sequence of operations, so
@@ -327,7 +341,7 @@ struct Blocks {
     granted: Vec<u32>,
 }
 
-/// the pause between progress passes while waiting on the link.
+/// the pause after a waiting pass that advanced nothing.
 const POLL_PAUSE: Duration = Duration::from_micros(50);
 
 fn none_epoch() -> Epoch {
@@ -594,6 +608,7 @@ impl<L: Link> Fabric<L> {
             self.inbox = inbox;
             match result {
                 Ok(true) => {
+                    self.stats.transitions += 1;
                     if self.blocks.staged.is_some() {
                         return Ok(());
                     }
@@ -622,13 +637,32 @@ impl<L: Link> Fabric<L> {
         }
     }
 
+    /// the progress made so far: bytes the link moved plus frames taken and posted.
+    /// pending work leaves it unchanged; only a moved byte or a state change raises it.
+    fn advance_mark(&self) -> u64 {
+        self.link.bytes_moved().wrapping_add(self.stats.transitions)
+    }
+
+    /// end one waiting pass that began at `mark`: pause when the pass advanced nothing,
+    /// so an idle wait yields the core and a productive one runs its next pass at once.
+    /// every waiting loop checks its deadline on each pass, advancing or idle.
+    fn pause_if_idle(&mut self, mark: u64) {
+        if self.advance_mark() == mark {
+            self.stats.idle_pauses += 1;
+            std::thread::sleep(POLL_PAUSE);
+        } else {
+            self.stats.advancing_passes += 1;
+        }
+    }
+
     /// service the link for `duration`: what a worker does while it waits for a collective
     /// result, so a faster peer's grant is tabled rather than left on the wire.
     pub fn service_for(&mut self, duration: Duration) -> Result<(), FabricError> {
         let start = Instant::now();
         while start.elapsed() < duration {
+            let mark = self.advance_mark();
             self.service()?;
-            std::thread::sleep(POLL_PAUSE);
+            self.pause_if_idle(mark);
         }
         self.service()
     }
@@ -735,6 +769,7 @@ impl<L: Link> Fabric<L> {
                 let slot = &mut self.slots[id.0 as usize];
                 decode_f64s(payload, &mut slot.buf);
                 slot.recv = RecvState::Received;
+                self.stats.halo_frames_received += 1;
                 Ok(())
             }
             Kind::Contribute => {
@@ -1023,6 +1058,7 @@ impl<L: Link> Fabric<L> {
         let op = self.begin_collective(kind, value)?;
         let start = Instant::now();
         loop {
+            let mark = self.advance_mark();
             if let Some(result) = self.collective_progress()? {
                 return Ok(result);
             }
@@ -1034,7 +1070,7 @@ impl<L: Link> Fabric<L> {
                     pending: 1 + usize::from(op == 0),
                 });
             }
-            std::thread::sleep(POLL_PAUSE);
+            self.pause_if_idle(mark);
         }
     }
 
@@ -1055,6 +1091,7 @@ impl<L: Link> Fabric<L> {
         // the credit while the first still occupies the outbox
         let start = Instant::now();
         while self.blocks.outstanding + len > self.blocks.credit || !self.link.ready(WorkerId(0)) {
+            let mark = self.advance_mark();
             self.service()?;
             if start.elapsed() > deadline {
                 return Err(FabricError::Deadline {
@@ -1064,7 +1101,7 @@ impl<L: Link> Fabric<L> {
                     pending: 1,
                 });
             }
-            std::thread::sleep(POLL_PAUSE);
+            self.pause_if_idle(mark);
         }
         let header = Header {
             kind: Kind::Block,
@@ -1126,6 +1163,7 @@ impl<L: Link> Fabric<L> {
     pub fn drain_blocks(&mut self, deadline: Duration) -> Result<(), FabricError> {
         let start = Instant::now();
         while self.blocks.outstanding > 0 || self.link.outbound_pending() {
+            let mark = self.advance_mark();
             self.service()?;
             if start.elapsed() > deadline {
                 return Err(FabricError::Deadline {
@@ -1135,7 +1173,7 @@ impl<L: Link> Fabric<L> {
                     pending: self.blocks.outstanding as usize,
                 });
             }
-            std::thread::sleep(POLL_PAUSE);
+            self.pause_if_idle(mark);
         }
         Ok(())
     }
@@ -1194,6 +1232,8 @@ impl<L: Link> Fabric<L> {
             };
             self.link.send(self.me, to, header, &self.scratch)?;
             slot.send = SendState::Sent;
+            self.stats.transitions += 1;
+            self.stats.halo_frames_sent += 1;
         }
         let all_received = self.phase.receives.iter().all(|id| {
             matches!(
@@ -1213,6 +1253,7 @@ impl<L: Link> Fabric<L> {
     pub fn wait(&mut self, deadline: Duration) -> Result<(), FabricError> {
         let start = Instant::now();
         loop {
+            let mark = self.advance_mark();
             if self.progress()? == Progress::Done {
                 return Ok(());
             }
@@ -1236,7 +1277,7 @@ impl<L: Link> Fabric<L> {
                     pending,
                 });
             }
-            std::thread::sleep(POLL_PAUSE);
+            self.pause_if_idle(mark);
         }
     }
 
@@ -1377,6 +1418,7 @@ impl<L: Link> Fabric<L> {
         self.begin_finish()?;
         let start = Instant::now();
         loop {
+            let mark = self.advance_mark();
             if self.finish_progress()? == Progress::Done {
                 return Ok(());
             }
@@ -1392,7 +1434,7 @@ impl<L: Link> Fabric<L> {
                     pending,
                 });
             }
-            std::thread::sleep(POLL_PAUSE);
+            self.pause_if_idle(mark);
         }
     }
 }
