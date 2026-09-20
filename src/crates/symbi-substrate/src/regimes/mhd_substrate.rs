@@ -978,7 +978,8 @@ pub(crate) fn fofc_restore_bface_n<const D: usize, const DOF: usize, Mem, Sc>(
 }
 
 /// FOFC: splice the induction flux `bflux[d][c] = face_flag ? FO : HO` per axis / B-component, over
-/// the axis-`d` interior face domain — the induction mirror of the gas flux splice. FO-on-flagged
+/// the axis-`d` interior faces and one face beyond them transversally, the induction mirror of
+/// the gas flux splice. FO-on-flagged
 /// faces feed the cell-B predictor + the Contact FO edge EMF; HO off the fallback region.
 pub(crate) fn fofc_splice_induction<const D: usize, const DOF: usize, Mem, Sc>(
     sim: &FieldStore<D, DOF, Mem, Sc>,
@@ -1001,14 +1002,17 @@ pub(crate) fn fofc_splice_induction<const D: usize, const DOF: usize, Mem, Sc>(
             }
         };
         let (inputs, outputs) = bind_by_manifest(&name, slot);
-        dispatch_fields_each::<Sc, Mem, D>(
-            &name,
-            &sim.geom.interior.face_domain(dir),
-            &inputs,
-            &outputs,
-            &[],
-            &[],
-        );
+        // the window of the flux sweep: the interior faces and one face beyond them on every
+        // transverse axis. the edge EMF on an edge of the interior's boundary reads two
+        // transverse faces in that outer column, and they carry the same spliced flux an
+        // interior face would, chosen by the flags of their own two cells in the first ghost
+        // layer. an edge on a periodic seam, on a tile cut, or against a physical boundary is
+        // then corrected by the rule of an interior edge.
+        let mut window = sim.geom.interior.face_domain(dir);
+        for ax in (0..D).filter(|ax| *ax != dir) {
+            window = window.expand(ax, 1);
+        }
+        dispatch_fields_each::<Sc, Mem, D>(&name, &window, &inputs, &outputs, &[], &[]);
     }
 }
 

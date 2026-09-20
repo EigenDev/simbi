@@ -186,3 +186,78 @@ fn rk2_predictor() {
 fn rk2_corrector() {
     assert_redo_reads_stage_entry_faces(Timestepping::Rk2, 1, "rk2 corrector");
 }
+
+/// the induction-flux splice covers the flux sweep's own window: the interior faces and one
+/// face beyond them on the transverse axis. the edge EMF of a boundary edge reads two
+/// transverse faces in that outer column, and each carries the first-order flux when either
+/// of its own two cells is flagged and the saved high-order flux otherwise, the rule of an
+/// interior face. the flags of the outer column are the wall's images of the interior flags.
+/// the troubled cell sits in the first interior column, against the low x wall.
+fn assert_outer_column_is_spliced(x_walls: BoundaryType, label: &str) {
+    let mut sim = build_with(Timestepping::Euler, x_walls);
+    let kernels = sim.substrate();
+    let args = StageArgs {
+        dt: DT,
+        a0: 0.0,
+        ac: 1.0,
+        stage: 0,
+        n_stages: 1,
+        injection_weight: 1.0,
+        allow_elision: false,
+    };
+    sim.dt = DT;
+    let sim = &*sim;
+    kernels.c2p(sim);
+    kernels.ghost_fill(sim);
+    assert_eq!(fold_stage_through_mark(sim, &kernels, args, &mut |_| {}), 0);
+    let lo = [sim.geom.interior.spaces[0].lo, sim.geom.interior.spaces[1].lo];
+    let at_wall = [lo[0], lo[1] + 9];
+    *sim.workspace.fofc_flag.view_mut().at_mut(at_wall) = 1.0;
+    let _ = fold_stage_from_correction(sim, &kernels, args, false, &mut |_| {});
+
+    let mhd = sim.fields.mhd.as_ref().expect("mhd fields");
+    let flag = sim.workspace.fofc_flag.view();
+    // the y faces of the outer column that holds the troubled cell's image, stored at the cell
+    // above each face: beyond the low wall for a mirror or an outward copy, beyond the high
+    // wall for the periodic wrap
+    let column = if x_walls == BoundaryType::Periodic {
+        lo[0] + N as isize
+    } else {
+        lo[0] - 1
+    };
+    let (mut first_order, mut high_order) = (0, 0);
+    for j in lo[1]..=lo[1] + N as isize {
+        let flagged = *flag.at([column, j]) != 0.0 || *flag.at([column, j - 1]) != 0.0;
+        for k in 0..3 {
+            let live = mhd.bflux[1][k].view().at([column, j]).to_bits();
+            let saved = mhd.bflux_ho[1][k].view().at([column, j]).to_bits();
+            if flagged {
+                first_order += 1;
+            } else {
+                high_order += 1;
+                assert_eq!(
+                    live, saved,
+                    "{label}: the unflagged outer face at row {j}, component {k}, lost its \
+                     high-order induction flux"
+                );
+            }
+        }
+    }
+    assert!(high_order > 0, "{label}: every outer face was flagged");
+    assert!(first_order > 0, "{label}: the wall gave the outer column no flagged image");
+}
+
+#[test]
+fn outer_column_spliced_at_a_periodic_wall() {
+    assert_outer_column_is_spliced(BoundaryType::Periodic, "periodic");
+}
+
+#[test]
+fn outer_column_spliced_at_an_outflow_wall() {
+    assert_outer_column_is_spliced(BoundaryType::Outflow, "outflow");
+}
+
+#[test]
+fn outer_column_spliced_at_a_reflecting_wall() {
+    assert_outer_column_is_spliced(BoundaryType::Reflect, "reflect");
+}
