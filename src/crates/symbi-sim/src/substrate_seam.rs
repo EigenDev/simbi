@@ -290,6 +290,11 @@ where
         FofcReport::inactive()
     }
 
+    /// copy the face field, transverse ghosts included, into the stage-entry snapshot the
+    /// first-order redo's flux sweep reads its normal B from. the stage fold calls it first in
+    /// every stage of a correcting kernel set. default: no face field.
+    fn snapshot_stage_faces(&self, _store: &FieldStore<NDIM, DOF, Mem, Sc>) {}
+
     /// decode the recovery status of the stage just completed into the troubled-cell flag over
     /// the interior and return the number of troubled interior cells. a decomposed driver
     /// marks every tile, shares the flags across the cuts, and only then calls `fofc`, which

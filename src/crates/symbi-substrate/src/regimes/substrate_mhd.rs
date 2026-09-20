@@ -509,7 +509,14 @@ where
             "", // MHD momentum is always a 3-vector; no DOF-lift tag
             self.has_additive_source(),
             &self.freeze_streak,
-            |dir| self.flux_impl(sim, dir, "", "_rusanov", 0.0),
+            |dir| {
+                // the redo reconstructs on the normal B the high-order sweep read: the
+                // stage-entry faces. the live interior faces already hold this stage's curl.
+                let stage_faces = &sim.workspace.flux_reads_stage_faces;
+                stage_faces.store(true, std::sync::atomic::Ordering::Relaxed);
+                self.flux_impl(sim, dir, "", "_rusanov", 0.0);
+                stage_faces.store(false, std::sync::atomic::Ordering::Relaxed);
+            },
             || self.c2p(sim),
             || self.godunov_stage(sim, dt, a0, ac),
             || self.source_apply(sim, ac * dt),
@@ -782,6 +789,10 @@ where
             ""
         };
         self.flux_impl(sim, dir, self.solver.kernel_suffix(), gr_solver, self.theta);
+    }
+
+    fn snapshot_stage_faces(&self, sim: &FieldStore<D, 3, Mem, Sc>) {
+        crate::regimes::mhd_substrate::snapshot_stage_faces(sim);
     }
 
     fn fofc_mark(&self, sim: &FieldStore<D, 3, Mem, Sc>) -> u64 {

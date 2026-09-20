@@ -950,6 +950,19 @@ pub(crate) fn fofc_restore_bcell_stage<const D: usize, const DOF: usize, Mem, Sc
     fofc_copy_fields(&pairs);
 }
 
+/// copy the live face field, transverse ghosts included, into the stage-entry snapshot.
+pub(crate) fn snapshot_stage_faces<const D: usize, const DOF: usize, Mem, Sc>(
+    sim: &FieldStore<D, DOF, Mem, Sc>,
+) where
+    Mem: MemorySpace + Sync,
+    Sc: Scalar + OrderedNumeric,
+{
+    let mhd = sim.fields.mhd.as_ref().expect("MHD requires mhd fields");
+    let pairs: Vec<(&Field<Sc, D, Mem>, &Field<Sc, D, Mem>)> =
+        (0..D).map(|d| (&mhd.bface[d], &mhd.bface_stage[d])).collect();
+    fofc_copy_fields(&pairs);
+}
+
 /// FOFC: restore the pre-curl face field `bface <- bface_n`, so the CT redo re-applies the curl
 /// exactly once from the spliced edge EMF.
 pub(crate) fn fofc_restore_bface_n<const D: usize, const DOF: usize, Mem, Sc>(

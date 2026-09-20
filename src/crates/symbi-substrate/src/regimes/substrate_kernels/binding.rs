@@ -481,7 +481,7 @@ where
         // the staggered sweep-normal face B — bound for the dispatch's active `dir`. its
         // allocated domain differs from the cell fields, but the per-buffer dispatch layout
         // (Field::domain()) handles that, so it binds by manifest like every cell field.
-        FieldRef::BFaceNormal => &mhd().bface[dir],
+        FieldRef::BFaceNormal => sim.flux_normal_faces(dir),
         // per-axis wave-speed scratch (RMHD quartic materialization), indexed by the ref.
         FieldRef::WaveSpeedL(k) => &mhd().wave_speed_l[k as usize],
         FieldRef::WaveSpeedR(k) => &mhd().wave_speed_r[k as usize],

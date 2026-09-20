@@ -402,6 +402,12 @@ where
     // describes a state that no longer exists — so each stage starts from an empty ledger and every
     // read of one is checked against this stage's producers. the guard disarms on every exit path,
     // including the fofc retry.
+    // the redo's normal-B input, captured before any phase runs. a stage folded in two
+    // captures in its first span.
+    if fofc && span != StageSpan::FromCorrection {
+        prof("snapshot_stage_faces", || kernels.snapshot_stage_faces(sim));
+    }
+
     // a stage folded in two keeps one ledger: the first span leaves it armed and the second
     // takes it over, so the correction's flux reads are checked against the first span's writes.
     #[cfg(debug_assertions)]

@@ -681,6 +681,17 @@ pub struct MhdStaggeredFields<
     /// on a firing substage.
     pub bface_n: BfaceFields<D, M, Sc>,
 
+    /// the face field a stage's flux sweep reads as its normal B, transverse ghosts included,
+    /// copied at the top of every stage: after the previous stage's halos and boundary ghosts
+    /// are in place and before the stage's curl advances the live faces. the first-order redo
+    /// binds its flux sweep's normal-B input here, so it reconstructs on the faces the
+    /// high-order sweep read; by then the live interior faces hold the stage's curled values
+    /// while their transverse ghosts still hold the stage-entry ones. a flux input only:
+    /// `bface_n` remains the base the constrained-transport update integrates from, which at
+    /// the RK2 corrector is the step-entry field and differs from this stage-entry one.
+    /// written every stage, with no alias to another buffer.
+    pub bface_stage: BfaceFields<D, M, Sc>,
+
     /// edge-centered E: efield[d] on edge_domain(d).
     /// transient — recomputed each stage from fluxes and prims.
     pub efield: EfieldFields<D, M, Sc>,
@@ -776,6 +787,7 @@ impl<const D: usize, const DOF: usize, M: MemorySpace, Sc: Scalar + OrderedNumer
         // to the narrower readers. on-disk checkpoint is interior-only, unaffected.
         let mut bface_vec: Vec<Field<Sc, D, M>> = Vec::with_capacity(D);
         let mut bface_n_vec: Vec<Field<Sc, D, M>> = Vec::with_capacity(D);
+        let mut bface_stage_vec: Vec<Field<Sc, D, M>> = Vec::with_capacity(D);
         let mut face_doms: Vec<Domain<D>> = Vec::with_capacity(D);
         for dd in 0..D {
             let mut face_dom = interior.extend(dd, 0, 1);
@@ -786,6 +798,7 @@ impl<const D: usize, const DOF: usize, M: MemorySpace, Sc: Scalar + OrderedNumer
             }
             bface_vec.push(Field::zeros(&face_dom)?);
             bface_n_vec.push(Field::zeros(&face_dom)?); // FOFC bface^n snapshot (same face domain)
+            bface_stage_vec.push(Field::zeros(&face_dom)?);
             face_doms.push(face_dom);
         }
         let bface = BfaceFields {
@@ -793,6 +806,9 @@ impl<const D: usize, const DOF: usize, M: MemorySpace, Sc: Scalar + OrderedNumer
         };
         let bface_n = BfaceFields {
             b: bface_n_vec.try_into().unwrap_or_else(|_| unreachable!()),
+        };
+        let bface_stage = BfaceFields {
+            b: bface_stage_vec.try_into().unwrap_or_else(|_| unreachable!()),
         };
         let step_snapshot = if rejectable {
             let mut snapshot_faces: Vec<Field<Sc, D, M>> = Vec::with_capacity(D);
@@ -874,6 +890,7 @@ impl<const D: usize, const DOF: usize, M: MemorySpace, Sc: Scalar + OrderedNumer
             bcell_stage,
             bface,
             bface_n,
+            bface_stage,
             efield,
             efield_n,
             efield_ho,
@@ -1077,6 +1094,9 @@ pub struct RkWorkspaceGeneric<
     /// interior, so the faces the two tiles share take one flux. the troubled flag's cut ghosts
     /// hold the neighbor's flags for that stage.
     pub fofc_cut_trouble: std::sync::atomic::AtomicBool,
+    /// set while the first-order redo runs its flux sweeps: the sweep's normal-B input then
+    /// resolves to the stage-entry face snapshot. `flux_normal_faces` is the one reader.
+    pub flux_reads_stage_faces: std::sync::atomic::AtomicBool,
     /// set when a stage folded in two has already decoded this stage's recovery status into the
     /// troubled-cell flag: the correction then counts the flag as it stands, cut ghosts and all,
     /// and leaves the decode to the mark that ran before the flags crossed the cuts.
@@ -2386,6 +2406,25 @@ impl<const NDIM: usize, const DOF: usize, Mem: MemorySpace, Sc: Scalar + Ordered
     /// snapshot otherwise. the MHD FOFC redo restores `bcell` from this so the
     /// recomputed edge EMF reads the true stage-input field — a direct
     /// `bcell_stage` read at stage 0 hands it a stale buffer.
+    /// the face field a flux sweep along `dir` reads as its normal B: the live faces, or the
+    /// stage-entry snapshot while the first-order redo sweeps.
+    pub fn flux_normal_faces(&self, dir: usize) -> &Field<Sc, NDIM, Mem> {
+        let mhd = self
+            .fields
+            .mhd
+            .as_ref()
+            .expect("flux_normal_faces requires MHD fields");
+        if self
+            .workspace
+            .flux_reads_stage_faces
+            .load(std::sync::atomic::Ordering::Relaxed)
+        {
+            &mhd.bface_stage[dir]
+        } else {
+            &mhd.bface[dir]
+        }
+    }
+
     pub fn bcell_stage_input(&self) -> &crate::state::BcellFields<NDIM, DOF, Mem, Sc> {
         let mhd = self
             .fields
@@ -2879,6 +2918,7 @@ where
             stage_input_is_un: std::sync::atomic::AtomicBool::new(false),
             elide_stage_snapshot: std::sync::atomic::AtomicBool::new(true),
             fofc_cut_trouble: std::sync::atomic::AtomicBool::new(false),
+            flux_reads_stage_faces: std::sync::atomic::AtomicBool::new(false),
             fofc_marked: std::sync::atomic::AtomicBool::new(false),
             flux_ho: array_cons_zeros_with_energy(&allocated, has_energy)?,
             fofc_flag: Field::zeros(&allocated)?,
