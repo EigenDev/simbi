@@ -261,3 +261,361 @@ fn outer_column_spliced_at_an_outflow_wall() {
 fn outer_column_spliced_at_a_reflecting_wall() {
     assert_outer_column_is_spliced(BoundaryType::Reflect, "reflect");
 }
+
+/// a correction is local: cells farther from the troubled cell than the redo's reach end the
+/// stage with the conserved gas, the cell field, and the faces bit-for-bit equal to the same
+/// stage run with no flag raised. every stage ends by interpolating the cell field from the
+/// faces, the RK2 predictor included, so the redo re-interpolates on every stage; a redo that
+/// left the cell field flux-predicted would change it wherever the field varies.
+fn assert_correction_is_local(ts: Timestepping, stage: usize, label: &str) {
+    let finish = |raise: bool| {
+        let mut sim = build(ts);
+        let kernels = sim.substrate();
+        let stages = ts.stages();
+        let args = |index: usize| StageArgs {
+            dt: DT,
+            a0: stages[index].0,
+            ac: stages[index].1,
+            stage: index,
+            n_stages: stages.len(),
+            injection_weight: 1.0,
+            allow_elision: false,
+        };
+        sim.dt = DT;
+        {
+            let sim = &*sim;
+            kernels.c2p(sim);
+            kernels.ghost_fill(sim);
+            if stages.len() > 1 {
+                kernels.snapshot(sim);
+            }
+            for earlier in 0..stage {
+                let _ = fold_stage(sim, &kernels, args(earlier), &mut |_| {});
+            }
+            assert_eq!(fold_stage_through_mark(sim, &kernels, args(stage), &mut |_| {}), 0);
+            if raise {
+                *sim.workspace.fofc_flag.view_mut().at_mut(TROUBLED) = 1.0;
+            }
+            let _ = fold_stage_from_correction(sim, &kernels, args(stage), false, &mut |_| {});
+        }
+        sim
+    };
+    let (clean, corrected) = (finish(false), finish(true));
+    let far = |c: [isize; 2]| {
+        let wrap = |d: isize| d.rem_euclid(N as isize).min((-d).rem_euclid(N as isize));
+        wrap(c[0] - TROUBLED[0]).max(wrap(c[1] - TROUBLED[1])) > 4
+    };
+    let (a, b) = (&*clean, &*corrected);
+    let (am, bm) = (a.fields.mhd.as_ref().unwrap(), b.fields.mhd.as_ref().unwrap());
+    let mut pairs: Vec<(String, &symbi_grid::Field<f64, 2, HostMemory>, &symbi_grid::Field<f64, 2, HostMemory>)> = vec![
+        ("den".into(), &a.fields.cons.den, &b.fields.cons.den),
+        ("nrg".into(), a.fields.cons.nrg_field().unwrap(), b.fields.cons.nrg_field().unwrap()),
+    ];
+    for k in 0..3 {
+        pairs.push((format!("bcell{k}"), &am.bcell.b[k], &bm.bcell.b[k]));
+    }
+    for d in 0..2 {
+        pairs.push((format!("bface{d}"), &am.bface.b[d], &bm.bface.b[d]));
+    }
+    let mut near_changed = 0;
+    for (name, x, y) in &pairs {
+        let (xv, yv) = (x.view(), y.view());
+        for c in a.geom.interior.iter() {
+            let same = xv.at(c).to_bits() == yv.at(c).to_bits();
+            if far(c) {
+                assert!(same, "{label}: {name} changed at {c:?}, far from the troubled cell {TROUBLED:?}");
+            } else if !same {
+                near_changed += 1;
+            }
+        }
+    }
+    assert!(near_changed > 0, "{label}: the correction changed nothing near the troubled cell");
+}
+
+#[test]
+fn a_correction_is_local_under_forward_euler() {
+    assert_correction_is_local(Timestepping::Euler, 0, "forward euler");
+}
+
+#[test]
+fn a_correction_is_local_in_the_rk2_predictor() {
+    assert_correction_is_local(Timestepping::Rk2, 0, "rk2 predictor");
+}
+
+#[test]
+fn a_correction_is_local_in_the_rk2_corrector() {
+    assert_correction_is_local(Timestepping::Rk2, 1, "rk2 corrector");
+}
+
+// -----------------------------------------------------------------------------
+// the RK2 constrained-transport update with corrections, against its formula:
+//   B^*     = B^n - dt   curl(E_1)
+//   B^{n+1} = B^n - dt/2 curl(E_1 + E_2)
+// where E_k is the accepted EMF of stage k: first-order on an edge touching a flagged
+// cell, high-order elsewhere. the accepted EMFs are obtained apart from the averaging
+// under test:
+//   E_1      read from the edge field when the predictor stage ends
+//   E_2 high the corrector's stage-local EMF, from a twin run phase by phase up to the
+//            edge-EMF phase, before the update averages it in place
+//   E_2 low  on flagged edges, the raw first-order EMF of the corrector's stage input, from
+//            a twin brought to the corrector's entry and folded there as a forward-Euler
+//            stage: the redo of a single-stage scheme splices the Contact EMF it computes
+//            with no average and no history. the first-order fluxes and the Contact EMF are
+//            functions of the restored stage input alone, so the stage weights and the
+//            timestep the twin uses leave them unchanged.
+// -----------------------------------------------------------------------------
+
+struct Rk2Step {
+    faces_n: [Vec<f64>; 2],
+    e1: Vec<f64>,
+    faces_star: [Vec<f64>; 2],
+    /// the edge field when the corrector ends: the EMF its single curl used
+    e_effective: Vec<f64>,
+    faces_new: [Vec<f64>; 2],
+    /// edges touching the corrector's flagged cell
+    corrector_flagged_edges: Vec<bool>,
+}
+
+/// interior faces of component `d` on the N by N periodic grid, x index first.
+fn face_grid(sim: &Sim, d: usize) -> Vec<f64> {
+    let view = sim.fields.mhd.as_ref().unwrap().bface.b[d].view();
+    let lo = [sim.geom.interior.spaces[0].lo, sim.geom.interior.spaces[1].lo];
+    (0..N * N)
+        .map(|q| *view.at([lo[0] + (q / N) as isize, lo[1] + (q % N) as isize]))
+        .collect()
+}
+
+/// the edge EMF at the low corner of every cell, x index first.
+fn edge_grid(sim: &Sim, field: &symbi_grid::Field<f64, 2, HostMemory>) -> Vec<f64> {
+    let view = field.view();
+    let lo = [sim.geom.interior.spaces[0].lo, sim.geom.interior.spaces[1].lo];
+    (0..N * N)
+        .map(|q| *view.at([lo[0] + (q / N) as isize, lo[1] + (q % N) as isize]))
+        .collect()
+}
+
+fn rk2_args(index: usize) -> StageArgs {
+    let stages = Timestepping::Rk2.stages();
+    StageArgs {
+        dt: DT,
+        a0: stages[index].0,
+        ac: stages[index].1,
+        stage: index,
+        n_stages: 2,
+        injection_weight: 1.0,
+        allow_elision: false,
+    }
+}
+
+/// one RK2 step with a flag raised in the chosen stages.
+fn rk2_step(flag_predictor: bool, flag_corrector: bool) -> Rk2Step {
+    let mut sim = build(Timestepping::Rk2);
+    let kernels = sim.substrate();
+    sim.dt = DT;
+    let s = &*sim;
+    kernels.c2p(s);
+    kernels.ghost_fill(s);
+    kernels.snapshot(s);
+    let faces_n = [face_grid(&sim, 0), face_grid(&sim, 1)];
+    let s = &*sim;
+
+    assert_eq!(fold_stage_through_mark(s, &kernels, rk2_args(0), &mut |_| {}), 0);
+    if flag_predictor {
+        *s.workspace.fofc_flag.view_mut().at_mut(TROUBLED) = 1.0;
+    }
+    let _ = fold_stage_from_correction(s, &kernels, rk2_args(0), false, &mut |_| {});
+    let mhd = s.fields.mhd.as_ref().unwrap();
+    let e1 = edge_grid(&sim, &mhd.efield.e[0]);
+    let faces_star = [face_grid(&sim, 0), face_grid(&sim, 1)];
+
+    assert_eq!(fold_stage_through_mark(s, &kernels, rk2_args(1), &mut |_| {}), 0);
+    let mut corrector_flagged_edges = vec![false; N * N];
+    if flag_corrector {
+        *s.workspace.fofc_flag.view_mut().at_mut(TROUBLED) = 1.0;
+        let lo = [s.geom.interior.spaces[0].lo, s.geom.interior.spaces[1].lo];
+        let cell = [(TROUBLED[0] - lo[0]) as usize, (TROUBLED[1] - lo[1]) as usize];
+        // the four corner edges of the flagged cell
+        for (di, dj) in [(0, 0), (1, 0), (0, 1), (1, 1)] {
+            corrector_flagged_edges[((cell[0] + di) % N) * N + (cell[1] + dj) % N] = true;
+        }
+    }
+    let _ = fold_stage_from_correction(s, &kernels, rk2_args(1), false, &mut |_| {});
+    Rk2Step {
+        faces_n,
+        e1,
+        faces_star,
+        e_effective: edge_grid(&sim, &mhd.efield.e[0]),
+        faces_new: [face_grid(&sim, 0), face_grid(&sim, 1)],
+        corrector_flagged_edges,
+    }
+}
+
+/// the corrector's stage-local high-order EMF, read before the update averages it: the
+/// step is run to the corrector's entry and the corrector phase by phase up to the edge EMF.
+fn corrector_high_order_emf(flag_predictor: bool) -> Vec<f64> {
+    let mut sim = build(Timestepping::Rk2);
+    let kernels = sim.substrate();
+    sim.dt = DT;
+    let s = &*sim;
+    kernels.c2p(s);
+    kernels.ghost_fill(s);
+    kernels.snapshot(s);
+    assert_eq!(fold_stage_through_mark(s, &kernels, rk2_args(0), &mut |_| {}), 0);
+    if flag_predictor {
+        *s.workspace.fofc_flag.view_mut().at_mut(TROUBLED) = 1.0;
+    }
+    let _ = fold_stage_from_correction(s, &kernels, rk2_args(0), false, &mut |_| {});
+    kernels.wave_speeds(s);
+    for d in 0..2 {
+        kernels.flux(s, d);
+    }
+    kernels.efield(s);
+    edge_grid(&sim, &s.fields.mhd.as_ref().unwrap().efield.e[0])
+}
+
+/// the raw first-order EMF of the corrector's stage input, with the corrector's flag raised:
+/// the step is run to the corrector's entry and that stage is folded as a forward-Euler
+/// stage, whose redo splices the Contact EMF as computed. meaningful on the flagged edges.
+fn corrector_first_order_emf(flag_predictor: bool) -> Vec<f64> {
+    let mut sim = build(Timestepping::Rk2);
+    let kernels = sim.substrate();
+    sim.dt = DT;
+    let s = &*sim;
+    kernels.c2p(s);
+    kernels.ghost_fill(s);
+    kernels.snapshot(s);
+    assert_eq!(fold_stage_through_mark(s, &kernels, rk2_args(0), &mut |_| {}), 0);
+    if flag_predictor {
+        *s.workspace.fofc_flag.view_mut().at_mut(TROUBLED) = 1.0;
+    }
+    let _ = fold_stage_from_correction(s, &kernels, rk2_args(0), false, &mut |_| {});
+    let single_stage = StageArgs {
+        dt: DT,
+        a0: 0.0,
+        ac: 1.0,
+        stage: 0,
+        n_stages: 1,
+        injection_weight: 1.0,
+        allow_elision: false,
+    };
+    assert_eq!(fold_stage_through_mark(s, &kernels, single_stage, &mut |_| {}), 0);
+    *s.workspace.fofc_flag.view_mut().at_mut(TROUBLED) = 1.0;
+    let _ = fold_stage_from_correction(s, &kernels, single_stage, false, &mut |_| {});
+    edge_grid(&sim, &s.fields.mhd.as_ref().unwrap().efield.e[0])
+}
+
+/// `B - dt curl(E)` on the periodic grid: Bx -= dt dE/dy, By += dt dE/dx, with the edge at
+/// the low corner of its cell.
+fn curled(faces: &[Vec<f64>; 2], e: &[f64], dt: f64) -> [Vec<f64>; 2] {
+    let h = 1.0 / N as f64;
+    let at = |i: usize, j: usize| e[(i % N) * N + j % N];
+    let mut out = faces.clone();
+    for i in 0..N {
+        for j in 0..N {
+            out[0][i * N + j] -= dt * (at(i, j + 1) - at(i, j)) / h;
+            out[1][i * N + j] += dt * (at(i + 1, j) - at(i, j)) / h;
+        }
+    }
+    out
+}
+
+fn max_abs_difference(a: &[Vec<f64>; 2], b: &[Vec<f64>; 2]) -> f64 {
+    (0..2)
+        .flat_map(|d| a[d].iter().zip(&b[d]).map(|(x, y)| (x - y).abs()))
+        .fold(0.0, f64::max)
+}
+
+/// the face comparison bound. the formula is evaluated here with its own operation order,
+/// so it agrees with the kernels to rounding of O(1) face values: a few ulp, 1e-14. a lost
+/// half weight or a stale history moves a face by dt times an EMF difference over h, which
+/// the premise below requires to exceed 1e-9.
+const FORMULA_ROUNDING: f64 = 1.0e-14;
+const SIGNAL: f64 = 1.0e-9;
+
+fn assert_rk2_formula(flag_predictor: bool, flag_corrector: bool, label: &str) {
+    let clean = rk2_step(false, false);
+    let step = rk2_step(flag_predictor, flag_corrector);
+    let e2_high = corrector_high_order_emf(flag_predictor);
+    let e2: Vec<f64> = if flag_corrector {
+        let e2_low = corrector_first_order_emf(flag_predictor);
+        // premise: on a flagged edge the first-order EMF differs from the high-order one, or
+        // the two branches of the corrector's splice could not be told apart
+        assert!(
+            (0..N * N).any(|q| step.corrector_flagged_edges[q] && e2_low[q] != e2_high[q]),
+            "{label}: the first-order and high-order corrector EMFs agree on every flagged edge"
+        );
+        (0..N * N)
+            .map(|q| {
+                if step.corrector_flagged_edges[q] {
+                    e2_low[q]
+                } else {
+                    e2_high[q]
+                }
+            })
+            .collect()
+    } else {
+        e2_high
+    };
+
+    // premises: the formula evaluator reproduces the clean step, and the correction changed
+    // an EMF whose curl moves faces by more than the signal bound
+    let clean_e2 = corrector_high_order_emf(false);
+    let clean_sum: Vec<f64> = clean.e1.iter().zip(&clean_e2).map(|(a, b)| a + b).collect();
+    let clean_formula = curled(&clean.faces_n, &clean_sum, 0.5 * DT);
+    assert!(
+        max_abs_difference(&clean_formula, &clean.faces_new) < FORMULA_ROUNDING,
+        "{label}: the formula evaluator misses the uncorrected step by {:e}",
+        max_abs_difference(&clean_formula, &clean.faces_new)
+    );
+    let moved = max_abs_difference(&step.faces_new, &clean.faces_new);
+    assert!(
+        moved > SIGNAL,
+        "{label}: the correction moved the final faces by {moved:e}; nothing to discriminate"
+    );
+    if flag_predictor {
+        let history = step.e1.iter().zip(&clean.e1).filter(|(a, b)| a != b).count();
+        assert!(history > 0, "{label}: the predictor's accepted EMF equals the high-order one");
+        assert!(
+            max_abs_difference(&step.faces_star, &clean.faces_star) > SIGNAL,
+            "{label}: the corrected predictor EMF has no curl to speak of"
+        );
+    }
+
+    let star = curled(&step.faces_n, &step.e1, DT);
+    assert!(
+        max_abs_difference(&star, &step.faces_star) < FORMULA_ROUNDING,
+        "{label}: B* misses B^n - dt curl(E_1) by {:e}",
+        max_abs_difference(&star, &step.faces_star)
+    );
+    // the effective EMF is the half-weighted sum on every edge, flagged or not
+    for q in 0..N * N {
+        let want = 0.5 * (step.e1[q] + e2[q]);
+        assert!(
+            (step.e_effective[q] - want).abs() <= 4.0 * f64::EPSILON * want.abs().max(1.0),
+            "{label}: edge {q} carries {:e}, the half-weighted sum is {want:e}",
+            step.e_effective[q]
+        );
+    }
+    let sum: Vec<f64> = step.e1.iter().zip(&e2).map(|(a, b)| a + b).collect();
+    let formula = curled(&step.faces_n, &sum, 0.5 * DT);
+    assert!(
+        max_abs_difference(&formula, &step.faces_new) < FORMULA_ROUNDING,
+        "{label}: B^(n+1) misses B^n - dt/2 curl(E_1 + E_2) by {:e}",
+        max_abs_difference(&formula, &step.faces_new)
+    );
+}
+
+#[test]
+fn rk2_formula_with_a_predictor_correction_and_a_clean_corrector() {
+    assert_rk2_formula(true, false, "predictor only");
+}
+
+#[test]
+fn rk2_formula_with_a_corrector_correction_alone() {
+    assert_rk2_formula(false, true, "corrector only");
+}
+
+#[test]
+fn rk2_formula_with_corrections_in_both_stages() {
+    assert_rk2_formula(true, true, "both stages");
+}

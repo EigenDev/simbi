@@ -1407,6 +1407,104 @@ pub(crate) fn efield<const D: usize, const DOF: usize, Mem, Sc>(
     }
 }
 
+/// the accepted predictor EMF: `efield_n <- efield`, the first term of the RK2 average
+/// `B^{n+1} = B^n - dt/2 curl(E_1 + E_2)`. it must be the EMF the predictor faces were curled
+/// from, so the predictor's redo saves again after it splices. device uses the pointwise copy
+/// kernel, host the fused memcpy; both loop the complex's edges.
+pub(crate) fn save_predictor_emf<const D: usize, const DOF: usize, Mem, Sc>(
+    sim: &FieldStore<D, DOF, Mem, Sc>,
+) where
+    Mem: MemorySpace + Sync,
+    Sc: Scalar + OrderedNumeric,
+{
+    let mhd = sim.fields.mhd.as_ref().expect("MHD requires mhd fields");
+    let edges = ct_edges::<D>(&sim.geom.axes);
+    if Mem::IS_DEVICE_ACCESSIBLE {
+        let sname = format!("rmhd_save_efield_{D}d");
+        let (sf, sir) = expect_kernel::<Sc>(&sname);
+        for e in &edges {
+            let (l, ext, v) = field_layout(&mhd.efield[e.slot]);
+            let inv = KernelInvocation {
+                buffers: vec![
+                    Buf {
+                        handle: BufHandle::Host(unsafe {
+                            std::slice::from_raw_parts(mhd.efield[e.slot].as_ptr(), v)
+                        }),
+                        lo: &l,
+                        extent: &ext,
+                    },
+                    Buf {
+                        handle: BufHandle::HostMut(unsafe {
+                            std::slice::from_raw_parts_mut(mhd.efield_n[e.slot].as_mut_ptr(), v)
+                        }),
+                        lo: &l,
+                        extent: &ext,
+                    },
+                ],
+                grid: &ext,
+                dom_lo: &l,
+                ints: &[],
+                scalars: &[],
+            };
+            invoke::<Sc, Mem, _>(inv, sir, &sname, sf);
+        }
+    } else {
+        let pairs: Vec<_> = edges
+            .iter()
+            .map(|e| (&mhd.efield[e.slot], &mhd.efield_n[e.slot]))
+            .collect();
+        fused_save_buffers(&pairs);
+    }
+}
+
+/// the RK2 time average on every edge: `efield <- 1/2 (efield + efield_n)`, the corrector-stage
+/// EMF with the accepted predictor EMF. applied once to whichever stage EMF `efield` holds.
+pub(crate) fn average_with_predictor_emf<const D: usize, const DOF: usize, Mem, Sc>(
+    sim: &FieldStore<D, DOF, Mem, Sc>,
+) where
+    Mem: MemorySpace + Sync,
+    Sc: Scalar + OrderedNumeric,
+{
+    let mhd = sim.fields.mhd.as_ref().expect("MHD requires mhd fields");
+    let edges = ct_edges::<D>(&sim.geom.axes);
+    if Mem::IS_DEVICE_ACCESSIBLE {
+        let aname = format!("rmhd_average_efield_{D}d");
+        let (af, air) = expect_kernel::<Sc>(&aname);
+        for e in &edges {
+            let (l, ext, v) = field_layout(&mhd.efield[e.slot]);
+            let inv = KernelInvocation {
+                buffers: vec![
+                    Buf {
+                        handle: BufHandle::Host(unsafe {
+                            std::slice::from_raw_parts(mhd.efield_n[e.slot].as_ptr(), v)
+                        }),
+                        lo: &l,
+                        extent: &ext,
+                    },
+                    Buf {
+                        handle: BufHandle::HostMut(unsafe {
+                            std::slice::from_raw_parts_mut(mhd.efield[e.slot].as_mut_ptr(), v)
+                        }),
+                        lo: &l,
+                        extent: &ext,
+                    },
+                ],
+                grid: &ext,
+                dom_lo: &l,
+                ints: &[],
+                scalars: &[],
+            };
+            invoke::<Sc, Mem, _>(inv, air, &aname, af);
+        }
+    } else {
+        let pairs: Vec<_> = edges
+            .iter()
+            .map(|e| (&mhd.efield[e.slot], &mhd.efield_n[e.slot]))
+            .collect();
+        fused_avg_buffers(&pairs);
+    }
+}
+
 /// the CT corrector: RK2 E save (stage 1) / time-average (stage 2) over the complex's
 /// edges, then the curl bface update (per in-plane face axis, from its incident edges)
 /// + the face->cell B interpolation with the 1/2|B|^2 magnetic-energy correction. one
@@ -1422,49 +1520,10 @@ pub(crate) fn post_godunov<const D: usize, const DOF: usize, Mem, Sc>(
     Sc: Scalar + OrderedNumeric,
 {
     let mhd = sim.fields.mhd.as_ref().expect("MHD requires mhd fields");
-    let axes = sim.geom.axes;
-    let edges = ct_edges::<D>(&axes);
 
-    // RK2 stage 1/2: save / time-average each edge's E. device uses the pointwise GPU copy
-    // (the 3d-named kernel is a same-cell copy; D!=3 device support needs a _{D}d copy —
-    // tracked); CPU uses the dimension-agnostic fused memcpy. both loop the complex edges.
+    // RK2: the predictor saves its edge EMF and the corrector time-averages its own with it.
     if stage == 1 {
-        if Mem::IS_DEVICE_ACCESSIBLE {
-            let sname = format!("rmhd_save_efield_{D}d");
-            let (sf, sir) = expect_kernel::<Sc>(&sname);
-            for e in &edges {
-                let (l, ext, v) = field_layout(&mhd.efield[e.slot]);
-                let inv = KernelInvocation {
-                    buffers: vec![
-                        Buf {
-                            handle: BufHandle::Host(unsafe {
-                                std::slice::from_raw_parts(mhd.efield[e.slot].as_ptr(), v)
-                            }),
-                            lo: &l,
-                            extent: &ext,
-                        },
-                        Buf {
-                            handle: BufHandle::HostMut(unsafe {
-                                std::slice::from_raw_parts_mut(mhd.efield_n[e.slot].as_mut_ptr(), v)
-                            }),
-                            lo: &l,
-                            extent: &ext,
-                        },
-                    ],
-                    grid: &ext,
-                    dom_lo: &l,
-                    ints: &[],
-                    scalars: &[],
-                };
-                invoke::<Sc, Mem, _>(inv, sir, &sname, sf);
-            }
-        } else {
-            let pairs: Vec<_> = edges
-                .iter()
-                .map(|e| (&mhd.efield[e.slot], &mhd.efield_n[e.slot]))
-                .collect();
-            fused_save_buffers(&pairs);
-        }
+        save_predictor_emf(sim);
         // the RK2 predictor CT update: save the pre-curl anchor B^n (also the FOFC anchor), then curl
         // E^n to advance bface to the predictor B* = B^n - dt curl(E^n) and interpolate the predictor
         // cell field. the corrector stage's godunov then evaluates E* = E(B*), so the averaged EMF is
@@ -1479,42 +1538,7 @@ pub(crate) fn post_godunov<const D: usize, const DOF: usize, Mem, Sc>(
         return;
     }
     if stage == 2 {
-        if Mem::IS_DEVICE_ACCESSIBLE {
-            let aname = format!("rmhd_average_efield_{D}d");
-            let (af, air) = expect_kernel::<Sc>(&aname);
-            for e in &edges {
-                let (l, ext, v) = field_layout(&mhd.efield[e.slot]);
-                let inv = KernelInvocation {
-                    buffers: vec![
-                        Buf {
-                            handle: BufHandle::Host(unsafe {
-                                std::slice::from_raw_parts(mhd.efield_n[e.slot].as_ptr(), v)
-                            }),
-                            lo: &l,
-                            extent: &ext,
-                        },
-                        Buf {
-                            handle: BufHandle::HostMut(unsafe {
-                                std::slice::from_raw_parts_mut(mhd.efield[e.slot].as_mut_ptr(), v)
-                            }),
-                            lo: &l,
-                            extent: &ext,
-                        },
-                    ],
-                    grid: &ext,
-                    dom_lo: &l,
-                    ints: &[],
-                    scalars: &[],
-                };
-                invoke::<Sc, Mem, _>(inv, air, &aname, af);
-            }
-        } else {
-            let pairs: Vec<_> = edges
-                .iter()
-                .map(|e| (&mhd.efield[e.slot], &mhd.efield_n[e.slot]))
-                .collect();
-            fused_avg_buffers(&pairs);
-        }
+        average_with_predictor_emf(sim);
         // the corrector restores the pre-curl anchor B^n the predictor saved into bface_n (bface holds
         // the predictor B*), then curls the averaged EMF once from B^n. bface_n stays the FOFC redo
         // anchor. the single-stage Euler path (stage 0) takes the else branch instead.

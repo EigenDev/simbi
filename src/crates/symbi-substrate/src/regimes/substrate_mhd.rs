@@ -474,35 +474,46 @@ where
         ac: f64,
         stage: u8,
     ) -> symbi_sim::substrate_seam::FofcReport {
-        // `bcell_from_bface` (the face->cell interp + magnetic-energy patch) runs on the single
-        // (Euler, tag 0) and corrector (rk2, tag 2) stages, never the predictor (tag 1, which leaves
-        // bcell flux-predicted). re-sync exactly there.
-        let patch_stage = stage == 0 || stage == 2;
+        // every stage ends its constrained-transport update the same way, the RK2 predictor
+        // included: it curls the edge EMF into the faces from the anchor saved in `bface_n` and
+        // interpolates the cell field from them. the redo repeats that update on every stage,
+        // with the accepted EMF in the role the stage gives it:
+        //   forward Euler  B^{n+1} = B^n - dt curl(E)
+        //   RK2 predictor  B^*     = B^n - dt curl(E_1), and E_1 is saved as the history
+        //   RK2 corrector  B^{n+1} = B^n - dt/2 curl(E_1 + E_2)
+        // where an accepted EMF is the first-order one on an edge touching a flagged cell and
+        // the high-order one elsewhere. the saved high-order EMF of the corrector is already
+        // the time average, so the corrector's first-order branch is averaged with the accepted
+        // E_1 before the splice chooses between the two, and both branches carry half weights.
+        // the predictor saves again after its splice, so the history the corrector averages is
+        // the EMF the predictor faces were curled from. a redo that stopped at the gas update
+        // would leave the cell field flux-predicted over the whole grid, in cells no flag
+        // touched, and a tile that ran no pass would keep the interpolated one.
         let has_energy = R::SPEC.has_energy;
         let rebuild_spliced_ct = || {
             use crate::regimes::mhd_substrate as ct;
             let prefix = Self::kernel_prefix();
             let flag = &sim.workspace.fofc_flag;
             ct::fofc_splice_induction(sim, prefix, flag);
-            if patch_stage {
-                ct::efield(
-                    sim,
-                    CtMethod::Contact,
-                    self.solver,
-                    prefix,
-                    self.eos_param.value(),
-                    0.0,
-                );
-                ct::fofc_emf_splice(sim, flag);
-                ct::fofc_restore_bface_n(sim);
-                ct::ct_curl(sim, dt);
+            ct::efield(
+                sim,
+                CtMethod::Contact,
+                self.solver,
+                prefix,
+                self.eos_param.value(),
+                0.0,
+            );
+            if stage == 2 {
+                ct::average_with_predictor_emf(sim);
             }
-        };
-        let resync_ct = || {
-            if patch_stage {
-                crate::regimes::mhd_substrate::bcell_from_bface(sim, has_energy);
+            ct::fofc_emf_splice(sim, flag);
+            if stage == 1 {
+                ct::save_predictor_emf(sim);
             }
+            ct::fofc_restore_bface_n(sim);
+            ct::ct_curl(sim, dt);
         };
+        let resync_ct = || crate::regimes::mhd_substrate::bcell_from_bface(sim, has_energy);
         crate::regimes::fofc::fofc_orchestrate(
             sim,
             Self::kernel_prefix(),
