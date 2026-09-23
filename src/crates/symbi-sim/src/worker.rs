@@ -138,8 +138,9 @@ impl From<FabricError> for WorkerError {
     }
 }
 
-/// the first-release scope: 2D cartesian adiabatic newtonian hydro and ideal MHD in host
-/// memory, on a static mesh, inviscid, without dye, bodies, tracers, or excision.
+/// the first-release scope: 2D cartesian adiabatic newtonian hydro, relativistic hydro and
+/// ideal newtonian MHD in host memory, on a static mesh, without dye, bodies, tracers, or
+/// excision.
 fn refuse<const D: usize, const DOF: usize, M: MemorySpace, K: KernelSet<D, DOF, M, f64>>(
     regime: RegimeKind,
     stores: &[&FieldStore<D, DOF, M, f64>],
@@ -148,7 +149,7 @@ fn refuse<const D: usize, const DOF: usize, M: MemorySpace, K: KernelSet<D, DOF,
     let refused = |reason: &str| {
         WorkerError::Refused(format!("{reason} is outside the distributed first release"))
     };
-    if !matches!(regime, RegimeKind::Newtonian | RegimeKind::NewtonianMhd) {
+    if !matches!(regime, RegimeKind::Newtonian | RegimeKind::Rhd | RegimeKind::NewtonianMhd) {
         return Err(refused(&format!("the {regime:?} regime")));
     }
     if D != 2 {

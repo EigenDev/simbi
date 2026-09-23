@@ -31,6 +31,7 @@ from simbi_configs.examples.ibm.roche_passage import RochePassage
 from simbi_configs.examples.newtonian.kh import KelvinHelmholtz
 from simbi_configs.examples.newtonian.nmhd_orszag_tang import NewtonianOrszagTang
 from simbi_configs.examples.newtonian.refined_kh import RefinedKelvinHelmholtz
+from simbi_configs.examples.srhd.ram44 import Ram44
 from simbi_configs.examples.srmhd.magnetic_blast import MagneticBomb
 
 from simbi.simulation.tests.process_guard import ProcessGuard, descendants
@@ -656,3 +657,104 @@ def test_a_forced_rejection_on_a_magnetized_launch_is_refused(tmp_path: Path) ->
     assert done.returncode != 0, f"the launch succeeded:\n{done.stdout}"
     flat = " ".join(done.stderr.split())
     assert "a forced rejection on a kernel set without a complete rollback snapshot is outside the distributed first release" in flat, done.stderr
+
+
+# -----------------------------------------------------------------------------
+# relativistic hydro through the public path, on the two-dimensional riemann problem of
+# ram44. the correction-active arm raises the flag on one cell against the cut; the
+# rejection arm forces one on worker 1 and compares with one worker under the same one.
+# -----------------------------------------------------------------------------
+
+RHD_SCRIPT = str(Path(Ram44.__module__.replace(".", "/") + ".py"))
+RHD_RESOLUTION = (32, 32)
+RHD_STEPS = 8
+RHD_REFERENCE_SNIPPET = """
+import sys
+from simbi.simulation import runner
+from simbi_configs.examples.srhd.ram44 import Ram44
+out, steps = sys.argv[1], int(sys.argv[2])
+runner.run(Ram44(resolution=({rx}, {ry}), data_directory=out, checkpoint_interval=1e9), compute_mode="cpu", max_steps=steps)
+"""
+
+
+def _rhd_reference(out: Path, steps: int) -> Path:
+    snippet = RHD_REFERENCE_SNIPPET.format(rx=RHD_RESOLUTION[0], ry=RHD_RESOLUTION[1])
+    done = subprocess.run([sys.executable, "-c", snippet, str(out), str(steps)], capture_output=True, text=True, timeout=600)
+    assert done.returncode == 0, f"reference failed:\n{done.stderr}"
+    files = sorted(out.glob("*final*.h5"))
+    assert len(files) == 1, f"expected one final checkpoint in {out}, found {files}"
+    return files[0]
+
+
+def _rhd_launch_command(out: Path, layout: Path, steps: int, checkpoint: Path | None = None) -> list[str]:
+    cmd = [
+        sys.executable, "-m", "simbi.cli", "launch", RHD_SCRIPT,
+        "--layout", str(layout), "--max-steps", str(steps),
+        "--resolution", f"{RHD_RESOLUTION[0]},{RHD_RESOLUTION[1]}",
+        "--data-directory", str(out), "--checkpoint-interval", "1e9",
+    ]
+    if checkpoint is not None:
+        cmd += ["--checkpoint", str(checkpoint)]
+    return cmd
+
+
+def _rhd_launch(out: Path, layout: Path, steps: int, workers: int, checkpoint: Path | None = None, env: dict[str, str] | None = None) -> tuple[Path, set[int]]:
+    full_env = dict(os.environ, **(env or {}))
+    done = subprocess.run(_rhd_launch_command(out, layout, steps, checkpoint), capture_output=True, text=True, timeout=600, env=full_env)
+    assert done.returncode == 0, f"launch failed:\nstdout:\n{done.stdout}\nstderr:\n{done.stderr}"
+    exits = {int(w): int(c) for w, c in EXIT.findall(done.stdout)}
+    assert sorted(exits) == list(range(workers)) and all(c == 0 for c in exits.values()), f"worker exit codes {exits}"
+    files = sorted(out.glob("*final*.h5"))
+    assert len(files) == 1, f"expected one final checkpoint in {out}, found {files}"
+    rejections = {int(r) for r in re.findall(r"SIMBI launch: worker=\d+/\d+ steps=\d+ rejections=(\d+)", done.stderr)}
+    return files[0], rejections
+
+
+def test_a_relativistic_launch_matches_the_single_grid_run(tmp_path: Path) -> None:
+    reference = _rhd_reference(tmp_path / "single", RHD_STEPS)
+    layout = _layout(tmp_path / "two.toml", workers=2, shape=(2, 1))
+    launched, _ = _rhd_launch(tmp_path / "two", layout, RHD_STEPS, workers=2)
+    _assert_same_state(launched, reference, "two relativistic workers")
+
+
+def test_a_relativistic_launch_resumed_onto_three_uneven_workers_matches(tmp_path: Path) -> None:
+    reference = _rhd_reference(tmp_path / "single", RHD_STEPS)
+    layout2 = _layout(tmp_path / "two.toml", workers=2, shape=(2, 1))
+    partial, _ = _rhd_launch(tmp_path / "first", layout2, RHD_STEPS // 2, workers=2)
+    with h5py.File(partial, "r") as f:
+        written_at = int(f["level_0"].attrs["iteration"])
+    assert 0 < written_at < RHD_STEPS
+    layout3 = _layout(tmp_path / "three.toml", workers=3, cuts=[[10, 21], []])
+    resumed, _ = _rhd_launch(tmp_path / "three", layout3, RHD_STEPS - written_at, workers=3, checkpoint=partial)
+    with h5py.File(resumed, "r") as fr, h5py.File(reference, "r") as fs:
+        assert fr["level_0"].attrs["time"] == fs["level_0"].attrs["time"]
+        assert int(fr["level_0"].attrs["iteration"]) == RHD_STEPS
+    _assert_same_state(resumed, reference, "relativistic, resumed on three workers")
+
+
+def test_a_relativistic_launch_with_a_correction_against_the_cut_matches_one_worker(tmp_path: Path) -> None:
+    one = _layout(tmp_path / "one.toml", workers=1, shape=(1, 1))
+    two = _layout(tmp_path / "two.toml", workers=2, shape=(2, 1))
+    clean, _ = _rhd_launch(tmp_path / "clean", one, RHD_STEPS, workers=1)
+    inject = {"SIMBI_FABRIC_INJECT": f"trouble:3:0:{RHD_RESOLUTION[0] // 2 - 1}:{RHD_RESOLUTION[1] // 3}"}
+    reference, _ = _rhd_launch(tmp_path / "one", one, RHD_STEPS, workers=1, env=inject)
+    launched, _ = _rhd_launch(tmp_path / "two", two, RHD_STEPS, workers=2, env=inject)
+    with h5py.File(clean, "r") as fc, h5py.File(reference, "r") as fr:
+        xs, ys = _interior(fc), _interior(fr)
+        assert any(not np.array_equal(xs[name], ys[name]) for name in xs), "the flag left the one-worker run unchanged; the gate is vacuous"
+    _assert_same_state(launched, reference, "two relativistic workers, trouble against the cut")
+
+
+def test_a_relativistic_rejection_on_one_worker_rolls_every_worker_back(tmp_path: Path) -> None:
+    one = _layout(tmp_path / "one.toml", workers=1, shape=(1, 1))
+    two = _layout(tmp_path / "two.toml", workers=2, shape=(2, 1))
+    clean, clean_rejections = _rhd_launch(tmp_path / "clean", one, RHD_STEPS, workers=1)
+    assert clean_rejections == {0}
+    reference, reference_rejections = _rhd_launch(tmp_path / "one", one, RHD_STEPS, workers=1, env={"SIMBI_FABRIC_INJECT": "reject:0:5:1"})
+    assert reference_rejections == {1}
+    launched, launched_rejections = _rhd_launch(tmp_path / "two", two, RHD_STEPS, workers=2, env={"SIMBI_FABRIC_INJECT": "reject:1:5:1"})
+    assert launched_rejections == {1}
+    with h5py.File(clean, "r") as fc, h5py.File(reference, "r") as fr:
+        xs, ys = _interior(fc), _interior(fr)
+        assert any(not np.array_equal(xs[name], ys[name]) for name in xs), "the rejection left the run unchanged; the gate is vacuous"
+    _assert_same_state(launched, reference, "two relativistic workers, rejection on worker 1")

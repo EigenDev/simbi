@@ -160,7 +160,7 @@ fn the_in_scope_fixture_is_admitted() {
 fn another_regime_is_refused() {
     let mut sim = sim2();
     let kern = Kern2::new(1.4, 0.4, &sim.geom.allocated);
-    refused(run2(&mut sim, &kern, RegimeKind::Rhd), "Rhd regime");
+    refused(run2(&mut sim, &kern, RegimeKind::Rmhd), "Rmhd regime");
 }
 
 /// flat adiabatic newtonian MHD is inside the scope; its isothermal closure is outside.

@@ -10204,7 +10204,7 @@ impl LaunchFault {
 /// before any tile is built.
 fn validate_launch_scope(cfg: &Config) -> Result<(), String> {
     let refused = |what: &str| Err(format!("{what} is outside the distributed first release"));
-    if !matches!(cfg.regime.as_str(), "newtonian" | "nmhd") {
+    if !matches!(cfg.regime.as_str(), "newtonian" | "rhd" | "nmhd") {
         return refused(&format!("the {} regime", cfg.regime));
     }
     // the magnetized substrate installs the limiter, the solver and the edge EMF and has no
@@ -10319,10 +10319,11 @@ fn run_worker_process(
         return Err(format!("worker {} holds no tile", launch.worker));
     }
     let offsets = tile_offsets(&partition);
-    // the tiles this worker holds, built as the single path builds them, per regime
-    match cfg.regime.as_str() {
-        "newtonian" => {
-            type Sim = SimDefaultGeneric<Newtonian, 2, 2, Cartesian, EosSelect<f64>>;
+    // the gas regimes share one tile build: a conserved vector of density, momentum and energy
+    // over the same primitive rows, with every numerics door of the single path
+    macro_rules! gas_tiles {
+        ($regime:expr, $regime_ty:ty) => {{
+            type Sim = SimDefaultGeneric<$regime_ty, 2, 2, Cartesian, EosSelect<f64>>;
         let mut tiles = Vec::with_capacity(mine.len());
         for &flat in &mine {
             let tc = unflatten(flat, counts);
@@ -10332,7 +10333,7 @@ fn run_worker_process(
             let origin = tile_origin::<2>(cfg, tile_lo);
             let spacing: [f64; 2] = [cfg.dx[0], cfg.dx[1]];
             let bnd = tile_boundaries(&phys, tc, counts);
-            let sim = Sim::build(Newtonian, host_eos(cfg), Cartesian)
+            let sim = Sim::build($regime, host_eos(cfg), Cartesian)
                 .cells(m)
                 .origin(origin)
                 .spacing(spacing)
@@ -10373,10 +10374,16 @@ fn run_worker_process(
             sim.time = cfg.start_time;
         }
         let built = build_clock.elapsed();
-            worker_session::<Newtonian, _, 2>(
+            worker_session::<$regime_ty, _, 2>(
                 cfg, launch, fault, drained, built, &partition, placement, &topology, me, &mine, &offsets, tiles,
             )
-        }
+        
+        }};
+    }
+    // the tiles this worker holds, built as the single path builds them, per regime
+    match cfg.regime.as_str() {
+        "newtonian" => gas_tiles!(Newtonian, Newtonian),
+        "rhd" => gas_tiles!(Rhd, Rhd),
         "nmhd" => {
             type Sim = SimDefaultGeneric<NewtonianMhd, 2, 3, Cartesian, EosSelect<f64>>;
             if bufs.len() < 3 {
