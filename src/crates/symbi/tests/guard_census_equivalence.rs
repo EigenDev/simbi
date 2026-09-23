@@ -10,78 +10,62 @@
 //
 // the legacy counters are process-global, so this is the only test in its binary;
 // cargo runs each test binary as its own process, so nothing else races the
-// counters. the setup is a violently magnetized near-horizon kerr-schild box that
-// floods the troubled-cell flag.
+// counters. the setup is a cold atmosphere in prescribed mach-173 radial infall
+// onto an excised cartesian kerr-schild hole: the supersonic stream meets the
+// excision rim's vacuum-floor cells and the high-order recovery there leaves
+// the physical set from the first step, at a rate set by the initial data. the
+// rim lies inside the horizon r = 2M, so the horizon subsets are exercised too.
+// every guard the equivalence compares is asserted to have fired.
 // =============================================================================
 
-use std::f64::consts::PI;
 use std::ops::ControlFlow;
 
-use symbi::regimes::substrate_kernels::Solver;
-use symbi::regimes::substrate_rmhd::RmhdSubstrateKernelSet3D;
+use symbi::regimes::substrate_rhd::RhdSubstrateKernelSet;
 use symbi::sim::refinement::Hierarchy;
 use symbi::sim::state::*;
+use symbi::sim::substrate_seam::WithExcision;
 use symbi_algebra::Tensor;
 use symbi_geometry::SchwarzschildKSCartesian;
+use symbi_hydro::Rhd;
 use symbi_hydro::eos::IdealGas;
-use symbi_hydro::mhd_state::MhdPrim;
 use symbi_hydro::quantity::{Density, Pressure};
-use symbi_hydro::rmhd::Rmhd;
 use symbi_hydro::state::Prim;
 use symbi_xpu::{CpuSpace, HostMemory};
 
-const N: usize = 6;
 const GAMMA: f64 = 4.0 / 3.0;
 const CFL: f64 = 0.3;
-const MASS: f64 = 0.8;
-const B0: f64 = 8.0;
-const X_LO: f64 = 0.9;
+const N: usize = 32;
+const L: f64 = 1.2;
+const DX: f64 = 2.0 * L / N as f64;
+const MASS: f64 = 0.3;
+const R_EXC: f64 = 0.35;
+const V_INFALL: f64 = 0.2;
+const T_FINAL: f64 = 5.0e-4;
 
-type KerrSim =
-    SimState<Rmhd, 3, SchwarzschildKSCartesian<f64>, IdealGas<f64>, CpuSpace, HostMemory>;
+type Sim = SimState<Rhd, 2, SchwarzschildKSCartesian<f64>, IdealGas<f64>, CpuSpace, HostMemory>;
+type Kern = RhdSubstrateKernelSet<HostMemory, f64, 2>;
 
-fn violent_prim(x: f64, y: f64, z: f64) -> MhdPrim<f64, 3> {
-    let s = 2.0 * PI;
-    let dense = y < 1.4;
-    let rho = if dense { 1.0e2 } else { 1.0e-6 };
-    let vel = if dense {
-        Tensor::new([
-            0.4 * (s * y).sin(),
-            0.4 * (s * z).sin(),
-            0.4 * (s * x).sin(),
-        ])
-    } else {
-        Tensor::new([0.0, 0.0, 0.0])
-    };
-    MhdPrim::new(
-        Prim::adiabatic(Density(rho), vel, Pressure(1.0e-8)),
-        Tensor::new([B0, 0.0, 0.0]),
-    )
-}
-
-fn kerr_sim() -> KerrSim {
-    let dx = 1.0 / N as f64;
-    let metric = SchwarzschildKSCartesian { mass: MASS };
-    KerrSim::build(Rmhd, IdealGas { gamma: GAMMA }, metric)
-        .cells([N; 3])
-        .origin([X_LO; 3])
-        .spacing([dx; 3])
+fn infall_sim() -> (Sim, Kern) {
+    let sim = Sim::build(Rhd, IdealGas { gamma: GAMMA }, SchwarzschildKSCartesian { mass: MASS })
+        .cells([N; 2])
+        .spacing([DX; 2])
+        .origin([-L; 2])
         .boundaries(Boundaries::uniform(BoundaryType::Outflow))
+        .timestepping(Timestepping::Rk2)
         .cfl(CFL)
         .allocate()
-        .expect("kerr sim")
-        .set_initial(|[x, y, z]| violent_prim(x, y, z))
-        .seed_faces(|axis, [x, y, z]| {
-            if axis == 0 {
-                B0 / symbi_geometry::Metric::<f64, 3>::sqrt_det_gamma(
-                    &metric,
-                    Tensor::new([x, y, z]),
-                )
-            } else {
-                0.0
-            }
+        .expect("sim")
+        .set_initial(|x| {
+            let r = (x[0] * x[0] + x[1] * x[1]).sqrt().max(1.0e-12);
+            Prim::adiabatic(
+                Density(1.0),
+                Tensor::new([-V_INFALL * x[0] / r, -V_INFALL * x[1] / r]),
+                Pressure(1.0e-6),
+            )
         })
-        .build()
+        .build();
+    let kern = Kern::new(GAMMA, CFL, &sim.geom.allocated).with_excision(R_EXC, 1.0, 1.0);
+    (sim, kern)
 }
 
 /// the guard ledger's attempted totals equal the legacy process-global census,
@@ -89,16 +73,12 @@ fn kerr_sim() -> KerrSim {
 #[test]
 fn the_attempted_totals_equal_the_legacy_census() {
     symbi::regimes::fofc::fofc_reset_stats();
+    symbi::regimes::fofc::fofc_set_horizon_radius(2.0 * MASS);
 
-    let sim = kerr_sim();
-    let kern =
-        RmhdSubstrateKernelSet3D::<HostMemory, f64>::new(GAMMA, CFL, 1.0, &sim.geom.allocated)
-            .with_solver(Solver::Hlld)
-            .expect("hlld")
-            .ct_method(CtMethod::Uct);
+    let (sim, kern) = infall_sim();
     let mut hier = Hierarchy::single(sim, kern);
-    hier.evolve_with_callback(2.0e-2, 1, |_h| ControlFlow::Continue(()))
-        .expect("the violent box must survive to t_final");
+    hier.evolve_with_callback(T_FINAL, 1, |_h| ControlFlow::Continue(()))
+        .expect("the infall must survive to t_final");
 
     let (attempted, _) = symbi_sim::guard_ledger::report();
     let (fb, fz) = symbi::regimes::fofc::fofc_stats();
@@ -107,6 +87,10 @@ fn the_attempted_totals_equal_the_legacy_census() {
     assert!(
         fb > 0 || fz > 0,
         "setup never tripped a guard; the equivalence gate is vacuous"
+    );
+    assert!(
+        fb_h > 0,
+        "no correction fired inside the horizon; the horizon subsets are vacuous"
     );
     assert_eq!(
         attempted.troubled_cells.total, fb,
