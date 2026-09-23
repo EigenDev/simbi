@@ -833,6 +833,13 @@ where
         true
     }
 
+    fn rollback_snapshot_is_complete(&self, sim: &FieldStore<D, 3, Mem, Sc>) -> bool {
+        sim.fields.mhd.as_ref().is_some_and(|mhd| mhd.step_snapshot.is_some())
+            && sim.tracers.is_none()
+            && sim.continuous_tracers.is_none()
+            && sim.immersed.is_none()
+    }
+
     fn snapshot_retry(&self, sim: &FieldStore<D, 3, Mem, Sc>) {
         crate::regimes::mhd_substrate::snapshot_retry(sim);
     }

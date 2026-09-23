@@ -10189,7 +10189,7 @@ impl LaunchFault {
             }
         }
         match parts[0] {
-            "reject" => fault.injection.reject_at = Some((number(2)?, number(3)? as usize)),
+            "reject" => fault.injection.reject_at = vec![(number(2)?, number(3)? as usize)],
             "bad_cfl" => fault.injection.invalid_cfl_at = Some(number(2)?),
             "exit" => fault.exit_after = Some(number(2)?),
             "face" => fault.perturb_face_after = Some(number(2)?),

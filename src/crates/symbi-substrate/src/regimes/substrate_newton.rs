@@ -772,6 +772,20 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize, const
         self.viscosity != 0.0 || self.alpha != 0.0
     }
 
+    fn rollback_snapshot_is_complete(&self, sim: &FieldStore<D, DOF, Mem, Sc>) -> bool {
+        crate::regimes::fofc::gas_rollback_snapshot_is_complete(sim)
+    }
+
+    fn snapshot_retry(&self, sim: &FieldStore<D, DOF, Mem, Sc>) {
+        crate::regimes::fofc::gas_snapshot_retry(sim);
+    }
+
+    fn restore_step(&self, sim: &FieldStore<D, DOF, Mem, Sc>) {
+        crate::regimes::fofc::gas_restore_step(sim);
+        self.c2p(sim);
+        self.ghost_fill(sim);
+    }
+
     fn fofc_mark(&self, sim: &FieldStore<D, DOF, Mem, Sc>) -> u64 {
         if DOF != D {
             return 0;

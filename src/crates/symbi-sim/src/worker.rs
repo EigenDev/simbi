@@ -41,10 +41,13 @@ use symbi_grid::Field;
 use symbi_xpu::{MemorySpace, with_device};
 
 /// outcomes a test harness forces at a named step, outside the numerical path.
-#[derive(Debug, Clone, Copy, Default)]
+#[derive(Debug, Clone, Default)]
 pub struct Injection {
-    /// report a rejection from this worker at (step, stage) on the first attempt
-    pub reject_at: Option<(u64, usize)>,
+    /// report a rejection from this worker at each (step, stage) on that step's first attempt
+    pub reject_at: Vec<(u64, usize)>,
+    /// take at most this timestep (as f64 bits) at this step: how a clean run follows the
+    /// accepted timestep sequence of a run that rejected and halved
+    pub cap_dt_at: Option<(u64, u64)>,
     /// report a NaN timestep candidate from this worker's first tile at this step, leaving
     /// its other tiles' candidates valid
     pub invalid_cfl_at: Option<u64>,
@@ -332,6 +335,21 @@ where
     {
         let sh = shared!();
         refuse(cfg.regime, &sh, kernels).map_err(|e| fail(fabric, e))?;
+        // a rejection replays the step from its entry, which needs the whole entry state kept
+        if !cfg.injection.reject_at.is_empty() {
+            for (store, kernel) in sh.iter().zip(kernels) {
+                if !kernel.rollback_snapshot_is_complete(store) {
+                    return Err(fail(
+                        fabric,
+                        WorkerError::Refused(
+                            "a forced rejection on a kernel set without a complete rollback \
+                             snapshot is outside the distributed first release"
+                                .into(),
+                        ),
+                    ));
+                }
+            }
+        }
     }
     let deadline = cfg.deadline;
     let mut timing = WorkerTiming::default();
@@ -425,6 +443,11 @@ where
         timing.collectives += clock.elapsed();
         let mut dt = select_timestep([f64::from_bits(global)], cfg.t_final - t, iter, t)
             .map_err(|e| fail(fabric, WorkerError::Numerics(e.detail)))?;
+        if let Some((at, bits)) = cfg.injection.cap_dt_at {
+            if at == iter {
+                dt = dt.min(f64::from_bits(bits));
+            }
+        }
         let mut attempt: u16 = 0;
         loop {
             {
@@ -532,7 +555,7 @@ where
                     retry |= outcome == StageOutcome::RetryStep;
                     report.neighbor_corrections += u64::from(cut_trouble[k] && clean[k]);
                 }
-                if attempt == 0 && cfg.injection.reject_at == Some((iter, stage.index)) {
+                if attempt == 0 && cfg.injection.reject_at.contains(&(iter, stage.index)) {
                     retry = true;
                 }
                 // the rejection is decided before this stage's halos move, so no halo is
@@ -582,11 +605,14 @@ where
             {
                 let sh = shared!();
                 for k in 0..n {
-                    if !kernels[k].fofc_active() {
+                    // a replay from anything but the step entry is a different computation
+                    // dressed as a retry: every worker ends the session instead
+                    if !kernels[k].rollback_snapshot_is_complete(sh[k]) {
                         return Err(fail(
                             fabric,
                             WorkerError::Numerics(
-                                "a step was rejected on a kernel set without a retry snapshot"
+                                "a step was rejected on a kernel set without a complete rollback \
+                                 snapshot; the replay cannot start from the step entry"
                                     .into(),
                             ),
                         ));

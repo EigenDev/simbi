@@ -871,7 +871,7 @@ pub(crate) fn snapshot_stage<const D: usize, const DOF: usize, Mem, Sc>(
 
 /// copy a list of (src, dst) field pairs (host memcpy / device pointwise-copy), each by its own
 /// layout — so it serves cell-centered (bcell/bflux) and staggered (bface/efield) fields.
-fn fofc_copy_fields<const D: usize, Sc, Mem>(pairs: &[(&Field<Sc, D, Mem>, &Field<Sc, D, Mem>)])
+pub(crate) fn fofc_copy_fields<const D: usize, Sc, Mem>(pairs: &[(&Field<Sc, D, Mem>, &Field<Sc, D, Mem>)])
 where
     Sc: Scalar + OrderedNumeric,
     Mem: MemorySpace,

@@ -320,10 +320,18 @@ where
         false
     }
 
+    /// whether `snapshot_retry` and `restore_step` together carry every input a fresh attempt
+    /// of a step needs on this store, so a rejected step replays from its entry. false where
+    /// the store carries state the snapshot leaves out, in which case a driver refuses a forced
+    /// rejection and reports a genuine one as an error instead of replaying from the rejected
+    /// state. default: no snapshot.
+    fn rollback_snapshot_is_complete(&self, _store: &FieldStore<NDIM, DOF, Mem, Sc>) -> bool {
+        false
+    }
+
     /// retain the complete state needed to replay a rejected explicit step. paired with
     /// `restore_step`; a kernel set that implements one must implement the other, and a driver
-    /// must gate both on `fofc_active` — restoring from a snapshot that was never taken would
-    /// overwrite the live state with zeros.
+    /// consults `rollback_snapshot_is_complete` before relying on either.
     fn snapshot_retry(&self, _store: &FieldStore<NDIM, DOF, Mem, Sc>) {}
 
     /// restore the complete step-entry state after `fofc` requests a retry: the conserved gas

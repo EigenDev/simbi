@@ -189,11 +189,23 @@ fn env_u64(name: &str) -> Option<u64> {
 
 fn injection_from_env(me: WorkerId) -> Injection {
     let mut injection = Injection::default();
+    // W_REJECT_STEP and W_REJECT_STAGE list the (step, stage) pairs, comma separated
     if env_u64("W_REJECT_WORKER") == Some(u64::from(me.0)) {
-        injection.reject_at = Some((
-            env_u64("W_REJECT_STEP").unwrap(),
-            env_u64("W_REJECT_STAGE").unwrap() as usize,
-        ));
+        let list = |name: &str| -> Vec<u64> {
+            std::env::var(name)
+                .unwrap()
+                .split(',')
+                .map(|s| s.parse().unwrap())
+                .collect()
+        };
+        injection.reject_at = list("W_REJECT_STEP")
+            .into_iter()
+            .zip(list("W_REJECT_STAGE"))
+            .map(|(s, g)| (s, g as usize))
+            .collect();
+    }
+    if let (Some(step), Some(bits)) = (env_u64("W_CAP_DT_STEP"), env_u64("W_CAP_DT_BITS")) {
+        injection.cap_dt_at = Some((step, bits));
     }
     if env_u64("W_BAD_CFL_WORKER") == Some(u64::from(me.0)) {
         injection.invalid_cfl_at = env_u64("W_BAD_CFL_STEP");
@@ -627,66 +639,98 @@ fn four_workers_with_distinct_neighbors_match_the_reference() {
 
 /// a rejection forced on one worker at step 5, stage 1: every worker rolls back, halves the
 /// step, and lands on the state a single worker reaches through the same rejection.
+/// a rejection on one worker rolls every worker back to the step entry and replays at the
+/// halved timestep: the result equals a single worker driven through the same rejection,
+/// and equals a clean single worker that merely takes the accepted timestep at that step,
+/// which is the statement that the replay started from the entry. arms: the rejection in
+/// the predictor, in the corrector, and twice in one run; two even workers, four with
+/// distinct neighbors, and three tiles unevenly owned by two workers.
 #[test]
 fn a_rejection_on_one_worker_rolls_back_all() {
     if in_worker_role() {
         worker_main();
     }
     let test = "a_rejection_on_one_worker_rolls_back_all";
-    let inject = |worker: u32| {
-        vec![
-            ("W_REJECT_STEP", "5".to_string()),
-            ("W_REJECT_STAGE", "1".to_string()),
-            ("W_REJECT_WORKER", worker.to_string()),
-        ]
-    };
-    let single = Arm {
-        cuts0: vec![32],
-        cuts1: vec![32],
+    let one_tile = Arm {
+        cuts0: vec![],
+        cuts1: vec![],
         periodic: [false, false],
-        owner: vec![0, 0, 0, 0],
+        owner: vec![0],
     };
-    let one = run_arm(test, "single", &single, &inject(0));
-    assert_all_ok(&one);
-    let want: Vec<Vec<f64>> = {
-        let mut tiles = one[0].tiles.clone();
-        tiles.sort_by_key(|(flat, _)| *flat);
-        tiles.into_iter().map(|(_, v)| v).collect()
-    };
-    let single_report = one[0].report.clone().expect("report");
-    assert_eq!(single_report.rejections, 1, "the injected rejection fired");
-    assert_eq!(single_report.steps, STEPS);
-    // the halved step: the accepted dt at step 5 is half of what the candidate gave
-    assert!(f64::from_bits(single_report.dts[5]) < f64::from_bits(single_report.dts[4]) * 0.75);
-    let clean = run_arm(test, "clean", &single, &[]);
+    let clean = run_arm(test, "clean", &one_tile, &[]);
     assert_all_ok(&clean);
     let clean_report = clean[0].report.clone().expect("report");
-    assert_ne!(
-        clean_report.time, single_report.time,
-        "the rejection changed the clock"
-    );
-    for (workers, arm, injected) in [
-        (2u32, even(), 1u32),
-        (
-            4,
-            Arm {
-                cuts0: vec![32],
-                cuts1: vec![32],
-                periodic: [false, false],
-                owner: vec![0, 1, 2, 3],
-            },
-            2,
-        ),
+    for (label, steps, stages) in [
+        ("predictor", "5", "0"),
+        ("corrector", "5", "1"),
+        ("repeated", "3,7", "0,1"),
     ] {
-        let outcomes = run_arm(test, &format!("w{workers}"), &arm, &inject(injected));
-        assert_all_ok(&outcomes);
-        assert_tiles_match(&outcomes, &want, &format!("{workers} workers"));
-        for o in &outcomes {
-            assert_eq!(
-                o.report.as_ref().expect("report"),
-                &single_report,
-                "{workers} workers: report"
+        let inject = |worker: u32| {
+            vec![
+                ("W_REJECT_STEP", steps.to_string()),
+                ("W_REJECT_STAGE", stages.to_string()),
+                ("W_REJECT_WORKER", worker.to_string()),
+            ]
+        };
+        let single = run_arm(test, &format!("single_{label}"), &one_tile, &inject(0));
+        assert_all_ok(&single);
+        let want = global_density(&single);
+        let single_report = single[0].report.clone().expect("report");
+        let expected: u64 = steps.split(',').count() as u64;
+        assert_eq!(single_report.rejections, expected, "{label}: the injected rejections fired");
+        assert_eq!(single_report.steps, STEPS);
+        for at in steps.split(',').map(|s| s.parse::<usize>().unwrap()) {
+            // the halved step: the accepted dt at the rejected step is half its candidate
+            assert!(
+                f64::from_bits(single_report.dts[at]) < f64::from_bits(clean_report.dts[at]) * 0.75,
+                "{label}: the timestep at step {at} was not halved"
             );
+        }
+        assert_ne!(global_density(&clean), want, "{label}: the rejection left the run unchanged");
+        // the clean reference on the accepted timestep sequence: a run that never rejected
+        // but takes the same dt at the rejected step reaches the same state bit for bit,
+        // which holds only if the replay started from the step entry
+        let capped_env: Vec<(&str, String)> = {
+            let first: usize = steps.split(',').next().unwrap().parse().unwrap();
+            vec![("W_CAP_DT_STEP", first.to_string()), ("W_CAP_DT_BITS", single_report.dts[first].to_string())]
+        };
+        if label != "repeated" {
+            let capped = run_arm(test, &format!("capped_{label}"), &one_tile, &capped_env);
+            assert_all_ok(&capped);
+            let capped_report = capped[0].report.clone().expect("report");
+            assert_eq!(capped_report.rejections, 0);
+            assert_eq!(capped_report.dts, single_report.dts, "{label}: the capped run took other timesteps");
+            assert_eq!(global_density(&capped), want, "{label}: the replay did not start from the step entry");
+        }
+        for (workers, arm, injected) in [
+            (2u32, even(), 1u32),
+            (
+                4,
+                Arm {
+                    cuts0: vec![32],
+                    cuts1: vec![32],
+                    periodic: [false, false],
+                    owner: vec![0, 1, 2, 3],
+                },
+                2,
+            ),
+            (
+                2,
+                Arm {
+                    cuts0: vec![20, 44],
+                    cuts1: vec![],
+                    periodic: [false, false],
+                    owner: vec![0, 0, 1],
+                },
+                1,
+            ),
+        ] {
+            let outcomes = run_arm(test, &format!("{label}_w{workers}_{}", arm.cuts0.len()), &arm, &inject(injected));
+            assert_all_ok(&outcomes);
+            assert_eq!(global_density(&outcomes), want, "{label}, {workers} workers: density");
+            for o in &outcomes {
+                assert_eq!(o.report.as_ref().expect("report"), &single_report, "{label}, {workers} workers: report");
+            }
         }
     }
 }

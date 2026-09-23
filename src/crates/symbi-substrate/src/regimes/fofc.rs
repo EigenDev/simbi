@@ -466,6 +466,70 @@ where
     fofc_flag_count(sim, flag)
 }
 
+/// the (live, saved) pairing of the step-entry conserved state of a gas regime: the conserved
+/// vector, the passive scalar with it when the run carries one. `u_n` holds the step entry on
+/// every scheme once `snapshot_retry` has written it.
+fn gas_step_snapshot_pairs<'a, const D: usize, const DOF: usize, Mem, Sc>(
+    sim: &'a FieldStore<D, DOF, Mem, Sc>,
+) -> Vec<(&'a Field<Sc, D, Mem>, &'a Field<Sc, D, Mem>)>
+where
+    Mem: MemorySpace,
+    Sc: Scalar + OrderedNumeric,
+{
+    let (cons, saved) = (&sim.fields.cons, &sim.workspace.u_n);
+    let mut pairs = vec![(&cons.den, &saved.den)];
+    for k in 0..DOF {
+        pairs.push((&cons.mom[k], &saved.mom[k]));
+    }
+    if let (Some(live), Some(kept)) = (cons.nrg_field(), saved.nrg_field()) {
+        pairs.push((live, kept));
+    }
+    if let (Some(live), Some(kept)) = (cons.chi_field(), saved.chi_field()) {
+        pairs.push((live, kept));
+    }
+    pairs
+}
+
+/// whether the conserved vector is every input a fresh attempt of a step needs on `sim`: a
+/// gas regime rebuilds its primitives and ghosts from it, and the passive scalar rides in it.
+/// tracers and immersed bodies keep state outside the conserved vector.
+pub(crate) fn gas_rollback_snapshot_is_complete<const D: usize, const DOF: usize, Mem, Sc>(
+    sim: &FieldStore<D, DOF, Mem, Sc>,
+) -> bool
+where
+    Mem: MemorySpace,
+    Sc: Scalar + OrderedNumeric,
+{
+    sim.tracers.is_none() && sim.continuous_tracers.is_none() && sim.immersed.is_none()
+}
+
+/// keep the step-entry conserved state of a gas regime: `u_n <- cons`, ghosts included. on a
+/// multistage scheme the driver's own step snapshot writes the same buffer right after.
+pub(crate) fn gas_snapshot_retry<const D: usize, const DOF: usize, Mem, Sc>(
+    sim: &FieldStore<D, DOF, Mem, Sc>,
+) where
+    Mem: MemorySpace,
+    Sc: Scalar + OrderedNumeric,
+{
+    crate::regimes::mhd_substrate::fofc_copy_fields(&gas_step_snapshot_pairs(sim));
+}
+
+/// restore the step-entry conserved state of a gas regime after a rejected step:
+/// `cons <- u_n` over the allocated domain. the caller re-derives the primitives and fills
+/// their ghosts, so the retry reconstructs from the entry state.
+pub(crate) fn gas_restore_step<const D: usize, const DOF: usize, Mem, Sc>(
+    sim: &FieldStore<D, DOF, Mem, Sc>,
+) where
+    Mem: MemorySpace,
+    Sc: Scalar + OrderedNumeric,
+{
+    let pairs: Vec<_> = gas_step_snapshot_pairs(sim)
+        .into_iter()
+        .map(|(live, saved)| (saved, live))
+        .collect();
+    crate::regimes::mhd_substrate::fofc_copy_fields(&pairs);
+}
+
 /// the number of set troubled-cell flags inside `region`, ghost cells included.
 pub(crate) fn fofc_flags_in<const D: usize, const DOF: usize, Mem, Sc>(
     sim: &FieldStore<D, DOF, Mem, Sc>,

@@ -98,6 +98,57 @@ fn refused(result: Result<(), WorkerError>, expect: &str) {
     }
 }
 
+/// a forced rejection needs the whole step entry kept: the flat magnetized set keeps no
+/// step-entry snapshot, so a run that injects a rejection on it is refused at entry.
+#[test]
+fn a_forced_rejection_without_a_complete_rollback_snapshot_is_refused() {
+    use symbi::prelude::SimSubstrate;
+    use symbi_hydro::mhd_state::MhdPrim;
+    use symbi_hydro::newtonian_mhd::NewtonianMhd;
+    let mut sim = SimStateGeneric::<NewtonianMhd, 2, 3, Cartesian, IdealGas<f64>, CpuSpace, HostMemory>::build(
+        NewtonianMhd,
+        IdealGas { gamma: 5.0 / 3.0 },
+        Cartesian,
+    )
+    .cells([16, 16])
+    .spacing([1.0 / 16.0; 2])
+    .boundaries(Boundaries::uniform(BoundaryType::Periodic))
+    .timestepping(Timestepping::Rk2)
+    .allocate()
+    .unwrap()
+    .set_initial(|[_x, y]| {
+        MhdPrim::new(
+            Prim::adiabatic(Density(1.0), Tensor::new([0.1 * y, 0.0, 0.0]), Pressure(1.0)),
+            Tensor::new([0.0, 0.5, 0.0]),
+        )
+    })
+    .seed_faces_uniform([0.0, 0.5])
+    .build();
+    let kern = sim.substrate();
+    let partition = Partition::uniform([16, 16], [1, 1]).unwrap();
+    let schema = plan_schema(&*sim);
+    let plan = ExchangePlan::compile(&partition, &Topology::wrapping([true; 2]), &schema, sim.geom.ng).unwrap();
+    let placement = Placement::new(1, vec![WorkerId(0)]).unwrap();
+    let exchange = PlanExchange::new(&plan, &placement, WorkerId(0));
+    let mut fabric = exchange.fabric(Loopback::new(), SessionId(1));
+    let mut stores = [&mut *sim];
+    let mut cfg = config(RegimeKind::NewtonianMhd);
+    cfg.injection.reject_at = vec![(0, 0)];
+    let result = evolve_worker(
+        &[TileId(0)],
+        &mut stores,
+        &[&kern],
+        &[0],
+        &exchange,
+        &LocalCopy,
+        &mut fabric,
+        &cfg,
+        |_, _, _, _| Ok(std::ops::ControlFlow::Continue(())),
+    )
+    .map(|_| ());
+    refused(result, "a forced rejection on a kernel set without a complete rollback snapshot");
+}
+
 #[test]
 fn the_in_scope_fixture_is_admitted() {
     let mut sim = sim2();
