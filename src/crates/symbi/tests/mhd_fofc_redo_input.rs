@@ -619,3 +619,124 @@ fn rk2_formula_with_a_corrector_correction_alone() {
 fn rk2_formula_with_corrections_in_both_stages() {
     assert_rk2_formula(true, true, "both stages");
 }
+
+// -----------------------------------------------------------------------------
+// the transverse mass flux the corrected Contact EMF upwinds on. the edge EMF at a corner
+// reads the mass flux of the four faces around it and takes each one's sign; on an edge of
+// the interior's boundary two of those faces lie in the column beyond the interior. the
+// first-order and high-order mass fluxes of a face can differ in sign: across a density
+// step in a slow flow the high-order contact-resolving flux carries mass with the flow while
+// the first-order fan diffuses it down the gradient. a corrected boundary edge whose outer
+// face holds the first-order flux, while the same face one cell inside would hold the
+// spliced high-order one, is then corrected differently from the same event in the interior.
+// -----------------------------------------------------------------------------
+
+const STEP_ROW: isize = 9;
+const SLOW: f64 = 0.02;
+
+/// a slow uniform transverse flow with a density step between rows STEP_ROW - 1 and STEP_ROW
+/// in the last canonical column, the sinusoidal face field of the other gates, HLLD for the
+/// high-order fluxes so a contact is resolved. `origin` is the grid column that carries
+/// canonical column 0: every value is computed from the canonical column index, so two grids
+/// with different origins hold the same numbers in shifted places, bit for bit.
+fn build_step(origin: usize) -> Sim {
+    let h = 1.0 / N as f64;
+    // the canonical x of a cell center or of a face at grid position x
+    let canonical = move |x: f64, face: bool| -> f64 {
+        let index = if face { (x / h).round() } else { (x / h).floor() } as isize;
+        let k = (index - origin as isize).rem_euclid(N as isize) as f64;
+        (k + if face { 0.0 } else { 0.5 }) * h
+    };
+    Sim::build(NewtonianMhd, IdealGas { gamma: GAMMA }, Cartesian)
+        .cells([N, N])
+        .spacing([h, h])
+        .boundaries(Boundaries::uniform(BoundaryType::Periodic))
+        .cfl(0.3)
+        .timestepping(Timestepping::Euler)
+        .allocate()
+        .expect("sim")
+        .set_initial(move |[x, y]| {
+            let xc = canonical(x, false);
+            let column = (xc / h).floor() as usize;
+            let row = (y / h).floor() as isize;
+            let rho = if column == N - 1 && row >= STEP_ROW { 2.0 } else { 1.0 };
+            MhdPrim::new(
+                Prim::adiabatic(Density(rho), Tensor::new([0.0, SLOW, 0.0]), Pressure(GAMMA)),
+                Tensor::new([-(2.0 * PI * y).sin(), (4.0 * PI * xc).sin(), 0.0]),
+            )
+        })
+        .seed_faces(move |axis, [x, y]| match axis {
+            0 => -(2.0 * PI * y).sin(),
+            _ => (4.0 * PI * canonical(x, false)).sin(),
+        })
+        .build()
+}
+
+/// one forward-euler stage of `sim` with the flag raised at `cell`; every conserved cell and
+/// face over the interior afterwards, x index first, plus the interior y-face mass fluxes
+fn step_corrected(sim: &Sim, cell: [isize; 2]) -> (Vec<u64>, Vec<f64>, Vec<f64>) {
+    let kernels = sim.substrate().with_solver(symbi_sim::substrate_seam::Solver::Hlld).expect("hlld");
+    let args = StageArgs { dt: DT, a0: 0.0, ac: 1.0, stage: 0, n_stages: 1, injection_weight: 1.0, allow_elision: false };
+    let s = &**sim;
+    kernels.c2p(s);
+    kernels.ghost_fill(s);
+    assert_eq!(fold_stage_through_mark(s, &kernels, args, &mut |_| {}), 0, "the step state tripped the correction by itself");
+    *s.workspace.fofc_flag.view_mut().at_mut(cell) = 1.0;
+    let _ = fold_stage_from_correction(s, &kernels, args, false, &mut |_| {});
+    let lo = [s.geom.interior.spaces[0].lo, s.geom.interior.spaces[1].lo];
+    let grid = |f: &symbi_grid::Field<f64, 2, HostMemory>| -> Vec<f64> {
+        let v = f.view();
+        (0..N * N).map(|q| *v.at([lo[0] + (q / N) as isize, lo[1] + (q % N) as isize])).collect()
+    };
+    let mhd = s.fields.mhd.as_ref().unwrap();
+    let mut state = Vec::new();
+    for f in [&s.fields.cons.den, s.fields.cons.nrg_field().unwrap(), &s.fields.cons.mom[0], &s.fields.cons.mom[1], &mhd.bface.b[0], &mhd.bface.b[1]] {
+        state.extend(grid(f).into_iter().map(f64::to_bits));
+    }
+    (state, grid(&s.fields.flux[1].den), grid(&s.workspace.flux_ho[1].den))
+}
+
+fn shifted_grid(grid: &[u64], shift: usize) -> Vec<u64> {
+    let mut out = vec![0; grid.len()];
+    for (q, v) in grid.iter().enumerate() {
+        let (i, j) = (q / N, q % N);
+        out[((i + shift) % N) * N + j] = *v;
+    }
+    out
+}
+
+#[test]
+fn a_boundary_edge_upwinding_on_a_sign_changing_transverse_mass_flux_is_corrected_like_an_interior_one() {
+    // the seam arm: canonical column 0 is grid column 0, so the density step sits in the last
+    // column and the flagged cell in the first, and the flagged edge reads the step's face
+    // through the ghost column
+    let seam = build_step(0);
+    let lo = [seam.geom.interior.spaces[0].lo, seam.geom.interior.spaces[1].lo];
+    let (seam_state, _, _) = step_corrected(&seam, [lo[0], lo[1] + STEP_ROW]);
+
+    // the premise, from a twin flagged on the step column itself so the splice keeps the
+    // first-order flux on the step's face: the first- and high-order transverse mass fluxes
+    // of that face have different signs
+    let twin = build_step(0);
+    let (_, fo, ho) = step_corrected(&twin, [lo[0] + N as isize - 1, lo[1] + STEP_ROW]);
+    let face = (N - 1) * N + STEP_ROW as usize;
+    assert!(
+        fo[face] * ho[face] < 0.0,
+        "the first-order ({:e}) and high-order ({:e}) transverse mass fluxes of the step's face \
+         share a sign; the upwinding dependency is not exercised",
+        fo[face], ho[face]
+    );
+
+    // the interior arm: everything shifted by half a box, so the same event is in the interior
+    let shift = N / 2;
+    let interior = build_step(shift);
+    let (interior_state, _, _) = step_corrected(&interior, [lo[0] + shift as isize, lo[1] + STEP_ROW]);
+    let fields = 6;
+    let per = N * N;
+    for f in 0..fields {
+        let a = &seam_state[f * per..(f + 1) * per];
+        let b = shifted_grid(&interior_state[f * per..(f + 1) * per], N - shift);
+        let differing = a.iter().zip(&b).filter(|(x, y)| x != y).count();
+        assert_eq!(differing, 0, "field {f} of the seam arm differs from its interior translate in {differing} places");
+    }
+}

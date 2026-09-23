@@ -437,14 +437,18 @@ pub(crate) fn fofc_splice<const D: usize, const DOF: usize, Mem, Sc>(
         }
     };
     let (inputs, outputs) = bind_by_manifest(&name, slot);
-    dispatch_fields_each::<Sc, Mem, D>(
-        &name,
-        &sim.geom.interior.face_domain(dir),
-        &inputs,
-        &outputs,
-        &[],
-        &[],
-    );
+    // the conservative update reads the interior faces. a magnetized run also feeds the mass
+    // flux of the faces one column beyond them, on every transverse axis, to the edge EMF of
+    // the interior's boundary edges, which upwinds on its sign; the first- and high-order
+    // mass fluxes of a face can differ in sign, so there the splice covers the flux sweep's
+    // own window and an outer face carries the flux the same face would carry one cell inside.
+    let mut window = sim.geom.interior.face_domain(dir);
+    if sim.fields.mhd.is_some() {
+        for ax in (0..D).filter(|ax| *ax != dir) {
+            window = window.expand(ax, 1);
+        }
+    }
+    dispatch_fields_each::<Sc, Mem, D>(&name, &window, &inputs, &outputs, &[], &[]);
 }
 
 /// decode the recovery status into the troubled-cell flag over the interior and count it:
