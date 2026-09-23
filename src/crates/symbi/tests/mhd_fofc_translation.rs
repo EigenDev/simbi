@@ -67,18 +67,33 @@ struct Arm {
 struct Fixture {
     speed: f64,
     t_final: f64,
+    /// amplitude of a transverse velocity varying along x, zero on the collision plane and
+    /// half a box away, so the transverse mass flux changes sign where the correction fires
+    transverse: f64,
 }
 
 /// fires from step 5 (UCT) or 37 (Contact, forward Euler) with no freeze through t = 0.06.
 const MODERATE: Fixture = Fixture {
     speed: 0.95,
     t_final: 0.06,
+    transverse: 0.0,
+};
+/// the moderate streams with a transverse flow: the Contact EMF the redo computes upwinds on
+/// the transverse mass flux, so the sign of that flux at the edges of the interior's boundary
+/// enters the corrected update. the amplitude keeps the troubled span inside the box, which
+/// a transverse flow of 0.3 does not (trouble then spans every column and no reference arm
+/// can keep it off the seam).
+const TRANSVERSE: Fixture = Fixture {
+    speed: 0.95,
+    t_final: 0.06,
+    transverse: 0.05,
 };
 /// Contact under RK2 corrects in its predictor alone at the moderate speed; at 0.98 the
 /// corrector stage corrects at step 49, and the freeze tier first acts after t = 0.02.
 const FAST_AND_SHORT: Fixture = Fixture {
     speed: 0.98,
     t_final: 0.02,
+    transverse: 0.0,
 };
 
 /// run with the streams colliding on the low face of cell column `collide`.
@@ -98,8 +113,10 @@ fn run(collide: usize, ct: CtMethod, ts: Timestepping, fixture: Fixture) -> Arm 
             let column = (x / DX).floor() as usize;
             let behind = (column + NX - collide) % NX >= NX / 2;
             let vx = if behind { fixture.speed } else { -(fixture.speed - 0.01) };
+            let phase = ((column + NX - collide) % NX) as f64 / NX as f64;
+            let vy = fixture.transverse * (2.0 * std::f64::consts::PI * phase).sin();
             MhdPrim::new(
-                Prim::adiabatic(Density(1.0), Tensor::new([vx, 0.0, 0.0]), Pressure(1e-4)),
+                Prim::adiabatic(Density(1.0), Tensor::new([vx, vy, 0.0]), Pressure(1e-4)),
                 Tensor::new([0.0, B0Y, 0.0]),
             )
         })
@@ -268,4 +285,22 @@ fn uct_euler() {
 #[test]
 fn uct_rk2() {
     assert_translation_invariant(CtMethod::Uct, Timestepping::Rk2, MODERATE, NX / 2, 2, "uct, rk2");
+}
+
+// the same arms with a transverse flow, so the transverse mass flux the corrected Contact
+// EMF upwinds on is exercised across the seam
+
+#[test]
+fn contact_euler_transverse_flow() {
+    assert_translation_invariant(CtMethod::Contact, Timestepping::Euler, TRANSVERSE, NX / 4, NX / 2, "contact, euler, transverse flow");
+}
+
+#[test]
+fn uct_euler_transverse_flow() {
+    assert_translation_invariant(CtMethod::Uct, Timestepping::Euler, TRANSVERSE, NX / 4, 2, "uct, euler, transverse flow");
+}
+
+#[test]
+fn uct_rk2_transverse_flow() {
+    assert_translation_invariant(CtMethod::Uct, Timestepping::Rk2, TRANSVERSE, NX / 2, 2, "uct, rk2, transverse flow");
 }

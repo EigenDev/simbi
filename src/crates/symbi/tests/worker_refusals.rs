@@ -112,6 +112,16 @@ fn another_regime_is_refused() {
     refused(run2(&mut sim, &kern, RegimeKind::Rhd), "Rhd regime");
 }
 
+/// flat adiabatic newtonian MHD is inside the scope; its isothermal closure is outside.
+#[test]
+fn the_newtonian_mhd_regime_is_admitted_and_the_isothermal_one_refused() {
+    let mut sim = sim2();
+    let kern = Kern2::new(1.4, 0.4, &sim.geom.allocated);
+    run2(&mut sim, &kern, RegimeKind::NewtonianMhd).expect("newtonian MHD is admitted");
+    let mut sim = sim2();
+    refused(run2(&mut sim, &kern, RegimeKind::IsoMhd), "IsoMhd regime");
+}
+
 #[test]
 fn a_curvilinear_chart_is_refused() {
     let mut sim = sim2();

@@ -15,9 +15,8 @@
 // are the same kernel calls in the same order, so the owned tiles of a worker
 // match the single-process reference bitwise.
 //
-// the first release evolves single-level cartesian hydro: a store carrying
-// bodies, tracers, mesh motion, magnetic fields, or excision is refused at
-// entry. a local fatal error tells every peer through the abort relay before
+// the first release evolves single-level cartesian hydro and ideal MHD: a
+// store carrying bodies, tracers, mesh motion, or excision is refused at entry. a local fatal error tells every peer through the abort relay before
 // the loop returns it.
 //
 // usage:
@@ -136,8 +135,8 @@ impl From<FabricError> for WorkerError {
     }
 }
 
-/// the first-release scope: 2D cartesian adiabatic newtonian hydro in host memory, on a
-/// static mesh, inviscid, without dye, bodies, tracers, magnetic fields, or excision.
+/// the first-release scope: 2D cartesian adiabatic newtonian hydro and ideal MHD in host
+/// memory, on a static mesh, inviscid, without dye, bodies, tracers, or excision.
 fn refuse<const D: usize, const DOF: usize, M: MemorySpace, K: KernelSet<D, DOF, M, f64>>(
     regime: RegimeKind,
     stores: &[&FieldStore<D, DOF, M, f64>],
@@ -146,7 +145,7 @@ fn refuse<const D: usize, const DOF: usize, M: MemorySpace, K: KernelSet<D, DOF,
     let refused = |reason: &str| {
         WorkerError::Refused(format!("{reason} is outside the distributed first release"))
     };
-    if regime != RegimeKind::Newtonian {
+    if !matches!(regime, RegimeKind::Newtonian | RegimeKind::NewtonianMhd) {
         return Err(refused(&format!("the {regime:?} regime")));
     }
     if D != 2 {
@@ -175,8 +174,6 @@ fn refuse<const D: usize, const DOF: usize, M: MemorySpace, K: KernelSet<D, DOF,
             Some("a tracer population".to_string())
         } else if store.motion_law.is_some() {
             Some("mesh motion".to_string())
-        } else if store.fields.mhd.is_some() {
-            Some("a magnetic field".to_string())
         } else if kernel.excise_pass_count(store) > 0 {
             Some("horizon excision".to_string())
         } else {
