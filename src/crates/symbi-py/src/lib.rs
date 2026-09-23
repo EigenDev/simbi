@@ -10207,6 +10207,23 @@ fn validate_launch_scope(cfg: &Config) -> Result<(), String> {
     if !matches!(cfg.regime.as_str(), "newtonian" | "nmhd") {
         return refused(&format!("the {} regime", cfg.regime));
     }
+    // the magnetized substrate installs the limiter, the solver and the edge EMF and has no
+    // door for a reconstruction, a flattening or an equation of state; a request for one is
+    // refused here so a comparison never appears to exercise a setting the run ignores
+    if cfg.regime == "nmhd" {
+        if cfg.reconstruction_name != "plm" {
+            return refused(&format!("{} reconstruction with the nmhd regime", cfg.reconstruction_name));
+        }
+        if cfg.ppm_flatten_full > 0.0 || cfg.ppm_flatten_onset > 0.0 {
+            return refused("ppm flattening with the nmhd regime");
+        }
+        if cfg.eos_name != "ideal" {
+            return refused(&format!("the {} equation of state with the nmhd regime", cfg.eos_name));
+        }
+        if cfg.wb_reconstruction {
+            return refused("well-balanced reconstruction with the nmhd regime");
+        }
+    }
     if cfg.dims != 2 {
         return refused(&format!("a {}-dimensional grid", cfg.dims));
     }

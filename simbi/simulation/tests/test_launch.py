@@ -595,3 +595,20 @@ def test_out_of_scope_problems_are_refused_by_name(tmp_path: Path, script: str, 
     assert done.returncode != 0, f"the launch succeeded:\n{done.stdout}"
     assert f"{reason} is outside the distributed first release" in done.stderr, done.stderr
     assert not (out.exists() and list(out.glob("*.h5"))), "a checkpoint was published"
+
+
+def test_a_magnetized_launch_refuses_the_numerics_its_substrate_has_no_door_for(tmp_path: Path) -> None:
+    """a magnetized run installs the limiter, the solver and the edge EMF; a request for a
+    reconstruction, a flattening or an equation of state it cannot install is refused by
+    name rather than ignored, so a comparison never appears to exercise it."""
+    layout = _layout(tmp_path / "two.toml", workers=2, shape=(2, 1))
+    # a synge equation of state is refused by the problem's own validation before the launch
+    # scope sees it, so the reconstruction request is the one that reaches the scope
+    for flags, reason in [(["--reconstruction", "ppm"], "ppm reconstruction with the nmhd regime")]:
+        out = tmp_path / reason.split()[0]
+        cmd = _mhd_launch_command(out, layout, 1) + flags
+        done = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
+        assert done.returncode != 0, f"the launch succeeded with {flags}:\n{done.stdout}"
+        # the error printer wraps long messages at the terminal width
+        flat = " ".join(done.stderr.split())
+        assert f"{reason} is outside the distributed first release" in flat, done.stderr
