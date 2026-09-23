@@ -482,12 +482,29 @@ pub struct AuditedCheckpointCost {
     pub checkpoint: std::time::Duration,
 }
 
+/// the audit a checkpoint's state has, or gets, before it is written.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AuditBasis {
+    /// the state as the prime exchange left it. the prime audit certified every shared face
+    /// of that state, and the invariant the caller asserts by choosing this is that no
+    /// stage, exchange, rollback or restore has touched a face field since: the caller
+    /// writes this checkpoint before its march begins. no second audit runs.
+    Primed,
+    /// the state that completed step `k`. an audit runs first, at an epoch that sorts after
+    /// every exchange of step `k` and before the next step's.
+    AfterStep(u64),
+}
+
+impl AuditBasis {
+    /// `Primed` when the plan audits nothing, whatever the basis: there is no face to compare.
+    fn filter_audited(self, has_audits: bool) -> Self {
+        if has_audits { self } else { AuditBasis::Primed }
+    }
+}
+
 /// audit every shared interface face of the state to be written, then write the checkpoint.
 /// the audit runs before the checkpoint transaction opens, so a mismatch ends the session
-/// with no temporary created and no file published. `after_step` is the step the state
-/// completed; the audit's epoch sorts after every exchange of that step and before the next
-/// step's. `None` writes a state no step has touched since the prime exchange, whose own
-/// audit already certified it, so no second audit runs.
+/// with no temporary created and no file published.
 #[allow(clippy::too_many_arguments)]
 pub fn audited_checkpoint<R, const D: usize, const DOF: usize, Mem, L>(
     fabric: &mut Fabric<L>,
@@ -496,7 +513,7 @@ pub fn audited_checkpoint<R, const D: usize, const DOF: usize, Mem, L>(
     level: &LevelTiles<'_, D, DOF, Mem>,
     tile_ids: &[TileId],
     req: &CheckpointRequest<'_>,
-    after_step: Option<u64>,
+    basis: AuditBasis,
 ) -> Result<AuditedCheckpointCost, CheckpointError>
 where
     R: Regime<f64, D>,
@@ -504,7 +521,7 @@ where
     L: Link,
 {
     let mut cost = AuditedCheckpointCost::default();
-    if let Some(step) = after_step.filter(|_| exchange.has_audits()) {
+    if let AuditBasis::AfterStep(step) = basis.filter_audited(exchange.has_audits()) {
         let stores: Vec<&crate::state::FieldStore<D, DOF, Mem, f64>> =
             level.tiles.iter().map(|t| t.state).collect();
         let fields = crate::worker::field_lists(tile_ids, &stores, exchange.plan().n_tiles());

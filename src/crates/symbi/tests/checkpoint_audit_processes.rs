@@ -35,7 +35,7 @@ use symbi_io::Metadata;
 use symbi_sim::atlas::{ExchangePlan, ExchangePoint, Placement, TileId};
 use symbi_sim::checkpoint::{GlobalGrid, LevelTiles, PhysicsIdentity, TileView};
 use symbi_sim::distributed_checkpoint::{
-    CheckpointError, CheckpointRequest, audited_checkpoint, block_credit_for,
+    AuditBasis, CheckpointError, CheckpointRequest, audited_checkpoint, block_credit_for,
 };
 use symbi_sim::plan_exchange::PlanExchange;
 use symbi_sim::substrate_seam::KernelSet;
@@ -189,7 +189,7 @@ fn run_worker(me: WorkerId, ckpt: &Path) -> Result<(), String> {
             vote_no: false,
         };
         let cost = audited_checkpoint::<NewtonianMhd, 2, 3, HostMemory, _>(
-            &mut fabric, &exchange, &identity, &level, &tiles, &req, Some(0),
+            &mut fabric, &exchange, &identity, &level, &tiles, &req, AuditBasis::AfterStep(0),
         )
         .map_err(|e| match e {
             CheckpointError::Interface(m) => format!("interface: {m}"),

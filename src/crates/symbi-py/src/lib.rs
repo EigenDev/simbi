@@ -10262,7 +10262,7 @@ fn run_worker_process(
     use symbi_fabric::{Fabric, WorkerId};
     use symbi_sim::atlas::{ExchangePlan, Placement, TileId};
     use symbi_sim::checkpoint::{LevelTiles, PhysicsIdentity, TileView, load_partitioned_level};
-    use symbi_sim::distributed_checkpoint::{CheckpointRequest, audited_checkpoint, block_credit_for};
+    use symbi_sim::distributed_checkpoint::{AuditBasis, CheckpointRequest, audited_checkpoint, block_credit_for};
     use symbi_sim::plan_exchange::PlanExchange;
     use symbi_sim::substrate_seam::RegimeKind;
     use symbi_sim::worker::{WorkerConfig, WorkerError, evolve_worker};
@@ -10430,14 +10430,15 @@ fn run_worker_process(
 
     // one checkpoint through the coordinator from this worker's tiles as they stand: the
     // shared interface faces are audited first when the plan has any, then the file is
-    // written. `after_step` is the step the state completed, `None` for the state as primed.
-    // returns the audit's and the checkpoint's own wall times apart.
+    // written. the basis says whether the state is the primed one, written before the march
+    // and certified by the prime audit, or the one that completed a step. returns the audit's
+    // and the checkpoint's own wall times apart.
     let audit_total = std::cell::Cell::new((0u64, symbi_sim::plan_exchange::AuditCost::default()));
     let write = |sh: &[&symbi_sim::state::FieldStore<2, 2, _, f64>],
                  fabric: &mut Fabric<_>,
                  path: &str,
                  cp_index: u64,
-                 after_step: Option<u64>|
+                 basis: AuditBasis|
      -> Result<f64, String> {
         let level = LevelTiles {
             tiles: sh
@@ -10458,10 +10459,10 @@ fn run_worker_process(
             vote_no: false,
         };
         let cost = audited_checkpoint::<Newtonian, 2, 2, _, _>(
-            fabric, &exchange, &identity, &level, &tile_ids, &req, after_step,
+            fabric, &exchange, &identity, &level, &tile_ids, &req, basis,
         )
         .map_err(|e| checkpoint_write_error(path, symbi_io::IoError::Backend(e.to_string())))?;
-        if after_step.is_some() && exchange.has_audits() {
+        if basis != AuditBasis::Primed && exchange.has_audits() {
             let (n, mut sum) = audit_total.get();
             sum.faces += cost.audit.faces;
             sum.wire_bytes += cost.audit.wire_bytes;
@@ -10482,7 +10483,9 @@ fn run_worker_process(
             let sh: Vec<&symbi_sim::state::FieldStore<2, 2, _, f64>> = stores.iter().map(|s| &**s).collect();
             let tag = checkpoint_tag(cfg, 0, cp_width, cfg.start_time, cfg.checkpoint_index);
             let path = checkpoint_name(cfg, &tag);
-            let io = write(&sh, &mut fabric, &path, cfg.checkpoint_index, None)?;
+            // before the march: the prime audit certified this state and nothing has touched
+            // a face since
+            let io = write(&sh, &mut fabric, &path, cfg.checkpoint_index, AuditBasis::Primed)?;
             if let Some(r) = reporter.as_mut() {
                 r.checkpoint_written(cfg, &path, cfg.start_time, io);
             }
@@ -10523,7 +10526,7 @@ fn run_worker_process(
                     let tag = checkpoint_tag(cfg, 0, cp_width, time, cp_index);
                     let path = checkpoint_name(cfg, &tag);
                     // the state completed step `iter`, whose exchanges ran under step index iter - 1
-                    let io = write(sh, fabric, &path, cp_index, Some(iter - 1)).map_err(WorkerError::Checkpoint)?;
+                    let io = write(sh, fabric, &path, cp_index, AuditBasis::AfterStep(iter - 1)).map_err(WorkerError::Checkpoint)?;
                     if let Some(r) = reporter.as_mut() {
                         r.checkpoint_written(cfg, &path, time, io);
                     }
@@ -10538,7 +10541,13 @@ fn run_worker_process(
         .map_err(|e| e.to_string())?;
         let sh: Vec<&symbi_sim::state::FieldStore<2, 2, _, f64>> = stores.iter().map(|s| &**s).collect();
         let final_path = checkpoint_name(cfg, checkpoint_status_tag(CheckpointOutcome::Completed));
-        let io = write(&sh, &mut fabric, &final_path, cp_index, report.steps.checked_sub(1))?;
+        let io = write(
+            &sh,
+            &mut fabric,
+            &final_path,
+            cp_index,
+            report.steps.checked_sub(1).map_or(AuditBasis::Primed, AuditBasis::AfterStep),
+        )?;
         if let Some(r) = reporter.as_mut() {
             r.checkpoint_written(cfg, &final_path, report.time, io);
         }
