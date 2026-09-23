@@ -10262,7 +10262,7 @@ fn run_worker_process(
     use symbi_fabric::{Fabric, WorkerId};
     use symbi_sim::atlas::{ExchangePlan, Placement, TileId};
     use symbi_sim::checkpoint::{LevelTiles, PhysicsIdentity, TileView, load_partitioned_level};
-    use symbi_sim::distributed_checkpoint::{CheckpointRequest, block_credit_for, distributed_checkpoint};
+    use symbi_sim::distributed_checkpoint::{CheckpointRequest, audited_checkpoint, block_credit_for};
     use symbi_sim::plan_exchange::PlanExchange;
     use symbi_sim::substrate_seam::RegimeKind;
     use symbi_sim::worker::{WorkerConfig, WorkerError, evolve_worker};
@@ -10428,11 +10428,16 @@ fn run_worker_process(
     let cp_width = checkpoint_time_width(cfg);
     let extras_of = |cp_index: u64| checkpoint_metadata(cfg, cp_index);
 
-    // one checkpoint through the coordinator from this worker's tiles as they stand
+    // one checkpoint through the coordinator from this worker's tiles as they stand: the
+    // shared interface faces are audited first when the plan has any, then the file is
+    // written. `after_step` is the step the state completed, `None` for the state as primed.
+    // returns the audit's and the checkpoint's own wall times apart.
+    let audit_total = std::cell::Cell::new((0u64, symbi_sim::plan_exchange::AuditCost::default()));
     let write = |sh: &[&symbi_sim::state::FieldStore<2, 2, _, f64>],
                  fabric: &mut Fabric<_>,
                  path: &str,
-                 cp_index: u64|
+                 cp_index: u64,
+                 after_step: Option<u64>|
      -> Result<f64, String> {
         let level = LevelTiles {
             tiles: sh
@@ -10452,10 +10457,18 @@ fn run_worker_process(
             duplicate_first_block: false,
             vote_no: false,
         };
-        let t_io = std::time::Instant::now();
-        distributed_checkpoint::<Newtonian, 2, 2, _, _>(fabric, &plan, &placement, &identity, &level, &tile_ids, &req)
-            .map_err(|e| checkpoint_write_error(path, symbi_io::IoError::Backend(e.to_string())))?;
-        Ok(t_io.elapsed().as_secs_f64())
+        let cost = audited_checkpoint::<Newtonian, 2, 2, _, _>(
+            fabric, &exchange, &identity, &level, &tile_ids, &req, after_step,
+        )
+        .map_err(|e| checkpoint_write_error(path, symbi_io::IoError::Backend(e.to_string())))?;
+        if after_step.is_some() && exchange.has_audits() {
+            let (n, mut sum) = audit_total.get();
+            sum.faces += cost.audit.faces;
+            sum.wire_bytes += cost.audit.wire_bytes;
+            sum.elapsed += cost.audit.elapsed;
+            audit_total.set((n + 1, sum));
+        }
+        Ok(cost.checkpoint.as_secs_f64())
     };
 
     let mut stores: Vec<&mut symbi_sim::state::FieldStore<2, 2, _, f64>> = Vec::new();
@@ -10469,7 +10482,7 @@ fn run_worker_process(
             let sh: Vec<&symbi_sim::state::FieldStore<2, 2, _, f64>> = stores.iter().map(|s| &**s).collect();
             let tag = checkpoint_tag(cfg, 0, cp_width, cfg.start_time, cfg.checkpoint_index);
             let path = checkpoint_name(cfg, &tag);
-            let io = write(&sh, &mut fabric, &path, cfg.checkpoint_index)?;
+            let io = write(&sh, &mut fabric, &path, cfg.checkpoint_index, None)?;
             if let Some(r) = reporter.as_mut() {
                 r.checkpoint_written(cfg, &path, cfg.start_time, io);
             }
@@ -10509,7 +10522,8 @@ fn run_worker_process(
                 if time + f64::EPSILON >= next_cp {
                     let tag = checkpoint_tag(cfg, 0, cp_width, time, cp_index);
                     let path = checkpoint_name(cfg, &tag);
-                    let io = write(sh, fabric, &path, cp_index).map_err(WorkerError::Checkpoint)?;
+                    // the state completed step `iter`, whose exchanges ran under step index iter - 1
+                    let io = write(sh, fabric, &path, cp_index, Some(iter - 1)).map_err(WorkerError::Checkpoint)?;
                     if let Some(r) = reporter.as_mut() {
                         r.checkpoint_written(cfg, &path, time, io);
                     }
@@ -10524,7 +10538,7 @@ fn run_worker_process(
         .map_err(|e| e.to_string())?;
         let sh: Vec<&symbi_sim::state::FieldStore<2, 2, _, f64>> = stores.iter().map(|s| &**s).collect();
         let final_path = checkpoint_name(cfg, checkpoint_status_tag(CheckpointOutcome::Completed));
-        let io = write(&sh, &mut fabric, &final_path, cp_index)?;
+        let io = write(&sh, &mut fabric, &final_path, cp_index, report.steps.checked_sub(1))?;
         if let Some(r) = reporter.as_mut() {
             r.checkpoint_written(cfg, &final_path, report.time, io);
         }
@@ -10533,9 +10547,14 @@ fn run_worker_process(
         {
             use std::io::Write;
             let t = report.timing;
+            // the interface audits run before each checkpoint transaction opened, apart from
+            // the checkpoints' own time: their count, the faces compared, the bytes sent, and
+            // their wall time
+            let (audits, audit) = audit_total.get();
             let line = format!(
                 "SIMBI launch: worker={}/{} steps={} rejections={} compute={:.6}s collectives={:.6}s \
-                 exchange={:.6}s final_checkpoint={:.6}s\n",
+                 exchange={:.6}s final_checkpoint={:.6}s checkpoint_audits={} audit_faces={} \
+                 audit_bytes={} checkpoint_audit={:.6}s\n",
                 launch.worker,
                 launch.workers,
                 report.steps,
@@ -10544,6 +10563,10 @@ fn run_worker_process(
                 t.collectives.as_secs_f64(),
                 t.exchange.as_secs_f64(),
                 io,
+                audits,
+                audit.faces,
+                audit.wire_bytes,
+                audit.elapsed.as_secs_f64(),
             );
             let _ = std::io::stderr().write_all(line.as_bytes());
             // the halo frames one exchange point sends each peer on each axis, and how the

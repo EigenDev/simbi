@@ -42,6 +42,14 @@ impl<'p, const D: usize> PlanExchange<'p, D> {
         }
     }
 
+    pub fn plan(&self) -> &'p ExchangePlan<D> {
+        self.plan
+    }
+
+    pub fn placement(&self) -> &'p Placement {
+        self.placement
+    }
+
     pub fn epoch(point: ExchangePoint, step: u64, attempt: u16, axis: usize) -> Epoch {
         Epoch {
             step,

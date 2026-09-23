@@ -190,7 +190,7 @@ fn refuse<const D: usize, const DOF: usize, M: MemorySpace, K: KernelSet<D, DOF,
 }
 
 /// `fields[tile][field]` for every held tile, in schema order; unheld tiles are empty.
-fn field_lists<'a, const D: usize, const DOF: usize, M: MemorySpace>(
+pub fn field_lists<'a, const D: usize, const DOF: usize, M: MemorySpace>(
     tiles: &[TileId],
     stores: &[&'a FieldStore<D, DOF, M, f64>],
     n_tiles: usize,

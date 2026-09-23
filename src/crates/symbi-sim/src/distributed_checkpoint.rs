@@ -44,6 +44,8 @@ pub enum CheckpointError {
     Io(IoError),
     /// the collective verdict was negative: a worker or the coordinator failed
     Refused(String),
+    /// two tiles hold different values for a shared interface face of the state to be written
+    Interface(crate::plan_exchange::InterfaceMismatch),
 }
 
 impl std::fmt::Display for CheckpointError {
@@ -52,6 +54,7 @@ impl std::fmt::Display for CheckpointError {
             CheckpointError::Fabric(e) => write!(f, "checkpoint fabric: {e}"),
             CheckpointError::Io(e) => write!(f, "checkpoint io: {e}"),
             CheckpointError::Refused(d) => write!(f, "checkpoint refused: {d}"),
+            CheckpointError::Interface(m) => write!(f, "checkpoint audit: {m}"),
         }
     }
 }
@@ -467,4 +470,68 @@ where
         }
         Ok(())
     }
+}
+
+
+/// what an audited checkpoint cost: the interface audit apart from the checkpoint's own
+/// collectives and I/O.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct AuditedCheckpointCost {
+    pub audit: crate::plan_exchange::AuditCost,
+    /// the checkpoint from its open vote to its publication
+    pub checkpoint: std::time::Duration,
+}
+
+/// audit every shared interface face of the state to be written, then write the checkpoint.
+/// the audit runs before the checkpoint transaction opens, so a mismatch ends the session
+/// with no temporary created and no file published. `after_step` is the step the state
+/// completed; the audit's epoch sorts after every exchange of that step and before the next
+/// step's. `None` writes a state no step has touched since the prime exchange, whose own
+/// audit already certified it, so no second audit runs.
+#[allow(clippy::too_many_arguments)]
+pub fn audited_checkpoint<R, const D: usize, const DOF: usize, Mem, L>(
+    fabric: &mut Fabric<L>,
+    exchange: &crate::plan_exchange::PlanExchange<'_, D>,
+    identity: &PhysicsIdentity,
+    level: &LevelTiles<'_, D, DOF, Mem>,
+    tile_ids: &[TileId],
+    req: &CheckpointRequest<'_>,
+    after_step: Option<u64>,
+) -> Result<AuditedCheckpointCost, CheckpointError>
+where
+    R: Regime<f64, D>,
+    Mem: MemorySpace,
+    L: Link,
+{
+    let mut cost = AuditedCheckpointCost::default();
+    if let Some(step) = after_step.filter(|_| exchange.has_audits()) {
+        let stores: Vec<&crate::state::FieldStore<D, DOF, Mem, f64>> =
+            level.tiles.iter().map(|t| t.state).collect();
+        let fields = crate::worker::field_lists(tile_ids, &stores, exchange.plan().n_tiles());
+        cost.audit = exchange
+            .audit(
+                &fields,
+                fabric,
+                crate::atlas::AuditAt::Checkpoint,
+                step,
+                u16::MAX,
+                req.deadline,
+            )
+            .map_err(|e| match e {
+                crate::plan_exchange::AuditError::Fabric(e) => CheckpointError::Fabric(e),
+                crate::plan_exchange::AuditError::Mismatch(m) => CheckpointError::Interface(m),
+            })?;
+    }
+    let clock = std::time::Instant::now();
+    distributed_checkpoint::<R, D, DOF, Mem, L>(
+        fabric,
+        exchange.plan(),
+        exchange.placement(),
+        identity,
+        level,
+        tile_ids,
+        req,
+    )?;
+    cost.checkpoint = clock.elapsed();
+    Ok(cost)
 }
