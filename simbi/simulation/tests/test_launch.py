@@ -27,7 +27,11 @@ import pytest
 
 from simbi.simulation import launcher
 from simbi.simulation.runner import _load_backend, to_execution_dict
+from simbi_configs.examples.ibm.roche_passage import RochePassage
 from simbi_configs.examples.newtonian.kh import KelvinHelmholtz
+from simbi_configs.examples.newtonian.nmhd_orszag_tang import NewtonianOrszagTang
+from simbi_configs.examples.newtonian.refined_kh import RefinedKelvinHelmholtz
+from simbi_configs.examples.srmhd.magnetic_blast import MagneticBomb
 
 from simbi.simulation.tests.process_guard import ProcessGuard, descendants
 
@@ -153,7 +157,10 @@ def _interior(f: h5py.File) -> dict[str, np.ndarray]:
         if name.startswith("mesh/") or name.startswith("partition_0/owned") or "/domain/" in name:
             continue
         data = level[name][()]
-        if data.ndim == 2:
+        if "/magnetic/" in name:
+            # a staggered face field is stored over its interior faces alone
+            out[name] = data
+        elif data.ndim == 2:
             out[name] = data[ng:-ng, ng:-ng]
     assert out, "no field datasets under level_0"
     return out
@@ -439,3 +446,152 @@ def test_the_guard_kills_its_own_descendants_alone() -> None:
         for p in (root, bystander):
             p.kill()
             p.wait()
+
+
+# -----------------------------------------------------------------------------
+# ideal newtonian MHD through the public path. the orszag-tang vortex corrects nothing by
+# itself; the correction-active arm raises the troubled flag on one physical cell against
+# the cut at a named step and audits the shared faces after every exchange.
+# -----------------------------------------------------------------------------
+
+MHD_SCRIPT = str(Path(NewtonianOrszagTang.__module__.replace(".", "/") + ".py"))
+MHD_RESOLUTION = (32, 32)
+MHD_STEPS = 8
+MHD_REFERENCE_SNIPPET = """
+import sys
+from simbi.simulation import runner
+from simbi_configs.examples.newtonian.nmhd_orszag_tang import NewtonianOrszagTang
+out, steps = sys.argv[1], int(sys.argv[2])
+runner.run(NewtonianOrszagTang(resolution=({rx}, {ry}, 1), data_directory=out, checkpoint_interval=1e9), compute_mode="cpu", max_steps=steps)
+"""
+
+
+def _mhd_reference(out: Path, steps: int) -> Path:
+    snippet = MHD_REFERENCE_SNIPPET.format(rx=MHD_RESOLUTION[0], ry=MHD_RESOLUTION[1])
+    done = subprocess.run([sys.executable, "-c", snippet, str(out), str(steps)], capture_output=True, text=True, timeout=600)
+    assert done.returncode == 0, f"reference failed:\n{done.stderr}"
+    files = sorted(out.glob("*final*.h5"))
+    assert len(files) == 1, f"expected one final checkpoint in {out}, found {files}"
+    return files[0]
+
+
+def _mhd_launch_command(out: Path, layout: Path, steps: int, checkpoint: Path | None = None) -> list[str]:
+    cmd = [
+        sys.executable, "-m", "simbi.cli", "launch", MHD_SCRIPT,
+        "--layout", str(layout), "--max-steps", str(steps),
+        "--resolution", f"{MHD_RESOLUTION[0]},{MHD_RESOLUTION[1]},1",
+        "--data-directory", str(out), "--checkpoint-interval", "1e9",
+    ]
+    if checkpoint is not None:
+        cmd += ["--checkpoint", str(checkpoint)]
+    return cmd
+
+
+def _mhd_launch(out: Path, layout: Path, steps: int, workers: int, checkpoint: Path | None = None, env: dict[str, str] | None = None) -> Launched:
+    full_env = dict(os.environ, **(env or {}))
+    done = subprocess.run(_mhd_launch_command(out, layout, steps, checkpoint), capture_output=True, text=True, timeout=600, env=full_env)
+    assert done.returncode == 0, f"launch failed:\nstdout:\n{done.stdout}\nstderr:\n{done.stderr}"
+    exits = {int(w): int(c) for w, c in EXIT.findall(done.stdout)}
+    assert sorted(exits) == list(range(workers)) and all(c == 0 for c in exits.values()), f"worker exit codes {exits}"
+    files = sorted(out.glob("*final*.h5"))
+    assert len(files) == 1, f"expected one final checkpoint in {out}, found {files}"
+    return Launched(final=files[0], backend=_backend_of(done.stderr), exits=exits)
+
+
+def _max_div_b(path: Path) -> float:
+    """the largest |div B| over the cells of a checkpoint from its staggered faces."""
+    with h5py.File(path, "r") as f:
+        b1 = f["level_0/partition_0/hydro/magnetic/B1/data"][()]
+        b2 = f["level_0/partition_0/hydro/magnetic/B2/data"][()]
+    ny, nx1 = b1.shape
+    nx = nx1 - 1
+    assert b2.shape == (ny + 1, nx), f"face shapes {b1.shape}, {b2.shape}"
+    h = 1.0 / nx
+    div = (b1[:, 1:] - b1[:, :-1]) / h + (b2[1:, :] - b2[:-1, :]) / h
+    return float(abs(div).max())
+
+
+def test_a_magnetized_launch_matches_the_single_grid_run(tmp_path: Path) -> None:
+    reference = _mhd_reference(tmp_path / "single", MHD_STEPS)
+    layout = _layout(tmp_path / "two.toml", workers=2, shape=(2, 1))
+    launched = _mhd_launch(tmp_path / "two", layout, MHD_STEPS, workers=2)
+    with h5py.File(reference, "r") as f:
+        assert "level_0/partition_0/hydro/magnetic/B1/data" in f, "the reference carries no staggered faces"
+    _assert_same_state(launched.final, reference, "two magnetized workers")
+    assert _max_div_b(launched.final) < 1e-10
+
+
+def test_a_magnetized_launch_resumed_onto_three_uneven_workers_matches(tmp_path: Path) -> None:
+    reference = _mhd_reference(tmp_path / "single", MHD_STEPS)
+    layout2 = _layout(tmp_path / "two.toml", workers=2, shape=(2, 1))
+    partial = _mhd_launch(tmp_path / "first", layout2, MHD_STEPS // 2, workers=2)
+    with h5py.File(partial.final, "r") as f:
+        written_at = int(f["level_0"].attrs["iteration"])
+    assert 0 < written_at < MHD_STEPS
+    layout3 = _layout(tmp_path / "three.toml", workers=3, cuts=[[10, 21], []])
+    resumed = _mhd_launch(tmp_path / "three", layout3, MHD_STEPS - written_at, workers=3, checkpoint=partial.final)
+    with h5py.File(resumed.final, "r") as fr, h5py.File(reference, "r") as fs:
+        assert fr["level_0"].attrs["time"] == fs["level_0"].attrs["time"]
+        assert int(fr["level_0"].attrs["iteration"]) == MHD_STEPS
+    _assert_same_state(resumed.final, reference, "magnetized, resumed on three workers")
+    assert _max_div_b(resumed.final) < 1e-10
+
+
+def test_a_magnetized_launch_with_a_correction_against_the_cut_matches_one_worker(tmp_path: Path) -> None:
+    """the flag raised on the cell against the cut at step 3 in the predictor, on whichever
+    worker holds it, with the shared faces audited after every exchange: two workers equal one
+    worker under the same flag, and the flag changed the run."""
+    one = _layout(tmp_path / "one.toml", workers=1, shape=(1, 1))
+    two = _layout(tmp_path / "two.toml", workers=2, shape=(2, 1))
+    clean = _mhd_launch(tmp_path / "clean", one, MHD_STEPS, workers=1)
+    inject = {"SIMBI_FABRIC_INJECT": f"trouble:3:0:{MHD_RESOLUTION[0] // 2 - 1}:{MHD_RESOLUTION[1] // 3}", "SIMBI_FABRIC_AUDIT": "all"}
+    reference = _mhd_launch(tmp_path / "one", one, MHD_STEPS, workers=1, env=inject)
+    launched = _mhd_launch(tmp_path / "two", two, MHD_STEPS, workers=2, env=inject)
+    with h5py.File(clean.final, "r") as fc, h5py.File(reference.final, "r") as fr:
+        xs, ys = _interior(fc), _interior(fr)
+        assert any(not np.array_equal(xs[name], ys[name]) for name in xs), "the flag left the one-worker run unchanged; the gate is vacuous"
+    _assert_same_state(launched.final, reference.final, "two magnetized workers, trouble against the cut")
+    assert _max_div_b(launched.final) < 1e-10
+
+
+def test_a_shared_face_mismatch_exits_every_worker_and_publishes_no_checkpoint(tmp_path: Path) -> None:
+    """worker 1's opening copy of a shared face moved by a unit in the last place after step
+    3: the audit before the next checkpoint names it, every worker exits nonzero, and no
+    checkpoint is published."""
+    layout = _layout(tmp_path / "two.toml", workers=2, shape=(2, 1))
+    out = tmp_path / "two"
+    env = dict(os.environ, SIMBI_FABRIC_INJECT="face:1:3")
+    done = subprocess.run(_mhd_launch_command(out, layout, MHD_STEPS), capture_output=True, text=True, timeout=600, env=env)
+    assert done.returncode != 0, f"the launch succeeded:\n{done.stdout}"
+    exits = {int(w): int(c) for w, c in EXIT.findall(done.stdout)}
+    assert sorted(exits) == [0, 1] and all(c != 0 for c in exits.values()), f"worker exit codes {exits}"
+    assert "shared-face mismatch on bface0" in done.stderr, done.stderr
+    # the checkpoint of the primed state, written before the march, is the only file: no
+    # checkpoint of a state after the perturbation, the final one included, was published
+    published = sorted(out.glob("*.h5"))
+    assert len(published) == 1 and "final" not in published[0].name, f"published: {published}"
+    with h5py.File(published[0], "r") as f:
+        assert int(f["level_0"].attrs["iteration"]) == 0, "a checkpoint after the perturbation was published"
+
+
+MHD_BLAST = str(Path(MagneticBomb.__module__.replace(".", "/") + ".py"))
+REFINED_KH = str(Path(RefinedKelvinHelmholtz.__module__.replace(".", "/") + ".py"))
+ROCHE_PASSAGE = str(Path(RochePassage.__module__.replace(".", "/") + ".py"))
+
+
+@pytest.mark.parametrize(
+    ("script", "reason"),
+    [(MHD_BLAST, "the rmhd regime"), (REFINED_KH, "mesh refinement"), (ROCHE_PASSAGE, "an immersed body")],
+)
+def test_out_of_scope_problems_are_refused_by_name(tmp_path: Path, script: str, reason: str) -> None:
+    # a layout with as many axes as the problem's grid, so the refusal is the scope's
+    problem_class = {MHD_BLAST: MagneticBomb, REFINED_KH: RefinedKelvinHelmholtz, ROCHE_PASSAGE: RochePassage}[script]
+    default = problem_class.model_fields["resolution"].default
+    dims = max(1, sum(1 for r in default if int(r) > 1))
+    layout = _layout(tmp_path / "two.toml", workers=2, shape=(2,) + (1,) * (dims - 1))
+    out = tmp_path / "out"
+    cmd = [sys.executable, "-m", "simbi.cli", "launch", script, "--layout", str(layout), "--max-steps", "1", "--data-directory", str(out), "--checkpoint-interval", "1e9"]
+    done = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
+    assert done.returncode != 0, f"the launch succeeded:\n{done.stdout}"
+    assert f"{reason} is outside the distributed first release" in done.stderr, done.stderr
+    assert not (out.exists() and list(out.glob("*.h5"))), "a checkpoint was published"

@@ -357,8 +357,12 @@ counters printed with the run summary show whether it fired.
 
 `simbi launch` evolves one problem across worker processes that exchange
 boundary data over TCP on the local host, without MPI. It covers 2D Cartesian
-adiabatic Newtonian hydro on a uniform static grid; every other configuration
-is refused at startup with the property named. A layout file names the worker
+adiabatic Newtonian hydro and ideal Newtonian MHD on a uniform static grid;
+every other configuration is refused at startup with the property named. A
+magnetized run audits the two copies of every face two workers share after
+the initial exchange and before every checkpoint, and after every exchange
+under `SIMBI_FABRIC_AUDIT=all`; a disagreement ends the run with the face
+named and publishes no checkpoint. A layout file names the worker
 count and the partition, and each worker holds one tile:
 
 ```toml

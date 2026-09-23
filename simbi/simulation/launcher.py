@@ -111,6 +111,11 @@ class Layout:
 
     @classmethod
     def from_file(cls, path: str, resolution: Sequence[int]) -> "Layout":
+        # a problem may state its resolution with trailing unit axes, (nx, ny, 1) for a plane;
+        # the grid the partition cuts has as many axes as the resolution has entries above one
+        cells = [int(r) for r in resolution]
+        effective = max(1, sum(1 for c in cells if c > 1))
+        resolution = cells[:effective]
         with open(path, "rb") as f:
             doc = tomllib.load(f)
         execution = doc.get("execution", {})

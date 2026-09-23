@@ -10148,13 +10148,17 @@ struct WorkerLaunch {
 /// a fault a validation run asks one worker to produce, from `SIMBI_FABRIC_INJECT`:
 /// `reject:WORKER:STEP:STAGE` reports a stage rejection, `bad_cfl:WORKER:STEP` reports an
 /// invalid timestep candidate, `exit:WORKER:STEP` ends the process after that step as a lost
-/// node would. `trouble:STEP:STAGE:I:J` names a global cell and no worker: whichever worker
+/// node would, `face:WORKER:STEP` moves one of that worker's shared-face copies by a unit in
+/// the last place after that step so the next audit names it. `trouble:STEP:STAGE:I:J` names a global cell and no worker: whichever worker
 /// holds the cell raises its troubled flag at that stage, so the same value drives a run on
 /// any partition. unset, every worker runs clean.
 #[derive(Default)]
 struct LaunchFault {
     injection: symbi_sim::worker::Injection,
     exit_after: Option<u64>,
+    /// after this step, this worker's opening copy of one shared face is moved by one unit in
+    /// the last place: the next interface audit must name it
+    perturb_face_after: Option<u64>,
 }
 
 impl LaunchFault {
@@ -10180,7 +10184,7 @@ impl LaunchFault {
         }
         if number(1)? as usize != me {
             match parts[0] {
-                "reject" | "bad_cfl" | "exit" => return Ok(fault),
+                "reject" | "bad_cfl" | "exit" | "face" => return Ok(fault),
                 other => return Err(format!("SIMBI_FABRIC_INJECT: unknown fault '{other}'")),
             }
         }
@@ -10188,6 +10192,7 @@ impl LaunchFault {
             "reject" => fault.injection.reject_at = Some((number(2)?, number(3)? as usize)),
             "bad_cfl" => fault.injection.invalid_cfl_at = Some(number(2)?),
             "exit" => fault.exit_after = Some(number(2)?),
+            "face" => fault.perturb_face_after = Some(number(2)?),
             other => return Err(format!("SIMBI_FABRIC_INJECT: unknown fault '{other}'")),
         }
         Ok(fault)
@@ -10199,7 +10204,7 @@ impl LaunchFault {
 /// before any tile is built.
 fn validate_launch_scope(cfg: &Config) -> Result<(), String> {
     let refused = |what: &str| Err(format!("{what} is outside the distributed first release"));
-    if cfg.regime != "newtonian" {
+    if !matches!(cfg.regime.as_str(), "newtonian" | "nmhd") {
         return refused(&format!("the {} regime", cfg.regime));
     }
     if cfg.dims != 2 {
@@ -10251,25 +10256,22 @@ fn validate_launch_scope(cfg: &Config) -> Result<(), String> {
 /// restricted to the tiles this worker holds, the rendezvous under the session credential,
 /// the worker loop with the coordinator-written checkpoints at the linear cadence, and the
 /// final checkpoint before the session ends. worker 0 reports through the decomposed table.
+/// `bufs` holds the staggered face-field generators' output for a magnetized regime, one
+/// buffer per component, and is empty for hydro.
 fn run_worker_process(
     cfg: &Config,
     prims: &[Vec<f64>],
+    bufs: &[Vec<f64>],
     launch: &WorkerLaunch,
     drained: std::time::Duration,
 ) -> Result<(), String> {
-    use symbi::sim::decomp::{LocalCopy, plan_schema, unflatten};
-    use symbi_fabric::rendezvous::{Identity, Rendezvous, connect};
-    use symbi_fabric::{Fabric, WorkerId};
-    use symbi_sim::atlas::{ExchangePlan, Placement, TileId};
-    use symbi_sim::checkpoint::{LevelTiles, PhysicsIdentity, TileView, load_partitioned_level};
-    use symbi_sim::distributed_checkpoint::{AuditBasis, CheckpointRequest, audited_checkpoint, block_credit_for};
-    use symbi_sim::plan_exchange::PlanExchange;
-    use symbi_sim::substrate_seam::RegimeKind;
-    use symbi_sim::worker::{WorkerConfig, WorkerError, evolve_worker};
+    use symbi::sim::decomp::unflatten;
+    use symbi_fabric::WorkerId;
+    use symbi_sim::atlas::{Placement, TileId};
+    use symbi_sim::checkpoint::load_partitioned_level;
 
     validate_launch_scope(cfg)?;
     let fault = LaunchFault::from_env(launch.worker)?;
-    type Sim = SimDefaultGeneric<Newtonian, 2, 2, Cartesian, EosSelect<f64>>;
     let n: [usize; 2] = [cfg.n_cells[0], cfg.n_cells[1]];
     let total: usize = n.iter().product();
     if prims.len() != total {
@@ -10300,56 +10302,175 @@ fn run_worker_process(
         return Err(format!("worker {} holds no tile", launch.worker));
     }
     let offsets = tile_offsets(&partition);
-    let mut tiles = Vec::with_capacity(mine.len());
-    for &flat in &mine {
-        let tc = unflatten(flat, counts);
-        let ext = partition.tile_extents(tc);
-        let tile_lo: [usize; 2] = [ext[0].0, ext[1].0];
-        let m: [usize; 2] = [ext[0].1, ext[1].1];
-        let origin = tile_origin::<2>(cfg, tile_lo);
-        let spacing: [f64; 2] = [cfg.dx[0], cfg.dx[1]];
-        let bnd = tile_boundaries(&phys, tc, counts);
-        let sim = Sim::build(Newtonian, host_eos(cfg), Cartesian)
-            .cells(m)
-            .origin(origin)
-            .spacing(spacing)
-            .ghosts(ghost_width(cfg))
-            .boundaries(bnd)
-            .cfl(cfg.cfl)
-            .timestepping(cfg.timestepping)
-            .allocate()
-            .map_err(|e| format!("tile {flat} allocate: {e:?}"))?
-            .set_initial_indexed(|idx, _x| {
-                let lin = (tile_lo[0] + idx[0] as usize) + (tile_lo[1] + idx[1] as usize) * n[0];
-                let row = &prims[lin];
-                Prim::adiabatic(Density(row[0]), Tensor::new([row[1], row[2]]), Pressure(row[3]))
-            })
-            .build();
-        // the numerics the single path installs: reconstruction, the ppm flatten, the
-        // well-balanced reconstruction, the eos, and the solver
-        let sub = sim
-            .substrate()
-            .theta(theta)
-            .reconstruction(build_recon(cfg))
-            .ppm_flatten(cfg.ppm_flatten_onset, cfg.ppm_flatten_full)
-            .well_balanced_reconstruction(cfg.wb_reconstruction)
-            .with_eos(build_eos(cfg))
-            .with_solver(solver)
-            .map_err(|e| format!("tile {flat} substrate/solver: {e:?}"))?;
-        tiles.push((sim, sub));
+    // the tiles this worker holds, built as the single path builds them, per regime
+    match cfg.regime.as_str() {
+        "newtonian" => {
+            type Sim = SimDefaultGeneric<Newtonian, 2, 2, Cartesian, EosSelect<f64>>;
+        let mut tiles = Vec::with_capacity(mine.len());
+        for &flat in &mine {
+            let tc = unflatten(flat, counts);
+            let ext = partition.tile_extents(tc);
+            let tile_lo: [usize; 2] = [ext[0].0, ext[1].0];
+            let m: [usize; 2] = [ext[0].1, ext[1].1];
+            let origin = tile_origin::<2>(cfg, tile_lo);
+            let spacing: [f64; 2] = [cfg.dx[0], cfg.dx[1]];
+            let bnd = tile_boundaries(&phys, tc, counts);
+            let sim = Sim::build(Newtonian, host_eos(cfg), Cartesian)
+                .cells(m)
+                .origin(origin)
+                .spacing(spacing)
+                .ghosts(ghost_width(cfg))
+                .boundaries(bnd)
+                .cfl(cfg.cfl)
+                .timestepping(cfg.timestepping)
+                .allocate()
+                .map_err(|e| format!("tile {flat} allocate: {e:?}"))?
+                .set_initial_indexed(|idx, _x| {
+                    let lin = (tile_lo[0] + idx[0] as usize) + (tile_lo[1] + idx[1] as usize) * n[0];
+                    let row = &prims[lin];
+                    Prim::adiabatic(Density(row[0]), Tensor::new([row[1], row[2]]), Pressure(row[3]))
+                })
+                .build();
+            // the numerics the single path installs: reconstruction, the ppm flatten, the
+            // well-balanced reconstruction, the eos, and the solver
+            let sub = sim
+                .substrate()
+                .theta(theta)
+                .reconstruction(build_recon(cfg))
+                .ppm_flatten(cfg.ppm_flatten_onset, cfg.ppm_flatten_full)
+                .well_balanced_reconstruction(cfg.wb_reconstruction)
+                .with_eos(build_eos(cfg))
+                .with_solver(solver)
+                .map_err(|e| format!("tile {flat} substrate/solver: {e:?}"))?;
+            tiles.push((sim, sub));
+        }
+        let ng = tiles[0].0.geom.ng;
+        let grid = decomposed_grid::<2>(cfg, ng);
+        if let Some(path) = cfg.restart_path.as_deref() {
+            for (&flat, (sim, _)) in mine.iter().zip(tiles.iter_mut()) {
+                load_partitioned_level(sim, path, 0, offsets[flat], &grid)
+                    .map_err(|e| format!("restart of tile {flat} from '{path}': {e}"))?;
+            }
+        }
+        for (sim, _) in tiles.iter_mut() {
+            sim.time = cfg.start_time;
+        }
+        let built = build_clock.elapsed();
+            worker_session::<Newtonian, _, 2>(
+                cfg, launch, fault, drained, built, &partition, placement, &topology, me, &mine, &offsets, tiles,
+            )
+        }
+        "nmhd" => {
+            type Sim = SimDefaultGeneric<NewtonianMhd, 2, 3, Cartesian, EosSelect<f64>>;
+            if bufs.len() < 3 {
+                return Err(format!("mhd needs 3 staggered b-field generators, got {}", bufs.len()));
+            }
+            let ct = cfg.ct_method;
+            let mut tiles = Vec::with_capacity(mine.len());
+            for &flat in &mine {
+                let tc = unflatten(flat, counts);
+                let ext = partition.tile_extents(tc);
+                let tile_lo: [usize; 2] = [ext[0].0, ext[1].0];
+                let m: [usize; 2] = [ext[0].1, ext[1].1];
+                let origin = tile_origin::<2>(cfg, tile_lo);
+                let spacing: [f64; 2] = [cfg.dx[0], cfg.dx[1]];
+                let bnd = tile_boundaries(&phys, tc, counts);
+                // each tile's slice of the global staggered buffers: a shared interface face
+                // reads the same global value on both of its tiles
+                let tile_faces: Vec<Vec<f64>> =
+                    (0..2).map(|d| tile_face_buffer::<2>(&bufs[d], n, m, tile_lo, d)).collect();
+                let sim = Sim::build(NewtonianMhd, host_eos(cfg), Cartesian)
+                    .cells(m)
+                    .origin(origin)
+                    .spacing(spacing)
+                    .boundaries(bnd)
+                    .cfl(cfg.cfl)
+                    .timestepping(cfg.timestepping)
+                    .allocate()
+                    .map_err(|e| format!("tile {flat} allocate: {e:?}"))?
+                    .set_initial_indexed(|idx, _x| {
+                        let lin = (tile_lo[0] + idx[0] as usize) + (tile_lo[1] + idx[1] as usize) * n[0];
+                        let row = &prims[lin];
+                        let gidx: [isize; 2] =
+                            std::array::from_fn(|ax| tile_lo[ax] as isize + idx[ax]);
+                        let mag: [f64; 3] = std::array::from_fn(|k| {
+                            if k < 2 { face_avg_cell_b::<2>(&bufs[k], k, gidx, n) } else { bufs[k][lin] }
+                        });
+                        MhdPrim::new(
+                            Prim::adiabatic(Density(row[0]), Tensor::new([row[1], row[2], row[3]]), Pressure(row[4])),
+                            Tensor::new(mag),
+                        )
+                    })
+                    .seed_faces_indexed(&tile_faces)
+                    .build();
+                // the numerics the single magnetized path installs: the limiter, the solver
+                // and the edge EMF
+                let sub = sim
+                    .substrate()
+                    .theta(theta)
+                    .with_solver(solver)
+                    .map_err(|e| format!("tile {flat} substrate/solver: {e:?}"))?
+                    .ct_method(ct);
+                tiles.push((sim, sub));
+            }
+        let ng = tiles[0].0.geom.ng;
+        let grid = decomposed_grid::<2>(cfg, ng);
+        if let Some(path) = cfg.restart_path.as_deref() {
+            for (&flat, (sim, _)) in mine.iter().zip(tiles.iter_mut()) {
+                load_partitioned_level(sim, path, 0, offsets[flat], &grid)
+                    .map_err(|e| format!("restart of tile {flat} from '{path}': {e}"))?;
+            }
+        }
+        for (sim, _) in tiles.iter_mut() {
+            sim.time = cfg.start_time;
+        }
+        let built = build_clock.elapsed();
+            worker_session::<NewtonianMhd, _, 3>(
+                cfg, launch, fault, drained, built, &partition, placement, &topology, me, &mine, &offsets, tiles,
+            )
+        }
+        other => Err(format!("the {other} regime is outside the distributed first release")),
     }
+}
+
+/// the fabric session of one worker over its built tiles, whatever the regime: the
+/// rendezvous under the session credential, the worker loop with the coordinator-written
+/// checkpoints at the linear cadence, and the final checkpoint before the session ends.
+/// worker 0 reports through the decomposed table.
+#[allow(clippy::too_many_arguments)]
+fn worker_session<R, K, const DOF: usize>(
+    cfg: &Config,
+    launch: &WorkerLaunch,
+    fault: LaunchFault,
+    drained: std::time::Duration,
+    built: std::time::Duration,
+    partition: &Partition<2>,
+    placement: symbi_sim::atlas::Placement,
+    topology: &symbi::sim::decomp::Topology<2>,
+    me: symbi_fabric::WorkerId,
+    mine: &[usize],
+    offsets: &[[isize; 2]],
+    mut tiles: Vec<(SimDefaultGeneric<R, 2, DOF, Cartesian, EosSelect<f64>>, K)>,
+) -> Result<(), String>
+where
+    R: Regime<f64, 2>,
+    K: symbi_sim::substrate_seam::KernelSet<2, DOF, DefaultMemory, f64>,
+{
+    use symbi::sim::decomp::{LocalCopy, plan_schema};
+    use symbi_fabric::rendezvous::{Identity, Rendezvous, connect};
+    use symbi_fabric::{Fabric, WorkerId};
+    use symbi_sim::atlas::{ExchangePlan, TileId};
+    use symbi_sim::checkpoint::{LevelTiles, PhysicsIdentity, TileView};
+    use symbi_sim::distributed_checkpoint::{AuditBasis, CheckpointRequest, audited_checkpoint, block_credit_for};
+    use symbi_sim::plan_exchange::PlanExchange;
+    use symbi_sim::substrate_seam::RegimeKind;
+    use symbi_sim::worker::{WorkerConfig, WorkerError, evolve_worker};
+
+    let n: [usize; 2] = [cfg.n_cells[0], cfg.n_cells[1]];
+    let total: usize = n.iter().product();
+    let counts = partition.counts();
     let ng = tiles[0].0.geom.ng;
     let grid = decomposed_grid::<2>(cfg, ng);
-    if let Some(path) = cfg.restart_path.as_deref() {
-        for (&flat, (sim, _)) in mine.iter().zip(tiles.iter_mut()) {
-            load_partitioned_level(sim, path, 0, offsets[flat], &grid)
-                .map_err(|e| format!("restart of tile {flat} from '{path}': {e}"))?;
-        }
-    }
-    for (sim, _) in tiles.iter_mut() {
-        sim.time = cfg.start_time;
-    }
-    let built = build_clock.elapsed();
     let identity = PhysicsIdentity::of(&tiles[0].0);
     let tile_ids: Vec<TileId> = mine.iter().map(|&f| TileId(f as u32)).collect();
     let my_offsets: Vec<[isize; 2]> = mine.iter().map(|&f| offsets[f]).collect();
@@ -10434,7 +10555,7 @@ fn run_worker_process(
     // and certified by the prime audit, or the one that completed a step. returns the audit's
     // and the checkpoint's own wall times apart.
     let audit_total = std::cell::Cell::new((0u64, symbi_sim::plan_exchange::AuditCost::default()));
-    let write = |sh: &[&symbi_sim::state::FieldStore<2, 2, _, f64>],
+    let write = |sh: &[&symbi_sim::state::FieldStore<2, DOF, DefaultMemory, f64>],
                  fabric: &mut Fabric<_>,
                  path: &str,
                  cp_index: u64,
@@ -10458,7 +10579,7 @@ fn run_worker_process(
             duplicate_first_block: false,
             vote_no: false,
         };
-        let cost = audited_checkpoint::<Newtonian, 2, 2, _, _>(
+        let cost = audited_checkpoint::<R, 2, DOF, _, _>(
             fabric, &exchange, &identity, &level, &tile_ids, &req, basis,
         )
         .map_err(|e| checkpoint_write_error(path, symbi_io::IoError::Backend(e.to_string())))?;
@@ -10472,7 +10593,7 @@ fn run_worker_process(
         Ok(cost.checkpoint.as_secs_f64())
     };
 
-    let mut stores: Vec<&mut symbi_sim::state::FieldStore<2, 2, _, f64>> = Vec::new();
+    let mut stores: Vec<&mut symbi_sim::state::FieldStore<2, DOF, DefaultMemory, f64>> = Vec::new();
     let mut kernels = Vec::new();
     for (s, k) in tiles.iter_mut() {
         stores.push(&mut **s);
@@ -10480,7 +10601,7 @@ fn run_worker_process(
     }
     let outcome: Result<(u64, f64), String> = (|| {
         if cfg.checkpoint_index == 0 || cfg.start_time == 0.0 {
-            let sh: Vec<&symbi_sim::state::FieldStore<2, 2, _, f64>> = stores.iter().map(|s| &**s).collect();
+            let sh: Vec<&symbi_sim::state::FieldStore<2, DOF, DefaultMemory, f64>> = stores.iter().map(|s| &**s).collect();
             let tag = checkpoint_tag(cfg, 0, cp_width, cfg.start_time, cfg.checkpoint_index);
             let path = checkpoint_name(cfg, &tag);
             // before the march: the prime audit certified this state and nothing has touched
@@ -10493,7 +10614,7 @@ fn run_worker_process(
         let mut next_cp = cfg.start_time + cp_dt;
         let mut cp_index = cfg.checkpoint_index + 1;
         let worker_cfg = WorkerConfig {
-            regime: RegimeKind::of::<f64, 2, Newtonian>(),
+            regime: RegimeKind::of::<f64, 2, R>(),
             timestepping: cfg.timestepping,
             start_time: cfg.start_time,
             t_final: cfg.t_final,
@@ -10519,6 +10640,15 @@ fn run_worker_process(
                     // sockets closed by the operating system
                     std::process::exit(86);
                 }
+                if fault.perturb_face_after == Some(iter) {
+                    if let Some(mhd) = sh[0].fields.mhd.as_ref() {
+                        let field = &mhd.bface.b[0];
+                        let lo = [sh[0].geom.interior.spaces[0].lo, sh[0].geom.interior.spaces[1].lo];
+                        let at = [lo[0], lo[1] + 1];
+                        let old = *field.view().at(at);
+                        *field.view_mut().at_mut(at) = f64::from_bits(old.to_bits() + 1);
+                    }
+                }
                 if let Some(r) = reporter.as_mut() {
                     r.progress(iter, time);
                 }
@@ -10539,7 +10669,7 @@ fn run_worker_process(
             },
         )
         .map_err(|e| e.to_string())?;
-        let sh: Vec<&symbi_sim::state::FieldStore<2, 2, _, f64>> = stores.iter().map(|s| &**s).collect();
+        let sh: Vec<&symbi_sim::state::FieldStore<2, DOF, DefaultMemory, f64>> = stores.iter().map(|s| &**s).collect();
         let final_path = checkpoint_name(cfg, checkpoint_status_tag(CheckpointOutcome::Completed));
         let io = write(
             &sh,
@@ -10789,6 +10919,7 @@ mod canon_tests {
 fn launch_worker(
     py: Python<'_>,
     prim_gen: &Bound<'_, PyAny>,
+    staggered_bfields: &Bound<'_, PyAny>,
     sim_info: &Bound<'_, PyDict>,
     launch: &Bound<'_, PyDict>,
 ) -> PyResult<()> {
@@ -10829,8 +10960,9 @@ fn launch_worker(
     }
     let drain_clock = std::time::Instant::now();
     let prims = drain_prims(prim_gen)?;
+    let bufs = if cfg.regime == "nmhd" { drain_bfields(staggered_bfields)? } else { Vec::new() };
     let drained = drain_clock.elapsed();
-    py.detach(|| run_worker_process(&cfg, &prims, &params, drained))
+    py.detach(|| run_worker_process(&cfg, &prims, &bufs, &params, drained))
         .map_err(PyRuntimeError::new_err)
 }
 

@@ -914,7 +914,7 @@ def launch_worker(
     if backend is None:
         raise RuntimeError("no backend is available for launch")
     _require_backend_features(problem, backend)
-    prim_iterator, _bfield_iterators = _get_iterators(problem)
+    prim_iterator, bfield_iterators = _get_iterators(problem)
     prim_iterator = _check_first_tuple(problem, prim_iterator)
     # the python side of the startup timeline; the backend reports the drain, build, and
     # rendezvous on its own line
@@ -928,6 +928,7 @@ def launch_worker(
     )
     backend.launch_worker(
         prim_gen=prim_iterator,
+        staggered_bfields=bfield_iterators,
         sim_info=exec_dict,
         launch={
             "worker": int(worker),
