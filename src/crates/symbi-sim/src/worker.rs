@@ -176,16 +176,16 @@ fn refuse<const D: usize, const DOF: usize, M: MemorySpace, K: KernelSet<D, DOF,
             || store.fields.cons.chi.is_some()
         {
             Some("a passive scalar".to_string())
-        } else if kernel.is_viscous() {
-            Some("viscous transport".to_string())
         } else if store.immersed.is_some() {
             Some("an immersed body".to_string())
         } else if store.tracers.is_some() || store.continuous_tracers.is_some() {
             Some("a tracer population".to_string())
         } else if store.motion_law.is_some() {
             Some("mesh motion".to_string())
-        } else if kernel.excise_pass_count(store) > 0 {
-            Some("horizon excision".to_string())
+        } else if let Some(property) = crate::stage::post_step_refresh_needed(store, *kernel) {
+            // the launched path carries no post-step exchange point, so an operation that
+            // leaves the cut halos stale is refused by the recipe's own declaration
+            Some(property.to_string())
         } else {
             None
         };
@@ -244,6 +244,26 @@ where
     let result = run();
     *spent += clock.elapsed();
     result
+}
+
+/// the post-step context of a worker: each tile's work on its device, a count combined over
+/// the tiles it holds, and no halo refresh, since admission refuses every operation that
+/// would need one
+struct WorkerStep<'a> {
+    devices: &'a [i32],
+    tiles: &'a [TileId],
+}
+
+impl<'a, const D: usize, const DOF: usize, M: MemorySpace> crate::stage::StepContext<D, DOF, M> for WorkerStep<'a> {
+    fn on_tile(&self, k: usize, f: &mut dyn FnMut()) {
+        with_device(self.devices[self.tiles[k].0 as usize], || f())
+    }
+    fn combine_max(&mut self, local: usize) -> usize {
+        local
+    }
+    fn refresh_halos(&mut self, _stores: &[&FieldStore<D, DOF, M, f64>]) {
+        unreachable!("the launched path admits no post-step operation that invalidates the halos")
+    }
 }
 
 /// negate the odd components of every polar ghost band this worker holds, after an antipodal
@@ -686,10 +706,12 @@ where
             attempt += 1;
         }
         {
+            // the post-step recipe on the accepted step; every operation it admits leaves the
+            // halos as current as the interior, so the next step's first stage reads what the
+            // last exchange left
             let sh = shared!();
-            for k in 0..n {
-                with_device(dev(k), || kernels[k].viscous(sh[k], dt));
-            }
+            let mut step = WorkerStep { devices, tiles };
+            crate::stage::fold_post_step(&sh, kernels, dt, &mut step, |_| true);
         }
         for s in stores.iter_mut() {
             advance_state_clock(&mut **s, dt);

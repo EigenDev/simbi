@@ -243,13 +243,14 @@ fn a_passive_scalar_is_refused() {
     );
 }
 
+/// the viscous transport is a post-step operation that leaves the halos as current as the
+/// interior, so the launched path admits a constant nu; the alpha prescription needs a central
+/// body, which the path refuses ahead of it
 #[test]
-fn viscous_transport_is_refused() {
+fn viscous_transport_is_admitted() {
     let mut sim = sim2();
     let kern = Kern2::new(1.4, 0.4, &sim.geom.allocated).with_viscosity(0.01);
-    refused(run2(&mut sim, &kern, RegimeKind::Newtonian), "viscous");
-    let kern = Kern2::new(1.4, 0.4, &sim.geom.allocated).with_alpha(0.1);
-    refused(run2(&mut sim, &kern, RegimeKind::Newtonian), "viscous");
+    run2(&mut sim, &kern, RegimeKind::Newtonian).expect("a constant-nu viscosity is admitted");
 }
 
 #[test]

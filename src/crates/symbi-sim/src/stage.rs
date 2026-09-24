@@ -534,3 +534,153 @@ where
     }
     (StageOutcome::Accepted, 0)
 }
+
+// =============================================================================
+// the post-step recipe: the operators every driver applies once per step after the RK
+// combination, in the method's order, each declaring what it reads and writes and whether
+// it leaves the cut halos stale. one executor folds it; the driver supplies the execution
+// context, which places each tile's work, combines a per-tile count, and refreshes the halos
+// where the recipe says an operation invalidated them.
+// =============================================================================
+
+/// a post-step operator
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum StepOp {
+    /// the constant-nu or alpha viscous transport: reads the primitive velocity one cell into
+    /// the halo, writes the interior momentum (and energy on an energy-carrying regime). the
+    /// primitives it leaves are the ones the next stage reads, on every tile alike, so the
+    /// halos stay as current as the interior
+    Viscous,
+    /// horizon excision: the fill sweeps read the rim's primitives, each writes the excised
+    /// cells, and the rebuild recovers their conserved state; a neighbor's rim read needs the
+    /// refreshed halo after every sweep and after the rebuild
+    Excise,
+}
+
+/// whether a post-step operation leaves every tile's cut halo stale for the next reader
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Refresh {
+    None,
+    Halos,
+}
+
+pub struct StepPhase {
+    pub name: &'static str,
+    pub op: StepOp,
+    pub reads: FieldSet,
+    pub writes: FieldSet,
+    pub refresh: Refresh,
+    /// the property a driver names when it refuses the operation
+    pub property: &'static str,
+}
+
+/// the canonical post-step order. this list is the sequence; every driver folds it.
+pub const POST_STEP_PIPELINE: &[StepPhase] = &[
+    StepPhase {
+        name: "viscous",
+        op: StepOp::Viscous,
+        reads: FieldSet::PRIM,
+        writes: FieldSet::CONS,
+        refresh: Refresh::None,
+        property: "viscous transport",
+    },
+    StepPhase {
+        name: "excise",
+        op: StepOp::Excise,
+        reads: FieldSet::PRIM,
+        writes: FieldSet::CONS.or(FieldSet::PRIM),
+        refresh: Refresh::Halos,
+        property: "horizon excision",
+    },
+];
+
+/// what a driver supplies under the post-step recipe: where each tile's work runs, how a
+/// per-tile count is combined across every tile the step spans, and how the cut halos are
+/// made current after an operation wrote its interior.
+pub trait StepContext<const D: usize, const DOF: usize, Mem: MemorySpace> {
+    /// run `f` where tile `k` lives
+    fn on_tile(&self, k: usize, f: &mut dyn FnMut());
+    /// the largest of a per-tile count over every tile the step spans
+    fn combine_max(&mut self, local: usize) -> usize;
+    /// every tile's cut halo made current from its neighbors' interiors
+    fn refresh_halos(&mut self, stores: &[&FieldStore<D, DOF, Mem, f64>]);
+}
+
+/// the context of a step over one grid: the work runs in place, a count is its own maximum,
+/// and a halo refresh is the grid's own physical fill, which the next stage runs anyway
+pub struct SingleGridStep;
+
+impl<const D: usize, const DOF: usize, Mem: MemorySpace> StepContext<D, DOF, Mem> for SingleGridStep {
+    fn on_tile(&self, _k: usize, f: &mut dyn FnMut()) {
+        f()
+    }
+    fn combine_max(&mut self, local: usize) -> usize {
+        local
+    }
+    fn refresh_halos(&mut self, _stores: &[&FieldStore<D, DOF, Mem, f64>]) {}
+}
+
+/// fold the post-step recipe over `stores`, `applies` selecting the operators this fold
+/// runs (a refined level runs the viscous transport on its finest levels alone)
+pub fn fold_post_step<const D: usize, const DOF: usize, Mem, K>(
+    stores: &[&FieldStore<D, DOF, Mem, f64>],
+    kernels: &[&K],
+    dt: f64,
+    cx: &mut impl StepContext<D, DOF, Mem>,
+    applies: impl Fn(StepOp) -> bool,
+) where
+    Mem: MemorySpace,
+    K: KernelSet<D, DOF, Mem, f64> + ?Sized,
+{
+    let n = stores.len();
+    for phase in POST_STEP_PIPELINE {
+        if !applies(phase.op) {
+            continue;
+        }
+        match phase.op {
+            StepOp::Viscous => {
+                for k in 0..n {
+                    cx.on_tile(k, &mut || prof("viscous", || kernels[k].viscous(stores[k], dt)));
+                }
+            }
+            StepOp::Excise => {
+                let local = (0..n).map(|k| kernels[k].excise_pass_count(stores[k])).max().unwrap_or(0);
+                let passes = cx.combine_max(local);
+                if passes == 0 {
+                    continue;
+                }
+                for _ in 0..passes {
+                    for k in 0..n {
+                        cx.on_tile(k, &mut || kernels[k].excise_sweep(stores[k]));
+                    }
+                    cx.refresh_halos(stores);
+                }
+                for k in 0..n {
+                    cx.on_tile(k, &mut || kernels[k].excise_finalize(stores[k]));
+                }
+                cx.refresh_halos(stores);
+            }
+        }
+    }
+}
+
+/// the property of the first post-step operation on `store` that would leave the cut halos
+/// stale: a driver without a post-step halo refresh refuses it by that name
+pub fn post_step_refresh_needed<const D: usize, const DOF: usize, Mem, K>(
+    store: &FieldStore<D, DOF, Mem, f64>,
+    kernel: &K,
+) -> Option<&'static str>
+where
+    Mem: MemorySpace,
+    K: KernelSet<D, DOF, Mem, f64> + ?Sized,
+{
+    POST_STEP_PIPELINE
+        .iter()
+        .filter(|phase| phase.refresh == Refresh::Halos)
+        .find(|phase| match phase.op {
+            StepOp::Viscous => kernel.is_viscous(),
+            StepOp::Excise => kernel.excise_pass_count(store) > 0,
+        })
+        .map(|phase| phase.property)
+}
+

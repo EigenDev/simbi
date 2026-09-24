@@ -366,7 +366,7 @@ fired against a cut, "restart" a resume onto a changed, uneven partition,
 
 | regime | gated configurations |
 |---|---|
-| newtonian | 2D Cartesian: periodic (fresh, restart, correction, ppm, rollback), periodic with reflecting walls and a gravity source, Neumann and Robin walls, pointwise user sources; reflect, outflow, Neumann, Robin walls at cut corners. 2D spherical with a log radial axis over both poles (fresh, correction at the pole, restart); 2D cylindrical with the R = 0 axis and reflecting ends. 3D Cartesian with a tabulated source (four workers, correction); 3D spherical over both poles with a cut azimuth (two, three uneven, four workers, correction at the pole). |
+| newtonian | 2D Cartesian: periodic (fresh, restart, correction, ppm, rollback), periodic with reflecting walls and a gravity source, Neumann and Robin walls, pointwise user sources, the constant-nu viscous transport (fresh, restart, nu shown to act); reflect, outflow, Neumann, Robin walls at cut corners. 2D spherical with a log radial axis over both poles (fresh, correction at the pole, restart); 2D cylindrical with the R = 0 axis and reflecting ends. 3D Cartesian with a tabulated source (four workers, correction); 3D spherical over both poles with a cut azimuth (two, three uneven, four workers, correction at the pole). |
 | rhd | 2D Cartesian (fresh, restart, correction, rollback); 3D Cartesian shock tube (two and four workers, correction). |
 | isothermal | 2D Cartesian periodic shear layer (fresh, restart, correction); a locally isothermal closure refused. |
 | nmhd | 2D Cartesian vortex (fresh with the face audit, restart, correction under Contact and UCT in both stages, shared-face mismatch aborting every worker, the numerics its substrate has no door for refused, a forced rejection refused); 2D Cartesian rotor with outflow walls (four workers, correction); reflect and outflow walls at cut corners; 2D (r, phi) disk plane with a periodic azimuth (four workers, correction); ohmic resistivity (two workers, correction, eta shown to act); 3D Cartesian and 3D spherical over both poles with a cut azimuth, in-process worker gates only. |
@@ -377,7 +377,9 @@ distributed gate of their own: geometric radial spacing, the gas equations
 of state beyond the ideal gas, the balanced reconstruction, the isothermal
 regimes on the spherical and cylindrical charts and in 3D, walls beyond
 periodic for the isothermal regimes, resistivity with the isothermal MHD
-closure, and the public 3D magnetized path. A polar axis with a cut
+closure, the public 3D magnetized path, and the viscous transport on the
+relativistic, isothermal and magnetized regimes (the alpha prescription
+needs a central body, which is refused ahead of it). A polar axis with a cut
 azimuth is filled by antipodal exchange on both charts; the cylindrical
 seam is ungated.
 
@@ -385,11 +387,12 @@ Refused at startup with the property named: the rmhd regime, a curved
 spacetime, a locally isothermal closure, a gradient wall or a user source
 with a magnetized regime, nondefault magnetized numerics, a forced
 rejection of a magnetized step, mesh refinement, mesh motion, immersed
-bodies, tracers, a passive scalar, viscous transport, horizon excision, a
-driven boundary, an equilibrium prescription, a perturbation expression,
-and the logarithmic checkpoint cadence. Viscous transport and horizon
-excision run on the in-process multi-GPU path of `simbi run` and are
-refused on the launched path by design until it carries their gates.
+bodies, tracers, a passive scalar, horizon excision, a driven boundary, an
+equilibrium prescription, a perturbation expression, and the logarithmic
+checkpoint cadence. The post-step operators (the viscous transport, horizon
+excision) are one recipe every driver folds; an operation the recipe
+declares to leave the cut halos stale is refused on the launched path by
+that declaration until the path carries a post-step exchange.
 
 Across two nodes on Frontier the evidence covers 2D Cartesian Newtonian
 hydro alone (equality, rollback, and faults on the shear layer), gathered

@@ -2825,9 +2825,20 @@ where
         // viscous -> excise -> horizon ledger -> penalize. transport first, then the
         // causally-disconnected fill, then the shell-flux booking (the flux fields still hold the
         // last stage's flux), then the IBM surface physics whose receipt must equal the removal.
-        if !has_finer {
+        // the post-step recipe on this level: the viscous transport on the finest levels
+        // alone, excision on every level
+        {
             let l = &self.levels[level];
-            prof("viscous", || l.kernels.viscous(&l.state, dt));
+            symbi_sim::stage::fold_post_step(
+                &[&l.state],
+                &[&l.kernels],
+                dt,
+                &mut symbi_sim::stage::SingleGridStep,
+                |op| match op {
+                    symbi_sim::stage::StepOp::Viscous => !has_finer,
+                    symbi_sim::stage::StepOp::Excise => false,
+                },
+            );
         }
         // excise runs on every level: the excised (causally-disconnected) region is owned by
         // whichever level contains it, and the refinement request gate keeps every finer patch clear
@@ -3098,7 +3109,13 @@ where
     /// live cells only.
     pub fn level_tail_excise(&self, level: usize) {
         let l = &self.levels[level];
-        l.kernels.excise(&l.state);
+        symbi_sim::stage::fold_post_step(
+            &[&l.state],
+            &[&l.kernels],
+            0.0,
+            &mut symbi_sim::stage::SingleGridStep,
+            |op| op == symbi_sim::stage::StepOp::Excise,
+        );
     }
 
     pub fn level_tail_emf(&self, level: usize, dt: f64) {

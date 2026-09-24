@@ -35,6 +35,7 @@ use symbi_hydro::state::Prim;
 use symbi_sim::atlas::{ExchangePlan, Placement, TileId};
 use symbi_sim::plan_exchange::PlanExchange;
 use symbi_sim::substrate_seam::RegimeKind;
+use symbi_sim::substrate_seam::WithViscosity;
 use symbi_sim::worker::{Injection, WorkerConfig, WorkerError, evolve_worker};
 use symbi_xpu::{CpuSpace, HostMemory};
 
@@ -160,7 +161,10 @@ fn tile(arm: &Arm, flat: usize) -> (Sim, Kern) {
             )
         })
         .build();
-    let k = Kern::new(GAMMA, CFL, &sim.geom.allocated);
+    // the constant-nu viscous transport under W_NU: a post-step operation whose stencil reads
+    // the exchanged halo and whose diffusion limit tightens every tile's time step
+    let nu: f64 = std::env::var("W_NU").ok().and_then(|v| v.parse().ok()).unwrap_or(0.0);
+    let k = Kern::new(GAMMA, CFL, &sim.geom.allocated).with_viscosity(nu);
     (sim, k)
 }
 
@@ -940,4 +944,37 @@ fn a_bad_tile_behind_a_good_one_still_aborts() {
         "{}",
         outcomes[0].stderr
     );
+}
+
+/// the viscous transport across workers: the post-step pass on every tile reads the neighbor's
+/// exchanged edge and its diffusion limit reaches the collective time step, so two workers and
+/// three unevenly owned tiles equal one worker bit for bit under the same nu, and nu changes the
+/// one-worker run
+#[test]
+fn a_viscous_run_matches_one_worker() {
+    if in_worker_role() {
+        worker_main();
+    }
+    let test = "a_viscous_run_matches_one_worker";
+    let uncut = Arm { cuts0: vec![], cuts1: vec![], periodic: [true, true], owner: vec![0] };
+    let viscous = [("W_NU", "0.02".to_string())];
+    let inviscid = run_arm(test, "inviscid", &uncut, &[]);
+    assert_all_ok(&inviscid);
+    let one = run_arm(test, "one", &uncut, &viscous);
+    assert_all_ok(&one);
+    let want = global_density(&one);
+    assert_ne!(global_density(&inviscid), want, "the viscosity left the one-worker run unchanged; the gate is vacuous");
+    let one_report = one[0].report.as_ref().expect("report");
+    for (label, arm) in [
+        ("two workers", Arm { cuts0: vec![32], cuts1: vec![], periodic: [true, true], owner: vec![0, 1] }),
+        ("three tiles on two workers", Arm { cuts0: vec![20, 32], cuts1: vec![], periodic: [true, true], owner: vec![0, 0, 1] }),
+    ] {
+        let outcomes = run_arm(test, label.split(' ').next().unwrap(), &arm, &viscous);
+        assert_all_ok(&outcomes);
+        for (w, o) in outcomes.iter().enumerate() {
+            let r = o.report.as_ref().expect("report");
+            assert_eq!(r.dts, one_report.dts, "{label}: worker {w} took other timesteps; the viscous limit did not reach the collective");
+        }
+        assert_eq!(global_density(&outcomes), want, "{label}: density differs from one worker under the same viscosity");
+    }
 }

@@ -63,12 +63,14 @@ def _script_launch(script: str, resolution: tuple[int, ...], out: Path, layout: 
     return files[0]
 
 
-def _script_reference(module: str, cls: str, resolution: tuple[int, ...], out: Path, steps: int) -> Path:
+def _script_reference(module: str, cls: str, resolution: tuple[int, ...], out: Path, steps: int, fields: str = "") -> Path:
+    """the single-grid run of `cls`; `fields` are extra constructor arguments, `nu=0.05`"""
+    extra = f", {fields}" if fields else ""
     snippet = f"""
 import sys
 from simbi.simulation import runner
 from {module} import {cls}
-runner.run({cls}(resolution={resolution!r}, data_directory=sys.argv[1], checkpoint_interval=1e9), compute_mode="cpu", max_steps=int(sys.argv[2]))
+runner.run({cls}(resolution={resolution!r}, data_directory=sys.argv[1], checkpoint_interval=1e9{extra}), compute_mode="cpu", max_steps=int(sys.argv[2]))
 """
     done = subprocess.run([sys.executable, "-c", snippet, str(out), str(steps)], capture_output=True, text=True, timeout=600)
     assert done.returncode == 0, f"reference failed:\n{done.stderr}"

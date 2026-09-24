@@ -1273,6 +1273,36 @@ fn polar_transfers<const D: usize, const DOF: usize, M: MemorySpace, F>(
     }
 }
 
+/// the post-step context of the in-process decomposed driver: each tile's work on its own
+/// device, a count combined over the tiles in this process, and a halo refresh that drains
+/// the devices, runs the schedule's exchange, and signs the polar bands
+struct ScheduledStep<'a, const D: usize, K, T> {
+    schedule: &'a Schedule<D>,
+    devices: &'a [i32],
+    transport: &'a T,
+    kernels: &'a [&'a K],
+}
+
+impl<'a, const D: usize, const DOF: usize, M, K, T> crate::stage::StepContext<D, DOF, M>
+    for ScheduledStep<'a, D, K, T>
+where
+    M: MemorySpace,
+    K: KernelSet<D, DOF, M, f64>,
+    T: HaloTransport,
+{
+    fn on_tile(&self, k: usize, f: &mut dyn FnMut()) {
+        symbi_xpu::with_device(self.devices[k], || f())
+    }
+    fn combine_max(&mut self, local: usize) -> usize {
+        local
+    }
+    fn refresh_halos(&mut self, stores: &[&FieldStore<D, DOF, M, f64>]) {
+        drain_devices::<M>(self.devices);
+        exchange_grid(stores, self.schedule, self.devices, self.transport);
+        flip_polar_bands(stores, self.kernels, self.schedule, self.devices);
+    }
+}
+
 /// negate the odd components of every polar ghost band the antipodal legs filled: the band is
 /// a rotated copy of the interior, and the components the half-turn reverses take their sign
 /// here, once, before the physical-boundary refill reads the band's edge.
@@ -2719,42 +2749,15 @@ where
         let mut accretion_density = Vec::new();
         {
             let sh = shared!();
-            // the viscous transport, per tile, once per step after
-            // the final halo exchange (the +-1 stencil reads the neighbor's
-            // exchanged edge). body-independent; inert when inviscid.
-            for i in 0..n {
-                symbi_xpu::with_device(devices[i], || {
-                    prof("viscous", || kernels[i].viscous(sh[i], dt))
-                });
-            }
+            // the post-step recipe once per step after the final halo exchange, every tile
+            // on its device: the viscous transport reads the neighbor's exchanged edge and
+            // needs no refresh; every excision sweep and the rebuild are followed by the
+            // exchange that publishes the excised state into the neighbors' halos. the pass
+            // count is the largest any tile needs, so every tile runs the same number and the
+            // tiled sequence stays bit-identical to the monolithic one.
             drain_devices::<M>(devices);
-            // horizon excision, once per step after the RK combination, mirroring
-            // the monolithic loop's phase order. the pass count comes from the
-            // store, so every tile runs the same number and the tiled sequence
-            // stays bit-identical to the monolithic one; a final exchange
-            // publishes the finalized
-            // (rebuilt) excised state into the neighbors' halos before the next
-            // step's stencils read them. inert (zero passes) when unexcised.
-            let passes = (0..n)
-                .map(|i| kernels[i].excise_pass_count(sh[i]))
-                .max()
-                .unwrap_or(0);
-            if passes > 0 {
-                for _ in 0..passes {
-                    for i in 0..n {
-                        symbi_xpu::with_device(devices[i], || kernels[i].excise_sweep(sh[i]));
-                    }
-                    drain_devices::<M>(devices);
-                    exchange_grid(&sh, &schedule, devices, transport);
-                flip_polar_bands(&sh, kernels, &schedule, devices);
-                }
-                for i in 0..n {
-                    symbi_xpu::with_device(devices[i], || kernels[i].excise_finalize(sh[i]));
-                }
-                drain_devices::<M>(devices);
-                exchange_grid(&sh, &schedule, devices, transport);
-                flip_polar_bands(&sh, kernels, &schedule, devices);
-            }
+            let mut step = ScheduledStep { schedule: &schedule, devices, transport, kernels };
+            crate::stage::fold_post_step(&sh, kernels, dt, &mut step, |_| true);
             let horizon = sh.first().and_then(|store| horizon_request(*store));
             if let Some((index, diagnostic_radius)) = horizon {
                 let (mdot, edot) = (0..n)

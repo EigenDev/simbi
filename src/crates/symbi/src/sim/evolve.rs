@@ -236,21 +236,19 @@ where
             emit_trace_neighborhood(sim, c);
         }
 
-        // the constant-nu viscous transport, once per step after
-        // the RK combination — the primitive velocity is current (each stage ends
-        // with c2p), and the pass reads prim / writes cons.mom, so it is body-
-        // independent and runs regardless of whether the sim carries immersed bodies.
-        // inert when inviscid (the kernel-set gates on nu > 0).
-        prof("viscous", || kernels.viscous(sim, sim.dt));
-
-        // horizon excision, once per step after the RK combination: overwrite the
-        // causally disconnected cells inside the excision sphere (within the
-        // black-hole horizon on the cartesian kerr-schild chart) with a
-        // zero-gradient outward primitive copy + local conserved rebuild, so the
-        // next step's stencils read bounded, smooth values at the excision rim.
-        // inert at zero radius (the kernel-set gates on r_exc > 0); profiled
-        // inside the dispatch.
-        kernels.excise(sim);
+        // the post-step recipe once per step after the RK combination: the viscous
+        // transport (the primitive velocity is current, each stage ends with c2p; inert when
+        // inviscid), then horizon excision (the causally disconnected cells inside the excision
+        // sphere overwritten with a zero-gradient outward primitive copy and a local conserved
+        // rebuild, so the next step's stencils read bounded values at the rim; inert at zero
+        // radius). one grid folds it in place.
+        symbi_sim::stage::fold_post_step(
+            &[&**sim],
+            &[kernels],
+            sim.dt,
+            &mut symbi_sim::stage::SingleGridStep,
+            |_| true,
+        );
 
         // the GR horizon shell-flux accretion, once per step: the mass_flux / nrg_flux fields still
         // hold the last stage's flux, so a GPU Add-reduction of the boundary flux through the

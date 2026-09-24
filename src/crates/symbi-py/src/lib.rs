@@ -10350,9 +10350,6 @@ fn validate_launch_scope(cfg: &Config) -> Result<(), String> {
     if !cfg.chi_ic.is_empty() {
         return refused("a passive scalar");
     }
-    if cfg.viscosity != 0.0 || cfg.alpha != 0.0 {
-        return refused("viscous transport");
-    }
     if cfg.perturbation_json.is_some() {
         return refused("a perturbation expression");
     }
@@ -10491,7 +10488,9 @@ fn run_worker_process(
                     .well_balanced_reconstruction(cfg.wb_reconstruction)
                     .with_eos(build_eos(cfg))
                     .with_solver(solver)
-                    .map_err(|e| format!("tile {flat} substrate/solver: {e:?}"))?;
+                    .map_err(|e| format!("tile {flat} substrate/solver: {e:?}"))?
+                    .with_viscosity(cfg.viscosity)
+                    .with_alpha(cfg.alpha);
                 // the user sources, per tile: pointwise, each tile evaluating them at its own
                 // global coordinates, as the single decomposed path attaches them
                 let sub = attach_configured_sources(
@@ -10558,6 +10557,7 @@ fn run_worker_process(
                     .theta(theta)
                     .with_solver(solver)
                     .map_err(|e| format!("tile {flat} substrate/solver: {e:?}"))?
+                    .with_viscosity(cfg.viscosity)
                     .with_resistivity(cfg.resistivity)
                     .ct_method(ct);
                 tiles.push((sim, sub));
@@ -10595,7 +10595,11 @@ fn run_worker_process(
                     .build();
                 // the numerics the single isothermal path installs: the limiter, then the
                 // user sources; the closure is globally isothermal, one sound speed per run
-                let sub = sim.substrate().theta(theta);
+                let sub = sim
+                    .substrate()
+                    .theta(theta)
+                    .with_viscosity(cfg.viscosity)
+                    .with_alpha(cfg.alpha);
                 let sub = attach_configured_sources(
                     sub,
                     &cfg.source_jsons,
@@ -10656,6 +10660,7 @@ fn run_worker_process(
                     .theta(theta)
                     .with_solver(solver)
                     .map_err(|e| format!("tile {flat} substrate/solver: {e:?}"))?
+                    .with_viscosity(cfg.viscosity)
                     .with_resistivity(cfg.resistivity)
                     .ct_method(ct);
                 tiles.push((sim, sub));
