@@ -394,7 +394,9 @@ def run_case(driver: Driver, case: Case) -> dict:
             return f"{arm.name}: exits reported for {sorted(arm.exits)}"
         if final_of(arm.data) is not None:
             return f"{arm.name}: a final checkpoint was published"
-        if marker and marker not in arm.stderr + arm.stdout:
+        # the streams are line-wrapped by the traceback printer, so the marker is matched
+        # with its whitespace collapsed
+        if marker and marker not in " ".join((arm.stderr + arm.stdout).split()):
             return f"{arm.name}: {marker!r} missing from the streams"
         return None
 
