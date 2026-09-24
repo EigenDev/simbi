@@ -373,6 +373,35 @@ fn a_patch_face_on_a_cut_is_refused_by_name() {
     );
 }
 
+/// a patch face one root cell from a cut is refused by name: the prolongation stencil of the
+/// fine ghosts reaches beyond the root halo across the cut
+#[test]
+fn a_patch_face_one_cell_from_a_cut_is_refused_by_name() {
+    let partition = Partition::explicit([N, N], [vec![11], vec![16]]).expect("cuts inside the grid");
+    let counts = partition.counts();
+    let beyond = partition.tile_extents(unflatten(2, counts));
+    let origin: [f64; 2] = std::array::from_fn(|a| beyond[a].0 as f64 * DX);
+    let m: [usize; 2] = [beyond[0].1, beyond[1].1];
+    let hi: [f64; 2] = std::array::from_fn(|a| origin[a] + m[a] as f64 * DX);
+    let bnd = Boundaries([
+        [BoundaryType::CoarseFine, BoundaryType::Outflow],
+        [BoundaryType::Outflow, BoundaryType::CoarseFine],
+    ]);
+    let root = build_root(m, origin, bnd, PLM.ng);
+    // the patch's low x face at root cell 12, one cell past this tile's cut at 11
+    let clipped = RefinementRegion { x_lo: [PX_LO, PY_LO], x_hi: [PX_HI.min(hi[0]), PY_HI.min(hi[1])] };
+    let whole = RefinementRegion { x_lo: [PX_LO, PY_LO], x_hi: [PX_HI, PY_HI] };
+    let k = kset_plm(&root);
+    let err = Hier::with_refinement_of(root, k, &[clipped], &[whole], PLM.prolong, kset_plm)
+        .err()
+        .expect("a patch face one cell from the cut was admitted");
+    assert!(
+        err.detail.contains("prolongation stencil reaches") && err.detail.contains("move the patch face"),
+        "the refusal names another reason: {}",
+        err.detail
+    );
+}
+
 /// the centered layout under both schemes: the probe's alignment itself, on a case known to
 /// hold
 #[test]

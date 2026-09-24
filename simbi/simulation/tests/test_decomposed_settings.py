@@ -124,5 +124,14 @@ def test_a_patch_face_on_the_device_cut_is_refused_by_name(tmp_path: Path) -> No
     assert "lies on a decomposition cut" in flat, done.stderr[-1500:]
     assert not list((tmp_path / "refused").glob("*.h5")), "output was written before the refusal"
     (x_min, x_max), _ = RefinedBlast(resolution=(32, 32, 1)).bounds[:2]
-    two_cells_past = _patch_on_cut_script(tmp_path / "past_cut.py", 2.0 * (x_max - x_min) / 32)
+    dx = (x_max - x_min) / 32
+    # one root cell past the cut: the fine ghosts' prolongation stencil reaches beyond the root
+    # halo across the cut, refused with the clearance to move the face by
+    one_cell_past = _patch_on_cut_script(tmp_path / "one_past.py", dx)
+    done = subprocess.run(_command(one_cell_past, tmp_path / "too_close", 2, flags), capture_output=True, text=True, timeout=900, env=env)
+    assert done.returncode != 0, f"the run succeeded:\n{done.stdout[-1500:]}"
+    flat = " ".join(done.stderr.split())
+    assert "prolongation stencil reaches" in flat and "move the patch face" in flat, done.stderr[-1500:]
+    assert not list((tmp_path / "too_close").glob("*.h5")), "output was written before the refusal"
+    two_cells_past = _patch_on_cut_script(tmp_path / "past_cut.py", 2.0 * dx)
     _run(two_cells_past, tmp_path / "admitted", 2, flags)

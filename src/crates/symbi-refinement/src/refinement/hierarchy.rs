@@ -1190,7 +1190,9 @@ where
             // fine ghost depth: one above the root's (the prolongation stencil
             // is one order above the evolution reconstruction).
             let ng = root_ng + 1;
-            validate_coverage(&coverage, parent, ng, prolong_order);
+            validate_coverage(&coverage, parent, ng, prolong_order).map_err(|detail| {
+                symbi_xpu::XpuError { operation: "refinement region", code: 0, detail }
+            })?;
 
             let n_cells: [usize; NDIM] =
                 std::array::from_fn(|ax| coverage.spaces[ax].size() * RATIO);
@@ -4318,13 +4320,17 @@ fn region_to_domain<const D: usize>(
 /// the coverage must sit inside the parent interior, and on every coarse-fine
 /// (non-touching) side leave enough parent cells that the prolongation's
 /// deepest read — the parent of the outermost fine ghost minus the stencil
-/// halfwidth — stays inside the parent allocated domain.
+/// halfwidth — stays inside the parent allocated domain. a violation is a
+/// refusal with the remedy: on a decomposed tile the parent's allocated domain
+/// ends a halo width past the cut, so a patch face closer to a cut than the
+/// stencil's reach beyond that halo is refused by name.
 fn validate_coverage<R, const D: usize, const DOF: usize, M, E, S, Mem>(
     coverage: &Domain<D>,
     parent: &SimStateGeneric<R, D, DOF, M, E, S, Mem>,
     fine_ng: usize,
     order: ProlongOrder,
-) where
+) -> Result<(), String>
+where
     R: Regime<f64, D>,
     M: Metric<f64, D> + Copy,
     E: symbi_hydro::eos::EosFor<f64, <R as Regime<f64, D>>::Energy>,
@@ -4336,29 +4342,34 @@ fn validate_coverage<R, const D: usize, const DOF: usize, M, E, S, Mem>(
         let (clo, chi) = (coverage.spaces[ax].lo, coverage.spaces[ax].hi);
         let int = &parent.geom.interior.spaces[ax];
         let alloc = &parent.geom.allocated.spaces[ax];
-        assert!(
-            clo >= int.lo && chi <= int.hi && clo < chi,
-            "refinement: coverage [{clo}, {chi}) outside parent interior [{}, {}) on axis {ax}",
-            int.lo,
-            int.hi
-        );
-        if clo != int.lo {
-            assert!(
-                clo - reach >= alloc.lo,
-                "refinement: coverage lo {clo} on axis {ax} leaves the prolongation stencil \
-                 (reach {reach}) outside the parent allocated domain (lo {})",
-                alloc.lo
-            );
+        if !(clo >= int.lo && chi <= int.hi && clo < chi) {
+            return Err(format!(
+                "coverage [{clo}, {chi}) outside parent interior [{}, {}) on axis {ax}",
+                int.lo, int.hi
+            ));
         }
-        if chi != int.hi {
-            assert!(
-                chi + reach <= alloc.hi,
-                "refinement: coverage hi {chi} on axis {ax} leaves the prolongation stencil \
-                 (reach {reach}) outside the parent allocated domain (hi {})",
-                alloc.hi
-            );
+        let ng = (int.lo - alloc.lo) as isize;
+        let clearance = reach - ng;
+        if clo != int.lo && clo - reach < alloc.lo {
+            return Err(format!(
+                "the refinement patch's low face on axis {ax} sits {} parent cell(s) from the \
+                 parent's boundary, and its prolongation stencil reaches {clearance} beyond the \
+                 halo; move the patch face at least {clearance} parent cells from the boundary or \
+                 the decomposition cut, or onto it",
+                clo - int.lo
+            ));
+        }
+        if chi != int.hi && chi + reach > alloc.hi {
+            return Err(format!(
+                "the refinement patch's high face on axis {ax} sits {} parent cell(s) from the \
+                 parent's boundary, and its prolongation stencil reaches {clearance} beyond the \
+                 halo; move the patch face at least {clearance} parent cells from the boundary or \
+                 the decomposition cut, or onto it",
+                int.hi - chi
+            ));
         }
     }
+    Ok(())
 }
 
 // =============================================================================
