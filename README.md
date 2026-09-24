@@ -356,13 +356,14 @@ counters printed with the run summary show whether it fired.
 ### Multi-process runs on one host
 
 `simbi launch` evolves one problem across worker processes that exchange
-boundary data over TCP on the local host, without MPI. It covers 2D Newtonian
-hydro, relativistic hydro, and ideal Newtonian MHD, adiabatic or globally
-isothermal, on the Cartesian, spherical, and cylindrical charts of a flat
-spacetime with uniform or graded spacing, with pointwise user sources and
-periodic, outflow, reflecting, axis, Neumann, and Robin walls (the gradient
-walls for the gas regimes), on a static grid; every other configuration is
-refused at startup with the property named. Every tile carries the whole
+boundary data over TCP on the local host, without MPI. It covers 2D and 3D
+Newtonian hydro, relativistic hydro, and Newtonian MHD, ideal or resistive,
+adiabatic or globally isothermal, on the Cartesian, spherical, and
+cylindrical charts of a flat spacetime with uniform or graded spacing, with
+pointwise user sources and periodic, outflow, reflecting, axis, Neumann, and
+Robin walls (the gradient walls for the gas regimes), on a static grid; a 3D
+polar axis with a cut azimuth, refinement, immersed bodies, tracers, and
+viscosity are refused at startup with the property named. Every tile carries the whole
 grid's origin, spacing, and maps and is placed by the index of its first
 cell, so a launched run equals the single-grid run bit for bit. A
 magnetized run audits the two copies of every face two workers share after

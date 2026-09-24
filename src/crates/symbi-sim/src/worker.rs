@@ -138,7 +138,7 @@ impl From<FabricError> for WorkerError {
     }
 }
 
-/// the first-release scope: 2D newtonian hydro, relativistic hydro and newtonian MHD,
+/// the first-release scope: 2D and 3D newtonian hydro, relativistic hydro and newtonian MHD,
 /// adiabatic or globally isothermal, on the cartesian, spherical and cylindrical charts of a
 /// flat spacetime, in host memory, on a static mesh, without dye, bodies, tracers, or
 /// excision.
@@ -160,7 +160,7 @@ fn refuse<const D: usize, const DOF: usize, M: MemorySpace, K: KernelSet<D, DOF,
     ) {
         return Err(refused(&format!("the {regime:?} regime")));
     }
-    if D != 2 {
+    if !matches!(D, 2 | 3) {
         return Err(refused(&format!("a {D}-dimensional grid")));
     }
     if M::IS_DEVICE_ACCESSIBLE {

@@ -162,8 +162,9 @@ def _interior(f: h5py.File) -> dict[str, np.ndarray]:
         if "/magnetic/" in name:
             # a staggered face field is stored over its interior faces alone
             out[name] = data
-        elif data.ndim == 2:
-            out[name] = data[ng:-ng, ng:-ng]
+        elif data.ndim >= 2:
+            # a cell field is stored with its halo on every axis
+            out[name] = data[tuple(slice(ng, -ng) for _ in range(data.ndim))]
     assert out, "no field datasets under level_0"
     return out
 
