@@ -42,14 +42,37 @@ const GAMMA: f64 = 1.4;
 const NU: f64 = 0.02;
 const STEPS: usize = 8;
 
+/// the domain's boundary condition: periodic on every axis, or open (outflow) faces
+#[derive(Clone, Copy)]
+enum Outer {
+    Periodic,
+    Open,
+}
+
+impl Outer {
+    fn topology(self) -> Topology<2> {
+        match self {
+            Outer::Periodic => Topology::wrapping([true; 2]),
+            Outer::Open => Topology::open(),
+        }
+    }
+}
+
 /// a vortex array whose velocity varies along both axes, so the viscous stress reads across
-/// every cut, in a density ripple
-fn tile(partition: &Partition<2>, flat: usize) -> (Sim, Kern) {
+/// every cut, in a density ripple. a cut face is `CoarseFine` (filled by the exchange); an
+/// uncut periodic axis wraps within the tile; an open domain's outer faces are outflow
+fn tile(partition: &Partition<2>, flat: usize, outer: Outer) -> (Sim, Kern) {
     let counts = partition.counts();
-    let ext = partition.tile_extents(unflatten(flat, counts));
+    let tc = unflatten(flat, counts);
+    let ext = partition.tile_extents(tc);
     let bnd = Boundaries(std::array::from_fn(|a| {
-        let kind = if counts[a] > 1 { BoundaryType::CoarseFine } else { BoundaryType::Periodic };
-        [kind, kind]
+        let face = |on_edge: bool| match (outer, on_edge) {
+            (Outer::Periodic, _) if counts[a] > 1 => BoundaryType::CoarseFine,
+            (Outer::Periodic, _) => BoundaryType::Periodic,
+            (Outer::Open, true) => BoundaryType::Outflow,
+            (Outer::Open, false) => BoundaryType::CoarseFine,
+        };
+        [face(tc[a] == 0), face(tc[a] + 1 == counts[a])]
     }));
     let sim = Sim::build(Newtonian, IdealGas { gamma: GAMMA }, Cartesian)
         .cells([ext[0].1, ext[1].1])
@@ -171,8 +194,12 @@ fn assembled(stores: &[&Store], partition: &Partition<2>) -> Vec<u64> {
 }
 
 fn run(partition: &Partition<2>, table: &[StepPhase], steps: usize) -> Vec<u64> {
-    let mut built: Vec<(Sim, Kern)> = (0..partition.n_tiles()).map(|f| tile(partition, f)).collect();
-    let schedule = Schedule::derive(partition.counts(), built[0].0.geom.ng, &Topology::wrapping([true; 2]));
+    run_with(partition, table, steps, Outer::Periodic)
+}
+
+fn run_with(partition: &Partition<2>, table: &[StepPhase], steps: usize, outer: Outer) -> Vec<u64> {
+    let mut built: Vec<(Sim, Kern)> = (0..partition.n_tiles()).map(|f| tile(partition, f, outer)).collect();
+    let schedule = Schedule::derive(partition.counts(), built[0].0.geom.ng, &outer.topology());
     let stores: Vec<&Store> = built.iter().map(|(s, _)| &**s).collect();
     let kernels: Vec<&Kern> = built.iter().map(|(_, k)| k).collect();
     prime(&stores, &kernels, &schedule);
@@ -203,7 +230,7 @@ fn two_tiles() -> Partition<2> {
 #[test]
 fn the_viscous_pass_leaves_the_primitives_behind_and_the_recovery_keeps_the_conserved_state() {
     let partition = one_tile();
-    let (sim, kern) = tile(&partition, 0);
+    let (sim, kern) = tile(&partition, 0, Outer::Periodic);
     let schedule = Schedule::derive([1, 1], sim.geom.ng, &Topology::wrapping([true; 2]));
     prime(&[&sim], &[&kern], &schedule);
     let dt = kern.cfl(&sim);
@@ -229,7 +256,7 @@ fn the_declared_recipe_holds_across_a_cut_and_across_a_restart() {
     let two = run(&two_tiles(), &table, STEPS);
     assert_eq!(one, two, "two tiles differ from one tile under the declared recipe");
     let partition = one_tile();
-    let (sim, kern) = tile(&partition, 0);
+    let (sim, kern) = tile(&partition, 0, Outer::Periodic);
     let schedule = Schedule::derive([1, 1], sim.geom.ng, &Topology::wrapping([true; 2]));
     prime(&[&sim], &[&kern], &schedule);
     march(&[&sim], &[&kern], &schedule, &table, STEPS / 2).unwrap();
@@ -255,11 +282,26 @@ fn without_the_recovery_a_restart_departs_from_the_uninterrupted_run() {
     let table = viscous_table(Recover::None, Refresh::Halos);
     let uninterrupted = run(&one_tile(), &table, STEPS);
     let partition = one_tile();
-    let (sim, kern) = tile(&partition, 0);
+    let (sim, kern) = tile(&partition, 0, Outer::Periodic);
     let schedule = Schedule::derive([1, 1], sim.geom.ng, &Topology::wrapping([true; 2]));
     prime(&[&sim], &[&kern], &schedule);
     march(&[&sim], &[&kern], &schedule, &table, STEPS / 2).unwrap();
     restart(&[&sim], &[&kern], &schedule);
     march(&[&sim], &[&kern], &schedule, &table, STEPS / 2).unwrap();
     assert_ne!(assembled(&[&sim], &partition), uninterrupted, "a restart equals the uninterrupted run without the recovery; the gate is vacuous");
+}
+
+/// the cut on the second axis and the two-axis cut, under periodic and open outer faces:
+/// the viscous stress reads the cross derivative at every face, so a tile corner across two
+/// cuts feeds the pass, and so does the corner beyond a cut side and an open outer face
+#[test]
+fn the_declared_recipe_holds_across_a_cut_on_each_axis() {
+    let table = viscous_table(Recover::Primitives, Refresh::Halos);
+    let y_cut = Partition::explicit([N, N], [Vec::new(), vec![N / 2]]).unwrap();
+    let quad = Partition::explicit([N, N], [vec![N / 2], vec![N / 2]]).unwrap();
+    for outer in [Outer::Periodic, Outer::Open] {
+        let one = run_with(&one_tile(), &table, STEPS, outer);
+        assert_eq!(one, run_with(&y_cut, &table, STEPS, outer), "a cut on the second axis departs from one tile");
+        assert_eq!(one, run_with(&quad, &table, STEPS, outer), "the two-axis cut departs from one tile");
+    }
 }

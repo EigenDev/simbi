@@ -299,14 +299,14 @@ fn ghost_strip<const D: usize>(
     layout: &FieldLayout<D>,
     axis: usize,
     side: Side,
-    clip: &[bool; D],
+    clip: &[[bool; 2]; D],
     h: isize,
 ) -> Domain<D> {
     let mut strip = layout.allocated_domain().boundary(axis, side, h);
     for b in 0..D {
-        if clip[b] {
-            strip = strip.slab(b, (layout.interior[b].lo, layout.interior[b].hi));
-        }
+        let lo = if clip[b][0] { layout.interior[b].lo } else { strip.spaces[b].lo };
+        let hi = if clip[b][1] { layout.interior[b].hi } else { strip.spaces[b].hi };
+        strip = strip.slab(b, (lo, hi));
     }
     strip
 }
@@ -928,16 +928,18 @@ impl<const D: usize> Topology<D> {
 
 /// one same-level halo transfer across a cut: the `hi` tile's first `reach` interior cells
 /// fill the `lo` tile's hi ghosts, and the `lo` tile's last `reach` interior cells fill the
-/// `hi` tile's lo ghosts, both along `axis`. `clip[b]` marks a transverse axis whose ghost
-/// extent is cut back to the interior, which is what carries a corner value to its diagonal
-/// neighbor through a later axis's legs instead of over a diagonal transfer. tile indices are
-/// flat over the tile grid (`flatten`).
+/// `hi` tile's lo ghosts, both along `axis`. `clip[b]` marks, per side of a transverse axis,
+/// a ghost extent cut back to the interior: a side that a later axis's leg fills, which is what
+/// carries a corner value to its diagonal neighbor through that later leg instead of over a
+/// diagonal transfer. a side with no later leg keeps its ghosts in the strip, so the corner
+/// beyond an outer face carries the neighbor's own fill of that face. tile indices are flat
+/// over the tile grid (`flatten`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Leg<const D: usize> {
     pub axis: usize,
     pub lo: usize,
     pub hi: usize,
-    pub clip: [bool; D],
+    pub clip: [[bool; 2]; D],
 }
 
 /// a polar axis face on a chart whose azimuth is gridded and cut into tiles. the ghost band
@@ -966,7 +968,7 @@ pub struct PolarLeg<const D: usize> {
     pub dst_lo: isize,
     pub src_lo: isize,
     pub len: isize,
-    pub clip: [bool; D],
+    pub clip: [[bool; 2]; D],
 }
 
 /// the ordered halo transfers a tile grid implies. derived once from the partition's tile
@@ -1007,14 +1009,25 @@ impl<const D: usize> Schedule<D> {
         let mut legs = Vec::new();
         let mut polar = Vec::new();
         let mut processed = [false; D];
+        // the sides of a transverse axis `b` that a later leg fills for the tile at `tc`: a cut
+        // side (a tile beyond it, or the wrap of a periodic axis). the exchange of `axis` clips
+        // its strip to the interior on those sides and keeps the ghosts on the others.
+        let later_sides = |axis: usize, processed: &[bool; D], tc: [usize; D]| -> [[bool; 2]; D] {
+            std::array::from_fn(|b| {
+                if b == axis || processed[b] || counts[b] < 2 {
+                    return [false; 2];
+                }
+                let wraps = topology.is_periodic(b);
+                [tc[b] > 0 || wraps, tc[b] + 1 < counts[b] || wraps]
+            })
+        };
         for axis in 0..D {
-            let clip: [bool; D] =
-                std::array::from_fn(|b| b != axis && !processed[b] && counts[b] > 1);
             if let Some(seam) = seam.as_ref().filter(|s| s.mirror == axis) {
-                polar.extend(polar_legs(counts, seam, clip));
+                polar.extend(polar_legs(counts, seam, |tc| later_sides(axis, &processed, tc)));
             }
             for flat in 0..total {
                 let tc = unflatten(flat, counts);
+                let clip = later_sides(axis, &processed, tc);
                 let wraps = tc[axis] + 1 == counts[axis];
                 // a single tile on a periodic axis wraps onto itself, which its own boundary
                 // fill already does; a cut periodic axis needs the end-to-end leg.
@@ -1099,7 +1112,7 @@ impl<const D: usize> Schedule<D> {
 fn polar_legs<const D: usize>(
     counts: [usize; D],
     seam: &PolarSeam,
-    clip: [bool; D],
+    clip_of: impl Fn([usize; D]) -> [[bool; 2]; D],
 ) -> Vec<PolarLeg<D>> {
     let az = seam.azimuth;
     assert_eq!(seam.slabs.len(), counts[az], "one azimuth slab per azimuth tile");
@@ -1134,6 +1147,7 @@ fn polar_legs<const D: usize>(
             if !on_pole {
                 continue;
             }
+            let clip = clip_of(tc);
             let (g0, w) = (offsets[tc[az]], seam.slabs[tc[az]]);
             // the destination slab [g0, g0 + w) reads the source [g0 + half, g0 + w + half)
             // modulo n: at most two unwrapped pieces, each intersected with every azimuth tile.
@@ -1216,13 +1230,17 @@ fn polar_transfers<const D: usize, const DOF: usize, M: MemorySpace, F>(
         let az0 = geom.interior.spaces[az].lo + az_lo;
         r = r.slab(az, (az0, az0 + leg.len + face_extra));
         for b in 0..D {
-            if b != mirror && b != az && leg.clip[b] {
-                let hi_ext = if b == d { 1 } else { 0 };
-                r = r.slab(
-                    b,
-                    (geom.interior.spaces[b].lo, geom.interior.spaces[b].hi + hi_ext),
-                );
+            if b == mirror || b == az {
+                continue;
             }
+            let hi_ext = if b == d { 1 } else { 0 };
+            let lo = if leg.clip[b][0] { geom.interior.spaces[b].lo } else { r.spaces[b].lo };
+            let hi = if leg.clip[b][1] {
+                geom.interior.spaces[b].hi + hi_ext
+            } else {
+                r.spaces[b].hi
+            };
+            r = r.slab(b, (lo, hi));
         }
         r
     };
@@ -3564,8 +3582,13 @@ mod tests {
         assert_eq!(axis0.len(), 2);
         assert_eq!(axis1.len(), 2);
         assert!(legs[..2].iter().all(|l| l.axis == 0), "axis 0 legs come first");
-        assert!(axis0.iter().all(|l| l.clip == [false, true]));
-        assert!(axis1.iter().all(|l| l.clip == [false, false]));
+        // on the open grid each axis-0 leg's tile pair has one cut side on axis 1 and one
+        // outer side: the cut side clips, the outer side keeps its ghosts.
+        for l in &axis0 {
+            let tc = unflatten(l.lo, [2usize, 2]);
+            assert_eq!(l.clip, [[false, false], [tc[1] > 0, tc[1] + 1 < 2]]);
+        }
+        assert!(axis1.iter().all(|l| l.clip == [[false; 2]; 2]));
 
         // tile pairs across the axis-0 cut: (0,0)-(1,0) and (0,1)-(1,1).
         let pairs: Vec<_> = axis0.iter().map(|l| (l.lo, l.hi)).collect();
@@ -3602,7 +3625,11 @@ mod tests {
             assert_eq!(src[2], (dst[2] + 2) % 4, "the antipode is two slabs on");
             assert_eq!(src[1], dst[1], "the source shares the pole tile's mirror-axis index");
             assert_eq!((leg.dst_lo, leg.src_lo, leg.len), (0, 0, 2), "a whole slab moves");
-            assert_eq!(leg.clip, [false, false, true], "the azimuth is still to come");
+            assert_eq!(
+                leg.clip,
+                [[false; 2], [false; 2], [true; 2]],
+                "the wrapping azimuth is still to come"
+            );
             let expect_side = if dst[1] == 0 { Side::Lo } else { Side::Hi };
             assert_eq!(leg.side, expect_side);
         }

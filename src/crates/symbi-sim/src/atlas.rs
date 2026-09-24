@@ -613,10 +613,12 @@ impl<const D: usize> ExchangePlan<D> {
                                 } else if b == az {
                                     let lo = tile.interior[az].lo + az_lo;
                                     Span { lo, hi: lo + leg.len + isize::from(d == az && closes) }
-                                } else if leg.clip[b] {
-                                    layout.interior[b]
                                 } else {
-                                    layout.allocated[b]
+                                    let (i, a) = (layout.interior[b], layout.allocated[b]);
+                                    Span {
+                                        lo: if leg.clip[b][0] { i.lo } else { a.lo },
+                                        hi: if leg.clip[b][1] { i.hi } else { a.hi },
+                                    }
                                 }
                             })
                         };
@@ -1338,7 +1340,7 @@ mod tests {
             axis: 0,
             lo: flatten([0, 0], p.counts()),
             hi: flatten([1, 0], p.counts()),
-            clip: [false, true],
+            clip: [[false, false], [false, true]],
         };
         assert_eq!(first.src.0 as usize, leg.hi);
         assert_eq!(first.dst.0 as usize, leg.lo);
