@@ -201,12 +201,15 @@ fn run_worker(arm: &Arm, me: WorkerId, out: PathBuf) -> Result<(), WorkerError> 
     let placement = Placement::new(arm.workers(), owner).expect("placement");
     let mine: Vec<usize> = (0..n).filter(|&f| placement.owner_of(TileId(f as u32)) == me).collect();
     let mut built: Vec<Sim> = mine.iter().map(|&f| tile(arm, f)).collect();
-    // the edge EMF: Contact, or UCT under W_CT=uct
+    // the edge EMF: Contact, or UCT under W_CT=uct; the ohmic resistivity under W_ETA, whose
+    // diffusive EMF eta*J reads the current at every edge from the faces around it, on a cut
+    // from the exchanged face halo, and tightens the time step by its diffusion limit
     let uct = std::env::var("W_CT").is_ok_and(|v| v == "uct");
+    let eta: f64 = std::env::var("W_ETA").ok().and_then(|v| v.parse().ok()).unwrap_or(0.0);
     let kernels: Vec<_> = built
         .iter()
         .map(|s| {
-            let k = s.substrate();
+            let k = s.substrate().with_resistivity(eta);
             if uct { k.ct_method(CtMethod::Uct) } else { k }
         })
         .collect();
@@ -476,15 +479,18 @@ fn uncut() -> Arm {
 }
 
 /// `neighbors` are the workers that hold no troubled cell and must still correct
-fn assert_cut_matches_uncut(test: &str, arm: Arm, cell: (usize, usize), neighbors: &[usize], stage: usize, ct: &str) {
+/// `extra` is the numerics every arm shares beyond the edge EMF, the resistivity among them
+fn assert_cut_matches_uncut(test: &str, arm: Arm, cell: (usize, usize), neighbors: &[usize], stage: usize, ct: &str, extra: &[(&str, String)]) {
     let label = format!("{ct}, stage {stage}, {} workers", arm.workers());
-    let inject = vec![
-        ("W_CT", ct.to_string()),
+    let mut base = vec![("W_CT", ct.to_string())];
+    base.extend(extra.iter().cloned());
+    let mut inject = base.clone();
+    inject.extend([
         ("W_TROUBLE_STAGE", stage.to_string()),
         ("W_TROUBLE_I", cell.0.to_string()),
         ("W_TROUBLE_J", cell.1.to_string()),
-    ];
-    let clean = run_arm(test, &format!("clean_{ct}_{stage}"), &uncut(), &[("W_CT", ct.to_string())]);
+    ]);
+    let clean = run_arm(test, &format!("clean_{ct}_{stage}"), &uncut(), &base);
     assert_all_ok(&clean, "clean");
     let clean_report = clean[0].report.clone().expect("report");
     assert_eq!((clean_report.troubled, clean_report.exchanges), (0, 0), "the vortex corrected by itself");
@@ -532,6 +538,21 @@ fn two_workers() -> Arm {
     Arm { cuts0: vec![32], cuts1: vec![], owner: vec![0, 1] }
 }
 
+/// the ohmic resistivity on the vortex: its diffusive EMF changes the one-worker run against
+/// the ideal one, and the cut arms reproduce the one-worker run under the same eta
+fn assert_resistive_cut_matches_uncut(test: &str, arm: Arm, cell: (usize, usize), neighbors: &[usize], stage: usize) {
+    const ETA: &str = "0.01";
+    let ideal = run_arm(test, "ideal", &uncut(), &[("W_CT", "contact".to_string())]);
+    assert_all_ok(&ideal, "ideal");
+    let resistive = run_arm(test, "resistive", &uncut(), &[("W_CT", "contact".to_string()), ("W_ETA", ETA.to_string())]);
+    assert_all_ok(&resistive, "resistive");
+    let (a, b) = (assemble(&ideal, "ideal"), assemble(&resistive, "resistive"));
+    let changed = a.den.iter().zip(&b.den).filter(|(x, y)| x != y).count()
+        + (0..2).map(|d| a.faces[d].iter().zip(&b.faces[d]).filter(|(x, y)| x != y).count()).sum::<usize>();
+    assert!(changed > 0, "the resistivity left the vortex unchanged; the gate is vacuous");
+    assert_cut_matches_uncut(test, arm, cell, neighbors, stage, "contact", &[("W_ETA", ETA.to_string())]);
+}
+
 fn four_workers() -> Arm {
     Arm { cuts0: vec![32], cuts1: vec![32], owner: vec![0, 1, 2, 3] }
 }
@@ -541,7 +562,7 @@ fn contact_trouble_against_the_cut_in_the_predictor_two_workers() {
     if in_worker_role() {
         worker_main();
     }
-    assert_cut_matches_uncut("contact_trouble_against_the_cut_in_the_predictor_two_workers", two_workers(), (31, 10), &[1], 0, "contact");
+    assert_cut_matches_uncut("contact_trouble_against_the_cut_in_the_predictor_two_workers", two_workers(), (31, 10), &[1], 0, "contact", &[]);
 }
 
 #[test]
@@ -549,7 +570,7 @@ fn contact_trouble_in_a_tile_corner_in_the_predictor_four_workers() {
     if in_worker_role() {
         worker_main();
     }
-    assert_cut_matches_uncut("contact_trouble_in_a_tile_corner_in_the_predictor_four_workers", four_workers(), (31, 31), &[1, 2, 3], 0, "contact");
+    assert_cut_matches_uncut("contact_trouble_in_a_tile_corner_in_the_predictor_four_workers", four_workers(), (31, 31), &[1, 2, 3], 0, "contact", &[]);
 }
 
 #[test]
@@ -557,7 +578,7 @@ fn contact_trouble_against_the_cut_in_the_corrector_two_workers() {
     if in_worker_role() {
         worker_main();
     }
-    assert_cut_matches_uncut("contact_trouble_against_the_cut_in_the_corrector_two_workers", two_workers(), (31, 10), &[1], 1, "contact");
+    assert_cut_matches_uncut("contact_trouble_against_the_cut_in_the_corrector_two_workers", two_workers(), (31, 10), &[1], 1, "contact", &[]);
 }
 
 #[test]
@@ -565,7 +586,7 @@ fn contact_trouble_in_a_tile_corner_in_the_corrector_four_workers() {
     if in_worker_role() {
         worker_main();
     }
-    assert_cut_matches_uncut("contact_trouble_in_a_tile_corner_in_the_corrector_four_workers", four_workers(), (31, 31), &[1, 2, 3], 1, "contact");
+    assert_cut_matches_uncut("contact_trouble_in_a_tile_corner_in_the_corrector_four_workers", four_workers(), (31, 31), &[1, 2, 3], 1, "contact", &[]);
 }
 
 #[test]
@@ -573,7 +594,7 @@ fn uct_trouble_against_the_cut_in_the_predictor_two_workers() {
     if in_worker_role() {
         worker_main();
     }
-    assert_cut_matches_uncut("uct_trouble_against_the_cut_in_the_predictor_two_workers", two_workers(), (31, 10), &[1], 0, "uct");
+    assert_cut_matches_uncut("uct_trouble_against_the_cut_in_the_predictor_two_workers", two_workers(), (31, 10), &[1], 0, "uct", &[]);
 }
 
 #[test]
@@ -581,7 +602,7 @@ fn uct_trouble_in_a_tile_corner_in_the_predictor_four_workers() {
     if in_worker_role() {
         worker_main();
     }
-    assert_cut_matches_uncut("uct_trouble_in_a_tile_corner_in_the_predictor_four_workers", four_workers(), (31, 31), &[1, 2, 3], 0, "uct");
+    assert_cut_matches_uncut("uct_trouble_in_a_tile_corner_in_the_predictor_four_workers", four_workers(), (31, 31), &[1, 2, 3], 0, "uct", &[]);
 }
 
 #[test]
@@ -589,7 +610,7 @@ fn uct_trouble_against_the_cut_in_the_corrector_two_workers() {
     if in_worker_role() {
         worker_main();
     }
-    assert_cut_matches_uncut("uct_trouble_against_the_cut_in_the_corrector_two_workers", two_workers(), (31, 10), &[1], 1, "uct");
+    assert_cut_matches_uncut("uct_trouble_against_the_cut_in_the_corrector_two_workers", two_workers(), (31, 10), &[1], 1, "uct", &[]);
 }
 
 #[test]
@@ -597,6 +618,21 @@ fn uct_trouble_in_a_tile_corner_in_the_corrector_four_workers() {
     if in_worker_role() {
         worker_main();
     }
-    assert_cut_matches_uncut("uct_trouble_in_a_tile_corner_in_the_corrector_four_workers", four_workers(), (31, 31), &[1, 2, 3], 1, "uct");
+    assert_cut_matches_uncut("uct_trouble_in_a_tile_corner_in_the_corrector_four_workers", four_workers(), (31, 31), &[1, 2, 3], 1, "uct", &[]);
 }
 
+#[test]
+fn resistive_trouble_against_the_cut_in_the_predictor_two_workers() {
+    if in_worker_role() {
+        worker_main();
+    }
+    assert_resistive_cut_matches_uncut("resistive_trouble_against_the_cut_in_the_predictor_two_workers", two_workers(), (31, 10), &[1], 0);
+}
+
+#[test]
+fn resistive_trouble_in_a_tile_corner_in_the_corrector_four_workers() {
+    if in_worker_role() {
+        worker_main();
+    }
+    assert_resistive_cut_matches_uncut("resistive_trouble_in_a_tile_corner_in_the_corrector_four_workers", four_workers(), (31, 31), &[1, 2, 3], 1);
+}

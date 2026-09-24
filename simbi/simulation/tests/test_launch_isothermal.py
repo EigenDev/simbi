@@ -44,7 +44,7 @@ pytestmark = pytest.mark.simulation
 # -----------------------------------------------------------------------------
 
 
-def _script_launch(script: str, resolution: tuple[int, ...], out: Path, layout: Path, steps: int, workers: int, checkpoint: Path | None = None, env: dict[str, str] | None = None) -> Path:
+def _script_launch(script: str, resolution: tuple[int, ...], out: Path, layout: Path, steps: int, workers: int, checkpoint: Path | None = None, env: dict[str, str] | None = None, flags: list[str] | None = None) -> Path:
     cmd = [
         sys.executable, "-m", "simbi.cli", "launch", script,
         "--layout", str(layout), "--max-steps", str(steps),
@@ -53,6 +53,7 @@ def _script_launch(script: str, resolution: tuple[int, ...], out: Path, layout: 
     ]
     if checkpoint is not None:
         cmd += ["--checkpoint", str(checkpoint)]
+    cmd += flags or []
     done = subprocess.run(cmd, capture_output=True, text=True, timeout=600, env=dict(os.environ, **(env or {})))
     assert done.returncode == 0, f"launch failed:\nstdout:\n{done.stdout}\nstderr:\n{done.stderr}"
     exits = {int(w): int(c) for w, c in EXIT.findall(done.stdout)}

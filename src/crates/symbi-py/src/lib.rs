@@ -10469,13 +10469,14 @@ fn run_worker_process(
                     })
                     .seed_faces_indexed(&tile_faces)
                     .build();
-                // the numerics the single magnetized path installs: the limiter, the solver
-                // and the edge EMF
+                // the numerics the single magnetized path installs: the limiter, the solver,
+                // the ohmic resistivity and the edge EMF
                 let sub = sim
                     .substrate()
                     .theta(theta)
                     .with_solver(solver)
                     .map_err(|e| format!("tile {flat} substrate/solver: {e:?}"))?
+                    .with_resistivity(cfg.resistivity)
                     .ct_method(ct);
                 tiles.push((sim, sub));
             }
@@ -10573,6 +10574,7 @@ fn run_worker_process(
                     .theta(theta)
                     .with_solver(solver)
                     .map_err(|e| format!("tile {flat} substrate/solver: {e:?}"))?
+                    .with_resistivity(cfg.resistivity)
                     .ct_method(ct);
                 tiles.push((sim, sub));
             }
