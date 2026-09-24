@@ -141,6 +141,40 @@ impl FofcReport {
         }
     }
 
+    /// the report of a pass a neighbor's trouble drove: this tile's interior carries no
+    /// flag, the redo on the faces the two tiles share still acts, and a cell next to a shared
+    /// face receiving mixed-order fluxes can freeze. the replay stays the shared redo, since a
+    /// conservative replay needs a flagged interior; a retry requires an exterior freeze act.
+    pub fn of_cut_pass(
+        frozen: u64,
+        frozen_exterior: u64,
+        replay: SourceReplayOutcome,
+        decision: FofcDecision,
+    ) -> Self {
+        assert!(
+            frozen_exterior <= frozen,
+            "exterior freeze evidence ({frozen_exterior}) exceeds the freeze count ({frozen})"
+        );
+        assert!(
+            replay == SourceReplayOutcome::SharedRedo,
+            "a pass driven by a neighbor's trouble replays nothing of its own ({replay:?})"
+        );
+        if decision == FofcDecision::RetryStep {
+            assert!(
+                frozen_exterior > 0,
+                "a retry decision requires an exterior freeze act the mask shows"
+            );
+        }
+        Self {
+            troubled: 0,
+            frozen,
+            replay,
+            decision,
+            receipt: None,
+            guards: crate::guard_ledger::GuardReceipt::empty(),
+        }
+    }
+
     /// attach the admissible-boundary projection's receipt for this pass. the
     /// substrate calls this on the report it returns; the receipt is evidence,
     /// so it never revises the counts or the decision.

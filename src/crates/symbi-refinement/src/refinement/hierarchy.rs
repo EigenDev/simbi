@@ -2480,28 +2480,150 @@ where
 
     /// one SSP stage `ii` of level `level` -- the body of `advance_level`'s stage loop. `alpha0` is
     /// this level's substep start as a fraction of the parent step (0 on the root). pure extraction.
+    /// one stage of `level`, folded whole: the mark and the correction back to back, as a
+    /// hierarchy that shares no cut runs them. returns true on a stage retry request.
     pub fn level_stage(&mut self, level: usize, ii: usize, dt: f64, alpha0: f64) -> bool {
-        // the phase sequence comes from the shared table (symbi-sim::stage); this
-        // driver contributes two structural interleaves through the hook points —
-        // flux-register sampling (on the high-order fluxes, before a fofc splice)
-        // and the coarse-fine ghost re-prolongation. everything the hooks touch is
-        // reached by shared reference (the registers and field writes go through
-        // interior mutability), so the fold's borrow of the level state stays
-        // compatible.
+        let mark = self.level_stage_through_mark(level, ii, dt, alpha0);
+        self.level_stage_from_correction(level, ii, dt, alpha0, false, mark.receipt_start)
+    }
+
+    /// the stage's phases up to the conserved-to-primitive recovery and the troubled-cell mark.
+    /// a decomposed level exchanges the marks across its cuts before
+    /// `level_stage_from_correction`, so a clean tile learns of trouble against its cut and
+    /// both tiles take the same corrected flux on the shared face. the receipt start is the
+    /// tracer interface ledger's length as the stage opened, ahead of the transfers this
+    /// stage's flux sampling appended, which the correction half's tail applies.
+    pub fn level_stage_through_mark(&mut self, level: usize, ii: usize, dt: f64, alpha0: f64) -> StageMark {
+        let receipt_start = (level > 0)
+            .then(|| self.tracer_interface_ledgers[level - 1].borrow().len())
+            .unwrap_or(0);
+        let args = self.stage_args(level, ii, dt);
+        let mut hook = self.stage_hook(level, ii, dt, alpha0);
+        let l = &self.levels[level];
+        let troubled = symbi_sim::stage::fold_stage_through_mark(&l.state, &l.kernels, args, &mut hook);
+        StageMark { troubled, receipt_start }
+    }
+
+    /// the stage's correction and every phase after it, `cut_trouble` saying whether a
+    /// neighbor's mark reached this level's cut ghosts, then the tracer transport the stage
+    /// carries from `receipt_start` on. returns true on a stage retry request.
+    pub fn level_stage_from_correction(
+        &mut self,
+        level: usize,
+        ii: usize,
+        dt: f64,
+        alpha0: f64,
+        cut_trouble: bool,
+        receipt_start: usize,
+    ) -> bool {
+        let has_coarser = level > 0;
+        let stages = self.levels[level].state.timestepping.stages();
+        let (a0, ac) = stages[ii];
+        let args = self.stage_args(level, ii, dt);
+        let outcome = {
+            let mut hook = self.stage_hook(level, ii, dt, alpha0);
+            let l = &self.levels[level];
+            symbi_sim::stage::fold_stage_from_correction(&l.state, &l.kernels, args, cut_trouble, &mut hook)
+        };
+        if outcome == symbi_sim::stage::StageOutcome::RetryStep {
+            return true;
+        }
+        if self.levels[level].state.continuous_tracers.is_some() {
+            symbi_substrate::regimes::substrate_gpu::device_sync::<Mem>();
+            let geometry = self.levels[level]
+                .state
+                .geom
+                .block_geometry(self.levels[level].state.physics.metric);
+            symbi_sim::tracers::accumulate_ito_transport_stage_store(
+                &mut self.levels[level].state.store,
+                &geometry,
+                ac,
+            )
+            .unwrap_or_else(|detail| panic!("ito transport accumulation: {detail}"));
+        }
+        if self.levels[level].state.has_tracers() {
+            symbi_substrate::regimes::substrate_gpu::device_sync::<Mem>();
+            let layout = self.tracer_layout(level);
+            let geometry = self.levels[level]
+                .state
+                .geom
+                .block_geometry(self.levels[level].state.physics.metric);
+            let mut injections = symbi_sim::tracers::boundary_injection_transfers_store(
+                &self.levels[level].state,
+                &geometry,
+                layout,
+            );
+            injections.extend(symbi_sim::tracers::source_injection_transfers_store(
+                &self.levels[level].state,
+                &geometry,
+                layout,
+                a0,
+                ac,
+            ));
+            injections.retain(|transfer| self.tracer_owner_is_active(transfer.destination));
+            symbi_sim::tracers::fold_injection_ledger(&mut self.injection_ledger, injections, ac);
+            prof("tracers", || {
+                let coverage = self.levels[level].coverage.clone();
+                symbi_sim::tracers::advance_stage_mass_transport_store_masked(
+                    &mut self.levels[level].state,
+                    &geometry,
+                    layout,
+                    coverage.as_ref(),
+                    a0,
+                    ac,
+                    ii,
+                )
+                .unwrap_or_else(|detail| panic!("tracer transport: {detail}"))
+            });
+        }
+        if has_coarser && self.levels[level].state.has_tracers() {
+            let transfers = {
+                let ledger = self.tracer_interface_ledgers[level - 1].borrow();
+                ledger[receipt_start..].to_vec()
+            };
+            let epoch = self.levels[level]
+                .state
+                .iteration
+                .wrapping_mul(64)
+                .wrapping_add((level as u64) << 4)
+                .wrapping_add(ii as u64);
+            self.apply_interface_event(&transfers, epoch)
+                .unwrap_or_else(|detail| panic!("tracer interface transport: {detail}"));
+        }
+        false
+    }
+
+    /// the fold's arguments for stage `ii` of `level`
+    fn stage_args(&self, level: usize, ii: usize, dt: f64) -> StageArgs {
+        let stages = self.levels[level].state.timestepping.stages();
+        let (a0, ac) = stages[ii];
+        StageArgs {
+            dt,
+            a0,
+            ac,
+            stage: ii,
+            n_stages: stages.len(),
+            injection_weight: symbi_sim::driver::downstream_injection_weight(stages, ii),
+            allow_elision: true,
+        }
+    }
+
+    /// the phase sequence comes from the shared table (symbi-sim::stage); this driver
+    /// contributes two structural interleaves through the hook points: flux-register sampling
+    /// (on the high-order fluxes, before a fofc splice) and the coarse-fine ghost
+    /// re-prolongation. everything the hooks touch is reached by shared reference (the
+    /// registers and field writes go through interior mutability), so the fold's borrow of the
+    /// level state stays compatible.
+    fn stage_hook(&self, level: usize, ii: usize, dt: f64, alpha0: f64) -> impl FnMut(HookPoint) + '_ {
         let has_finer = level + 1 < self.levels.len();
         let has_coarser = level > 0;
         let stages = self.levels[level].state.timestepping.stages();
-        let n = stages.len();
         let weights = flux_weights(stages);
         let stage_time = stage_time_fractions(stages);
-        let (a0, ac) = stages[ii];
-        let receipt_start = has_coarser
-            .then(|| self.tracer_interface_ledgers[level - 1].borrow().len())
-            .unwrap_or(0);
-
-        let this = &*self;
+        let (_a0, ac) = stages[ii];
+        let this = self;
         let l = &this.levels[level];
-        let mut hook = |hp: HookPoint| match hp {
+        move |hp: HookPoint| match hp {
             HookPoint::AfterFlux => {
                 prof("refine_flux_reg", || {
                     // when the run declares a stationary target, that same accumulation runs a
@@ -2668,88 +2790,9 @@ where
                     this.prolong_cf(level, alpha0 + stage_time[ii] / RATIO as f64);
                 }
             }
-        };
-        let outcome = fold_stage(
-            &l.state,
-            &l.kernels,
-            StageArgs {
-                dt,
-                a0,
-                ac,
-                stage: ii,
-                n_stages: n,
-                injection_weight: symbi_sim::driver::downstream_injection_weight(stages, ii),
-                allow_elision: true,
-            },
-            &mut hook,
-        );
-        if outcome == symbi_sim::stage::StageOutcome::RetryStep {
-            return true;
         }
-        if self.levels[level].state.continuous_tracers.is_some() {
-            symbi_substrate::regimes::substrate_gpu::device_sync::<Mem>();
-            let geometry = self.levels[level]
-                .state
-                .geom
-                .block_geometry(self.levels[level].state.physics.metric);
-            symbi_sim::tracers::accumulate_ito_transport_stage_store(
-                &mut self.levels[level].state.store,
-                &geometry,
-                ac,
-            )
-            .unwrap_or_else(|detail| panic!("ito transport accumulation: {detail}"));
-        }
-        if self.levels[level].state.has_tracers() {
-            symbi_substrate::regimes::substrate_gpu::device_sync::<Mem>();
-            let layout = self.tracer_layout(level);
-            let geometry = self.levels[level]
-                .state
-                .geom
-                .block_geometry(self.levels[level].state.physics.metric);
-            let mut injections = symbi_sim::tracers::boundary_injection_transfers_store(
-                &self.levels[level].state,
-                &geometry,
-                layout,
-            );
-            injections.extend(symbi_sim::tracers::source_injection_transfers_store(
-                &self.levels[level].state,
-                &geometry,
-                layout,
-                a0,
-                ac,
-            ));
-            injections.retain(|transfer| self.tracer_owner_is_active(transfer.destination));
-            symbi_sim::tracers::fold_injection_ledger(&mut self.injection_ledger, injections, ac);
-            prof("tracers", || {
-                let coverage = self.levels[level].coverage.clone();
-                symbi_sim::tracers::advance_stage_mass_transport_store_masked(
-                    &mut self.levels[level].state,
-                    &geometry,
-                    layout,
-                    coverage.as_ref(),
-                    a0,
-                    ac,
-                    ii,
-                )
-                .unwrap_or_else(|detail| panic!("tracer transport: {detail}"))
-            });
-        }
-        if has_coarser && self.levels[level].state.has_tracers() {
-            let transfers = {
-                let ledger = self.tracer_interface_ledgers[level - 1].borrow();
-                ledger[receipt_start..].to_vec()
-            };
-            let epoch = self.levels[level]
-                .state
-                .iteration
-                .wrapping_mul(64)
-                .wrapping_add((level as u64) << 4)
-                .wrapping_add(ii as u64);
-            self.apply_interface_event(&transfers, epoch)
-                .unwrap_or_else(|detail| panic!("tracer interface transport: {detail}"));
-        }
-        false
     }
+
 
     /// step epilogue: emf bookkeeping (mhd) + the finer-level subcycle + restrict + reflux + the
     /// level clock. pure extraction from `advance_level`. for the decomposed root the driver calls
@@ -4485,6 +4528,76 @@ pub fn gather_decomposed_hierarchy_tracers<
 /// `devices[k]` is order-aligned. cut faces are `CoarseFine` (so `ghost_fill` leaves them for the
 /// exchange); the sub-grid's outer faces are the patch's coarse-fine boundary (prolong-filled) or a
 /// physical boundary, neither of which `exchange_grid` touches (it moves only internal cuts).
+/// one stage of `level` across the tiles of a decomposed level: every tile marks its troubled
+/// cells, the marks cross the level's cuts into the neighbors' ghost layer next to the
+/// interior, and every tile then corrects with the knowledge of trouble against its cuts, so
+/// the two tiles sharing a face take the same corrected flux there. returns true on a stage
+/// retry request from any tile.
+#[allow(clippy::too_many_arguments)]
+fn decomposed_level_stage<R, const NDIM: usize, const DOF: usize, M, E, S, Mem, K, T>(
+    tiles: &mut [Hierarchy<R, NDIM, DOF, M, E, S, Mem, K>],
+    level: usize,
+    order: &[usize],
+    counts: [usize; NDIM],
+    devices: &[i32],
+    transport: &T,
+    ii: usize,
+    dt: f64,
+    alpha0: f64,
+) -> bool
+where
+    R: Regime<f64, NDIM> + Copy,
+    M: Metric<f64, NDIM> + Copy + Send + Sync,
+    E: symbi_hydro::eos::EosFor<f64, <R as Regime<f64, NDIM>>::Energy> + Copy + Send + Sync,
+    S: ExecutionSpace,
+    Mem: MemorySpace + Sync,
+    K: KernelSet<NDIM, DOF, Mem, f64>,
+    T: HaloTransport,
+{
+    let marks: Vec<StageMark> = order
+        .iter()
+        .enumerate()
+        .map(|(k, &i)| {
+            symbi_xpu::with_device(devices[k], || tiles[i].level_stage_through_mark(level, ii, dt, alpha0))
+        })
+        .collect();
+    let troubled: u64 = marks.iter().map(|m| m.troubled).sum();
+    let mut cut_trouble = vec![false; order.len()];
+    if troubled > 0 {
+        drain_devices::<Mem>(devices);
+        let received = {
+            let states: Vec<&FieldStore<NDIM, DOF, Mem, f64>> = order
+                .iter()
+                .map(|&i| &*tiles[i].levels[level].state)
+                .collect();
+            let schedule = schedule_of_tiles(&states, counts, &Topology::open());
+            symbi_sim::decomp::exchange_trouble(&states, &schedule, devices, transport)
+        };
+        drain_devices::<Mem>(devices);
+        for (k, &i) in order.iter().enumerate() {
+            let l = &tiles[i].levels[level];
+            cut_trouble[k] = symbi_xpu::with_device(devices[k], || {
+                received[k].iter().any(|region| l.kernels.fofc_flags_in(&l.state, region) > 0)
+            });
+        }
+    }
+    let mut retry = false;
+    for (k, &i) in order.iter().enumerate() {
+        retry |= symbi_xpu::with_device(devices[k], || {
+            tiles[i].level_stage_from_correction(level, ii, dt, alpha0, cut_trouble[k], marks[k].receipt_start)
+        });
+    }
+    retry
+}
+
+/// what the first half of a level stage leaves for the second: the troubled interior cell
+/// count and the tracer interface ledger's length as the stage opened
+#[derive(Clone, Copy, Debug)]
+pub struct StageMark {
+    pub troubled: u64,
+    pub receipt_start: usize,
+}
+
 fn exchange_level_halos<R, const NDIM: usize, const DOF: usize, M, E, S, Mem, K, T>(
     tiles: &[Hierarchy<R, NDIM, DOF, M, E, S, Mem, K>],
     level: usize,
@@ -4855,13 +4968,10 @@ where
                 symbi_xpu::with_device(devices[i], || tiles[i].level_step_begin(0, gdt));
             }
             let mut retry = false;
-            // the root SSP stages, with a root halo exchange between each.
+            // the root SSP stages, each with the troubled marks crossing the cuts before the
+            // correction and a root halo exchange after.
             for ii in 0..nstages {
-                for i in 0..n {
-                    retry |= symbi_xpu::with_device(devices[i], || {
-                        tiles[i].level_stage(0, ii, gdt, 0.0)
-                    });
-                }
+                retry |= decomposed_level_stage(tiles, 0, root_order, counts, devices, transport, ii, gdt, 0.0);
                 if retry {
                     break;
                 }
@@ -4929,11 +5039,9 @@ where
                             });
                         }
                         for jj in 0..nstages {
-                            for (k, &i) in fg.order.iter().enumerate() {
-                                retry |= symbi_xpu::with_device(fg.devices[k], || {
-                                    tiles[i].level_stage(1, jj, fine_dt, alpha)
-                                });
-                            }
+                            retry |= decomposed_level_stage(
+                                tiles, 1, &fg.order, fg.counts, &fg.devices, transport, jj, fine_dt, alpha,
+                            );
                             if retry {
                                 break 'fine_subcycle;
                             }

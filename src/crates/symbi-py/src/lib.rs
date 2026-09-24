@@ -6078,6 +6078,17 @@ macro_rules! build_and_run_hydro_decomposed_refined {
             let m: [usize; $d] = std::array::from_fn(|ax| ext[ax].1);
             let origin: [f64; $d] = tile_origin::<$d>(cfg, tile_lo);
             let phys = boundaries_nd::<$d>(&cfg.boundaries);
+            // the refined tiles exchange their level halos under an open topology: a periodic
+            // axis cut into tiles would leave the domain seam without an exchange leg while
+            // its seam faces are declared cuts, so such a run is refused rather than filled
+            // from nothing
+            let ring = wrap_topology(&phys, counts);
+            if let Some(ax) = (0..$d).find(|&ax| ring.is_periodic(ax) && counts[ax] > 1) {
+                return Err(format!(
+                    "a periodic axis (axis {ax}) cut across gpus > 1 with mesh refinement is outside the \
+                     refined multi-GPU path: the refined level exchange carries no wrap leg"
+                ));
+            }
             let bnd = tile_boundaries(&phys, tc, counts);
             let tile_maps: [symbi_geometry::AxisMap; $d] = tile_axis_maps::<$d>(cfg, tile_lo)
                 .unwrap_or_else(|| std::array::from_fn(|ax| symbi_geometry::AxisMap::Uniform {

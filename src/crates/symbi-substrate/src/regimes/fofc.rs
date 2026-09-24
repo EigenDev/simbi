@@ -832,9 +832,15 @@ where
         frozen,
         frozen_interior,
     );
-    let report = FofcReport::of_pass(troubled, frozen, exterior_froze, replay, decision)
-        .with_receipt(projection_receipt)
-        .with_guards(guards);
+    // a clean interior driven by a neighbor's trouble across a cut reports the acts of its
+    // shared redo without a troubled count of its own
+    let report = if troubled == 0 {
+        FofcReport::of_cut_pass(frozen, exterior_froze, replay, decision)
+    } else {
+        FofcReport::of_pass(troubled, frozen, exterior_froze, replay, decision)
+    }
+    .with_receipt(projection_receipt)
+    .with_guards(guards);
     // the process-global census counters observe the report as attempted events.
     book_census(&report, troubled_interior, frozen_interior);
     report

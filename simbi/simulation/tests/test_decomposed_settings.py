@@ -76,3 +76,17 @@ def test_the_balanced_reconstruction_on_several_devices_is_refused(tmp_path: Pat
     assert done.returncode != 0
     assert "wb_reconstruction with gpus > 1" in done.stderr.replace("\n", " "), done.stderr[-1500:]
     assert not list((tmp_path / "wb").glob("*.h5")), "output was written before the refusal"
+
+
+def test_a_refined_run_with_a_cut_periodic_axis_on_several_devices_is_refused(tmp_path: Path) -> None:
+    """the refined multi-device path exchanges level halos under an open topology, so a periodic
+    axis cut into tiles would leave the domain seam unfilled; the run is refused by name."""
+    from simbi_configs.examples.newtonian.refined_kh import RefinedKelvinHelmholtz
+
+    script = str(Path(RefinedKelvinHelmholtz.__module__.replace(".", "/") + ".py"))
+    env = dict(os.environ, SYMBI_GPU_OVERSUBSCRIBE="1")
+    done = subprocess.run(_command(script, tmp_path / "out", 2, ["--resolution", "32,32", "--end-time", "1e-6"]), capture_output=True, text=True, timeout=900, env=env)
+    assert done.returncode != 0, f"the run succeeded:\n{done.stdout[-1500:]}"
+    flat = " ".join(done.stderr.split())
+    assert "cut across gpus > 1 with mesh refinement is outside the refined multi-GPU path" in flat, done.stderr[-1500:]
+
