@@ -153,7 +153,7 @@ fn build_tiles(
         let h = match clip(region, origin, m) {
             Some(r) => {
                 let k = kset(&root);
-                let h = Hier::with_refinement(root, k, &[r], ProlongOrder::Ppm, kset)
+                let h = Hier::with_refinement_of(root, k, &[r], &[*region], ProlongOrder::Ppm, kset)
                     .expect("tile hierarchy");
                 h.seed_fine_from_coarse().expect("seed fine");
                 h
