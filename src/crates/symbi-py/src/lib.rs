@@ -10310,6 +10310,11 @@ fn validate_launch_scope(cfg: &Config) -> Result<(), String> {
     if matches!(cfg.regime.as_str(), "nmhd" | "imhd") && !cfg.gradient_bcs.is_empty() {
         return refused(&format!("a gradient wall with the {} regime", cfg.regime));
     }
+    // the launched magnetized tiles install no user source; a source the single path would
+    // apply is refused rather than dropped
+    if matches!(cfg.regime.as_str(), "nmhd" | "imhd") && !cfg.source_jsons.is_empty() {
+        return refused(&format!("a user source with the {} regime", cfg.regime));
+    }
     if !matches!(cfg.dims, 2 | 3) {
         return refused(&format!("a {}-dimensional grid", cfg.dims));
     }

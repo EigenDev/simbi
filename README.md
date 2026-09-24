@@ -356,21 +356,50 @@ counters printed with the run summary show whether it fired.
 ### Multi-process runs on one host
 
 `simbi launch` evolves one problem across worker processes that exchange
-boundary data over TCP on the local host, without MPI. It covers 2D and 3D
-Newtonian hydro, relativistic hydro, and Newtonian MHD, ideal or resistive,
-adiabatic or globally isothermal, on the Cartesian, spherical, and
-cylindrical charts of a flat spacetime with uniform or graded spacing, with
-pointwise user sources and periodic, outflow, reflecting, axis, Neumann, and
-Robin walls (the gradient walls for the gas regimes), on a static grid; a
-polar axis with a cut azimuth is filled by antipodal exchange. Refinement,
-immersed bodies, tracers, and viscosity are refused at startup with the
-property named. Every tile carries the whole
-grid's origin, spacing, and maps and is placed by the index of its first
-cell, so a launched run equals the single-grid run bit for bit. A
-magnetized run audits the two copies of every face two workers share after
-the initial exchange and before every checkpoint, and after every exchange
-under `SIMBI_FABRIC_AUDIT=all`; a disagreement ends the run with the face
-named and publishes no checkpoint. A layout file names the worker
+boundary data over TCP on the local host, without MPI. Every tile carries
+the whole grid's origin, spacing, and maps and is placed by the index of its
+first cell, so a launched run equals the single-grid run bit for bit. The
+configurations below are gated locally on two to four processes against
+the single grid, bit for bit; "correction" means the first-order correction
+fired against a cut, "restart" a resume onto a changed, uneven partition,
+"rollback" a rejected step replayed on every worker:
+
+| regime | gated configurations |
+|---|---|
+| newtonian | 2D Cartesian: periodic (fresh, restart, correction, ppm, rollback), periodic with reflecting walls and a gravity source, Neumann and Robin walls, pointwise user sources; reflect, outflow, Neumann, Robin walls at cut corners. 2D spherical with a log radial axis over both poles (fresh, correction at the pole, restart); 2D cylindrical with the R = 0 axis and reflecting ends. 3D Cartesian with a tabulated source (four workers, correction); 3D spherical over both poles with a cut azimuth (two, three uneven, four workers, correction at the pole). |
+| rhd | 2D Cartesian (fresh, restart, correction, rollback); 3D Cartesian shock tube (two and four workers, correction). |
+| isothermal | 2D Cartesian periodic shear layer (fresh, restart, correction); a locally isothermal closure refused. |
+| nmhd | 2D Cartesian vortex (fresh with the face audit, restart, correction under Contact and UCT in both stages, shared-face mismatch aborting every worker, the numerics its substrate has no door for refused, a forced rejection refused); 2D Cartesian rotor with outflow walls (four workers, correction); reflect and outflow walls at cut corners; 2D (r, phi) disk plane with a periodic azimuth (four workers, correction); ohmic resistivity (two workers, correction, eta shown to act); 3D Cartesian and 3D spherical over both poles with a cut azimuth, in-process worker gates only. |
+| imhd | 2D Cartesian vortex (fresh with the face audit, correction under Contact and UCT). |
+
+Installed on the launched tiles as on the single path but without a
+distributed gate of their own: geometric radial spacing, the gas equations
+of state beyond the ideal gas, the balanced reconstruction, the isothermal
+regimes on the spherical and cylindrical charts and in 3D, walls beyond
+periodic for the isothermal regimes, resistivity with the isothermal MHD
+closure, and the public 3D magnetized path. A polar axis with a cut
+azimuth is filled by antipodal exchange on both charts; the cylindrical
+seam is ungated.
+
+Refused at startup with the property named: the rmhd regime, a curved
+spacetime, a locally isothermal closure, a gradient wall or a user source
+with a magnetized regime, nondefault magnetized numerics, a forced
+rejection of a magnetized step, mesh refinement, mesh motion, immersed
+bodies, tracers, a passive scalar, viscous transport, horizon excision, a
+driven boundary, an equilibrium prescription, a perturbation expression,
+and the logarithmic checkpoint cadence. Viscous transport and horizon
+excision run on the in-process multi-GPU path of `simbi run` and are
+refused on the launched path by design until it carries their gates.
+
+Across two nodes on Frontier the evidence covers 2D Cartesian Newtonian
+hydro alone (equality, rollback, and faults on the shear layer), gathered
+before the tile geometry, the walls, the charts, the third dimension, the
+polar seam, and the magnetized, isothermal, and resistive paths landed;
+every row above rests on local evidence until the two-node gates are
+rerun. A magnetized run audits the two copies of every face two workers
+share after the initial exchange and before every checkpoint, and after
+every exchange under `SIMBI_FABRIC_AUDIT=all`; a disagreement ends the run
+with the face named and publishes no checkpoint. A layout file names the worker
 count and the partition, and each worker holds one tile:
 
 ```toml

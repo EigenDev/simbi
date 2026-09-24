@@ -111,3 +111,25 @@ def test_a_gradient_wall_with_a_magnetized_regime_is_refused_by_name(tmp_path: P
     assert done.returncode != 0, f"the launch succeeded:\n{done.stdout}"
     flat = " ".join(done.stderr.split())
     assert "a gradient wall with the nmhd regime is outside the distributed first release" in flat, done.stderr
+
+
+def test_a_user_source_with_a_magnetized_regime_is_refused_by_name(tmp_path: Path) -> None:
+    # the launched magnetized tiles install no user source, so a vortex with a source is refused
+    # rather than run without it
+    script = tmp_path / "sourced_vortex.py"
+    script.write_text(
+        "import simbi.expression as expr\n"
+        "from simbi_configs.examples.newtonian.nmhd_orszag_tang import NewtonianOrszagTang\n"
+        "\n"
+        "class SourcedVortex(NewtonianOrszagTang):\n"
+        "    @property\n"
+        "    def source_expressions(self):\n"
+        "        return [expr.force([0.0, -0.1, 0.0], dim=3)]\n"
+    )
+    layout = _layout(tmp_path / "two.toml", workers=2, shape=(2, 1))
+    cmd = [sys.executable, "-m", "simbi.cli", "launch", str(script), "--layout", str(layout), "--max-steps", "1", "--resolution", "16,16,1", "--data-directory", str(tmp_path / "out"), "--checkpoint-interval", "1e9"]
+    done = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
+    assert done.returncode != 0, f"the launch succeeded:\n{done.stdout}"
+    flat = " ".join(done.stderr.split())
+    assert "a user source with the nmhd regime is outside the distributed first release" in flat, done.stderr
+
