@@ -604,7 +604,7 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize> Kerne
                 ScalarRef::A0 => a0,
                 ScalarRef::Ac => ac,
                 other => motion_scalar(&sim.motion, sim.geom.coords, D, other)
-                    .or_else(|| geom_scalar(&x_lo_k, &dx_k, &sim.geom.maps, other))
+                    .or_else(|| geom_scalar(&x_lo_k, &dx_k, &sim.geom.maps, &sim.geom.index_offset, other))
                     .unwrap_or_else(|| panic!("chi_godunov: unexpected scalar {other:?}")),
             })
         });

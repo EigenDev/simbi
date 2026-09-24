@@ -71,12 +71,14 @@ pub(crate) fn geom_scalar<const D: usize>(
     x_lo: &[f64; D],
     dx: &[f64; D],
     maps: &Option<[symbi_geometry::AxisMap; D]>,
+    index_offset: &[isize; D],
     sref: ScalarRef,
 ) -> Option<f64> {
     match sref {
         ScalarRef::InvDx(ax) => Some(dx[ax as usize].recip()),
         ScalarRef::XLo(ax) => Some(x_lo[ax as usize]),
         ScalarRef::Dx(ax) => Some(dx[ax as usize]),
+        ScalarRef::IdxOff(ax) => Some(index_offset[ax as usize] as f64),
         // a Log axis map -> 1.0, else uniform -> 0.0; a None maps is a fully uniform grid.
         ScalarRef::MapKind(ax) => Some(match maps {
             Some(m) => match m[ax as usize] {
@@ -370,7 +372,7 @@ where
         ScalarRef::KerrSpin => Sc::from_f64(spacetime("kerr_spin")),
         other => Sc::from_f64(
             motion_scalar(&sim.motion, sim.geom.coords, D, other)
-                .or_else(|| geom_scalar(x_lo_k, dx_k, &sim.geom.maps, other))
+                .or_else(|| geom_scalar(x_lo_k, dx_k, &sim.geom.maps, &sim.geom.index_offset, other))
                 .unwrap_or_else(|| panic!("{label}: unexpected scalar {other:?}")),
         ),
     }
@@ -417,7 +419,7 @@ where
                     body_scalar::<D>(bodies, idx, field)
                 }
             }
-            other => geom_scalar(&x_lo_k, &dx_k, &sim.geom.maps, other)
+            other => geom_scalar(&x_lo_k, &dx_k, &sim.geom.maps, &sim.geom.index_offset, other)
                 .unwrap_or_else(|| panic!("body kernel: unexpected scalar param {other:?}")),
         };
         Sc::from_f64(v)

@@ -301,7 +301,7 @@ fn apply_boundary_dag_gpu<const D: usize, const DOF: usize, Mem, Sc>(
                     .get(i as usize)
                     .unwrap_or_else(|| panic!("boundary gpu: param p{i} not provided")),
             ),
-            other => geom_scalar(&sim.geom.x_lo, &sim.geom.dx, &sim.geom.maps, other)
+            other => geom_scalar(&sim.geom.x_lo, &sim.geom.dx, &sim.geom.maps, &sim.geom.index_offset, other)
                 .map(Sc::from_f64)
                 .unwrap_or_else(|| {
                     panic!("boundary gpu: unresolved scalar {other:?} (t | x_lo_k | dx_k | p{{i}})")
@@ -463,7 +463,7 @@ pub fn dispatch_gradient_boundaries<const D: usize, const DOF: usize, Mem, Sc>(
                     },
                     |bind| match bind {
                         ScalarBind::Ref(sref) => {
-                            geom_scalar(&x_lo_phys, &dx_phys, &sim.geom.maps, *sref)
+                            geom_scalar(&x_lo_phys, &dx_phys, &sim.geom.maps, &sim.geom.index_offset, *sref)
                                 .map(Sc::from_f64)
                                 .unwrap_or_else(|| {
                                     panic!("gradient boundary: unexpected geom scalar {sref:?}")

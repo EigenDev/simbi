@@ -18,7 +18,7 @@ use symbi::sim::state::*;
 use symbi::sim::substrate_seam::{RegimeKind, WithViscosity};
 use symbi_algebra::Tensor;
 use symbi_fabric::{Loopback, SessionId, WorkerId};
-use symbi_geometry::{Cartesian, Geometry, Spacetime};
+use symbi_geometry::{Cartesian, Spacetime};
 use symbi_grid::Field;
 use symbi_hydro::eos::IdealGas;
 use symbi_hydro::newtonian::Newtonian;
@@ -169,17 +169,6 @@ fn the_newtonian_mhd_regime_is_admitted() {
     let mut sim = sim2();
     let kern = Kern2::new(1.4, 0.4, &sim.geom.allocated);
     run2(&mut sim, &kern, RegimeKind::NewtonianMhd).expect("newtonian MHD is admitted");
-}
-
-#[test]
-fn a_curvilinear_chart_is_refused() {
-    let mut sim = sim2();
-    let kern = Kern2::new(1.4, 0.4, &sim.geom.allocated);
-    sim.geom.coords = Geometry::Spherical;
-    refused(
-        run2(&mut sim, &kern, RegimeKind::Newtonian),
-        "Spherical chart",
-    );
 }
 
 #[test]

@@ -380,7 +380,7 @@ fn godunov_stage_impl<const D: usize, const DOF: usize, Mem, Sc>(
                     sim.geom.dx.len(),
                     other,
                 )
-                .or_else(|| geom_scalar(&x_lo_k, &dx_k, &sim.geom.maps, other))
+                .or_else(|| geom_scalar(&x_lo_k, &dx_k, &sim.geom.maps, &sim.geom.index_offset, other))
                 .unwrap_or_else(|| panic!("mhd godunov_stage: unexpected scalar {other:?}")),
             ),
         }
@@ -563,7 +563,7 @@ pub(crate) fn ghost_fill<const D: usize, const DOF: usize, Mem, Sc>(
                                 .expect("kerr ghost fill needs kerr_spin"),
                         ),
                         ScalarBind::Ref(other) => Sc::from_f64(
-                            geom_scalar(&x_lo_g, &dx_g, &sim.geom.maps, *other).unwrap_or_else(
+                            geom_scalar(&x_lo_g, &dx_g, &sim.geom.maps, &sim.geom.index_offset, *other).unwrap_or_else(
                                 || panic!("mhd kerr ghost: unexpected scalar {other:?}"),
                             ),
                         ),
@@ -1292,7 +1292,7 @@ pub(crate) fn efield<const D: usize, const DOF: usize, Mem, Sc>(
                     .expect("GR edge EMF needs kerr_spin"),
             ),
             ScalarBind::Ref(other) => Sc::from_f64(
-                geom_scalar(&x_lo_k, &dx_k, &sim.geom.maps, *other)
+                geom_scalar(&x_lo_k, &dx_k, &sim.geom.maps, &sim.geom.index_offset, *other)
                     .unwrap_or_else(|| panic!("mhd efield: unexpected scalar {other:?}")),
             ),
             o => panic!("mhd efield: unexpected scalar {o:?}"),
@@ -1643,7 +1643,7 @@ fn resistive_emf_ortho<const D: usize, const DOF: usize, Mem, Sc>(
     let scalars = scalars_for(&name, |bind| match bind {
         ScalarBind::Spec(s) if &**s == "eta" => Sc::from_f64(eta),
         ScalarBind::Ref(sref) => Sc::from_f64(
-            geom_scalar(&x_lo_k, &dx_k, &sim.geom.maps, *sref)
+            geom_scalar(&x_lo_k, &dx_k, &sim.geom.maps, &sim.geom.index_offset, *sref)
                 .unwrap_or_else(|| panic!("resistive_emf_ortho: unexpected scalar {sref:?}")),
         ),
         o => panic!("resistive_emf_ortho: unexpected scalar {o:?}"),
@@ -1711,7 +1711,7 @@ pub fn body_resistive_emf<const D: usize, const DOF: usize, Mem, Sc>(
                     body_scalar::<D>(Some(bodies), b as u8, *field)
                 }
                 ScalarBind::Ref(other) => {
-                    geom_scalar(&sim.geom.x_lo, &sim.geom.dx, &sim.geom.maps, *other)
+                    geom_scalar(&sim.geom.x_lo, &sim.geom.dx, &sim.geom.maps, &sim.geom.index_offset, *other)
                         .unwrap_or_else(|| {
                             panic!("body_resistive_emf: unexpected scalar {other:?}")
                         })
@@ -1793,7 +1793,7 @@ where
     use symbi_ir::ScalarBind;
     Sc::from_f64(match bind {
         ScalarBind::Ref(ScalarRef::Dt) => dt,
-        ScalarBind::Ref(other) => geom_scalar(&sim.geom.x_lo, &sim.geom.dx, &sim.geom.maps, *other)
+        ScalarBind::Ref(other) => geom_scalar(&sim.geom.x_lo, &sim.geom.dx, &sim.geom.maps, &sim.geom.index_offset, *other)
             .unwrap_or_else(|| panic!("{name}: unexpected scalar {other:?}")),
         o => panic!("{name}: unexpected scalar {o:?}"),
     })
@@ -1876,7 +1876,7 @@ where
                     body_scalar::<D>(Some(bodies), b as u8, *field)
                 }
                 ScalarBind::Ref(other) => {
-                    geom_scalar(&sim.geom.x_lo, &sim.geom.dx, &sim.geom.maps, *other)
+                    geom_scalar(&sim.geom.x_lo, &sim.geom.dx, &sim.geom.maps, &sim.geom.index_offset, *other)
                         .unwrap_or_else(|| panic!("body_slip_emf: unexpected scalar {other:?}"))
                 }
                 o => panic!("body_slip_emf: unexpected scalar {o:?}"),
@@ -2032,7 +2032,7 @@ where
                     body_scalar::<D>(Some(bodies), b as u8, *field)
                 }
                 ScalarBind::Ref(other) => {
-                    geom_scalar(&sim.geom.x_lo, &sim.geom.dx, &sim.geom.maps, *other)
+                    geom_scalar(&sim.geom.x_lo, &sim.geom.dx, &sim.geom.maps, &sim.geom.index_offset, *other)
                         .unwrap_or_else(|| panic!("body_slip_emf_2p5d: unexpected scalar {other:?}"))
                 }
                 o => panic!("body_slip_emf_2p5d: unexpected scalar {o:?}"),
@@ -2386,7 +2386,7 @@ fn slip_cell_pass<const D: usize, const DOF: usize, Mem, Sc>(
     let scalars = scalars_for(name, |bind: &ScalarBind| -> Sc {
         Sc::from_f64(match bind {
             ScalarBind::Ref(ScalarRef::Dt) => dt,
-            ScalarBind::Ref(other) => geom_scalar(&sim.geom.x_lo, &sim.geom.dx, &sim.geom.maps, *other)
+            ScalarBind::Ref(other) => geom_scalar(&sim.geom.x_lo, &sim.geom.dx, &sim.geom.maps, &sim.geom.index_offset, *other)
                 .unwrap_or_else(|| panic!("{name}: unexpected scalar {other:?}")),
             o => panic!("{name}: unexpected scalar {o:?}"),
         })
@@ -2984,7 +2984,7 @@ fn resistive_emf_cyl_rz<const D: usize, const DOF: usize, Mem, Sc>(
     let scalars = scalars_for(name, |bind| match bind {
         ScalarBind::Spec(s) if &**s == "eta" => Sc::from_f64(eta),
         ScalarBind::Ref(sref) => Sc::from_f64(
-            geom_scalar(&x_lo_k, &dx_k, &sim.geom.maps, *sref)
+            geom_scalar(&x_lo_k, &dx_k, &sim.geom.maps, &sim.geom.index_offset, *sref)
                 .unwrap_or_else(|| panic!("resistive_emf_cyl_rz: unexpected scalar {sref:?}")),
         ),
         o => panic!("resistive_emf_cyl_rz: unexpected scalar {o:?}"),
@@ -3075,7 +3075,7 @@ pub fn ct_curl<const D: usize, const DOF: usize, Mem, Sc>(
                             .expect("gr ct curl needs kerr_spin"),
                     ),
                     other => Sc::from_f64(
-                        geom_scalar(&x_lo_k, &dx_k, &sim.geom.maps, other)
+                        geom_scalar(&x_lo_k, &dx_k, &sim.geom.maps, &sim.geom.index_offset, other)
                             .unwrap_or_else(|| panic!("gr ct curl: unexpected scalar {other:?}")),
                     ),
                 }
@@ -3187,7 +3187,7 @@ pub(crate) fn bcell_from_bface<const D: usize, const DOF: usize, Mem, Sc>(
                         .expect("gr bcell_from_bface needs kerr_spin"),
                 ),
                 other => Sc::from_f64(
-                    geom_scalar(&x_lo_k, &dx_k, &sim.geom.maps, other).unwrap_or_else(|| {
+                    geom_scalar(&x_lo_k, &dx_k, &sim.geom.maps, &sim.geom.index_offset, other).unwrap_or_else(|| {
                         panic!("gr bcell_from_bface: unexpected scalar {other:?}")
                     }),
                 ),

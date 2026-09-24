@@ -154,6 +154,11 @@ pub enum ScalarRef {
     /// the per-axis coordinate-map parameter `map_param_{ax}`. geometric grading uses the
     /// adjacent-cell width ratio; uniform and logarithmic maps bind zero.
     MapParam(u8),
+    /// the per-axis global index offset `idx_off_{ax}`: the in-kernel face map evaluates the
+    /// position of local cell `i` at index `i + idx_off`, so a tile of a decomposed grid, built
+    /// with the grid's own origin and spacing, places every cell bitwise where the whole grid
+    /// places it. zero on an undivided grid.
+    IdxOff(u8),
     /// a moving-mesh rate (`mesh_hdil`, `mesh_adot_{ax}`, `mesh_vtrans_{ax}`).
     Mesh(MeshScalar),
     /// a user-source tunable knob `p{i}`.
@@ -197,6 +202,7 @@ impl ScalarRef {
             ScalarRef::Dx(ax) => format!("dx_{ax}"),
             ScalarRef::MapKind(ax) => format!("map_kind_{ax}"),
             ScalarRef::MapParam(ax) => format!("map_param_{ax}"),
+            ScalarRef::IdxOff(ax) => format!("idx_off_{ax}"),
             ScalarRef::Mesh(m) => m.name(),
             ScalarRef::UserParam(i) => format!("p{i}"),
             ScalarRef::Body { idx, field } => format!("body_{idx}_{}", field.name()),
@@ -246,6 +252,9 @@ impl ScalarRef {
         }
         if let Some(ax) = name.strip_prefix("map_param_") {
             return ax.parse().ok().map(ScalarRef::MapParam);
+        }
+        if let Some(ax) = name.strip_prefix("idx_off_") {
+            return ax.parse().ok().map(ScalarRef::IdxOff);
         }
         if let Some(ax) = name.strip_prefix("dx_") {
             return ax.parse().ok().map(ScalarRef::Dx);
@@ -342,6 +351,7 @@ mod tests {
             v.push(ScalarRef::InvDx(ax));
             v.push(ScalarRef::XLo(ax));
             v.push(ScalarRef::Dx(ax));
+            v.push(ScalarRef::IdxOff(ax));
             v.push(ScalarRef::MapType(ax));
             v.push(ScalarRef::Arg(ax));
             v.push(ScalarRef::VelSign(ax));

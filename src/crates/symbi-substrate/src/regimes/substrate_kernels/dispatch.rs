@@ -263,7 +263,7 @@ where
             ),
             other => Sc::from_f64(
                 motion_scalar(&sim.motion, sim.geom.coords, D, other)
-                    .or_else(|| geom_scalar(&x_lo_phys, &dx_phys, &sim.geom.maps, other))
+                    .or_else(|| geom_scalar(&x_lo_phys, &dx_phys, &sim.geom.maps, &sim.geom.index_offset, other))
                     .unwrap_or_else(|| panic!("cfl_wave_speed: unexpected scalar {other:?}")),
             ),
         }
@@ -472,7 +472,7 @@ pub(crate) fn fofc_project_named<const D: usize, const DOF: usize, Mem, Sc>(
             ScalarRef::Gamma => Sc::from_f64(eos_param),
             other => Sc::from_f64(
                 motion_scalar(&sim.motion, geom.coords, D, other)
-                    .or_else(|| geom_scalar(&x_lo_phys, &dx_phys, &geom.maps, other))
+                    .or_else(|| geom_scalar(&x_lo_phys, &dx_phys, &geom.maps, &geom.index_offset, other))
                     .unwrap_or_else(|| panic!("fofc_project: unexpected scalar {other:?}")),
             ),
         }
@@ -573,7 +573,7 @@ pub fn fofc_source_theta<const D: usize, const DOF: usize, Mem, Sc>(
             ),
             other => Sc::from_f64(
                 motion_scalar(&sim.motion, geom.coords, D, other)
-                    .or_else(|| geom_scalar(&x_lo_phys, &dx_phys, &geom.maps, other))
+                    .or_else(|| geom_scalar(&x_lo_phys, &dx_phys, &geom.maps, &geom.index_offset, other))
                     .unwrap_or_else(|| panic!("fofc_source_theta: unexpected scalar {other:?}")),
             ),
         }
@@ -664,7 +664,7 @@ pub fn constraint_projection<const D: usize, const DOF: usize, Mem, Sc>(
             ScalarBind::Ref(ScalarRef::KerrSpin) => Sc::from_f64(metric_scalar("kerr_spin")),
             ScalarBind::Ref(sref) => Sc::from_f64(
                 motion_scalar(&sim.motion, geom.coords, D, *sref)
-                    .or_else(|| geom_scalar(&x_lo_phys, &dx_phys, &geom.maps, *sref))
+                    .or_else(|| geom_scalar(&x_lo_phys, &dx_phys, &geom.maps, &geom.index_offset, *sref))
                     .unwrap_or_else(|| panic!("constraint_projection: unexpected scalar {sref:?}")),
             ),
             other => panic!("constraint_projection: unexpected scalar {other:?}"),
@@ -743,7 +743,7 @@ pub fn fofc_exterior_mask<const D: usize, const DOF: usize, Mem, Sc>(
             ScalarBind::Ref(ScalarRef::KerrSpin) => Sc::from_f64(metric_scalar("kerr_spin")),
             ScalarBind::Ref(sref) => Sc::from_f64(
                 motion_scalar(&sim.motion, geom.coords, D, *sref)
-                    .or_else(|| geom_scalar(&x_lo_phys, &dx_phys, &geom.maps, *sref))
+                    .or_else(|| geom_scalar(&x_lo_phys, &dx_phys, &geom.maps, &geom.index_offset, *sref))
                     .unwrap_or_else(|| panic!("fofc_exterior_mask: unexpected scalar {sref:?}")),
             ),
             other => panic!("fofc_exterior_mask: unexpected scalar {other:?}"),
@@ -799,7 +799,7 @@ where
             ),
             ScalarBind::Ref(sref) => Sc::from_f64(
                 motion_scalar(&sim.motion, geom.coords, D, *sref)
-                    .or_else(|| geom_scalar(&x_lo_phys, &dx_phys, &geom.maps, *sref))
+                    .or_else(|| geom_scalar(&x_lo_phys, &dx_phys, &geom.maps, &geom.index_offset, *sref))
                     .unwrap_or_else(|| panic!("shell_accretion: unexpected scalar {sref:?}")),
             ),
             other => panic!("shell_accretion: unexpected spec scalar {other:?}"),
@@ -1243,7 +1243,7 @@ fn dispatch_excise_inner<const D: usize, const DOF: usize, Mem, Sc>(
             ScalarBind::Spec(s) if &**s == "excision_radius" => r_exc,
             ScalarBind::Spec(s) if &**s == "excision_rho" => rho_atmosphere,
             ScalarBind::Spec(s) if &**s == "excision_pre" => pre_atmosphere,
-            ScalarBind::Ref(sref) => geom_scalar(&x_lo_k, &dx_k, &geom.maps, *sref)
+            ScalarBind::Ref(sref) => geom_scalar(&x_lo_k, &dx_k, &geom.maps, &geom.index_offset, *sref)
                 .unwrap_or_else(|| panic!("excise: unexpected scalar {sref:?}")),
             other => panic!("excise: unexpected scalar {other:?}"),
         })
@@ -1437,7 +1437,7 @@ pub fn dispatch_viscous<const D: usize, const DOF: usize, Mem, Sc>(
         ScalarBind::Ref(ScalarRef::Dt) => Sc::from_f64(dt),
         ScalarBind::Spec(s) if &**s == "nu" => Sc::from_f64(nu),
         ScalarBind::Ref(sref) => Sc::from_f64(
-            super::params::geom_scalar(&geom.x_lo, &geom.dx, &geom.maps, *sref)
+            super::params::geom_scalar(&geom.x_lo, &geom.dx, &geom.maps, &geom.index_offset, *sref)
                 .unwrap_or_else(|| panic!("viscous: unexpected scalar {sref:?}")),
         ),
         other => panic!("viscous: unexpected scalar {other:?}"),
@@ -1609,7 +1609,7 @@ pub fn dispatch_viscous_alpha<const D: usize, const DOF: usize, Mem, Sc>(
             Sc::from_f64(super::params::body_scalar::<D>(Some(bodies), *idx, *field))
         }
         ScalarBind::Ref(sref) => Sc::from_f64(
-            super::params::geom_scalar(&geom.x_lo, &geom.dx, &geom.maps, *sref)
+            super::params::geom_scalar(&geom.x_lo, &geom.dx, &geom.maps, &geom.index_offset, *sref)
                 .unwrap_or_else(|| panic!("viscous alpha: unexpected scalar {sref:?}")),
         ),
         ScalarBind::Spec(s) if &**s == "alpha" => Sc::from_f64(alpha),
@@ -1795,7 +1795,7 @@ fn dispatch_body_feedback_split<const D: usize, const DOF: usize, Mem, Sc>(
                     body_scalar::<D>(Some(bodies), b as u8, field)
                 }
             }
-            other => geom_scalar(&geom.x_lo, &geom.dx, &geom.maps, other)
+            other => geom_scalar(&geom.x_lo, &geom.dx, &geom.maps, &geom.index_offset, other)
                 .unwrap_or_else(|| panic!("body kernel: unexpected scalar param {other:?}")),
         }
     };
@@ -2442,7 +2442,7 @@ fn dispatch_penalize_inner<const D: usize, const DOF: usize, Mem, Sc>(
                 ScalarRef::Dt => dt,
                 ScalarRef::Gamma | ScalarRef::Cs => gamma,
                 ScalarRef::Body { idx: 0, field } => body_scalar::<D>(Some(bodies), b as u8, field),
-                other => geom_scalar(&geom.x_lo, &geom.dx, &geom.maps, other)
+                other => geom_scalar(&geom.x_lo, &geom.dx, &geom.maps, &geom.index_offset, other)
                     .unwrap_or_else(|| panic!("penalize: unexpected scalar param {other:?}")),
             },
             ScalarBind::Spec(spec) if &**spec == "c_drain" => c_drain,
@@ -2813,7 +2813,7 @@ pub fn dispatch_godunov_with_body_source<const D: usize, const DOF: usize, Mem, 
                 }
             }
             ScalarBind::Ref(sref) => motion_scalar(&sim.motion, geom.coords, D, *sref)
-                .or_else(|| geom_scalar(&x_lo_phys, &dx_phys, &sim.geom.maps, *sref))
+                .or_else(|| geom_scalar(&x_lo_phys, &dx_phys, &sim.geom.maps, &sim.geom.index_offset, *sref))
                 .unwrap_or_else(|| {
                     panic!(
                         "dispatch_godunov_with_body_source: unexpected scalar {sref:?} for '{name}'"
@@ -3059,7 +3059,7 @@ pub fn dispatch_flux<const D: usize, const DOF: usize, Mem, Sc>(
             ),
             other => Sc::from_f64(
                 motion_scalar(&sim.motion, sim.geom.coords, D, other)
-                    .or_else(|| geom_scalar(&x_lo_phys, &dx_phys, &sim.geom.maps, other))
+                    .or_else(|| geom_scalar(&x_lo_phys, &dx_phys, &sim.geom.maps, &sim.geom.index_offset, other))
                     .unwrap_or_else(|| panic!("dispatch_flux: unexpected scalar {other:?}")),
             ),
         }
@@ -3147,7 +3147,7 @@ pub fn dispatch_godunov<const D: usize, const DOF: usize, Mem, Sc>(
             ),
             other => Sc::from_f64(
                 motion_scalar(&sim.motion, sim.geom.coords, D, other)
-                    .or_else(|| geom_scalar(&x_lo_phys, &dx_phys, &sim.geom.maps, other))
+                    .or_else(|| geom_scalar(&x_lo_phys, &dx_phys, &sim.geom.maps, &sim.geom.index_offset, other))
                     .unwrap_or_else(|| panic!("dispatch_godunov: unexpected scalar {other:?}")),
             ),
         }
@@ -3186,7 +3186,7 @@ pub fn dispatch_source_apply<const D: usize, const DOF: usize, Mem, Sc>(
             // the name is `dt` but the value is the SSP stage weight ac*dt at this call site.
             ScalarBind::Ref(ScalarRef::Dt) => Sc::from_f64(weight),
             // lazily-declared centroid params (x_lo_k, dx_k).
-            ScalarBind::Ref(sref) => geom_scalar(&geom.x_lo, &geom.dx, &sim.geom.maps, *sref)
+            ScalarBind::Ref(sref) => geom_scalar(&geom.x_lo, &geom.dx, &sim.geom.maps, &sim.geom.index_offset, *sref)
                 .map(Sc::from_f64)
                 .unwrap_or_else(|| {
                     panic!("dispatch_source_apply: unexpected scalar {sref:?} for kernel '{name}'")
@@ -3334,7 +3334,7 @@ pub fn dispatch_godunov_with_sources<const D: usize, const DOF: usize, Mem, Sc>(
             ScalarBind::Ref(ScalarRef::A0) => Sc::from_f64(a0),
             ScalarBind::Ref(ScalarRef::Ac) => Sc::from_f64(ac),
             ScalarBind::Ref(sref) => motion_scalar(&sim.motion, sim.geom.coords, D, *sref)
-                .or_else(|| geom_scalar(&x_lo_phys, &dx_phys, &sim.geom.maps, *sref))
+                .or_else(|| geom_scalar(&x_lo_phys, &dx_phys, &sim.geom.maps, &sim.geom.index_offset, *sref))
                 .map(Sc::from_f64)
                 .unwrap_or_else(|| panic!(
                     "dispatch_godunov_with_sources: unexpected scalar {sref:?} (not dt, not geom) for kernel '{name}'"

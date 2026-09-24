@@ -10252,9 +10252,6 @@ fn validate_launch_scope(cfg: &Config) -> Result<(), String> {
     if cfg.dims != 2 {
         return refused(&format!("a {}-dimensional grid", cfg.dims));
     }
-    if cfg.coord_system != "cartesian" {
-        return refused(&format!("the {} chart", cfg.coord_system));
-    }
     if cfg.spacetime != "minkowski" {
         return refused(&format!("the {} spacetime", cfg.spacetime));
     }
@@ -10290,9 +10287,6 @@ fn validate_launch_scope(cfg: &Config) -> Result<(), String> {
     }
     if cfg.dlogt > 0.0 {
         return refused("a logarithmic checkpoint cadence");
-    }
-    if axis_maps::<2>(cfg).is_some() {
-        return refused("nonuniform spacing");
     }
     Ok(())
 }
@@ -10349,80 +10343,90 @@ fn run_worker_process(
     let offsets = tile_offsets(&partition);
     // the gas regimes share one tile build: a conserved vector of density, momentum and energy
     // over the same primitive rows, with every numerics door of the single path
-    macro_rules! gas_tiles {
-        ($regime:expr, $regime_ty:ty) => {{
-            type Sim = SimDefaultGeneric<$regime_ty, 2, 2, Cartesian, EosSelect<f64>>;
-        let mut tiles = Vec::with_capacity(mine.len());
-        for &flat in &mine {
-            let tc = unflatten(flat, counts);
-            let ext = partition.tile_extents(tc);
-            let tile_lo: [usize; 2] = [ext[0].0, ext[1].0];
-            let m: [usize; 2] = [ext[0].1, ext[1].1];
-            let origin = tile_origin::<2>(cfg, tile_lo);
-            let spacing: [f64; 2] = [cfg.dx[0], cfg.dx[1]];
-            let bnd = tile_boundaries(&phys, tc, counts);
-            let sim = Sim::build($regime, host_eos(cfg), Cartesian)
-                .cells(m)
-                .origin(origin)
-                .spacing(spacing)
-                .ghosts(ghost_width(cfg))
-                .boundaries(bnd)
-                .cfl(cfg.cfl)
-                .timestepping(cfg.timestepping)
-                .allocate()
-                .map_err(|e| format!("tile {flat} allocate: {e:?}"))?
-                .set_initial_indexed(|idx, _x| {
-                    let lin = (tile_lo[0] + idx[0] as usize) + (tile_lo[1] + idx[1] as usize) * n[0];
-                    let row = &prims[lin];
-                    Prim::adiabatic(Density(row[0]), Tensor::new([row[1], row[2]]), Pressure(row[3]))
-                })
-                .build();
-            // the numerics the single path installs: reconstruction, the ppm flatten, the
-            // well-balanced reconstruction, the eos, and the solver
-            let sub = sim
-                .substrate()
-                .theta(theta)
-                .reconstruction(build_recon(cfg))
-                .ppm_flatten(cfg.ppm_flatten_onset, cfg.ppm_flatten_full)
-                .well_balanced_reconstruction(cfg.wb_reconstruction)
-                .with_eos(build_eos(cfg))
-                .with_solver(solver)
-                .map_err(|e| format!("tile {flat} substrate/solver: {e:?}"))?;
-            // the user sources, per tile: pointwise, each tile evaluating them at its own
-            // global coordinates, as the single decomposed path attaches them
-            let sub = attach_configured_sources(
-                sub,
-                &cfg.source_jsons,
-                <$regime_ty as Regime<f64, 2>>::SPEC,
-                &state_law_of(cfg, <$regime_ty as Regime<f64, 2>>::SPEC),
-            )?;
-            let sub = attach_gradient_walls(sub, cfg, |sub, gbc| sub.with_gradient_boundary(gbc).0)?;
-            tiles.push((sim, sub));
-        }
-        let ng = tiles[0].0.geom.ng;
-        let grid = decomposed_grid::<2>(cfg, ng);
-        if let Some(path) = cfg.restart_path.as_deref() {
-            for (&flat, (sim, _)) in mine.iter().zip(tiles.iter_mut()) {
-                load_partitioned_level(sim, path, 0, offsets[flat], &grid)
-                    .map_err(|e| format!("restart of tile {flat} from '{path}': {e}"))?;
+    // every tile carries the whole grid's origin, spacing and maps and is placed by the index
+    // of its first cell, so each cell sits bitwise where the whole grid puts it
+    let origin: [f64; 2] = [cfg.x_lo[0], cfg.x_lo[1]];
+    let spacing: [f64; 2] = [cfg.dx[0], cfg.dx[1]];
+    let maps = axis_maps::<2>(cfg);
+    let placed = |tile_lo: [usize; 2]| -> [isize; 2] { [tile_lo[0] as isize, tile_lo[1] as isize] };
+    // the tail every regime shares: the restart from a partitioned checkpoint, the clock, and
+    // the fabric session over the built tiles
+    macro_rules! session_over {
+        ($regime_ty:ty, $dof:literal, $tiles:ident) => {{
+            let ng = $tiles[0].0.geom.ng;
+            let grid = decomposed_grid::<2>(cfg, ng);
+            if let Some(path) = cfg.restart_path.as_deref() {
+                for (&flat, (sim, _)) in mine.iter().zip($tiles.iter_mut()) {
+                    load_partitioned_level(sim, path, 0, offsets[flat], &grid)
+                        .map_err(|e| format!("restart of tile {flat} from '{path}': {e}"))?;
+                }
             }
-        }
-        for (sim, _) in tiles.iter_mut() {
-            sim.time = cfg.start_time;
-        }
-        let built = build_clock.elapsed();
-            worker_session::<$regime_ty, _, _, 2>(
-                cfg, launch, fault, drained, built, &partition, placement, &topology, me, &mine, &offsets, tiles,
+            for (sim, _) in $tiles.iter_mut() {
+                sim.time = cfg.start_time;
+            }
+            let built = build_clock.elapsed();
+            worker_session::<$regime_ty, _, _, _, $dof>(
+                cfg, launch, fault, drained, built, &partition, placement, &topology, me, &mine, &offsets, $tiles,
             )
-        
         }};
     }
-    // the tiles this worker holds, built as the single path builds them, per regime
-    match cfg.regime.as_str() {
-        "newtonian" => gas_tiles!(Newtonian, Newtonian),
-        "rhd" => gas_tiles!(Rhd, Rhd),
-        "nmhd" => {
-            type Sim = SimDefaultGeneric<NewtonianMhd, 2, 3, Cartesian, EosSelect<f64>>;
+    macro_rules! gas_tiles {
+        ($geom:expr, $geom_ty:ty, $regime:expr, $regime_ty:ty) => {{
+            type Sim = SimDefaultGeneric<$regime_ty, 2, 2, $geom_ty, EosSelect<f64>>;
+            let mut tiles = Vec::with_capacity(mine.len());
+            for &flat in &mine {
+                let tc = unflatten(flat, counts);
+                let ext = partition.tile_extents(tc);
+                let tile_lo: [usize; 2] = [ext[0].0, ext[1].0];
+                let m: [usize; 2] = [ext[0].1, ext[1].1];
+                let bnd = tile_boundaries(&phys, tc, counts);
+                let sim = Sim::build($regime, host_eos(cfg), $geom)
+                    .cells(m)
+                    .origin(origin)
+                    .spacing(spacing)
+                    .ghosts(ghost_width(cfg))
+                    .coord_maps(maps)
+                    .index_offset(placed(tile_lo))
+                    .boundaries(bnd)
+                    .cfl(cfg.cfl)
+                    .timestepping(cfg.timestepping)
+                    .cyl_plane(cfg.cyl_plane)
+                    .allocate()
+                    .map_err(|e| format!("tile {flat} allocate: {e:?}"))?
+                    .set_initial_indexed(|idx, _x| {
+                        let lin = (tile_lo[0] + idx[0] as usize) + (tile_lo[1] + idx[1] as usize) * n[0];
+                        let row = &prims[lin];
+                        Prim::adiabatic(Density(row[0]), Tensor::new([row[1], row[2]]), Pressure(row[3]))
+                    })
+                    .build();
+                // the numerics the single path installs: reconstruction, the ppm flatten, the
+                // well-balanced reconstruction, the eos, and the solver
+                let sub = sim
+                    .substrate()
+                    .theta(theta)
+                    .reconstruction(build_recon(cfg))
+                    .ppm_flatten(cfg.ppm_flatten_onset, cfg.ppm_flatten_full)
+                    .well_balanced_reconstruction(cfg.wb_reconstruction)
+                    .with_eos(build_eos(cfg))
+                    .with_solver(solver)
+                    .map_err(|e| format!("tile {flat} substrate/solver: {e:?}"))?;
+                // the user sources, per tile: pointwise, each tile evaluating them at its own
+                // global coordinates, as the single decomposed path attaches them
+                let sub = attach_configured_sources(
+                    sub,
+                    &cfg.source_jsons,
+                    <$regime_ty as Regime<f64, 2>>::SPEC,
+                    &state_law_of(cfg, <$regime_ty as Regime<f64, 2>>::SPEC),
+                )?;
+                let sub = attach_gradient_walls(sub, cfg, |sub, gbc| sub.with_gradient_boundary(gbc).0)?;
+                tiles.push((sim, sub));
+            }
+            session_over!($regime_ty, 2, tiles)
+        }};
+    }
+    macro_rules! nmhd_tiles {
+        ($geom:expr, $geom_ty:ty) => {{
+            type Sim = SimDefaultGeneric<NewtonianMhd, 2, 3, $geom_ty, EosSelect<f64>>;
             if bufs.len() < 3 {
                 return Err(format!("mhd needs 3 staggered b-field generators, got {}", bufs.len()));
             }
@@ -10433,20 +10437,21 @@ fn run_worker_process(
                 let ext = partition.tile_extents(tc);
                 let tile_lo: [usize; 2] = [ext[0].0, ext[1].0];
                 let m: [usize; 2] = [ext[0].1, ext[1].1];
-                let origin = tile_origin::<2>(cfg, tile_lo);
-                let spacing: [f64; 2] = [cfg.dx[0], cfg.dx[1]];
                 let bnd = tile_boundaries(&phys, tc, counts);
                 // each tile's slice of the global staggered buffers: a shared interface face
                 // reads the same global value on both of its tiles
                 let tile_faces: Vec<Vec<f64>> =
                     (0..2).map(|d| tile_face_buffer::<2>(&bufs[d], n, m, tile_lo, d)).collect();
-                let sim = Sim::build(NewtonianMhd, host_eos(cfg), Cartesian)
+                let sim = Sim::build(NewtonianMhd, host_eos(cfg), $geom)
                     .cells(m)
                     .origin(origin)
                     .spacing(spacing)
+                    .coord_maps(maps)
+                    .index_offset(placed(tile_lo))
                     .boundaries(bnd)
                     .cfl(cfg.cfl)
                     .timestepping(cfg.timestepping)
+                    .cyl_plane(cfg.cyl_plane)
                     .allocate()
                     .map_err(|e| format!("tile {flat} allocate: {e:?}"))?
                     .set_initial_indexed(|idx, _x| {
@@ -10474,40 +10479,29 @@ fn run_worker_process(
                     .ct_method(ct);
                 tiles.push((sim, sub));
             }
-        let ng = tiles[0].0.geom.ng;
-        let grid = decomposed_grid::<2>(cfg, ng);
-        if let Some(path) = cfg.restart_path.as_deref() {
-            for (&flat, (sim, _)) in mine.iter().zip(tiles.iter_mut()) {
-                load_partitioned_level(sim, path, 0, offsets[flat], &grid)
-                    .map_err(|e| format!("restart of tile {flat} from '{path}': {e}"))?;
-            }
-        }
-        for (sim, _) in tiles.iter_mut() {
-            sim.time = cfg.start_time;
-        }
-        let built = build_clock.elapsed();
-            worker_session::<NewtonianMhd, _, _, 3>(
-                cfg, launch, fault, drained, built, &partition, placement, &topology, me, &mine, &offsets, tiles,
-            )
-        }
-        "isothermal" => {
-            type Sim = SimDefault<IsoNewtonian, 2, Cartesian, Isothermal<f64>>;
+            session_over!(NewtonianMhd, 3, tiles)
+        }};
+    }
+    macro_rules! iso_tiles {
+        ($geom:expr, $geom_ty:ty) => {{
+            type Sim = SimDefault<IsoNewtonian, 2, $geom_ty, Isothermal<f64>>;
             let mut tiles = Vec::with_capacity(mine.len());
             for &flat in &mine {
                 let tc = unflatten(flat, counts);
                 let ext = partition.tile_extents(tc);
                 let tile_lo: [usize; 2] = [ext[0].0, ext[1].0];
                 let m: [usize; 2] = [ext[0].1, ext[1].1];
-                let origin = tile_origin::<2>(cfg, tile_lo);
-                let spacing: [f64; 2] = [cfg.dx[0], cfg.dx[1]];
                 let bnd = tile_boundaries(&phys, tc, counts);
-                let sim = Sim::build(IsoNewtonian, Isothermal { cs: cfg.cs }, Cartesian)
+                let sim = Sim::build(IsoNewtonian, Isothermal { cs: cfg.cs }, $geom)
                     .cells(m)
                     .origin(origin)
                     .spacing(spacing)
+                    .coord_maps(maps)
+                    .index_offset(placed(tile_lo))
                     .boundaries(bnd)
                     .cfl(cfg.cfl)
                     .timestepping(cfg.timestepping)
+                    .cyl_plane(cfg.cyl_plane)
                     .allocate()
                     .map_err(|e| format!("tile {flat} allocate: {e:?}"))?
                     .set_initial_indexed(|idx, _x| {
@@ -10528,24 +10522,12 @@ fn run_worker_process(
                 let sub = attach_gradient_walls(sub, cfg, |sub, gbc| sub.with_gradient_boundary(gbc).0)?;
                 tiles.push((sim, sub));
             }
-        let ng = tiles[0].0.geom.ng;
-        let grid = decomposed_grid::<2>(cfg, ng);
-        if let Some(path) = cfg.restart_path.as_deref() {
-            for (&flat, (sim, _)) in mine.iter().zip(tiles.iter_mut()) {
-                load_partitioned_level(sim, path, 0, offsets[flat], &grid)
-                    .map_err(|e| format!("restart of tile {flat} from '{path}': {e}"))?;
-            }
-        }
-        for (sim, _) in tiles.iter_mut() {
-            sim.time = cfg.start_time;
-        }
-        let built = build_clock.elapsed();
-            worker_session::<IsoNewtonian, _, _, 2>(
-                cfg, launch, fault, drained, built, &partition, placement, &topology, me, &mine, &offsets, tiles,
-            )
-        }
-        "imhd" => {
-            type Sim = SimDefaultGeneric<IsothermalMhd, 2, 3, Cartesian, Isothermal<f64>>;
+            session_over!(IsoNewtonian, 2, tiles)
+        }};
+    }
+    macro_rules! imhd_tiles {
+        ($geom:expr, $geom_ty:ty) => {{
+            type Sim = SimDefaultGeneric<IsothermalMhd, 2, 3, $geom_ty, Isothermal<f64>>;
             if bufs.len() < 3 {
                 return Err(format!("imhd needs 3 staggered b-field generators, got {}", bufs.len()));
             }
@@ -10556,18 +10538,19 @@ fn run_worker_process(
                 let ext = partition.tile_extents(tc);
                 let tile_lo: [usize; 2] = [ext[0].0, ext[1].0];
                 let m: [usize; 2] = [ext[0].1, ext[1].1];
-                let origin = tile_origin::<2>(cfg, tile_lo);
-                let spacing: [f64; 2] = [cfg.dx[0], cfg.dx[1]];
                 let bnd = tile_boundaries(&phys, tc, counts);
                 let tile_faces: Vec<Vec<f64>> =
                     (0..2).map(|d| tile_face_buffer::<2>(&bufs[d], n, m, tile_lo, d)).collect();
-                let sim = Sim::build(IsothermalMhd, Isothermal { cs: cfg.cs }, Cartesian)
+                let sim = Sim::build(IsothermalMhd, Isothermal { cs: cfg.cs }, $geom)
                     .cells(m)
                     .origin(origin)
                     .spacing(spacing)
+                    .coord_maps(maps)
+                    .index_offset(placed(tile_lo))
                     .boundaries(bnd)
                     .cfl(cfg.cfl)
                     .timestepping(cfg.timestepping)
+                    .cyl_plane(cfg.cyl_plane)
                     .allocate()
                     .map_err(|e| format!("tile {flat} allocate: {e:?}"))?
                     .set_initial_indexed(|idx, _x| {
@@ -10593,22 +10576,27 @@ fn run_worker_process(
                     .ct_method(ct);
                 tiles.push((sim, sub));
             }
-        let ng = tiles[0].0.geom.ng;
-        let grid = decomposed_grid::<2>(cfg, ng);
-        if let Some(path) = cfg.restart_path.as_deref() {
-            for (&flat, (sim, _)) in mine.iter().zip(tiles.iter_mut()) {
-                load_partitioned_level(sim, path, 0, offsets[flat], &grid)
-                    .map_err(|e| format!("restart of tile {flat} from '{path}': {e}"))?;
+            session_over!(IsothermalMhd, 3, tiles)
+        }};
+    }
+    // one arm per chart the flat spacetime is gridded on
+    macro_rules! charted {
+        ($arm:ident $(, $args:tt)*) => {
+            match cfg.coord_system.as_str() {
+                "cartesian" => $arm!(Cartesian, Cartesian $(, $args)*),
+                "spherical" => $arm!(Spherical, Spherical $(, $args)*),
+                "cylindrical" => $arm!(Cylindrical, Cylindrical $(, $args)*),
+                other => Err(format!("the {other} chart is outside the distributed first release")),
             }
-        }
-        for (sim, _) in tiles.iter_mut() {
-            sim.time = cfg.start_time;
-        }
-        let built = build_clock.elapsed();
-            worker_session::<IsothermalMhd, _, _, 3>(
-                cfg, launch, fault, drained, built, &partition, placement, &topology, me, &mine, &offsets, tiles,
-            )
-        }
+        };
+    }
+    // the tiles this worker holds, built as the single path builds them, per regime and chart
+    match cfg.regime.as_str() {
+        "newtonian" => charted!(gas_tiles, Newtonian, Newtonian),
+        "rhd" => charted!(gas_tiles, Rhd, Rhd),
+        "nmhd" => charted!(nmhd_tiles),
+        "isothermal" => charted!(iso_tiles),
+        "imhd" => charted!(imhd_tiles),
         other => Err(format!("the {other} regime is outside the distributed first release")),
     }
 }
@@ -10618,7 +10606,7 @@ fn run_worker_process(
 /// checkpoints at the linear cadence, and the final checkpoint before the session ends.
 /// worker 0 reports through the decomposed table.
 #[allow(clippy::too_many_arguments)]
-fn worker_session<R, E, K, const DOF: usize>(
+fn worker_session<R, G, E, K, const DOF: usize>(
     cfg: &Config,
     launch: &WorkerLaunch,
     fault: LaunchFault,
@@ -10630,10 +10618,11 @@ fn worker_session<R, E, K, const DOF: usize>(
     me: symbi_fabric::WorkerId,
     mine: &[usize],
     offsets: &[[isize; 2]],
-    mut tiles: Vec<(SimDefaultGeneric<R, 2, DOF, Cartesian, E>, K)>,
+    mut tiles: Vec<(SimDefaultGeneric<R, 2, DOF, G, E>, K)>,
 ) -> Result<(), String>
 where
     R: Regime<f64, 2>,
+    G: symbi_geometry::Metric<f64, 2> + Copy,
     E: Eos<f64>,
     K: symbi_sim::substrate_seam::KernelSet<2, DOF, DefaultMemory, f64>,
 {

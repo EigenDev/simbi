@@ -164,7 +164,7 @@ fn run_compiled(g: &mut Row, axis: Axis) {
             "x_lo_0" => x_lo,
             "dx_0" => dx,
             "map_kind_0" => axis.map_kind(),
-            "map_param_0" => 0.0,
+            "map_param_0" | "idx_off_0" => 0.0,
             other => panic!("unexpected scalar '{other}'"),
         }
     };

@@ -1209,6 +1209,12 @@ pub struct PartitionGeometry<const D: usize> {
     /// per-axis coordinate maps. when Some, overrides dx/x_lo for
     /// non-uniform grids (logarithmic radial spacing, etc.).
     pub maps: Option<[symbi_geometry::AxisMap; D]>,
+
+    /// the index of local cell 0 on the whole grid, per axis. a tile of a decomposed grid
+    /// carries the grid's own origin, spacing and maps and this offset, so every position it
+    /// evaluates, on the host and in the kernels, is the whole grid's bitwise. zero on an
+    /// undivided grid.
+    pub index_offset: [isize; D],
 }
 
 /// the cylindrical 2D plane an MHD sim grids — the one place the grid-axis set is ambiguous
@@ -1258,6 +1264,9 @@ where
     timestepping: Timestepping,
     device_id: i64,
     cyl_plane: Option<CylPlane>,
+    /// the index of local cell 0 on the whole grid, per axis; see
+    /// [`PartitionGeometry::index_offset`].
+    index_offset: [isize; D],
     /// per-axis non-uniform coordinate maps (e.g. log-radial spacing). `None` -> the uniform
     /// `x_lo + i*dx` grid (bit-identical to the prior behavior).
     coord_maps: Option<[symbi_geometry::AxisMap; D]>,
@@ -1294,6 +1303,13 @@ where
     /// the physical origin (coordinate of index 0). default `[0; D]`.
     pub fn origin(mut self, x_lo: [f64; D]) -> Self {
         self.x_lo = x_lo;
+        self
+    }
+    /// place this grid as a tile of a larger one: local cell 0 sits at `offset` on the whole
+    /// grid, and the origin, spacing and maps given are the whole grid's. every position the
+    /// tile evaluates is then the whole grid's bitwise.
+    pub fn index_offset(mut self, offset: [isize; D]) -> Self {
+        self.index_offset = offset;
         self
     }
     /// the cell widths directly. mutually exclusive with [`Self::bounds`] (last one wins).
@@ -1372,10 +1388,12 @@ where
             self.timestepping,
             self.device_id,
         )?;
-        Ok(match self.cyl_plane {
+        let mut sim = match self.cyl_plane {
             Some(p) => sim.with_cyl_plane(p),
             None => sim,
-        })
+        };
+        sim.geom.index_offset = self.index_offset;
+        Ok(sim)
     }
 
     /// validate the grid config, then allocate the sim's fields — the typestate gate from the
@@ -1440,6 +1458,8 @@ where
             Some(maps) => sim.with_maps(maps),
             None => sim,
         };
+        let mut sim = sim;
+        sim.geom.index_offset = self.index_offset;
         Ok(SimBuilder {
             regime: self.regime,
             eos: self.eos,
@@ -1454,6 +1474,7 @@ where
             timestepping: self.timestepping,
             device_id: self.device_id,
             cyl_plane: self.cyl_plane,
+            index_offset: self.index_offset,
             coord_maps: self.coord_maps,
             sim: Some(sim),
             _marker: std::marker::PhantomData,
@@ -1516,6 +1537,7 @@ where
             timestepping: self.timestepping,
             device_id: self.device_id,
             cyl_plane: self.cyl_plane,
+            index_offset: self.index_offset,
             coord_maps: self.coord_maps,
             sim: self.sim,
             _marker: std::marker::PhantomData,
@@ -1703,11 +1725,14 @@ impl<const D: usize> PartitionGeometry<D> {
     /// bug class). honors non-uniform maps (Face -> map.face, Center -> map.center).
     #[inline]
     pub fn stagger_coord(&self, coord: [isize; D], loc: [Loc; D]) -> [f64; D] {
-        std::array::from_fn(|ax| match (self.maps.as_ref(), loc[ax]) {
-            (Some(maps), Loc::Face) => maps[ax].face(coord[ax]),
-            (Some(maps), Loc::Center) => maps[ax].center(coord[ax]),
-            (None, Loc::Face) => self.x_lo[ax] + (coord[ax] as f64) * self.dx[ax],
-            (None, Loc::Center) => self.x_lo[ax] + (coord[ax] as f64 + 0.5) * self.dx[ax],
+        std::array::from_fn(|ax| {
+            let i = coord[ax] + self.index_offset[ax];
+            match (self.maps.as_ref(), loc[ax]) {
+                (Some(maps), Loc::Face) => maps[ax].face(i),
+                (Some(maps), Loc::Center) => maps[ax].center(i),
+                (None, Loc::Face) => self.x_lo[ax] + (i as f64) * self.dx[ax],
+                (None, Loc::Center) => self.x_lo[ax] + (i as f64 + 0.5) * self.dx[ax],
+            }
         })
     }
 
@@ -1732,7 +1757,7 @@ impl<const D: usize> PartitionGeometry<D> {
     #[inline]
     pub fn cell_width(&self, coord: [isize; D], ax: usize) -> f64 {
         if let Some(ref maps) = self.maps {
-            maps[ax].width(coord[ax])
+            maps[ax].width(coord[ax] + self.index_offset[ax])
         } else {
             self.dx[ax]
         }
@@ -2843,6 +2868,7 @@ where
         let geom = PartitionGeometry {
             dx,
             x_lo,
+            index_offset: [0; D],
             allocated: allocated.clone(),
             interior,
             ng,
@@ -3101,6 +3127,7 @@ where
             timestepping: Timestepping::Rk2,
             device_id: 0,
             cyl_plane: None,
+            index_offset: [0; D],
             coord_maps: None,
             sim: None,
             _marker: std::marker::PhantomData,

@@ -33,11 +33,12 @@ fn kernel_invocation_run_cpu_matches_direct_descriptor_call() {
     let ext_n1 = [(N + 1) as u32];
     let grid = [N as u32];
     let dom_lo = [0i32];
-    // the generated signature order is [dt, map_kind_0, x_lo_0, dx_0, map_param_0]: the face
-    // map is selected at runtime, so the kernel carries the selector and both maps' parameters
-    // on every chart. map_kind 0 is the uniform map `x_lo + i*dx`, under which the origin and
-    // the grading ratio go unread.
-    let scalars = [DT, 0.0, 0.0, DX, 0.0];
+    // the generated signature order is [dt, map_kind_0, x_lo_0, dx_0, idx_off_0, map_param_0]:
+    // the face map is selected at runtime, so the kernel carries the selector, both maps'
+    // parameters and the tile's index offset on every chart. map_kind 0 is the uniform map
+    // `x_lo + (i + idx_off)*dx`, under which the origin and the grading ratio go unread; the
+    // offset is zero on an undivided grid.
+    let scalars = [DT, 0.0, 0.0, DX, 0.0, 0.0];
 
     // --- direct descriptor call (the existing path) ---
     let (rho, flux) = inputs();

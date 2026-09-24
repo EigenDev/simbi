@@ -1135,7 +1135,7 @@ where
                 ),
                 other => Sc::from_f64(
                     motion_scalar(&sim.motion, geom.coords, D, other)
-                        .or_else(|| geom_scalar(&x_lo_phys, &dx_phys, &sim.geom.maps, other))
+                        .or_else(|| geom_scalar(&x_lo_phys, &dx_phys, &sim.geom.maps, &sim.geom.index_offset, other))
                         .unwrap_or_else(|| {
                             panic!("{} cfl: unexpected scalar {other:?}", Self::kernel_prefix())
                         }),

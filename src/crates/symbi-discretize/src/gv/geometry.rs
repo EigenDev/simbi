@@ -439,6 +439,10 @@ pub(crate) fn gv_axis_face_at_index<'t>(
 ) -> Gv<'t> {
     let start = cx.scalar(&format!("x_lo_{ax}"));
     let param = cx.scalar(&format!("dx_{ax}"));
+    // the index of this cell on the whole grid: a tile of a decomposed grid carries the grid's
+    // own origin and spacing and the offset of its first cell, so its positions are the
+    // whole grid's positions bitwise. the offset is a small integer and the sum is exact.
+    let i = i + cx.scalar(&format!("idx_off_{ax}"));
     // spacing is a runtime per-axis value: `map_kind_{ax}` selects the face-
     // position map (0 = uniform, 1 = log, 2 = geometric cell widths), so one kernel per
     // (regime, geometry) serves every spacing (log-r, log-theta, ...) and a moving mesh updates

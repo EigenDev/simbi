@@ -138,9 +138,10 @@ impl From<FabricError> for WorkerError {
     }
 }
 
-/// the first-release scope: 2D cartesian newtonian hydro, relativistic hydro and newtonian
-/// MHD, adiabatic or globally isothermal, in host memory, on a static mesh, without dye,
-/// bodies, tracers, or excision.
+/// the first-release scope: 2D newtonian hydro, relativistic hydro and newtonian MHD,
+/// adiabatic or globally isothermal, on the cartesian, spherical and cylindrical charts of a
+/// flat spacetime, in host memory, on a static mesh, without dye, bodies, tracers, or
+/// excision.
 fn refuse<const D: usize, const DOF: usize, M: MemorySpace, K: KernelSet<D, DOF, M, f64>>(
     regime: RegimeKind,
     stores: &[&FieldStore<D, DOF, M, f64>],
@@ -166,9 +167,7 @@ fn refuse<const D: usize, const DOF: usize, M: MemorySpace, K: KernelSet<D, DOF,
         return Err(refused("device memory"));
     }
     for (store, kernel) in stores.iter().zip(kernels) {
-        let reason = if store.geom.coords != symbi_geometry::Geometry::Cartesian {
-            Some(format!("the {:?} chart", store.geom.coords))
-        } else if store.geom.spacetime != symbi_geometry::Spacetime::Minkowski {
+        let reason = if store.geom.spacetime != symbi_geometry::Spacetime::Minkowski {
             Some(format!("the {:?} spacetime", store.geom.spacetime))
         } else if kernel.isothermal_closure_varies(store) {
             Some("a locally isothermal closure".to_string())

@@ -244,6 +244,7 @@ impl<'a, S: Scalar + OrderedNumeric> NamedKernel<'a, S> {
                                 ScalarRef::Mesh(_)
                                     | ScalarRef::MapKind(_)
                                     | ScalarRef::MapParam(_)
+                                    | ScalarRef::IdxOff(_)
                                     | ScalarRef::XLo(_),
                             )
                         )

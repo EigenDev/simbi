@@ -647,7 +647,7 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize, const
                         // face-position ladder, which declares the per-axis grid origin
                         // and spacing like any position-reading kernel.
                         ScalarBind::Ref(other) => Sc::from_f64(
-                            geom_scalar(&x_lo_k, &dx_k, &sim.geom.maps, *other).unwrap_or_else(
+                            geom_scalar(&x_lo_k, &dx_k, &sim.geom.maps, &sim.geom.index_offset, *other).unwrap_or_else(
                                 || panic!("ghost_fill: unexpected scalar {other:?}"),
                             ),
                         ),
@@ -747,7 +747,7 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize, const
                 ScalarRef::A0 => a0,
                 ScalarRef::Ac => ac,
                 other => motion_scalar(&sim.motion, sim.geom.coords, D, other)
-                    .or_else(|| geom_scalar(&x_lo_k, &dx_k, &sim.geom.maps, other))
+                    .or_else(|| geom_scalar(&x_lo_k, &dx_k, &sim.geom.maps, &sim.geom.index_offset, other))
                     .unwrap_or_else(|| panic!("chi_godunov: unexpected scalar {other:?}")),
             })
         });

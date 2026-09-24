@@ -337,7 +337,7 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize, const
                             .expect("rhd GR c2p needs kerr_spin but the metric supplied none"),
                     ),
                     other => Sc::from_f64(
-                        geom_scalar(&x_lo, &dx, &sim.geom.maps, other)
+                        geom_scalar(&x_lo, &dx, &sim.geom.maps, &sim.geom.index_offset, other)
                             .unwrap_or_else(|| panic!("rhd GR c2p: unexpected scalar {other:?}")),
                     ),
                 }
@@ -567,7 +567,7 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize, const
                                 .expect("kerr ghost fill needs kerr_spin"),
                         ),
                         ScalarBind::Ref(other) => Sc::from_f64(
-                            geom_scalar(&x_lo, &dx, &sim.geom.maps, *other).unwrap_or_else(|| {
+                            geom_scalar(&x_lo, &dx, &sim.geom.maps, &sim.geom.index_offset, *other).unwrap_or_else(|| {
                                 panic!("ghost_fill: unexpected scalar {other:?}")
                             }),
                         ),

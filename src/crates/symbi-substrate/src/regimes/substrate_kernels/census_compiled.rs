@@ -124,7 +124,7 @@ where
                 ScalarRef::UserParam(i) => *params
                     .get(i as usize)
                     .unwrap_or_else(|| panic!("census map: param p{i} not provided")),
-                other => geom_scalar(&sim.geom.x_lo, &sim.geom.dx, &sim.geom.maps, other)
+                other => geom_scalar(&sim.geom.x_lo, &sim.geom.dx, &sim.geom.maps, &sim.geom.index_offset, other)
                     .unwrap_or_else(|| panic!("census map: unresolved scalar {other:?}")),
             }
         })

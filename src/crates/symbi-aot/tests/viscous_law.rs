@@ -150,7 +150,7 @@ fn compiled_viscous_iso_alpha_matches_the_f64_chain_bitwise() {
             "body_0_pos_1" => BODY[1],
             "dx_0" | "dx_1" => DX,
             "x_lo_0" | "x_lo_1" => X_LO,
-            "map_kind_0" | "map_kind_1" | "map_param_0" | "map_param_1" => 0.0,
+            "map_kind_0" | "map_kind_1" | "map_param_0" | "map_param_1" | "idx_off_0" | "idx_off_1" => 0.0,
             other => panic!("unexpected scalar '{other}'"),
         }
     };
@@ -392,7 +392,7 @@ fn compiled_viscous_iso_alpha_3d_matches_the_f64_chain_bitwise() {
             "dx_0" | "dx_1" | "dx_2" => DX,
             "x_lo_0" | "x_lo_1" | "x_lo_2" => X_LO,
             "map_kind_0" | "map_kind_1" | "map_kind_2" | "map_param_0" | "map_param_1"
-            | "map_param_2" => 0.0,
+            | "map_param_2" | "idx_off_0" | "idx_off_1" | "idx_off_2" => 0.0,
             other => panic!("unexpected scalar '{other}'"),
         }
     };
@@ -535,7 +535,7 @@ fn compiled_viscous_iso_ortho_cyl_matches_the_f64_chain_bitwise() {
             "dx_1" => DPHI,
             "x_lo_0" => R_LO,
             "x_lo_1" => PHI_LO,
-            "map_kind_0" | "map_kind_1" | "map_param_0" | "map_param_1" => 0.0,
+            "map_kind_0" | "map_kind_1" | "map_param_0" | "map_param_1" | "idx_off_0" | "idx_off_1" => 0.0,
             other => panic!("unexpected scalar '{other}'"),
         }
     };
@@ -670,7 +670,7 @@ fn compiled_viscous_iso_alpha_ortho_cyl_matches_the_f64_chain_bitwise() {
             "dx_1" => DPHI,
             "x_lo_0" => R_LO,
             "x_lo_1" => PHI_LO,
-            "map_kind_0" | "map_kind_1" | "map_param_0" | "map_param_1" => 0.0,
+            "map_kind_0" | "map_kind_1" | "map_param_0" | "map_param_1" | "idx_off_0" | "idx_off_1" => 0.0,
             other => panic!("unexpected scalar '{other}'"),
         }
     };

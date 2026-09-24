@@ -84,6 +84,8 @@ fn jit_fused_godunov_matches_interp_bitwise() {
         ("map_kind_1", 0.0),
         ("map_param_0", 0.0),
         ("map_param_1", 0.0),
+        ("idx_off_0", 0.0),
+        ("idx_off_1", 0.0),
         ("t", 0.0),
         ("p0", 0.5),
         ("p1", -0.3),
