@@ -1955,6 +1955,28 @@ fn tile_boundaries<const D: usize>(
     }))
 }
 
+/// register the configured neumann / robin walls on a tile's kernel set in registry order, so
+/// the `Neumann(id)` / `Robin(id)` faces of the tile name the same coefficients as on the single
+/// grid. a tile away from the wall carries no such face and the table stays unread.
+fn attach_gradient_walls<K>(
+    mut sub: K,
+    cfg: &Config,
+    register: impl Fn(K, symbi::regimes::substrate_kernels::GradientBc) -> K,
+) -> Result<K, String> {
+    use symbi::regimes::substrate_kernels::GradientBc;
+    for spec in &cfg.gradient_bcs {
+        let gbc = match spec.kind.as_str() {
+            "neumann" => GradientBc::Neumann(spec.coeffs.clone()),
+            "robin" => GradientBc::Robin(
+                spec.coeffs.chunks_exact(3).map(|c| [c[0], c[1], c[2]]).collect(),
+            ),
+            other => return Err(format!("unknown gradient boundary kind '{other}'")),
+        };
+        sub = register(sub, gbc);
+    }
+    Ok(sub)
+}
+
 /// what a decomposed run may carry once an axis wraps. closing the domain seam with exchanged
 /// legs moves the periodic law out of the tile faces and into the schedule. what still reads a
 /// tile's own faces to learn it is refused rather than approximated.
@@ -10224,6 +10246,9 @@ fn validate_launch_scope(cfg: &Config) -> Result<(), String> {
             return refused("well-balanced reconstruction with the nmhd regime");
         }
     }
+    if matches!(cfg.regime.as_str(), "nmhd" | "imhd") && !cfg.gradient_bcs.is_empty() {
+        return refused(&format!("a gradient wall with the {} regime", cfg.regime));
+    }
     if cfg.dims != 2 {
         return refused(&format!("a {}-dimensional grid", cfg.dims));
     }
@@ -10371,6 +10396,7 @@ fn run_worker_process(
                 <$regime_ty as Regime<f64, 2>>::SPEC,
                 &state_law_of(cfg, <$regime_ty as Regime<f64, 2>>::SPEC),
             )?;
+            let sub = attach_gradient_walls(sub, cfg, |sub, gbc| sub.with_gradient_boundary(gbc).0)?;
             tiles.push((sim, sub));
         }
         let ng = tiles[0].0.geom.ng;
@@ -10499,6 +10525,7 @@ fn run_worker_process(
                     <IsoNewtonian as Regime<f64, 2>>::SPEC,
                     &state_law_of(cfg, <IsoNewtonian as Regime<f64, 2>>::SPEC),
                 )?;
+                let sub = attach_gradient_walls(sub, cfg, |sub, gbc| sub.with_gradient_boundary(gbc).0)?;
                 tiles.push((sim, sub));
             }
         let ng = tiles[0].0.geom.ng;
@@ -10952,6 +10979,25 @@ fn canon_of(value: &Bound<'_, PyAny>, path: &str) -> PyResult<Canon> {
         }
         entries.sort_by(|a, b| a.0.cmp(&b.0));
         return Ok(Canon::Map(entries));
+    }
+    // a prescribed-gradient wall (`Neumann` / `Robin`): its kind and its per-primitive
+    // coefficients, which are floats and tuples of floats
+    if let (Ok(kind), Ok(rho), Ok(velocity), Ok(pressure)) = (
+        value.getattr("value"),
+        value.getattr("rho"),
+        value.getattr("velocity"),
+        value.getattr("pressure"),
+    ) {
+        if let Ok(kind) = kind.extract::<String>() {
+            if matches!(kind.as_str(), "neumann" | "robin") {
+                return Ok(Canon::Map(vec![
+                    ("kind".to_string(), Canon::Str(kind)),
+                    ("pressure".to_string(), canon_of(&pressure, &format!("{path}.pressure"))?),
+                    ("rho".to_string(), canon_of(&rho, &format!("{path}.rho"))?),
+                    ("velocity".to_string(), canon_of(&velocity, &format!("{path}.velocity"))?),
+                ]));
+            }
+        }
     }
     Err(PyValueError::new_err(format!(
         "configuration value at '{path}' has unsupported type {}",
