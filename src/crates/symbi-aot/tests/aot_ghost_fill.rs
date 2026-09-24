@@ -69,8 +69,10 @@ fn fill_low(
 ) {
     // in-place (read at source, write at cell) over the low-ghost window; the
     // allocated buffer starts at lo = lo (= -NG), so the field views need the
-    // explicit layout. map_type / arg are INT scalars, vel_sign FLOAT — the
-    // harness routes each by name into the right ABI tail.
+    // explicit layout. map_type / arg / turn / turn_lo are INT scalars, vel_sign and oop_sign
+    // FLOAT — the harness routes each by name into the right ABI tail. the half-turn window is
+    // empty on a cartesian wall, so both turn lanes bind zero, and the out-of-plane components
+    // keep their sign across a wall.
     let lo_arr = [LO];
     let ext = [rho.len() as u32];
     NamedKernel::new("iso_ghost_fill_1d")
@@ -81,7 +83,10 @@ fn fill_low(
         .dom_lo(&[LO])
         .int("map_type_0", map_type)
         .int("arg_0", arg)
+        .int("turn_0", 0)
+        .int("turn_lo_0", 0)
         .scalar("vel_sign_0", vel_sign)
+        .scalar("oop_sign_0", 1.0)
         .run();
 }
 
