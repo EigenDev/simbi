@@ -182,6 +182,46 @@ def test_python_runner_restart_matches_uninterrupted_state(tmp_path):
         )
 
 
+# a gradient (neumann) wall is recorded by kind alone; the restart takes its coefficients from
+# the configuration and continues the run exactly
+@pytest.mark.simulation
+def test_python_runner_restart_continues_a_gradient_walled_run(tmp_path):
+    from simbi_configs.examples.newtonian.gradient_box import GradientBox
+
+    run(GradientBox(resolution=(16, 16), data_directory=tmp_path / "continuous"), compute_mode="cpu", max_steps=6)
+    run(GradientBox(resolution=(16, 16), data_directory=tmp_path / "split"), compute_mode="cpu", max_steps=3)
+    run(
+        GradientBox(resolution=(16, 16), data_directory=tmp_path / "restarted", checkpoint_file=_final(tmp_path / "split")),
+        compute_mode="cpu",
+        max_steps=6,
+    )
+    with h5py.File(_final(tmp_path / "continuous")) as continuous, h5py.File(_final(tmp_path / "restarted")) as restarted:
+        assert continuous["metadata"].attrs["time"] == restarted["metadata"].attrs["time"]
+        _assert_dataset_group_equal(continuous["level_0/conserved"], restarted["level_0/conserved"])
+
+
+# a two-dimensional cylindrical checkpoint records its plane; the disk (r, phi) chart
+# survives the restart, so the resumed run continues on the same geometry
+@pytest.mark.simulation
+def test_python_runner_restart_keeps_the_disk_plane_of_a_cylindrical_run(tmp_path):
+    from simbi_configs.examples.newtonian.nmhd_rotor_cyl import NewtonianRotorCyl
+
+    problem = dict(resolution=(16, 16, 1))
+    run(NewtonianRotorCyl(**problem, data_directory=tmp_path / "continuous"), compute_mode="cpu", max_steps=6)
+    run(NewtonianRotorCyl(**problem, data_directory=tmp_path / "split"), compute_mode="cpu", max_steps=3)
+    with h5py.File(_final(tmp_path / "split")) as split:
+        assert split["metadata"].attrs["cyl_plane"] == "rphi"
+    run(
+        NewtonianRotorCyl(**problem, data_directory=tmp_path / "restarted", checkpoint_file=_final(tmp_path / "split")),
+        compute_mode="cpu",
+        max_steps=6,
+    )
+    with h5py.File(_final(tmp_path / "continuous")) as continuous, h5py.File(_final(tmp_path / "restarted")) as restarted:
+        assert continuous["metadata"].attrs["time"] == restarted["metadata"].attrs["time"]
+        _assert_dataset_group_equal(continuous["level_0/conserved"], restarted["level_0/conserved"])
+        _assert_tree_equal(continuous["level_0/partition_0/hydro/magnetic"], restarted["level_0/partition_0/hydro/magnetic"])
+
+
 # a checkpoint names its regime in the configuration vocabulary; the bare "mhd" that earlier
 # adiabatic Newtonian MHD checkpoints recorded is a legacy slug the reader maps to nmhd.
 def test_legacy_mhd_checkpoint_slug_restarts_as_newtonian_mhd() -> None:

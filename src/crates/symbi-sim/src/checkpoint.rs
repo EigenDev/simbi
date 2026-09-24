@@ -156,6 +156,9 @@ pub struct PhysicsIdentity {
     pub gamma: f64,
     pub sound_speed: Option<f64>,
     pub geometry: symbi_geometry::Geometry,
+    /// the plane of a two-dimensional cylindrical grid: "rz" (axisymmetric) or "rphi" (the
+    /// disk), read from the grid-axis map; the chart family alone cannot tell them apart
+    pub cyl_plane: Option<&'static str>,
 }
 
 impl PhysicsIdentity {
@@ -183,6 +186,9 @@ impl PhysicsIdentity {
                 )
             }),
             geometry: sim.physics.metric.geometry(),
+            cyl_plane: (sim.physics.metric.geometry() == symbi_geometry::Geometry::Cylindrical
+                && D == 2)
+                .then(|| if sim.geom.axes[1] == 1 { "rphi" } else { "rz" }),
         }
     }
 }
@@ -239,6 +245,9 @@ fn build_metadata_group<'a, const D: usize, const DOF: usize, Mem: MemorySpace>(
     // pressure-dependent fields.
     if let Some(cs) = identity.sound_speed {
         builtins.push(("sound_speed", Attr::F64(cs)));
+    }
+    if let Some(plane) = identity.cyl_plane {
+        builtins.push(("cyl_plane", Attr::Str(plane.into())));
     }
     let mut meta = Tree::new("metadata");
     // explicit user extras win. start with them, then fill in any built-in

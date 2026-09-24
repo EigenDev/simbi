@@ -370,6 +370,9 @@ class Metadata:
     x3_spacing: str = "linear"
     x3_spacing_ratio: float = 1.0
     boundary_conditions: tuple[str, ...] = ()
+    # the plane of a two-dimensional cylindrical grid, "rz" or "rphi"; empty when the
+    # checkpoint predates the attribute or the grid is not two-dimensional cylindrical
+    cyl_plane: str = ""
     initial_time: float = 0.0  # start time from original initial conditions
     # the constant sound speed of an isothermal run; None on energy regimes
     # and on isothermal checkpoints written before the attr existed.

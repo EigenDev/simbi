@@ -11,6 +11,7 @@
 # =============================================================================
 from __future__ import annotations
 
+from collections.abc import Sequence
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, get_args
 
@@ -102,9 +103,10 @@ def metadata_to_config_dict(
         "x2_spacing_ratio": float(getattr(metadata, "x2_spacing_ratio", 1.0)),
         "x3_spacing": CellSpacing(metadata.x3_spacing),
         "x3_spacing_ratio": float(getattr(metadata, "x3_spacing_ratio", 1.0)),
-        "boundary_conditions": [
-            BoundaryCondition(b) for b in metadata.boundary_conditions
-        ],
+        # the recorded names; a restart resolves them against the configuration's own
+        # specifications, since a gradient or robin face is recorded by kind alone
+        "boundary_conditions": [str(b) for b in metadata.boundary_conditions],
+        "cyl_plane": str(getattr(metadata, "cyl_plane", "") or ""),
     })
 
     # amr fields if present
@@ -230,6 +232,55 @@ def _assert_same_equilibrium_target(
     )
 
 
+CYLINDRICAL_FAMILY = frozenset(
+    {CoordSystem.CYLINDRICAL, CoordSystem.PLANAR_CYLINDRICAL, CoordSystem.AXIS_CYLINDRICAL}
+)
+
+
+def chart_on_restart(recorded: CoordSystem | str, plane: str, declared: CoordSystem) -> CoordSystem:
+    """the chart a restart runs on. a checkpoint records the chart family and, for a
+    two-dimensional cylindrical grid, its plane ("rz" for the axisymmetric plane, "rphi"
+    for the disk). the configuration's cylindrical variant is kept when it names the
+    recorded plane, or when the checkpoint predates the plane attribute, since the family
+    alone reads the same for the disk and for the axisymmetric plane; a recorded plane
+    the configuration contradicts selects the variant of that plane."""
+    recorded_chart = CoordSystem(recorded)
+    if recorded_chart != CoordSystem.CYLINDRICAL or declared not in CYLINDRICAL_FAMILY:
+        return recorded_chart
+    declared_plane = "rphi" if declared == CoordSystem.PLANAR_CYLINDRICAL else "rz"
+    if plane in ("", declared_plane):
+        return declared
+    return CoordSystem.PLANAR_CYLINDRICAL if plane == "rphi" else CoordSystem.CYLINDRICAL
+
+
+def boundaries_on_restart(recorded: Sequence[str], declared: Any) -> list[Any]:
+    """the boundary condition of every face on a restart: the vocabulary member for a
+    recorded name the vocabulary knows, and the configuration's own specification for a
+    face the checkpoint records by kind alone (a gradient "neumann" wall, a "robin" wall),
+    since the file carries the kind and the configuration carries the coefficients. a
+    recorded kind the configuration's face contradicts is refused."""
+    from .problem import ConfigError
+    from .runner import _process_boundary_conditions
+
+    faces = _process_boundary_conditions(declared, max(len(recorded) // 2, 1))
+    known = {member.value for member in BoundaryCondition}
+    resolved = []
+    for index, name in enumerate(recorded):
+        if name in known:
+            resolved.append(BoundaryCondition(name))
+            continue
+        face = faces[index] if index < len(faces) else None
+        if getattr(face, "value", None) != name:
+            raise ConfigError(
+                f"face {index}: the checkpoint records a '{name}' boundary but the "
+                f"configuration declares {face!r}; a restart takes the coefficients of a "
+                f"gradient or robin wall from the configuration, so declare the same kind "
+                f"there or start a fresh run (no --checkpoint)."
+            )
+        resolved.append(face)
+    return resolved
+
+
 def merge_with_checkpoint(
     problem: SimbiProblem,
     checkpoint_path: Path,
@@ -253,6 +304,12 @@ def merge_with_checkpoint(
     """
     metadata, mesh_shape = load_checkpoint_metadata(checkpoint_path)
     checkpoint_config = metadata_to_config_dict(metadata, mesh_shape)
+    checkpoint_config["coord_system"] = chart_on_restart(
+        checkpoint_config["coord_system"], checkpoint_config.pop("cyl_plane"), problem.coord_system
+    )
+    checkpoint_config["boundary_conditions"] = boundaries_on_restart(
+        checkpoint_config["boundary_conditions"], problem.boundary_conditions
+    )
 
     # get field classifications
     immutable_fields = problem.get_checkpoint_immutable_fields()

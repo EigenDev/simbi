@@ -524,6 +524,7 @@ def read_metadata(meta_group: h5py.Group) -> Result[Metadata, str]:
                 x3_spacing=decode_str(attrs.get("x3_spacing", "linear")),
                 x3_spacing_ratio=float(attrs.get("x3_spacing_ratio", 1.0)),
                 boundary_conditions=bcs,
+                cyl_plane=decode_str(attrs["cyl_plane"]) if "cyl_plane" in attrs else "",
                 initial_time=float(attrs.get("initial_time", attrs["time"])),
                 sound_speed=(
                     float(attrs["sound_speed"])
