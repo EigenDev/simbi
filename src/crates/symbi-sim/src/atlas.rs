@@ -18,9 +18,9 @@
 //  let placement = Placement::new(2, vec![WorkerId(0), WorkerId(0), WorkerId(1), WorkerId(1)])?;
 // =============================================================================
 
-use crate::decomp::{Partition, Schedule, Topology, leg_regions, unflatten};
+use crate::decomp::{Partition, PolarSeam, Schedule, Topology, leg_regions, unflatten};
 use crate::state::{PartitionGeometry, axis_name};
-use symbi_algebra::{Domain, Space};
+use symbi_algebra::{Domain, Side, Space};
 pub use symbi_fabric::{Digest, Epoch, Fnv, TransferId, WorkerId};
 
 /// a tile of the level, numbered flat over the tile grid (`decomp::flatten`).
@@ -431,7 +431,7 @@ impl std::fmt::Display for PlanError {
                     "transfers {a:?} and {b:?} write overlapping destinations"
                 )
             }
-            PlanError::PolarSeam => write!(f, "polar seams are outside the exchange plan"),
+            PlanError::PolarSeam => write!(f, "a polar seam needs an even azimuth cell count"),
         }
     }
 }
@@ -448,6 +448,13 @@ pub struct ExchangePlan<const D: usize> {
     pub fields: Vec<Vec<FieldLayout<D>>>,
     pub schema: FieldSchema,
     pub axes: Vec<AxisPhase<D>>,
+    /// the polar seam the plan carries antipodal transfers for: a polar axis face on a
+    /// chart whose azimuth is gridded and cut, so the ghost band beyond the pole is the
+    /// interior half a period away on other tiles
+    pub seam: Option<PolarSeam>,
+    /// every (tile, side) whose band beyond the pole the antipodal transfers fill; the band's
+    /// odd components take their sign after every state exchange
+    pub polar_bands: Vec<(TileId, Side)>,
     pub digest: Digest,
 }
 
@@ -458,11 +465,32 @@ impl<const D: usize> ExchangePlan<D> {
         schema: &FieldSchema,
         ng: usize,
     ) -> Result<Self, PlanError> {
+        Self::compile_with_seam(partition, topology, schema, ng, None)
+    }
+
+    /// `compile` plus the antipodal transfers of a polar seam whose azimuth is cut: for every
+    /// tile on a declared pole face, every halo row beyond the pole reads the interior row
+    /// the same distance inside the pole of the tiles holding the azimuth window half a
+    /// period away, one row per transfer since the mirror reverses the row order. the
+    /// transfers run in the mirror axis's phase after its ordinary ones; the axes still to
+    /// come clip the window to the interior and carry the band's corners afterwards. the
+    /// mirror-axis face field carries no band beyond the pole face, which the seed and the
+    /// constrained-transport update own; the azimuth face field carries one face past the
+    /// window so a slab's closing face lands on its physical partner.
+    pub fn compile_with_seam(
+        partition: &Partition<D>,
+        topology: &Topology<D>,
+        schema: &FieldSchema,
+        ng: usize,
+        seam: Option<PolarSeam>,
+    ) -> Result<Self, PlanError> {
         let counts = partition.counts();
-        let schedule = Schedule::derive(counts, ng, topology);
-        if schedule.seam().is_some() {
-            return Err(PlanError::PolarSeam);
+        if let Some(s) = &seam {
+            if s.slabs.iter().sum::<usize>() % 2 != 0 {
+                return Err(PlanError::PolarSeam);
+            }
         }
+        let schedule = Schedule::derive_with_seam(counts, ng, topology, seam);
         let tiles: Vec<TileLayout<D>> = (0..partition.n_tiles())
             .map(|t| TileLayout::of_partition(partition, TileId(t as u32), ng))
             .collect();
@@ -544,12 +572,87 @@ impl<const D: usize> ExchangePlan<D> {
                 push(leg.lo, &r.lo_src, leg.hi, &r.hi_ghost);
             }
         }
+        if let Some(s) = schedule.seam() {
+            let (mirror, az) = (s.mirror, s.azimuth);
+            let within = |span: &Span, row: isize| span.lo <= row && row < span.hi;
+            for leg in schedule.polar_legs() {
+                let (dst_tile, src_tile) = (&tiles[leg.dst], &tiles[leg.src]);
+                for k in 0..ng as isize {
+                    // row k beyond the pole reads interior row k counted from the pole
+                    let (drow, srow) = match leg.side {
+                        Side::Lo => (dst_tile.interior[mirror].lo - 1 - k, src_tile.interior[mirror].lo + k),
+                        Side::Hi => (dst_tile.interior[mirror].hi + k, src_tile.interior[mirror].hi - 1 - k),
+                    };
+                    for (f, entry) in schema.entries.iter().enumerate() {
+                        let d = match entry.kind {
+                            FieldKind::Face(d) => d as usize,
+                            _ => D,
+                        };
+                        if d == mirror {
+                            continue;
+                        }
+                        let (dl, sl) = (&fields[leg.dst][f], &fields[leg.src][f]);
+                        if !within(&dl.allocated[mirror], drow) || !within(&sl.allocated[mirror], srow) {
+                            continue;
+                        }
+                        // the azimuth face field carries one face past the window where the
+                        // window closes the destination slab; a window ending inside the slab
+                        // shares that face with the next leg's opening face
+                        let closes = leg.dst_lo + leg.len == dst_tile.interior[az].size() as isize;
+                        let region = |layout: &FieldLayout<D>, tile: &TileLayout<D>, row: isize, az_lo: isize| -> [Span; D] {
+                            std::array::from_fn(|b| {
+                                if b == mirror {
+                                    Span { lo: row, hi: row + 1 }
+                                } else if b == az {
+                                    let lo = tile.interior[az].lo + az_lo;
+                                    Span { lo, hi: lo + leg.len + isize::from(d == az && closes) }
+                                } else if leg.clip[b] {
+                                    layout.interior[b]
+                                } else {
+                                    layout.allocated[b]
+                                }
+                            })
+                        };
+                        let src_region = region(sl, src_tile, srow, leg.src_lo);
+                        let dst_region = region(dl, dst_tile, drow, leg.dst_lo);
+                        axes[mirror].transfers.push(Transfer {
+                            id: TransferId(next),
+                            axis: mirror as u8,
+                            src: TileId(leg.src as u32),
+                            dst: TileId(leg.dst as u32),
+                            field: f as u16,
+                            len: volume(&dst_region),
+                            src_region,
+                            dst_region,
+                            audit: false,
+                        });
+                        next += 1;
+                    }
+                }
+            }
+        }
+        // the ids run in plan order, axis by axis, the antipodal transfers of the mirror
+        // axis included
+        let mut next = 0u32;
+        for phase in axes.iter_mut() {
+            for t in phase.transfers.iter_mut() {
+                t.id = TransferId(next);
+                next += 1;
+            }
+        }
+        let polar_bands = schedule
+            .polar_bands()
+            .into_iter()
+            .map(|(tile, side)| (TileId(tile as u32), side))
+            .collect();
         let plan = Self {
             reach: ng,
             tiles,
             fields,
             schema: schema.clone(),
             axes,
+            seam: schedule.seam().cloned(),
+            polar_bands,
             digest: Digest(0),
         };
         plan.validate()?;
@@ -610,6 +713,19 @@ impl<const D: usize> ExchangePlan<D> {
         for ax in 0..D {
             h.u64(counts[ax] as u64);
             h.u8(u8::from(topology.is_periodic(ax)));
+        }
+        match &self.seam {
+            Some(s) => {
+                h.u8(1);
+                h.u64(s.mirror as u64);
+                h.u8(u8::from(s.sides[0]));
+                h.u8(u8::from(s.sides[1]));
+                h.u64(s.azimuth as u64);
+                for w in &s.slabs {
+                    h.u64(*w as u64);
+                }
+            }
+            None => h.u8(0),
         }
         h.u32(self.tiles.len() as u32);
         for t in &self.tiles {

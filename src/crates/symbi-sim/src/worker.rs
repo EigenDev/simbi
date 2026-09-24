@@ -246,6 +246,32 @@ where
     result
 }
 
+/// negate the odd components of every polar ghost band this worker holds, after an antipodal
+/// exchange filled it with rotated interior copies and before the physical refill reads the
+/// band's edge. a plan without a seam has no band.
+fn flip_polar_bands<const D: usize, const DOF: usize, M, K>(
+    exchange: &PlanExchange<'_, D>,
+    tiles: &[TileId],
+    stores: &[&FieldStore<D, DOF, M, f64>],
+    kernels: &[&K],
+    devices: &[i32],
+) where
+    M: MemorySpace,
+    K: KernelSet<D, DOF, M, f64>,
+{
+    let plan = exchange.plan();
+    let Some(seam) = plan.seam.as_ref() else {
+        return;
+    };
+    for &(tile, side) in &plan.polar_bands {
+        if let Some(k) = tiles.iter().position(|&t| t == tile) {
+            with_device(devices[tile.0 as usize], || {
+                kernels[k].flip_polar_band(stores[k], seam.mirror, side, plan.reach)
+            });
+        }
+    }
+}
+
 /// audit the shared interface faces after the exchange `at`, booking the cost. a plan with
 /// no face field along a cut has nothing to audit and opens no phase.
 #[allow(clippy::too_many_arguments)]
@@ -394,6 +420,7 @@ where
             &mut timing.exchange,
         )
         .map_err(|e| fail(fabric, e.into()))?;
+        flip_polar_bands(exchange, tiles, &sh, kernels, devices);
         for k in 0..n {
             with_device(dev(k), || kernels[k].ghost_fill(sh[k]));
         }
@@ -591,6 +618,7 @@ where
             &mut timing.exchange,
         )
                 .map_err(|e| fail(fabric, e.into()))?;
+                flip_polar_bands(exchange, tiles, &sh, kernels, devices);
                 for k in 0..n {
                     with_device(dev(k), || kernels[k].ghost_fill(sh[k]));
                 }
@@ -641,6 +669,7 @@ where
             &mut timing.exchange,
         )
                 .map_err(|e| fail(fabric, e.into()))?;
+                flip_polar_bands(exchange, tiles, &sh, kernels, devices);
                 for k in 0..n {
                     with_device(dev(k), || kernels[k].ghost_fill(sh[k]));
                 }

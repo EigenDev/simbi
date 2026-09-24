@@ -1977,6 +1977,53 @@ fn attach_gradient_walls<K>(
     Ok(sub)
 }
 
+/// the polar seam a launched partition carries: a spherical shell gridded over a pole, or a
+/// cylinder holding the R = 0 axis, with the azimuth periodic and cut into tiles. the ghost
+/// band beyond such a pole is the interior half a turn away on other tiles, so the plan
+/// carries antipodal transfers for it and the pole faces of the tiles are cuts. an uncut
+/// azimuth needs none: the tile's own half-turn fill covers the band.
+fn polar_seam_of_partition<const D: usize>(
+    coord_system: &str,
+    phys: &Boundaries<D>,
+    topology: &symbi::sim::decomp::Topology<D>,
+    partition: &Partition<D>,
+) -> Option<symbi::sim::decomp::PolarSeam> {
+    if D != 3 {
+        return None;
+    }
+    let (mirror, azimuth) = match coord_system {
+        "spherical" => (1, 2),
+        "cylindrical" => (0, 1),
+        _ => return None,
+    };
+    let sides = [phys.lo(mirror) == BoundaryType::Axis, phys.hi(mirror) == BoundaryType::Axis];
+    let counts = partition.counts();
+    if !(sides[0] || sides[1]) || !topology.is_periodic(azimuth) || counts[azimuth] < 2 {
+        return None;
+    }
+    Some(symbi::sim::decomp::PolarSeam {
+        mirror,
+        sides,
+        azimuth,
+        slabs: (0..counts[azimuth]).map(|i| partition.tile_range(azimuth, i).1).collect(),
+    })
+}
+
+/// a tile's pole faces on a seam are cuts the antipodal transfers fill
+fn seam_faces_as_cuts<const D: usize>(
+    mut bnd: Boundaries<D>,
+    seam: Option<&symbi::sim::decomp::PolarSeam>,
+) -> Boundaries<D> {
+    if let Some(s) = seam {
+        for side in 0..2 {
+            if s.sides[side] && bnd.0[s.mirror][side] == BoundaryType::Axis {
+                bnd.0[s.mirror][side] = BoundaryType::CoarseFine;
+            }
+        }
+    }
+    bnd
+}
+
 /// what a decomposed run may carry once an axis wraps. closing the domain seam with exchanged
 /// legs moves the periodic law out of the tile faces and into the schedule. what still reads a
 /// tile's own faces to learn it is refused rather than approximated.
@@ -10350,6 +10397,7 @@ fn run_worker_process(
     let phys = boundaries_nd::<$d>(&cfg.boundaries);
     let topology = wrap_topology(&phys, counts);
     wrap_capability(&topology, cfg.wb_reconstruction, false)?;
+    let seam = polar_seam_of_partition::<$d>(&cfg.coord_system, &phys, &topology, &partition);
     let theta = build_theta(cfg);
     let solver = cfg.solver;
     let mine: Vec<usize> = (0..partition.n_tiles())
@@ -10397,7 +10445,7 @@ fn run_worker_process(
                 let ext = partition.tile_extents(tc);
                 let tile_lo: [usize; $d] = std::array::from_fn(|ax| ext[ax].0);
                 let m: [usize; $d] = std::array::from_fn(|ax| ext[ax].1);
-                let bnd = tile_boundaries(&phys, tc, counts);
+                let bnd = seam_faces_as_cuts(tile_boundaries(&phys, tc, counts), seam.as_ref());
                 let sim = Sim::build($regime, host_eos(cfg), $geom)
                     .cells(m)
                     .origin(origin)
@@ -10455,7 +10503,7 @@ fn run_worker_process(
                 let ext = partition.tile_extents(tc);
                 let tile_lo: [usize; $d] = std::array::from_fn(|ax| ext[ax].0);
                 let m: [usize; $d] = std::array::from_fn(|ax| ext[ax].1);
-                let bnd = tile_boundaries(&phys, tc, counts);
+                let bnd = seam_faces_as_cuts(tile_boundaries(&phys, tc, counts), seam.as_ref());
                 // each tile's slice of the global staggered buffers: a shared interface face
                 // reads the same global value on both of its tiles
                 let tile_faces: Vec<Vec<f64>> =
@@ -10510,7 +10558,7 @@ fn run_worker_process(
                 let ext = partition.tile_extents(tc);
                 let tile_lo: [usize; $d] = std::array::from_fn(|ax| ext[ax].0);
                 let m: [usize; $d] = std::array::from_fn(|ax| ext[ax].1);
-                let bnd = tile_boundaries(&phys, tc, counts);
+                let bnd = seam_faces_as_cuts(tile_boundaries(&phys, tc, counts), seam.as_ref());
                 let sim = Sim::build(IsoNewtonian, Isothermal { cs: cfg.cs }, $geom)
                     .cells(m)
                     .origin(origin)
@@ -10557,7 +10605,7 @@ fn run_worker_process(
                 let ext = partition.tile_extents(tc);
                 let tile_lo: [usize; $d] = std::array::from_fn(|ax| ext[ax].0);
                 let m: [usize; $d] = std::array::from_fn(|ax| ext[ax].1);
-                let bnd = tile_boundaries(&phys, tc, counts);
+                let bnd = seam_faces_as_cuts(tile_boundaries(&phys, tc, counts), seam.as_ref());
                 let tile_faces: Vec<Vec<f64>> =
                     (0..$d).map(|d| tile_face_buffer::<$d>(&bufs[d], n, m, tile_lo, d)).collect();
                 let sim = Sim::build(IsothermalMhd, Isothermal { cs: cfg.cs }, $geom)
@@ -10680,7 +10728,8 @@ where
     let tile_ids: Vec<TileId> = mine.iter().map(|&f| TileId(f as u32)).collect();
     let my_offsets: Vec<[isize; D]> = mine.iter().map(|&f| offsets[f]).collect();
     let schema = plan_schema(&*tiles[0].0);
-    let plan = ExchangePlan::compile(&partition, &topology, &schema, ng).map_err(|e| e.to_string())?;
+    let seam = polar_seam_of_partition::<D>(&cfg.coord_system, &boundaries_nd::<D>(&cfg.boundaries), topology, partition);
+    let plan = ExchangePlan::compile_with_seam(partition, topology, &schema, ng, seam).map_err(|e| e.to_string())?;
     let exchange = PlanExchange::new(&plan, &placement, me);
     let budget = launch.staging_cells.max(1);
     let credit = block_credit_for(budget, D);
