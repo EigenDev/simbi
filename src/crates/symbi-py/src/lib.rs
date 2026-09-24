@@ -10204,7 +10204,7 @@ impl LaunchFault {
 /// before any tile is built.
 fn validate_launch_scope(cfg: &Config) -> Result<(), String> {
     let refused = |what: &str| Err(format!("{what} is outside the distributed first release"));
-    if !matches!(cfg.regime.as_str(), "newtonian" | "rhd" | "nmhd") {
+    if !matches!(cfg.regime.as_str(), "newtonian" | "rhd" | "isothermal" | "nmhd" | "imhd") {
         return refused(&format!("the {} regime", cfg.regime));
     }
     // the magnetized substrate installs the limiter, the solver and the edge EMF and has no
@@ -10385,7 +10385,7 @@ fn run_worker_process(
             sim.time = cfg.start_time;
         }
         let built = build_clock.elapsed();
-            worker_session::<$regime_ty, _, 2>(
+            worker_session::<$regime_ty, _, _, 2>(
                 cfg, launch, fault, drained, built, &partition, placement, &topology, me, &mine, &offsets, tiles,
             )
         
@@ -10460,7 +10460,125 @@ fn run_worker_process(
             sim.time = cfg.start_time;
         }
         let built = build_clock.elapsed();
-            worker_session::<NewtonianMhd, _, 3>(
+            worker_session::<NewtonianMhd, _, _, 3>(
+                cfg, launch, fault, drained, built, &partition, placement, &topology, me, &mine, &offsets, tiles,
+            )
+        }
+        "isothermal" => {
+            type Sim = SimDefault<IsoNewtonian, 2, Cartesian, Isothermal<f64>>;
+            let mut tiles = Vec::with_capacity(mine.len());
+            for &flat in &mine {
+                let tc = unflatten(flat, counts);
+                let ext = partition.tile_extents(tc);
+                let tile_lo: [usize; 2] = [ext[0].0, ext[1].0];
+                let m: [usize; 2] = [ext[0].1, ext[1].1];
+                let origin = tile_origin::<2>(cfg, tile_lo);
+                let spacing: [f64; 2] = [cfg.dx[0], cfg.dx[1]];
+                let bnd = tile_boundaries(&phys, tc, counts);
+                let sim = Sim::build(IsoNewtonian, Isothermal { cs: cfg.cs }, Cartesian)
+                    .cells(m)
+                    .origin(origin)
+                    .spacing(spacing)
+                    .boundaries(bnd)
+                    .cfl(cfg.cfl)
+                    .timestepping(cfg.timestepping)
+                    .allocate()
+                    .map_err(|e| format!("tile {flat} allocate: {e:?}"))?
+                    .set_initial_indexed(|idx, _x| {
+                        let lin = (tile_lo[0] + idx[0] as usize) + (tile_lo[1] + idx[1] as usize) * n[0];
+                        let row = &prims[lin];
+                        PrimG::<f64, 2, IsoModel>::isothermal(Density(row[0]), Tensor::new([row[1], row[2]]))
+                    })
+                    .build();
+                // the numerics the single isothermal path installs: the limiter, then the
+                // user sources; the closure is globally isothermal, one sound speed per run
+                let sub = sim.substrate().theta(theta);
+                let sub = attach_configured_sources(
+                    sub,
+                    &cfg.source_jsons,
+                    <IsoNewtonian as Regime<f64, 2>>::SPEC,
+                    &state_law_of(cfg, <IsoNewtonian as Regime<f64, 2>>::SPEC),
+                )?;
+                tiles.push((sim, sub));
+            }
+        let ng = tiles[0].0.geom.ng;
+        let grid = decomposed_grid::<2>(cfg, ng);
+        if let Some(path) = cfg.restart_path.as_deref() {
+            for (&flat, (sim, _)) in mine.iter().zip(tiles.iter_mut()) {
+                load_partitioned_level(sim, path, 0, offsets[flat], &grid)
+                    .map_err(|e| format!("restart of tile {flat} from '{path}': {e}"))?;
+            }
+        }
+        for (sim, _) in tiles.iter_mut() {
+            sim.time = cfg.start_time;
+        }
+        let built = build_clock.elapsed();
+            worker_session::<IsoNewtonian, _, _, 2>(
+                cfg, launch, fault, drained, built, &partition, placement, &topology, me, &mine, &offsets, tiles,
+            )
+        }
+        "imhd" => {
+            type Sim = SimDefaultGeneric<IsothermalMhd, 2, 3, Cartesian, Isothermal<f64>>;
+            if bufs.len() < 3 {
+                return Err(format!("imhd needs 3 staggered b-field generators, got {}", bufs.len()));
+            }
+            let ct = cfg.ct_method;
+            let mut tiles = Vec::with_capacity(mine.len());
+            for &flat in &mine {
+                let tc = unflatten(flat, counts);
+                let ext = partition.tile_extents(tc);
+                let tile_lo: [usize; 2] = [ext[0].0, ext[1].0];
+                let m: [usize; 2] = [ext[0].1, ext[1].1];
+                let origin = tile_origin::<2>(cfg, tile_lo);
+                let spacing: [f64; 2] = [cfg.dx[0], cfg.dx[1]];
+                let bnd = tile_boundaries(&phys, tc, counts);
+                let tile_faces: Vec<Vec<f64>> =
+                    (0..2).map(|d| tile_face_buffer::<2>(&bufs[d], n, m, tile_lo, d)).collect();
+                let sim = Sim::build(IsothermalMhd, Isothermal { cs: cfg.cs }, Cartesian)
+                    .cells(m)
+                    .origin(origin)
+                    .spacing(spacing)
+                    .boundaries(bnd)
+                    .cfl(cfg.cfl)
+                    .timestepping(cfg.timestepping)
+                    .allocate()
+                    .map_err(|e| format!("tile {flat} allocate: {e:?}"))?
+                    .set_initial_indexed(|idx, _x| {
+                        let lin = (tile_lo[0] + idx[0] as usize) + (tile_lo[1] + idx[1] as usize) * n[0];
+                        let row = &prims[lin];
+                        let gidx: [isize; 2] =
+                            std::array::from_fn(|ax| tile_lo[ax] as isize + idx[ax]);
+                        let mag: [f64; 3] = std::array::from_fn(|k| {
+                            if k < 2 { face_avg_cell_b::<2>(&bufs[k], k, gidx, n) } else { bufs[k][lin] }
+                        });
+                        MhdPrimG::<f64, 3, IsoModel>::new(
+                            PrimG::isothermal(Density(row[0]), Tensor::new([row[1], row[2], row[3]])),
+                            Tensor::new(mag),
+                        )
+                    })
+                    .seed_faces_indexed(&tile_faces)
+                    .build();
+                let sub = sim
+                    .substrate()
+                    .theta(theta)
+                    .with_solver(solver)
+                    .map_err(|e| format!("tile {flat} substrate/solver: {e:?}"))?
+                    .ct_method(ct);
+                tiles.push((sim, sub));
+            }
+        let ng = tiles[0].0.geom.ng;
+        let grid = decomposed_grid::<2>(cfg, ng);
+        if let Some(path) = cfg.restart_path.as_deref() {
+            for (&flat, (sim, _)) in mine.iter().zip(tiles.iter_mut()) {
+                load_partitioned_level(sim, path, 0, offsets[flat], &grid)
+                    .map_err(|e| format!("restart of tile {flat} from '{path}': {e}"))?;
+            }
+        }
+        for (sim, _) in tiles.iter_mut() {
+            sim.time = cfg.start_time;
+        }
+        let built = build_clock.elapsed();
+            worker_session::<IsothermalMhd, _, _, 3>(
                 cfg, launch, fault, drained, built, &partition, placement, &topology, me, &mine, &offsets, tiles,
             )
         }
@@ -10473,7 +10591,7 @@ fn run_worker_process(
 /// checkpoints at the linear cadence, and the final checkpoint before the session ends.
 /// worker 0 reports through the decomposed table.
 #[allow(clippy::too_many_arguments)]
-fn worker_session<R, K, const DOF: usize>(
+fn worker_session<R, E, K, const DOF: usize>(
     cfg: &Config,
     launch: &WorkerLaunch,
     fault: LaunchFault,
@@ -10485,10 +10603,11 @@ fn worker_session<R, K, const DOF: usize>(
     me: symbi_fabric::WorkerId,
     mine: &[usize],
     offsets: &[[isize; 2]],
-    mut tiles: Vec<(SimDefaultGeneric<R, 2, DOF, Cartesian, EosSelect<f64>>, K)>,
+    mut tiles: Vec<(SimDefaultGeneric<R, 2, DOF, Cartesian, E>, K)>,
 ) -> Result<(), String>
 where
     R: Regime<f64, 2>,
+    E: Eos<f64>,
     K: symbi_sim::substrate_seam::KernelSet<2, DOF, DefaultMemory, f64>,
 {
     use symbi::sim::decomp::{LocalCopy, plan_schema};
@@ -10995,7 +11114,7 @@ fn launch_worker(
     }
     let drain_clock = std::time::Instant::now();
     let prims = drain_prims(prim_gen)?;
-    let bufs = if cfg.regime == "nmhd" { drain_bfields(staggered_bfields)? } else { Vec::new() };
+    let bufs = if matches!(cfg.regime.as_str(), "nmhd" | "imhd") { drain_bfields(staggered_bfields)? } else { Vec::new() };
     let drained = drain_clock.elapsed();
     py.detach(|| run_worker_process(&cfg, &prims, &bufs, &params, drained))
         .map_err(PyRuntimeError::new_err)

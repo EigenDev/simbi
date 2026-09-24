@@ -163,14 +163,12 @@ fn another_regime_is_refused() {
     refused(run2(&mut sim, &kern, RegimeKind::Rmhd), "Rmhd regime");
 }
 
-/// flat adiabatic newtonian MHD is inside the scope; its isothermal closure is outside.
+/// flat adiabatic newtonian MHD is inside the scope.
 #[test]
-fn the_newtonian_mhd_regime_is_admitted_and_the_isothermal_one_refused() {
+fn the_newtonian_mhd_regime_is_admitted() {
     let mut sim = sim2();
     let kern = Kern2::new(1.4, 0.4, &sim.geom.allocated);
     run2(&mut sim, &kern, RegimeKind::NewtonianMhd).expect("newtonian MHD is admitted");
-    let mut sim = sim2();
-    refused(run2(&mut sim, &kern, RegimeKind::IsoMhd), "IsoMhd regime");
 }
 
 #[test]
@@ -192,12 +190,56 @@ fn a_curved_spacetime_is_refused() {
     refused(run2(&mut sim, &kern, RegimeKind::Newtonian), "spacetime");
 }
 
+/// the isothermal closure is admitted while its sound speed is one value over the tile and
+/// refused once it varies: a cut ghost continued from the tile's own interior would then hold
+/// another cell's temperature.
 #[test]
-fn an_isothermal_closure_is_refused() {
-    let mut sim = sim2();
-    let kern = Kern2::new(1.4, 0.4, &sim.geom.allocated);
-    sim.fields.prim.pre = None;
-    refused(run2(&mut sim, &kern, RegimeKind::Newtonian), "isothermal");
+fn a_locally_isothermal_closure_is_refused_and_a_global_one_admitted() {
+    use symbi::regimes::substrate::IsoSubstrateKernelSet;
+    use symbi_hydro::eos::Isothermal;
+    use symbi_hydro::isothermal::IsoNewtonian;
+    use symbi_hydro::state::PrimG;
+    type IsoSim = SimStateGeneric<IsoNewtonian, 2, 2, Cartesian, Isothermal<f64>, CpuSpace, HostMemory>;
+    let build = || {
+        IsoSim::build(IsoNewtonian, Isothermal { cs: 1.0 }, Cartesian)
+        .cells([16, 16])
+        .spacing([1.0 / 16.0; 2])
+        .boundaries(Boundaries::uniform(BoundaryType::Outflow))
+        .timestepping(Timestepping::Rk2)
+        .allocate()
+        .unwrap()
+        .set_initial(|[x, y]| PrimG::isothermal(Density(1.0 + 0.1 * x), Tensor::new([0.1 * y, 0.0])))
+        .build()
+    };
+    let mut sim = build();
+    let kern = IsoSubstrateKernelSet::<HostMemory, f64, 2>::new(1.0, 0.4, &sim.geom.allocated);
+    let plan_run = |sim: &mut IsoSim, kern: &IsoSubstrateKernelSet<HostMemory, f64, 2>| {
+        let partition = Partition::uniform([16, 16], [1, 1]).unwrap();
+        let schema = plan_schema(&**sim);
+        let plan = ExchangePlan::compile(&partition, &Topology::open(), &schema, sim.geom.ng).unwrap();
+        let placement = Placement::new(1, vec![WorkerId(0)]).unwrap();
+        let exchange = PlanExchange::new(&plan, &placement, WorkerId(0));
+        let mut fabric = exchange.fabric(Loopback::new(), SessionId(1));
+        let mut stores = [&mut **sim];
+        evolve_worker(
+            &[TileId(0)],
+            &mut stores,
+            &[kern],
+            &[0],
+            &exchange,
+            &LocalCopy,
+            &mut fabric,
+            &config(RegimeKind::IsoNewtonian),
+            |_, _, _, _| Ok(ControlFlow::Continue(())),
+        )
+        .map(|_| ())
+    };
+    plan_run(&mut sim, &kern).expect("a globally isothermal closure is admitted");
+    let mut sim = build();
+    let kern = IsoSubstrateKernelSet::<HostMemory, f64, 2>::new(1.0, 0.4, &sim.geom.allocated);
+    let c = [sim.geom.interior.spaces[0].lo + 3, sim.geom.interior.spaces[1].lo + 4];
+    kern.cs2.set(c, 0.25);
+    refused(plan_run(&mut sim, &kern), "a locally isothermal closure");
 }
 
 #[test]

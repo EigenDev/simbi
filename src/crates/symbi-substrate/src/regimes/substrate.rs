@@ -655,6 +655,13 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize> Kerne
         true
     }
 
+    fn isothermal_closure_varies(&self, sim: &FieldStore<D, D, Mem, Sc>) -> bool {
+        let cs2 = self.cs2.view();
+        let mut cells = sim.geom.allocated.iter();
+        let first = cells.next().map(|c| *cs2.at(c));
+        first.is_some_and(|value| cells.any(|c| *cs2.at(c) != value))
+    }
+
     fn rollback_snapshot_is_complete(&self, sim: &FieldStore<D, D, Mem, Sc>) -> bool {
         crate::regimes::fofc::gas_rollback_snapshot_is_complete(sim)
     }

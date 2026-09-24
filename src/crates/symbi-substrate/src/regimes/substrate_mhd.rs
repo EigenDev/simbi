@@ -833,6 +833,15 @@ where
         true
     }
 
+    fn isothermal_closure_varies(&self, sim: &FieldStore<D, 3, Mem, Sc>) -> bool {
+        sim.fields.cs2.as_ref().is_some_and(|cs2| {
+            let cs2 = cs2.view();
+            let mut cells = sim.geom.allocated.iter();
+            let first = cells.next().map(|c| *cs2.at(c));
+            first.is_some_and(|value| cells.any(|c| *cs2.at(c) != value))
+        })
+    }
+
     fn rollback_snapshot_is_complete(&self, sim: &FieldStore<D, 3, Mem, Sc>) -> bool {
         sim.fields.mhd.as_ref().is_some_and(|mhd| mhd.step_snapshot.is_some())
             && sim.tracers.is_none()

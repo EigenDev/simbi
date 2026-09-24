@@ -320,6 +320,14 @@ where
         false
     }
 
+    /// whether the isothermal closure's sound speed field varies over `store`, in which case a
+    /// cut ghost filled by continuation from the tile's own interior holds another cell's
+    /// temperature and the tile cannot stand for the whole grid. false where the closure is
+    /// uniform or the regime carries energy. default: no closure field.
+    fn isothermal_closure_varies(&self, _store: &FieldStore<NDIM, DOF, Mem, Sc>) -> bool {
+        false
+    }
+
     /// whether `snapshot_retry` and `restore_step` together carry every input a fresh attempt
     /// of a step needs on this store, so a rejected step replays from its entry. false where
     /// the store carries state the snapshot leaves out, in which case a driver refuses a forced

@@ -138,9 +138,9 @@ impl From<FabricError> for WorkerError {
     }
 }
 
-/// the first-release scope: 2D cartesian adiabatic newtonian hydro, relativistic hydro and
-/// ideal newtonian MHD in host memory, on a static mesh, without dye, bodies, tracers, or
-/// excision.
+/// the first-release scope: 2D cartesian newtonian hydro, relativistic hydro and newtonian
+/// MHD, adiabatic or globally isothermal, in host memory, on a static mesh, without dye,
+/// bodies, tracers, or excision.
 fn refuse<const D: usize, const DOF: usize, M: MemorySpace, K: KernelSet<D, DOF, M, f64>>(
     regime: RegimeKind,
     stores: &[&FieldStore<D, DOF, M, f64>],
@@ -149,7 +149,14 @@ fn refuse<const D: usize, const DOF: usize, M: MemorySpace, K: KernelSet<D, DOF,
     let refused = |reason: &str| {
         WorkerError::Refused(format!("{reason} is outside the distributed first release"))
     };
-    if !matches!(regime, RegimeKind::Newtonian | RegimeKind::Rhd | RegimeKind::NewtonianMhd) {
+    if !matches!(
+        regime,
+        RegimeKind::Newtonian
+            | RegimeKind::Rhd
+            | RegimeKind::IsoNewtonian
+            | RegimeKind::NewtonianMhd
+            | RegimeKind::IsoMhd
+    ) {
         return Err(refused(&format!("the {regime:?} regime")));
     }
     if D != 2 {
@@ -163,8 +170,8 @@ fn refuse<const D: usize, const DOF: usize, M: MemorySpace, K: KernelSet<D, DOF,
             Some(format!("the {:?} chart", store.geom.coords))
         } else if store.geom.spacetime != symbi_geometry::Spacetime::Minkowski {
             Some(format!("the {:?} spacetime", store.geom.spacetime))
-        } else if store.fields.prim.pre.is_none() {
-            Some("an isothermal closure".to_string())
+        } else if kernel.isothermal_closure_varies(store) {
+            Some("a locally isothermal closure".to_string())
         } else if store.has_passive_scalar()
             || store.fields.prim.chi.is_some()
             || store.fields.cons.chi.is_some()

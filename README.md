@@ -357,7 +357,8 @@ counters printed with the run summary show whether it fired.
 
 `simbi launch` evolves one problem across worker processes that exchange
 boundary data over TCP on the local host, without MPI. It covers 2D Cartesian
-adiabatic Newtonian hydro and ideal Newtonian MHD on a uniform static grid;
+Newtonian hydro, relativistic hydro, and ideal Newtonian MHD, adiabatic or
+globally isothermal, with pointwise user sources, on a uniform static grid;
 every other configuration is refused at startup with the property named. A
 magnetized run audits the two copies of every face two workers share after
 the initial exchange and before every checkpoint, and after every exchange
