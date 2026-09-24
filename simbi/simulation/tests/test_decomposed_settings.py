@@ -90,3 +90,39 @@ def test_a_refined_run_with_a_cut_periodic_axis_on_several_devices_is_refused(tm
     flat = " ".join(done.stderr.split())
     assert "cut across gpus > 1 with mesh refinement is outside the refined multi-GPU path" in flat, done.stderr[-1500:]
 
+
+
+def _patch_on_cut_script(path: Path, x_lo: float) -> str:
+    """a refined blast whose fine patch starts at `x_lo`; the two-device cut of the symmetric
+    domain lies at x = 0"""
+    path.write_text(
+        "from typing import Annotated\n"
+        "from simbi import ProblemParam\n"
+        "from simbi_configs.examples.newtonian.refined_blast import RefinedBlast\n\n\n"
+        "class PatchAgainstTheCut(RefinedBlast):\n"
+        "    refinement_regions: Annotated[\n"
+        "        list[list[float]],\n"
+        f"        ProblemParam([[{x_lo!r}, 0.25, -0.25, 0.25]], description='the fine patch'),\n"
+        "    ]\n"
+    )
+    return str(path)
+
+
+def test_a_patch_face_on_the_device_cut_is_refused_by_name(tmp_path: Path) -> None:
+    """the fine faces on a patch face lying on a cut and the coarse cell their reflux corrects
+    would live on different devices; the run is refused with the remedy, and the same patch
+    starting two root cells past the cut (the prolongation stencil's reach inside the root
+    halo) runs."""
+    from simbi_configs.examples.newtonian.refined_blast import RefinedBlast
+
+    env = dict(os.environ, SYMBI_GPU_OVERSUBSCRIBE="1")
+    flags = ["--resolution", "32,32,1", "--end-time", "1e-6"]
+    on_cut = _patch_on_cut_script(tmp_path / "on_cut.py", 0.0)
+    done = subprocess.run(_command(on_cut, tmp_path / "refused", 2, flags), capture_output=True, text=True, timeout=900, env=env)
+    assert done.returncode != 0, f"the run succeeded:\n{done.stdout[-1500:]}"
+    flat = " ".join(done.stderr.split())
+    assert "lies on a decomposition cut" in flat, done.stderr[-1500:]
+    assert not list((tmp_path / "refused").glob("*.h5")), "output was written before the refusal"
+    (x_min, x_max), _ = RefinedBlast(resolution=(32, 32, 1)).bounds[:2]
+    two_cells_past = _patch_on_cut_script(tmp_path / "past_cut.py", 2.0 * (x_max - x_min) / 32)
+    _run(two_cells_past, tmp_path / "admitted", 2, flags)
