@@ -30,6 +30,7 @@ from simbi.simulation.runner import _load_backend, to_execution_dict
 from simbi_configs.examples.ibm.roche_passage import RochePassage
 from simbi_configs.examples.newtonian.kh import KelvinHelmholtz
 from simbi_configs.examples.newtonian.nmhd_orszag_tang import NewtonianOrszagTang
+from simbi_configs.examples.newtonian.ordered_sources import OrderedSources
 from simbi_configs.examples.newtonian.refined_kh import RefinedKelvinHelmholtz
 from simbi_configs.examples.srhd.ram44 import Ram44
 from simbi_configs.examples.srmhd.magnetic_blast import MagneticBomb
@@ -758,3 +759,42 @@ def test_a_relativistic_rejection_on_one_worker_rolls_every_worker_back(tmp_path
         xs, ys = _interior(fc), _interior(fr)
         assert any(not np.array_equal(xs[name], ys[name]) for name in xs), "the rejection left the run unchanged; the gate is vacuous"
     _assert_same_state(launched, reference, "two relativistic workers, rejection on worker 1")
+
+
+# -----------------------------------------------------------------------------
+# user sources through the public path: the ordered-sources example carries two pointwise
+# sources each tile evaluates at its own global coordinates.
+# -----------------------------------------------------------------------------
+
+SOURCES_SCRIPT = str(Path(OrderedSources.__module__.replace(".", "/") + ".py"))
+SOURCES_RESOLUTION = (24, 16)
+SOURCES_REFERENCE_SNIPPET = """
+import sys
+from simbi.simulation import runner
+from simbi_configs.examples.newtonian.ordered_sources import OrderedSources
+out, steps = sys.argv[1], int(sys.argv[2])
+runner.run(OrderedSources(resolution=({rx}, {ry}), data_directory=out, checkpoint_interval=1e9), compute_mode="cpu", max_steps=steps)
+"""
+
+
+def test_a_launch_with_user_sources_matches_the_single_grid_run(tmp_path: Path) -> None:
+    snippet = SOURCES_REFERENCE_SNIPPET.format(rx=SOURCES_RESOLUTION[0], ry=SOURCES_RESOLUTION[1])
+    done = subprocess.run([sys.executable, "-c", snippet, str(tmp_path / "single"), str(STEPS)], capture_output=True, text=True, timeout=600)
+    assert done.returncode == 0, f"reference failed:\n{done.stderr}"
+    references = sorted((tmp_path / "single").glob("*final*.h5"))
+    assert len(references) == 1
+    layout = _layout(tmp_path / "two.toml", workers=2, shape=(2, 1))
+    cmd = [
+        sys.executable, "-m", "simbi.cli", "launch", SOURCES_SCRIPT,
+        "--layout", str(layout), "--max-steps", str(STEPS),
+        "--resolution", f"{SOURCES_RESOLUTION[0]},{SOURCES_RESOLUTION[1]}",
+        "--data-directory", str(tmp_path / "two"), "--checkpoint-interval", "1e9",
+    ]
+    done = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
+    assert done.returncode == 0, f"launch failed:\nstdout:\n{done.stdout}\nstderr:\n{done.stderr}"
+    exits = {int(w): int(c) for w, c in EXIT.findall(done.stdout)}
+    assert exits == {0: 0, 1: 0}, f"worker exit codes {exits}"
+    launched = sorted((tmp_path / "two").glob("*final*.h5"))
+    assert len(launched) == 1
+    _assert_same_state(launched[0], references[0], "two workers with user sources")
+

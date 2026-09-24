@@ -10257,8 +10257,11 @@ fn validate_launch_scope(cfg: &Config) -> Result<(), String> {
     if cfg.perturbation_json.is_some() {
         return refused("a perturbation expression");
     }
-    if !cfg.source_jsons.is_empty() || !cfg.driven_exprs.is_empty() || cfg.equilibrium_json.is_some() {
-        return refused("a user source or driven boundary");
+    if !cfg.driven_exprs.is_empty() {
+        return refused("a driven boundary");
+    }
+    if cfg.equilibrium_json.is_some() {
+        return refused("an equilibrium prescription");
     }
     if cfg.dlogt > 0.0 {
         return refused("a logarithmic checkpoint cadence");
@@ -10360,6 +10363,14 @@ fn run_worker_process(
                 .with_eos(build_eos(cfg))
                 .with_solver(solver)
                 .map_err(|e| format!("tile {flat} substrate/solver: {e:?}"))?;
+            // the user sources, per tile: pointwise, each tile evaluating them at its own
+            // global coordinates, as the single decomposed path attaches them
+            let sub = attach_configured_sources(
+                sub,
+                &cfg.source_jsons,
+                <$regime_ty as Regime<f64, 2>>::SPEC,
+                &state_law_of(cfg, <$regime_ty as Regime<f64, 2>>::SPEC),
+            )?;
             tiles.push((sim, sub));
         }
         let ng = tiles[0].0.geom.ng;

@@ -36,10 +36,13 @@ class OrderedSources(SimbiProblem):
     @property
     def source_expressions(self) -> list[ExpressionDict]:
         # each slot is its own graph, since a raw source reaches one conserved
-        # slot at a time. the blob is the same disc in every one of them.
+        # slot at a time. the blob is the same disc in every one of them: the
+        # comparison yields a mask, and the select turns it into a 0/1 indicator
+        # that arithmetic can scale.
         def blob() -> tuple:
             x, y = expr.coords(2)
-            return x, y, ((x - 0.5) * (x - 0.5) + (y - 0.5) * (y - 0.5)) < 0.04
+            inside = ((x - 0.5) * (x - 0.5) + (y - 0.5) * (y - 0.5)) < 0.04
+            return x, y, expr.where(inside, 1.0, 0.0)
 
         _, _, region = blob()
         density = expr.raw(
