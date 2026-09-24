@@ -10293,6 +10293,49 @@ impl LaunchFault {
     }
 }
 
+/// whether the operator has opted into the combinations the launched path builds without a
+/// distributed gate
+fn launch_experimental_opt_in() -> bool {
+    std::env::var("SIMBI_LAUNCH_EXPERIMENTAL").is_ok_and(|v| v == "1")
+}
+
+/// the first combination of `cfg` the launched tiles install as the single path does but that no
+/// distributed gate has validated, named for the refusal; `None` when every combination in play
+/// carries a gate. the gated set is the table in the README's multi-process section
+fn ungated_launch_combination(cfg: &Config) -> Option<String> {
+    let magnetized = matches!(cfg.regime.as_str(), "nmhd" | "imhd");
+    let isothermal = matches!(cfg.regime.as_str(), "isothermal" | "imhd");
+    let spacings = [&cfg.x1_spacing, &cfg.x2_spacing, &cfg.x3_spacing];
+    if spacings[..cfg.dims].iter().any(|s| s.eq_ignore_ascii_case("geometric")) {
+        return Some("geometric spacing".to_string());
+    }
+    if !magnetized && cfg.eos_name != "ideal" {
+        return Some(format!("the {} equation of state", cfg.eos_name));
+    }
+    if cfg.wb_reconstruction {
+        return Some("the balanced reconstruction".to_string());
+    }
+    if cfg.regime != "newtonian" && cfg.reconstruction_name != "plm" {
+        return Some(format!("{} reconstruction with the {} regime", cfg.reconstruction_name, cfg.regime));
+    }
+    if isothermal && (cfg.coord_system != "cartesian" || cfg.dims == 3) {
+        return Some(format!("the {} regime on a {}-dimensional {} chart", cfg.regime, cfg.dims, cfg.coord_system));
+    }
+    if isothermal && cfg.boundaries.iter().any(|b| *b != BoundaryType::Periodic) {
+        return Some(format!("a wall beyond periodic with the {} regime", cfg.regime));
+    }
+    if cfg.regime == "imhd" && cfg.resistivity != 0.0 {
+        return Some("resistivity with the imhd regime".to_string());
+    }
+    if magnetized && cfg.dims == 3 {
+        return Some(format!("the {} regime on a three-dimensional grid", cfg.regime));
+    }
+    if cfg.regime != "newtonian" && (cfg.viscosity != 0.0 || cfg.alpha != 0.0) {
+        return Some(format!("viscous transport with the {} regime", cfg.regime));
+    }
+    None
+}
+
 /// the distributed first release: 2D cartesian adiabatic newtonian hydro on a static uniform
 /// grid with a linear checkpoint cadence. every other configuration is named and refused here,
 /// before any tile is built.
@@ -10361,6 +10404,18 @@ fn validate_launch_scope(cfg: &Config) -> Result<(), String> {
     }
     if cfg.dlogt > 0.0 {
         return refused("a logarithmic checkpoint cadence");
+    }
+    // a combination the launched tiles build as the single path does but that no distributed
+    // gate has validated: refused by name, or run as experimental under an explicit opt-in.
+    // successful construction is no evidence of validated support
+    if let Some(property) = ungated_launch_combination(cfg) {
+        if !launch_experimental_opt_in() {
+            return Err(format!(
+                "{property} is installed on the launched path without a distributed gate; set \
+                 SIMBI_LAUNCH_EXPERIMENTAL=1 to run it as an experimental, unvalidated combination"
+            ));
+        }
+        eprintln!("SIMBI launch: experimental combination without a distributed gate: {property}");
     }
     Ok(())
 }

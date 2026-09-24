@@ -372,14 +372,19 @@ fired against a cut, "restart" a resume onto a changed, uneven partition,
 | nmhd | 2D Cartesian vortex (fresh with the face audit, restart, correction under Contact and UCT in both stages, shared-face mismatch aborting every worker, the numerics its substrate has no door for refused, a forced rejection refused); 2D Cartesian rotor with outflow walls (four workers, correction); reflect and outflow walls at cut corners; 2D (r, phi) disk plane with a periodic azimuth (four workers, correction); ohmic resistivity (two workers, correction, eta shown to act); 3D Cartesian and 3D spherical over both poles with a cut azimuth, in-process worker gates only. |
 | imhd | 2D Cartesian vortex (fresh with the face audit, correction under Contact and UCT). |
 
-Installed on the launched tiles as on the single path but without a
-distributed gate of their own: geometric radial spacing, the gas equations
-of state beyond the ideal gas, the balanced reconstruction, the isothermal
-regimes on the spherical and cylindrical charts and in 3D, walls beyond
-periodic for the isothermal regimes, resistivity with the isothermal MHD
-closure, the public 3D magnetized path, and the viscous transport on the
-relativistic, isothermal and magnetized regimes (the alpha prescription
-needs a central body, which is refused ahead of it). A polar axis with a cut
+The listed regime and operator combinations are locally validated; the
+launched path validates nothing beyond them. Combinations the tiles build
+as the single path does but that no distributed gate has validated are
+refused at startup by name: geometric radial spacing, the gas equations of
+state beyond the ideal gas, the balanced reconstruction, reconstruction
+beyond plm outside Newtonian hydro, the isothermal regimes on the
+spherical and cylindrical charts and in 3D, walls beyond periodic for the
+isothermal regimes, resistivity with the isothermal MHD closure, the 3D
+magnetized path, and the viscous transport outside Newtonian hydro (the
+alpha prescription needs a central body, which is refused ahead of it).
+`SIMBI_LAUNCH_EXPERIMENTAL=1` runs such a combination anyway, as an
+experimental, unvalidated one, and the launch says so; successful
+construction is no evidence of validated support. A polar axis with a cut
 azimuth is filled by antipodal exchange on both charts; the cylindrical
 seam is ungated.
 
@@ -397,11 +402,14 @@ more than once per step is refused on the launched path by that
 declaration.
 
 Across two nodes on Frontier the evidence covers 2D Cartesian Newtonian
-hydro alone (equality, rollback, and faults on the shear layer), gathered
-before the tile geometry, the walls, the charts, the third dimension, the
-polar seam, and the magnetized, isothermal, and resistive paths landed;
-every row above rests on local evidence until the two-node gates are
-rerun. A magnetized run audits the two copies of every face two workers
+hydro alone (equality, rollback, and faults on the shear layer), and it
+stands for the build it was recorded on; that build predates the tile
+geometry, the walls, the charts, the third dimension, the polar seam, and
+the magnetized, isothermal, resistive, and viscous paths, so every row
+above rests on local evidence until the two-node gates run again on the
+current build. The cross-node timing measured then showed substantial
+arrival skew per stage; its cause and the network's share of it are not
+yet isolated. A magnetized run audits the two copies of every face two workers
 share after the initial exchange and before every checkpoint, and after
 every exchange under `SIMBI_FABRIC_AUDIT=all`; a disagreement ends the run
 with the face named and publishes no checkpoint. A layout file names the worker
