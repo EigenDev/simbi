@@ -543,7 +543,13 @@ impl<L: Link> Fabric<L> {
                 spec.epoch.axis, self.axes
             )));
         }
-        self.grants.open(spec.epoch)?;
+        let exchanges_with = |peer: WorkerId| {
+            spec.receives
+                .iter()
+                .chain(spec.sends.iter())
+                .any(|&(_, p)| p == peer)
+        };
+        self.grants.open(spec.epoch, exchanges_with)?;
         if let Some(&(_, peer)) = spec
             .receives
             .iter()

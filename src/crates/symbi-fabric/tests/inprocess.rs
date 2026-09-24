@@ -345,6 +345,59 @@ fn axis_one_grant_survives_axis_zero_in_a_valid_sequence() {
     b.shutdown().unwrap();
 }
 
+/// a peer with no transfer in a point's later phases finishes the point and opens the next
+/// one while this worker still opens an empty phase of the earlier point; the next-point
+/// grant it tabled stays through that open and is consumed when the next point opens here
+#[test]
+fn a_peer_one_point_ahead_through_an_empty_phase_is_no_violation() {
+    let link = Loopback::new();
+    let (mut a, mut b) = pair(&link);
+    let p1 = epoch(0, 1, 0);
+    let p1_axis1 = epoch(0, 1, 1);
+    let p2 = epoch(0, 2, 0);
+    open_axis0(&mut a, &mut b, p1);
+    drive(&mut [&mut a, &mut b]).unwrap();
+    finish_axis0(&mut a, &mut b);
+    // b runs through the empty axis-1 phase and opens the next point, granting a
+    let empty = |e: Epoch| PhaseSpec {
+        epoch: e,
+        sends: &[],
+        receives: &[],
+    };
+    b.open(empty(p1_axis1)).unwrap();
+    b.close().unwrap();
+    b.pack(T1, |buf| buf.copy_from_slice(&[-7.0, -8.0, -9.0]))
+        .unwrap();
+    b.open(PhaseSpec {
+        epoch: p2,
+        sends: &[(T1, A)],
+        receives: &[(T0, A)],
+    })
+    .unwrap();
+    // a tables that grant, then opens its own empty axis-1 phase of the earlier point
+    a.service().unwrap();
+    assert!(a.grants().is_tabled(B, p2));
+    a.open(empty(p1_axis1)).unwrap();
+    a.close().unwrap();
+    a.pack(T0, |buf| buf.copy_from_slice(&[7.0, 8.0, 9.0]))
+        .unwrap();
+    a.open(PhaseSpec {
+        epoch: p2,
+        sends: &[(T0, B)],
+        receives: &[(T1, B)],
+    })
+    .unwrap();
+    drive(&mut [&mut a, &mut b]).unwrap();
+    assert_eq!(a.payload(T1).unwrap(), &[-7.0, -8.0, -9.0]);
+    assert_eq!(b.payload(T0).unwrap(), &[7.0, 8.0, 9.0]);
+    a.mark_unpacked(T1).unwrap();
+    b.mark_unpacked(T0).unwrap();
+    a.close().unwrap();
+    b.close().unwrap();
+    a.shutdown().unwrap();
+    b.shutdown().unwrap();
+}
+
 #[test]
 fn local_only_axis_issues_no_grant() {
     let link = Loopback::new();
@@ -797,7 +850,11 @@ impl Link for Restless {
         Ok(())
     }
 
-    fn poll(&self, _: WorkerId, _: &mut Vec<u8>) -> Result<Option<(WorkerId, Header)>, FabricError> {
+    fn poll(
+        &self,
+        _: WorkerId,
+        _: &mut Vec<u8>,
+    ) -> Result<Option<(WorkerId, Header)>, FabricError> {
         Ok(None)
     }
 
@@ -863,5 +920,8 @@ fn pending_work_alone_pauses_every_pass() {
     let st = a.stats();
     assert!(st.grant_waits > 0, "the send never waited for its grant");
     assert!(st.idle_pauses > 0);
-    assert_eq!(st.advancing_passes, 0, "a pass with only pending work counted as progress");
+    assert_eq!(
+        st.advancing_passes, 0,
+        "a pass with only pending work counted as progress"
+    );
 }

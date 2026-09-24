@@ -9,7 +9,7 @@
 //
 // usage:
 //  table.table(peer, epoch, count)?;        // a Grant frame arrived
-//  table.open(epoch)?;                      // this worker opens the phase
+//  table.open(epoch, |peer| in_phase(peer))?; // this worker opens the phase
 //  let count = table.consume(peer, epoch)?; // the grant is spent
 // =============================================================================
 
@@ -93,11 +93,20 @@ impl GrantTable {
         }
     }
 
-    /// this worker opens `epoch`: every tabled grant, from every peer, must belong to the
-    /// same exchange point. a grant for another point means that peer took a different
-    /// branch out of the last collective.
-    pub fn open(&self, epoch: Epoch) -> Result<(), FabricError> {
+    /// this worker opens `epoch`: every tabled grant from a peer this phase exchanges with
+    /// must belong to the same exchange point. such a peer waits on this worker inside the
+    /// point (a send leaves only on the receiver's grant), so its grant for another point
+    /// means it took a different branch out of the last collective. a peer outside the phase
+    /// may have opened the next point already; its grant waits for the phase it names.
+    pub fn open(
+        &self,
+        epoch: Epoch,
+        in_phase: impl Fn(WorkerId) -> bool,
+    ) -> Result<(), FabricError> {
         for (p, chunk) in self.slots.chunks(self.axes).enumerate() {
+            if !in_phase(WorkerId(p as u32)) {
+                continue;
+            }
             for t in chunk.iter().flatten() {
                 if !same_point(&t.epoch, &epoch) {
                     return Err(FabricError::protocol(
@@ -202,10 +211,10 @@ mod tests {
         let mut t = GrantTable::new(2, 2);
         t.table(WorkerId(1), e(0, 0, 1, 0), 1).unwrap();
         t.table(WorkerId(1), e(0, 0, 1, 1), 1).unwrap();
-        t.open(e(0, 0, 1, 0)).unwrap();
+        t.open(e(0, 0, 1, 0), |_| true).unwrap();
         assert_eq!(t.consume(WorkerId(1), e(0, 0, 1, 0)), Some(1));
         assert!(t.is_tabled(WorkerId(1), e(0, 0, 1, 1)));
-        t.open(e(0, 0, 1, 1)).unwrap();
+        t.open(e(0, 0, 1, 1), |_| true).unwrap();
         assert_eq!(t.consume(WorkerId(1), e(0, 0, 1, 1)), Some(1));
         t.assert_drained().unwrap();
     }
@@ -227,12 +236,24 @@ mod tests {
         let mut t = GrantTable::new(2, 2);
         // the peer took the accept branch into stage 1; this worker's result said rollback.
         t.table(WorkerId(1), e(3, 0, 2, 0), 1).unwrap();
-        let err = t.open(e(3, 0, 0xF0, 0)).unwrap_err();
+        let err = t.open(e(3, 0, 0xF0, 0), |_| true).unwrap_err();
         assert!(err.is_protocol());
         // and the converse: the peer rolled back, this worker opens stage 1.
         let mut t = GrantTable::new(2, 2);
         t.table(WorkerId(1), e(3, 0, 0xF0, 0), 1).unwrap();
-        assert!(t.open(e(3, 0, 2, 0)).unwrap_err().is_protocol());
+        assert!(t.open(e(3, 0, 2, 0), |_| true).unwrap_err().is_protocol());
+    }
+
+    /// a peer with no transfer in the phase being opened may have finished the point and
+    /// opened the next one; its grant for that next point stays tabled through the open
+    #[test]
+    fn a_next_point_grant_from_a_peer_outside_the_phase_survives_the_open() {
+        let mut t = GrantTable::new(2, 2);
+        t.table(WorkerId(1), e(3, 0, 3, 0), 2).unwrap();
+        t.open(e(3, 0, 2, 1), |_| false).unwrap();
+        assert!(t.open(e(3, 0, 2, 1), |_| true).unwrap_err().is_protocol());
+        t.open(e(3, 0, 3, 0), |_| true).unwrap();
+        assert_eq!(t.consume(WorkerId(1), e(3, 0, 3, 0)), Some(2));
     }
 
     #[test]
@@ -241,7 +262,7 @@ mod tests {
         // the peer already holds Result(k) and opens stage 1; this worker is still waiting.
         t.table(WorkerId(1), e(3, 0, 2, 0), 4).unwrap();
         // this worker's result arrives and it opens the same phase.
-        t.open(e(3, 0, 2, 0)).unwrap();
+        t.open(e(3, 0, 2, 0), |_| true).unwrap();
         assert_eq!(t.consume(WorkerId(1), e(3, 0, 2, 0)), Some(4));
     }
 }
