@@ -119,6 +119,8 @@ use super::transfer::{
     restrict_bface, restrict_cell_field, restrict_cons,
 };
 use std::ops::ControlFlow;
+
+use super::phase_probe;
 use symbi_hydro::state::PrimFromSlots;
 use symbi_sim::decomp::{
     HaloTransport, Topology, drain_devices, exchange_grid, flatten, schedule_of_tiles, unflatten,
@@ -145,6 +147,7 @@ const RATIO: usize = 2;
 
 /// a box in physical space that one finer level will cover (static nesting:
 /// region k refines level k). snapped to coarse cell faces by rounding.
+#[derive(Clone, Copy, Debug)]
 pub struct RefinementRegion<const D: usize> {
     pub x_lo: [f64; D],
     pub x_hi: [f64; D],
@@ -1089,6 +1092,24 @@ where
         prolong_order: ProlongOrder,
         make_kernels: impl Fn(&SimStateGeneric<R, NDIM, DOF, M, E, S, Mem>) -> K,
     ) -> symbi_xpu::Result<Self> {
+        Self::with_refinement_of(coarse, coarse_kernels, regions, regions, prolong_order, make_kernels)
+    }
+
+    /// a tile of a decomposed hierarchy: `regions` are the patches clipped to this tile's
+    /// extent and `whole[i]` the unclipped patch of `regions[i]`. the fine grid covers the
+    /// clipped box; the level's ownership (the covered core a stage holds at its input) is
+    /// the whole patch's core clipped to the tile, so every tile and the single hierarchy
+    /// hold the same cells active around the patch's real faces, wherever a cut falls.
+    pub fn with_refinement_of(
+        coarse: SimStateGeneric<R, NDIM, DOF, M, E, S, Mem>,
+        coarse_kernels: K,
+        regions: &[RefinementRegion<NDIM>],
+        whole: &[RefinementRegion<NDIM>],
+        prolong_order: ProlongOrder,
+        make_kernels: impl Fn(&SimStateGeneric<R, NDIM, DOF, M, E, S, Mem>) -> K,
+    ) -> symbi_xpu::Result<Self> {
+        assert_eq!(regions.len(), whole.len(), "one whole patch per clipped region");
+        let mut whole_coverages: Vec<Domain<NDIM>> = Vec::with_capacity(regions.len());
         let root_ng = coarse.geom.ng;
         let mut levels = vec![LevelData {
             state: coarse,
@@ -1106,8 +1127,9 @@ where
             prim_eq: None,
         }];
 
-        for region in regions {
+        for (region, whole_region) in regions.iter().zip(whole) {
             let parent = &levels.last().unwrap().state;
+            whole_coverages.push(region_to_domain(whole_region, &parent.geom.x_lo, &parent.geom.dx));
             if parent.fields.mhd.is_some() {
                 assert!(
                     NDIM == 2 || NDIM == 3,
@@ -1235,15 +1257,19 @@ where
         let root_cells: [usize; NDIM] =
             std::array::from_fn(|aa| levels[0].state.geom.interior.spaces[aa].size());
         let mut tracer_interfaces = Vec::with_capacity(levels.len().saturating_sub(1));
-        for level in &mut levels {
+        for (ll, level) in levels.iter_mut().enumerate() {
             let donor_width = (level.kernels.reconstruction_reach() as usize)
                 .max(prolong_order.ghost_width())
                 + 1;
-            level.state.composite_ownership = symbi_sim::state::CompositeOwnership::new(
-                level.coverage.clone(),
-                &level.state.geom.interior,
-                donor_width,
-            );
+            level.state.composite_ownership = match level.coverage.clone() {
+                Some(coverage) => symbi_sim::state::CompositeOwnership::clipped(
+                    coverage,
+                    &whole_coverages[ll],
+                    &level.state.geom.interior,
+                    donor_width,
+                ),
+                None => symbi_sim::state::CompositeOwnership::new(None, &level.state.geom.interior, donor_width),
+            };
         }
         for ll in 0..levels.len().saturating_sub(1) {
             // the out-of-plane magnetic components of a partially gridded chart reflux with the
@@ -2264,11 +2290,13 @@ where
     /// 1-level hierarchy reproduces it bit-for-bit.
     fn advance_level(&mut self, level: usize, dt: f64, alpha0: f64) -> bool {
         self.level_step_begin(level, dt);
+        phase_probe::sample("begin", level, &self.levels[level].state);
         let n = self.levels[level].state.timestepping.stages().len();
         for ii in 0..n {
             if self.level_stage(level, ii, dt, alpha0) {
                 return true;
             }
+            phase_probe::sample(phase_probe::STAGE[ii], level, &self.levels[level].state);
         }
         self.level_step_tail(level, dt, alpha0)
     }
@@ -2923,12 +2951,16 @@ where
                 return true;
             }
             self.level_restrict_reflux(level, alpha0);
+            phase_probe::sample("restrict", level, &self.levels[level].state);
         }
         if self.levels[level].state.continuous_tracers.is_some() {
             self.advance_level_continuous_tracers(level, dt);
         }
         self.sample_per_level_censuses(level);
         self.level_clock(level, dt);
+        if !has_finer {
+            phase_probe::sample("tail", level, &self.levels[level].state);
+        }
         false
     }
 
@@ -3157,6 +3189,7 @@ where
             self.prolong_cf(level + 1, alpha);
             let f = &self.levels[level + 1];
             prof("ghost_fill", || f.kernels.ghost_fill(&f.state));
+            phase_probe::sample("prolong", level + 1, &f.state);
             if self.advance_level(level + 1, fine_dt, alpha) {
                 return true;
             }
@@ -4985,6 +5018,8 @@ where
                     }
                 }
                 symbi_xpu::with_device(devices[i], || tiles[i].level_step_begin(0, gdt));
+                phase_probe::set_tile(i);
+                phase_probe::sample("begin", 0, &tiles[i].levels[0].state);
             }
             let mut retry = false;
             // the root SSP stages, each with the troubled marks crossing the cuts before the
@@ -4996,6 +5031,10 @@ where
                 }
                 migrate_level_tracers(tiles, 0);
                 exchange_level_halos(tiles, 0, &root_order, counts, devices, transport);
+                for &i in root_order {
+                    phase_probe::set_tile(i);
+                    phase_probe::sample(phase_probe::STAGE[ii], 0, &tiles[i].levels[0].state);
+                }
             }
             if retry {
                 // handled by the common collective rollback at the end of the attempt.
@@ -5052,10 +5091,16 @@ where
                             &fg.devices,
                             transport,
                         );
+                        for &i in &fg.order {
+                            phase_probe::set_tile(i);
+                            phase_probe::sample("prolong", 1, &tiles[i].levels[1].state);
+                        }
                         for (k, &i) in fg.order.iter().enumerate() {
                             symbi_xpu::with_device(fg.devices[k], || {
                                 tiles[i].level_step_begin(1, fine_dt)
                             });
+                            phase_probe::set_tile(i);
+                            phase_probe::sample("begin", 1, &tiles[i].levels[1].state);
                         }
                         for jj in 0..nstages {
                             retry |= decomposed_level_stage(
@@ -5073,9 +5118,14 @@ where
                                 &fg.devices,
                                 transport,
                             );
+                            for &i in &fg.order {
+                                phase_probe::set_tile(i);
+                                phase_probe::sample(phase_probe::STAGE[jj], 1, &tiles[i].levels[1].state);
+                            }
                         }
                         spawn_decomposed_injections(tiles, &fg.order, 1);
                         for (k, &i) in fg.order.iter().enumerate() {
+                            phase_probe::set_tile(i);
                             retry |= symbi_xpu::with_device(fg.devices[k], || {
                                 tiles[i].level_step_tail(1, fine_dt, alpha)
                             });
@@ -5084,12 +5134,20 @@ where
                             break 'fine_subcycle;
                         }
                     }
-                    // tile-local restrict + flux/emf reflux + c2p + ghost on each refined tile's root.
+                    // tile-local restrict + flux/emf reflux + c2p + ghost on each refined tile's root,
+                    // then the root halos carry the restricted covered cells: the next step's
+                    // prolongation snapshot and the cut-adjacent stencils read them.
                     if !retry {
                         for (k, &i) in fg.order.iter().enumerate() {
+                            phase_probe::set_tile(i);
                             symbi_xpu::with_device(fg.devices[k], || {
                                 tiles[i].level_restrict_reflux(0, 0.0)
                             });
+                        }
+                        exchange_level_halos(tiles, 0, &root_order, counts, devices, transport);
+                        for &i in root_order {
+                            phase_probe::set_tile(i);
+                            phase_probe::sample("restrict", 0, &tiles[i].levels[0].state);
                         }
                     }
                 }

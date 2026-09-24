@@ -130,7 +130,11 @@ fn build_tiles(partition: &Partition<2>, ts: Timestepping) -> Vec<Hier> {
                 x_lo: [cx[0], cy[0]],
                 x_hi: [cx[1], cy[1]],
             };
-            let h = Hier::with_refinement(root, k, &[region], ProlongOrder::Ppm, kset)
+            let whole = RefinementRegion {
+                x_lo: [PX_LO, PY_LO],
+                x_hi: [PX_HI, PY_HI],
+            };
+            let h = Hier::with_refinement_of(root, k, &[region], &[whole], ProlongOrder::Ppm, kset)
                 .expect("tile hier");
             h
         } else {

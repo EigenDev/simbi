@@ -25,6 +25,7 @@ pub mod emf_register;
 pub mod equilibrium;
 pub mod flux_register;
 pub mod hierarchy;
+pub mod phase_probe;
 pub mod tracer_interface;
 pub mod transfer;
 

@@ -106,7 +106,8 @@ fn build_tiles(partition: &Partition<2>) -> Vec<Hier> {
         let k = kset(&root);
         let h = if cx[0] < cx[1] {
             let region = RefinementRegion { x_lo: [cx[0], 0.0], x_hi: [cx[1], NY as f64 * DX] };
-            Hier::with_refinement(root, k, &[region], ProlongOrder::Ppm, kset).expect("tile hierarchy")
+            let whole = RefinementRegion { x_lo: [PX_LO, 0.0], x_hi: [PX_HI, NY as f64 * DX] };
+            Hier::with_refinement_of(root, k, &[region], &[whole], ProlongOrder::Ppm, kset).expect("tile hierarchy")
         } else {
             Hier::single(root, k)
         };

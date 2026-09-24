@@ -2154,29 +2154,36 @@ impl<const D: usize> Default for CompositeOwnership<D> {
 }
 
 impl<const D: usize> CompositeOwnership<D> {
+    /// the ownership of a level whose coverage is the whole patch: the donor shell contracts
+    /// every refinement seam, and a coverage face on the level's own boundary keeps its core
     pub fn new(coverage: Option<Domain<D>>, interior: &Domain<D>, donor_width: usize) -> Self {
-        let inactive = coverage.as_ref().and_then(|covered| {
-            let spaces = std::array::from_fn(|axis| {
-                let covered_axis = &covered.spaces[axis];
-                let interior_axis = &interior.spaces[axis];
-                // A donor shell belongs only to a genuine coarse-fine face.  A clipped coverage
-                // face coincident with the tile interior boundary is a decomposition cut (or a
-                // physical boundary), not a refinement seam; contracting it would make ownership
-                // and CFL depend on the domain decomposition.
-                let lo_width = usize::from(covered_axis.lo > interior_axis.lo) * donor_width;
-                let hi_width = usize::from(covered_axis.hi < interior_axis.hi) * donor_width;
-                Space {
-                    name: covered_axis.name,
-                    lo: covered_axis.lo + lo_width as isize,
-                    hi: covered_axis.hi - hi_width as isize,
-                }
-            });
-            spaces
-                .iter()
-                .all(|space| space.hi > space.lo)
-                .then(|| Domain::new(spaces))
+        match coverage {
+            Some(covered) => Self::clipped(covered.clone(), &covered, interior, donor_width),
+            None => Self { coverage: None, inactive: None },
+        }
+    }
+
+    /// the ownership of a tile whose coverage is the whole patch `global` clipped to the tile,
+    /// both in the tile's own cell indices. the inactive core is the patch's core: the donor
+    /// shell contracts the patch's real faces (the refinement seams) wherever they lie, on this
+    /// tile or beyond a cut, so a tile sees the same core the single hierarchy does. a patch
+    /// face on the tile boundary that is also the patch's real face is a physical boundary and
+    /// keeps its core; a coverage face at a cut continues into the neighbor tile.
+    pub fn clipped(coverage: Domain<D>, global: &Domain<D>, interior: &Domain<D>, donor_width: usize) -> Self {
+        let width = donor_width as isize;
+        let spaces = std::array::from_fn(|axis| {
+            let local = &coverage.spaces[axis];
+            let whole = &global.spaces[axis];
+            let tile = &interior.spaces[axis];
+            let lo = if whole.lo == local.lo && local.lo == tile.lo { local.lo } else { local.lo.max(whole.lo + width) };
+            let hi = if whole.hi == local.hi && local.hi == tile.hi { local.hi } else { local.hi.min(whole.hi - width) };
+            Space { name: local.name, lo, hi }
         });
-        Self { coverage, inactive }
+        let inactive = spaces
+            .iter()
+            .all(|space| space.hi > space.lo)
+            .then(|| Domain::new(spaces));
+        Self { coverage: Some(coverage), inactive }
     }
 
     /// True precisely where this level contributes the physical composite solution.
@@ -3886,6 +3893,40 @@ mod tests {
                 right.inactive.as_ref().unwrap().contains(cell)
             };
             assert_eq!(global_inactive, tiled_inactive, "mismatch at {cell:?}");
+        }
+    }
+
+    // a cut within the donor width of a patch face: the tile beyond the cut holds cells that
+    // lie in the patch's shell, and only the ownership derived from the whole patch keeps them
+    // active; the per-tile rule would sink them into the core
+    #[test]
+    fn composite_inactive_core_follows_the_patch_across_a_cut_near_its_face() {
+        let domain = |lo, hi| Domain::new([Space { name: "x", lo, hi }]);
+        let whole = domain(8, 24);
+        let global = CompositeOwnership::new(Some(whole.clone()), &domain(0, 32), 2);
+        for cut in [9, 10, 22, 23] {
+            let left = CompositeOwnership::clipped(domain(8, cut), &whole, &domain(0, cut), 2);
+            let right = CompositeOwnership::clipped(domain(cut, 24), &whole, &domain(cut, 32), 2);
+            for cell in domain(0, 32).iter() {
+                let global_inactive = global.inactive.as_ref().unwrap().contains(cell);
+                let side = if cell[0] < cut { &left } else { &right };
+                let tiled_inactive = side.inactive.as_ref().is_some_and(|core| core.contains(cell));
+                assert_eq!(global_inactive, tiled_inactive, "cut {cut}: mismatch at {cell:?}");
+            }
+        }
+        // the premise: a cut strictly inside the shell is where the per-tile rule sinks shell
+        // cells into the core (a cut exactly one shell width in agrees by coincidence)
+        let bounds = |o: &CompositeOwnership<1>| o.inactive.as_ref().map(|d| (d.spaces[0].lo, d.spaces[0].hi));
+        let right_of_9 = (domain(9, 24), domain(9, 32));
+        let left_of_23 = (domain(8, 23), domain(0, 23));
+        for (coverage, tile) in [right_of_9, left_of_23] {
+            let per_tile = CompositeOwnership::new(Some(coverage.clone()), &tile, 2);
+            let of_patch = CompositeOwnership::clipped(coverage, &whole, &tile, 2);
+            assert_ne!(
+                bounds(&per_tile),
+                bounds(&of_patch),
+                "the per-tile rule agrees with the patch's core; the premise is vacuous"
+            );
         }
     }
 

@@ -3498,7 +3498,7 @@ fn clip_regions_to_tile<const D: usize>(
     origin: [f64; D],
     cells: [usize; D],
     maps: &[symbi_geometry::AxisMap; D],
-) -> Vec<RefinementRegion<D>> {
+) -> Vec<(RefinementRegion<D>, RefinementRegion<D>)> {
     let hi: [f64; D] = std::array::from_fn(|a| maps[a].face(cells[a] as isize));
     // the narrowest cell on each axis: for a uniform map every cell has this width, for a log map it
     // is the innermost one, so the test never discards a region an actual cell could resolve.
@@ -3512,7 +3512,7 @@ fn clip_regions_to_tile<const D: usize>(
         let lo: [f64; D] = std::array::from_fn(|a| r.x_lo[a].max(origin[a]));
         let up: [f64; D] = std::array::from_fn(|a| r.x_hi[a].min(hi[a]));
         if (0..D).all(|a| up[a] - lo[a] > 0.5 * min_w[a]) {
-            out.push(RefinementRegion { x_lo: lo, x_hi: up });
+            out.push((RefinementRegion { x_lo: lo, x_hi: up }, *r));
         }
     }
     out
@@ -6195,7 +6195,8 @@ macro_rules! build_and_run_hydro_decomposed_refined {
                 let mut h = if tile_regions.is_empty() {
                     Hierarchy::single(sim, sub)
                 } else {
-                    Hierarchy::with_refinement(sim, sub, &tile_regions, prolong, make)
+                    let (clipped, whole): (Vec<_>, Vec<_>) = tile_regions.iter().copied().unzip();
+                    Hierarchy::with_refinement_of(sim, sub, &clipped, &whole, prolong, make)
                         .map_err(|e| format!("tile {flat} refinement build: {e:?}"))?
                 };
                 // immersed bodies on every tile hierarchy at their global positions: the finest
