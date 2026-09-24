@@ -461,6 +461,20 @@ srun --nodes=2 --ntasks=2 simbi launch /path/to/problem.py --layout two-node.tom
 result with `simbi run` of the same problem, recording each worker's host,
 backend hash, and exit code. The transport is unencrypted TCP for a trusted allocation.
 
+`scripts/fabric_campaign.py <fresh-dir> --tier smoke|full` runs the validation
+campaign over the capability table above: for every case a single-grid run,
+a one-worker launch, an uneven multi-worker launch, a launch resumed onto a
+different partition, a troubled cell against a cut on one worker and on
+many, and the failure arms (a forced rejection, an invalid timestep, a lost
+worker, a perturbed shared face), with the final checkpoints compared
+interior cell for interior cell, the conserved totals of a periodic case
+held to roundoff, and div B read from the staggered faces. Each case leaves
+`result.json`; the campaign leaves `provenance.txt` (commit, dirty state,
+host, reported backend hash, scheduler job) and `summary.md`. With
+`--mode scheduler` inside an allocation each arm is one `srun` with one
+task per worker, and each task records its host, cpus, streams, and exit,
+so the same table runs on one host and across nodes from one installation.
+
 Problem flags pass through as they do for `simbi run`. The launcher starts the
 workers, prints each worker's pid and exit code, and exits nonzero if any
 worker did; interrupting the launcher ends every worker. Checkpoints are
