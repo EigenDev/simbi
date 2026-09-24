@@ -1160,6 +1160,33 @@ where
                     ),
                 });
             }
+            // a patch face lying on a root cut: the fine faces on it live on this tile and
+            // the coarse cell their reflux corrects lives on the neighbor, and no register
+            // carries a contribution across a cut yet. the root's coarse-fine boundary is a
+            // cut by construction (a single hierarchy's root has physical boundaries alone).
+            if levels.len() == 1 {
+                for ax in 0..NDIM {
+                    let whole_face = &whole_coverages.last().unwrap().spaces[ax];
+                    let on_lo_cut = coverage.spaces[ax].lo == parent.geom.interior.spaces[ax].lo
+                        && whole_face.lo == coverage.spaces[ax].lo
+                        && parent.boundaries.lo(ax) == BoundaryType::CoarseFine;
+                    let on_hi_cut = coverage.spaces[ax].hi == parent.geom.interior.spaces[ax].hi
+                        && whole_face.hi == coverage.spaces[ax].hi
+                        && parent.boundaries.hi(ax) == BoundaryType::CoarseFine;
+                    if on_lo_cut || on_hi_cut {
+                        return Err(symbi_xpu::XpuError {
+                            operation: "refinement region",
+                            code: 0,
+                            detail: format!(
+                                "a refinement patch face on axis {ax} lies on a decomposition cut: the \
+                                 coarse cell its reflux corrects is on the neighbor tile, which is \
+                                 outside the refined multi-device path; move the cut or the patch \
+                                 face by at least one root cell"
+                            ),
+                        });
+                    }
+                }
+            }
             // fine ghost depth: one above the root's (the prolongation stencil
             // is one order above the evolution reconstruction).
             let ng = root_ng + 1;

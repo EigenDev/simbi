@@ -332,6 +332,47 @@ fn ppm_root_cuts_17_17_match_after_one_root_step() {
     assert_one_step_matches([17, 17], PPM);
 }
 
+/// a patch face lying on a root cut is refused by name: the fine faces on it and the coarse
+/// cell their reflux corrects would live on different tiles, and no register contribution
+/// crosses a cut yet
+#[test]
+fn a_patch_face_on_a_cut_is_refused_by_name() {
+    let partition = Partition::explicit([N, N], [vec![12], vec![16]]).expect("cuts inside the grid");
+    let counts = partition.counts();
+    let flat = 0;
+    let ext = partition.tile_extents(unflatten(flat, counts));
+    let m: [usize; 2] = [ext[0].1, ext[1].1];
+    let origin: [f64; 2] = std::array::from_fn(|a| ext[a].0 as f64 * DX);
+    let bnd = Boundaries([
+        [BoundaryType::Outflow, BoundaryType::CoarseFine],
+        [BoundaryType::Outflow, BoundaryType::CoarseFine],
+    ]);
+    let root = build_root(m, origin, bnd, PLM.ng);
+    // the patch's low x face at 0.375 = root cell 12 is the cut: this tile holds no patch cell,
+    // the tile beyond the cut holds the patch's face on its own boundary
+    let beyond = partition.tile_extents(unflatten(2, counts));
+    let origin_beyond: [f64; 2] = std::array::from_fn(|a| beyond[a].0 as f64 * DX);
+    let m_beyond: [usize; 2] = [beyond[0].1, beyond[1].1];
+    let bnd_beyond = Boundaries([
+        [BoundaryType::CoarseFine, BoundaryType::Outflow],
+        [BoundaryType::Outflow, BoundaryType::CoarseFine],
+    ]);
+    let root_beyond = build_root(m_beyond, origin_beyond, bnd_beyond, PLM.ng);
+    let hi: [f64; 2] = std::array::from_fn(|a| origin_beyond[a] + m_beyond[a] as f64 * DX);
+    let clipped = RefinementRegion { x_lo: [PX_LO.max(origin_beyond[0]), PY_LO], x_hi: [PX_HI.min(hi[0]), PY_HI.min(hi[1])] };
+    let whole = RefinementRegion { x_lo: [PX_LO, PY_LO], x_hi: [PX_HI, PY_HI] };
+    drop(root);
+    let k = kset_plm(&root_beyond);
+    let err = Hier::with_refinement_of(root_beyond, k, &[clipped], &[whole], PLM.prolong, kset_plm)
+        .err()
+        .expect("a patch face on a cut was admitted");
+    assert!(
+        err.detail.contains("lies on a decomposition cut"),
+        "the refusal names another reason: {}",
+        err.detail
+    );
+}
+
 /// the centered layout under both schemes: the probe's alignment itself, on a case known to
 /// hold
 #[test]
