@@ -699,7 +699,7 @@ mod tests {
         assert!(
             disagreement(&mine, &previous, WorkerId(1))
                 .unwrap()
-                .contains("protocol 1 against 3")
+                .contains("protocol 1 against 4")
         );
         let mut plan = mine.clone();
         plan.identity.plan_digest = Digest(9);

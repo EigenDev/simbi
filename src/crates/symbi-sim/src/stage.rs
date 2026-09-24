@@ -547,9 +547,8 @@ where
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum StepOp {
     /// the constant-nu or alpha viscous transport: reads the primitive velocity one cell into
-    /// the halo, writes the interior momentum (and energy on an energy-carrying regime). the
-    /// primitives it leaves are the ones the next stage reads, on every tile alike, so the
-    /// halos stay as current as the interior
+    /// the halo and writes the interior momentum (and energy on an energy-carrying regime),
+    /// so the primitives it leaves predate the conserved state until they are recovered
     Viscous,
     /// horizon excision: the fill sweeps read the rim's primitives, each writes the excised
     /// cells, and the rebuild recovers their conserved state; a neighbor's rim read needs the
@@ -557,11 +556,23 @@ pub enum StepOp {
     Excise,
 }
 
-/// whether a post-step operation leaves every tile's cut halo stale for the next reader
+/// whether the primitives must be recovered from the conserved state after an operation:
+/// an operation that writes the conserved interior leaves the stored primitives inconsistent
+/// with it, and the next reconstruction and the next checkpoint read the primitives
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Recover {
+    None,
+    Primitives,
+}
+
+/// whether an operation leaves every tile's cut halo stale for the next reader: once after
+/// it, or after every one of its passes. a refresh moves the primitives the tiles hold, so
+/// it follows the recovery; an exchange of stale primitives satisfies nothing
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Refresh {
     None,
     Halos,
+    HalosPerPass,
 }
 
 pub struct StepPhase {
@@ -569,9 +580,29 @@ pub struct StepPhase {
     pub op: StepOp,
     pub reads: FieldSet,
     pub writes: FieldSet,
+    pub recover: Recover,
     pub refresh: Refresh,
     /// the property a driver names when it refuses the operation
     pub property: &'static str,
+}
+
+impl StepPhase {
+    /// whether the operation acts on `store` under `kernel` at all; a phase that does not act
+    /// runs none of its recovery or refresh, so an inviscid, unexcised run is untouched
+    pub fn applies<const D: usize, const DOF: usize, Mem, K>(
+        &self,
+        store: &FieldStore<D, DOF, Mem, f64>,
+        kernel: &K,
+    ) -> bool
+    where
+        Mem: MemorySpace,
+        K: KernelSet<D, DOF, Mem, f64> + ?Sized,
+    {
+        match self.op {
+            StepOp::Viscous => kernel.is_viscous(),
+            StepOp::Excise => kernel.excise_pass_count(store) > 0,
+        }
+    }
 }
 
 /// the canonical post-step order. this list is the sequence; every driver folds it.
@@ -581,7 +612,8 @@ pub const POST_STEP_PIPELINE: &[StepPhase] = &[
         op: StepOp::Viscous,
         reads: FieldSet::PRIM,
         writes: FieldSet::CONS,
-        refresh: Refresh::None,
+        recover: Recover::Primitives,
+        refresh: Refresh::Halos,
         property: "viscous transport",
     },
     StepPhase {
@@ -589,10 +621,26 @@ pub const POST_STEP_PIPELINE: &[StepPhase] = &[
         op: StepOp::Excise,
         reads: FieldSet::PRIM,
         writes: FieldSet::CONS.or(FieldSet::PRIM),
-        refresh: Refresh::Halos,
+        recover: Recover::None,
+        refresh: Refresh::HalosPerPass,
         property: "horizon excision",
     },
 ];
+
+/// a post-step operation that left an interior cell unrecoverable: the step was accepted, so
+/// the driver ends the run coherently with the phase and the cell named rather than publish
+/// the state
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PostStepError {
+    pub phase: &'static str,
+    pub detail: String,
+}
+
+impl std::fmt::Display for PostStepError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "the {} pass left the accepted state unrecoverable: {}", self.phase, self.detail)
+    }
+}
 
 /// what a driver supplies under the post-step recipe: where each tile's work runs, how a
 /// per-tile count is combined across every tile the step spans, and how the cut halos are
@@ -620,27 +668,54 @@ impl<const D: usize, const DOF: usize, Mem: MemorySpace> StepContext<D, DOF, Mem
     fn refresh_halos(&mut self, _stores: &[&FieldStore<D, DOF, Mem, f64>]) {}
 }
 
-/// fold the post-step recipe over `stores`, `applies` selecting the operators this fold
-/// runs (a refined level runs the viscous transport on its finest levels alone)
+/// fold the canonical post-step recipe over `stores`, `select` choosing the operators this
+/// fold runs (a refined level runs the viscous transport on its finest levels alone)
 pub fn fold_post_step<const D: usize, const DOF: usize, Mem, K>(
     stores: &[&FieldStore<D, DOF, Mem, f64>],
     kernels: &[&K],
     dt: f64,
     cx: &mut impl StepContext<D, DOF, Mem>,
-    applies: impl Fn(StepOp) -> bool,
-) where
+    select: impl Fn(StepOp) -> bool,
+) -> Result<(), PostStepError>
+where
+    Mem: MemorySpace,
+    K: KernelSet<D, DOF, Mem, f64> + ?Sized,
+{
+    fold_post_step_with(POST_STEP_PIPELINE, stores, kernels, dt, cx, select)
+}
+
+/// fold a post-step table over `stores`. a phase that acts on a tile runs its operation on
+/// every tile, then, as the table declares, recovers every tile's interior primitives from
+/// the conserved state and fills its physical ghosts, then refreshes the cut halos through
+/// the context, in that order, so the halos the tiles exchange are the recovered primitives.
+/// a recovery that leaves an interior cell unrecoverable ends the fold with the cell named.
+pub fn fold_post_step_with<const D: usize, const DOF: usize, Mem, K>(
+    table: &[StepPhase],
+    stores: &[&FieldStore<D, DOF, Mem, f64>],
+    kernels: &[&K],
+    dt: f64,
+    cx: &mut impl StepContext<D, DOF, Mem>,
+    select: impl Fn(StepOp) -> bool,
+) -> Result<(), PostStepError>
+where
     Mem: MemorySpace,
     K: KernelSet<D, DOF, Mem, f64> + ?Sized,
 {
     let n = stores.len();
-    for phase in POST_STEP_PIPELINE {
-        if !applies(phase.op) {
+    for phase in table {
+        if !select(phase.op) || !(0..n).any(|k| phase.applies(stores[k], kernels[k])) {
             continue;
         }
         match phase.op {
             StepOp::Viscous => {
                 for k in 0..n {
                     cx.on_tile(k, &mut || prof("viscous", || kernels[k].viscous(stores[k], dt)));
+                }
+                if phase.recover == Recover::Primitives {
+                    recover_primitives(phase, stores, kernels, cx)?;
+                }
+                if phase.refresh != Refresh::None {
+                    cx.refresh_halos(stores);
                 }
             }
             StepOp::Excise => {
@@ -653,19 +728,50 @@ pub fn fold_post_step<const D: usize, const DOF: usize, Mem, K>(
                     for k in 0..n {
                         cx.on_tile(k, &mut || kernels[k].excise_sweep(stores[k]));
                     }
-                    cx.refresh_halos(stores);
+                    if phase.refresh == Refresh::HalosPerPass {
+                        cx.refresh_halos(stores);
+                    }
                 }
                 for k in 0..n {
                     cx.on_tile(k, &mut || kernels[k].excise_finalize(stores[k]));
                 }
-                cx.refresh_halos(stores);
+                if phase.refresh != Refresh::None {
+                    cx.refresh_halos(stores);
+                }
             }
         }
     }
+    Ok(())
 }
 
-/// the property of the first post-step operation on `store` that would leave the cut halos
-/// stale: a driver without a post-step halo refresh refuses it by that name
+/// every tile's interior primitives recovered from its conserved state and its physical
+/// ghosts filled; an interior cell the recovery cannot land ends the fold
+fn recover_primitives<const D: usize, const DOF: usize, Mem, K>(
+    phase: &StepPhase,
+    stores: &[&FieldStore<D, DOF, Mem, f64>],
+    kernels: &[&K],
+    cx: &mut impl StepContext<D, DOF, Mem>,
+) -> Result<(), PostStepError>
+where
+    Mem: MemorySpace,
+    K: KernelSet<D, DOF, Mem, f64> + ?Sized,
+{
+    for k in 0..stores.len() {
+        cx.on_tile(k, &mut || prof("c2p", || kernels[k].c2p(stores[k])));
+        let code = crate::hydro_ops::scan_c2p_errors(stores[k]);
+        if !code.is_ok() {
+            let first = crate::hydro_ops::first_c2p_error(stores[k])
+                .map(|(coord, code)| format!("cell {coord:?} code {code}"))
+                .unwrap_or_else(|| "unavailable".to_string());
+            return Err(PostStepError { phase: phase.name, detail: format!("tile {k}, {first}") });
+        }
+        cx.on_tile(k, &mut || prof("ghost_fill", || kernels[k].ghost_fill(stores[k])));
+    }
+    Ok(())
+}
+
+/// the property of the first post-step operation on `store` that refreshes the cut halos more
+/// than once per step: a driver whose post-step exchange point runs once refuses it by name
 pub fn post_step_refresh_needed<const D: usize, const DOF: usize, Mem, K>(
     store: &FieldStore<D, DOF, Mem, f64>,
     kernel: &K,
@@ -676,11 +782,8 @@ where
 {
     POST_STEP_PIPELINE
         .iter()
-        .filter(|phase| phase.refresh == Refresh::Halos)
-        .find(|phase| match phase.op {
-            StepOp::Viscous => kernel.is_viscous(),
-            StepOp::Excise => kernel.excise_pass_count(store) > 0,
-        })
+        .filter(|phase| phase.refresh == Refresh::HalosPerPass)
+        .find(|phase| phase.applies(store, kernel))
         .map(|phase| phase.property)
 }
 

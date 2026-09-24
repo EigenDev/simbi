@@ -1300,6 +1300,10 @@ where
         drain_devices::<M>(self.devices);
         exchange_grid(stores, self.schedule, self.devices, self.transport);
         flip_polar_bands(stores, self.kernels, self.schedule, self.devices);
+        // the physical fill at the cut corners reads the exchanged halo
+        for (k, store) in stores.iter().enumerate() {
+            symbi_xpu::with_device(self.devices[k], || self.kernels[k].ghost_fill(store));
+        }
     }
 }
 
@@ -2757,7 +2761,8 @@ where
             // tiled sequence stays bit-identical to the monolithic one.
             drain_devices::<M>(devices);
             let mut step = ScheduledStep { schedule: &schedule, devices, transport, kernels };
-            crate::stage::fold_post_step(&sh, kernels, dt, &mut step, |_| true);
+            crate::stage::fold_post_step(&sh, kernels, dt, &mut step, |_| true)
+                .unwrap_or_else(|e| panic!("{e}"));
             let horizon = sh.first().and_then(|store| horizon_request(*store));
             if let Some((index, diagnostic_radius)) = horizon {
                 let (mdot, edot) = (0..n)

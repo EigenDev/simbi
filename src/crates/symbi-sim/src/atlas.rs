@@ -296,6 +296,9 @@ pub enum ExchangePoint {
     /// inside stage `k`, between the troubled-cell mark and the correction: the flags cross
     /// the cuts so both tiles sharing a face take one flux there.
     Troubled(u8),
+    /// after the accepted step's post-step operations recovered the primitives: the cut halos
+    /// carry them before the next step's first reader and the checkpoint
+    PostStep,
     Rollback,
     /// after the named exchange: each tile below a cut sends its copy of the shared
     /// interface face to the tile above, which compares it with its own bit for bit. the
@@ -315,12 +318,14 @@ pub enum AuditAt {
 
 impl ExchangePoint {
     pub const ROLLBACK_WIRE: u8 = 0xF0;
+    /// the post-step exchange sits after every stage's bytes and before the rollback's
+    pub const POST_STEP_WIRE: u8 = 0xEF;
     pub const CHECKPOINT_AUDIT_WIRE: u8 = 0xF8;
     /// stage `k` owns three bytes from `STAGE_BASE + 3k`: its flag exchange, its halos, its
     /// audit.
     const STAGE_BASE: u8 = 2;
-    /// the largest stage index the wire byte holds below the rollback byte.
-    pub const MAX_STAGE: u8 = (Self::ROLLBACK_WIRE - Self::STAGE_BASE) / 3 - 1;
+    /// the largest stage index the wire byte holds below the post-step byte.
+    pub const MAX_STAGE: u8 = (Self::POST_STEP_WIRE - Self::STAGE_BASE) / 3 - 1;
 
     /// whether a wire byte names a `Troubled` point.
     pub fn is_troubled_wire(byte: u8) -> bool {
@@ -343,6 +348,7 @@ impl ExchangePoint {
             ExchangePoint::Troubled(k) => Self::STAGE_BASE + 3 * k,
             ExchangePoint::Stage(k) => Self::STAGE_BASE + 3 * k + 1,
             ExchangePoint::Audit(AuditAt::Stage(k)) => Self::STAGE_BASE + 3 * k + 2,
+            ExchangePoint::PostStep => Self::POST_STEP_WIRE,
             ExchangePoint::Rollback => Self::ROLLBACK_WIRE,
             ExchangePoint::Audit(AuditAt::Rollback) => Self::ROLLBACK_WIRE + 1,
             ExchangePoint::Audit(AuditAt::Checkpoint) => Self::CHECKPOINT_AUDIT_WIRE,
@@ -352,12 +358,13 @@ impl ExchangePoint {
     pub fn from_wire(byte: u8) -> Option<Self> {
         match byte {
             0 => Some(ExchangePoint::Prime),
+            Self::POST_STEP_WIRE => Some(ExchangePoint::PostStep),
             Self::ROLLBACK_WIRE => Some(ExchangePoint::Rollback),
             Epoch::NO_POINT => None,
             1 => Some(ExchangePoint::Audit(AuditAt::Prime)),
             k if k == Self::ROLLBACK_WIRE + 1 => Some(ExchangePoint::Audit(AuditAt::Rollback)),
             Self::CHECKPOINT_AUDIT_WIRE => Some(ExchangePoint::Audit(AuditAt::Checkpoint)),
-            k if k < Self::ROLLBACK_WIRE => {
+            k if k < Self::POST_STEP_WIRE => {
                 let stage = (k - Self::STAGE_BASE) / 3;
                 if stage > Self::MAX_STAGE {
                     return None;
@@ -1230,16 +1237,17 @@ mod tests {
             ExchangePoint::Troubled(1),
             ExchangePoint::Stage(1),
             ExchangePoint::Audit(AuditAt::Stage(1)),
+            ExchangePoint::PostStep,
             ExchangePoint::Rollback,
             ExchangePoint::Audit(AuditAt::Rollback),
             ExchangePoint::Audit(AuditAt::Checkpoint),
         ];
         let bytes: Vec<u8> = order.iter().map(|p| p.to_wire()).collect();
-        assert_eq!(bytes, vec![0, 1, 2, 3, 4, 5, 6, 7, 0xF0, 0xF1, 0xF8]);
+        assert_eq!(bytes, vec![0, 1, 2, 3, 4, 5, 6, 7, 0xEF, 0xF0, 0xF1, 0xF8]);
         for p in order {
             assert_eq!(ExchangePoint::from_wire(p.to_wire()), Some(p));
         }
-        assert!(ExchangePoint::Stage(ExchangePoint::MAX_STAGE).to_wire() < ExchangePoint::ROLLBACK_WIRE);
+        assert!(ExchangePoint::Audit(AuditAt::Stage(ExchangePoint::MAX_STAGE)).to_wire() < ExchangePoint::POST_STEP_WIRE);
         assert!(ExchangePoint::is_troubled_wire(2) && !ExchangePoint::is_troubled_wire(3));
         assert!(ExchangePoint::is_audit_wire(1) && ExchangePoint::is_audit_wire(4));
         assert!(!ExchangePoint::is_troubled_wire(ExchangePoint::ROLLBACK_WIRE));

@@ -247,22 +247,64 @@ where
 }
 
 /// the post-step context of a worker: each tile's work on its device, a count combined over
-/// the tiles it holds, and no halo refresh, since admission refuses every operation that
-/// would need one
-struct WorkerStep<'a> {
-    devices: &'a [i32],
+/// the tiles it holds, and a halo refresh through the post-step exchange point, the polar
+/// bands signed and the physical ghosts refilled at the cut corners. a fabric failure during
+/// the refresh is kept for the caller, which ends the session
+struct WorkerStep<'a, 'p, const D: usize, K, T, L: Link> {
+    exchange: &'a PlanExchange<'p, D>,
     tiles: &'a [TileId],
+    n_tiles: usize,
+    devices: &'a [i32],
+    transport: &'a T,
+    fabric: &'a mut Fabric<L>,
+    kernels: &'a [&'a K],
+    step: u64,
+    attempt: u16,
+    deadline: Duration,
+    spent: &'a mut Duration,
+    failure: Option<FabricError>,
 }
 
-impl<'a, const D: usize, const DOF: usize, M: MemorySpace> crate::stage::StepContext<D, DOF, M> for WorkerStep<'a> {
+impl<'a, 'p, const D: usize, const DOF: usize, M, K, T, L> crate::stage::StepContext<D, DOF, M>
+    for WorkerStep<'a, 'p, D, K, T, L>
+where
+    M: MemorySpace,
+    K: KernelSet<D, DOF, M, f64>,
+    T: HaloTransport,
+    L: Link,
+{
     fn on_tile(&self, k: usize, f: &mut dyn FnMut()) {
         with_device(self.devices[self.tiles[k].0 as usize], || f())
     }
     fn combine_max(&mut self, local: usize) -> usize {
         local
     }
-    fn refresh_halos(&mut self, _stores: &[&FieldStore<D, DOF, M, f64>]) {
-        unreachable!("the launched path admits no post-step operation that invalidates the halos")
+    fn refresh_halos(&mut self, stores: &[&FieldStore<D, DOF, M, f64>]) {
+        if self.failure.is_some() {
+            return;
+        }
+        let moved = exchange_point(
+            self.exchange,
+            self.tiles,
+            stores,
+            self.n_tiles,
+            self.devices,
+            self.transport,
+            self.fabric,
+            ExchangePoint::PostStep,
+            self.step,
+            self.attempt,
+            self.deadline,
+            self.spent,
+        );
+        if let Err(e) = moved {
+            self.failure = Some(e);
+            return;
+        }
+        flip_polar_bands(self.exchange, self.tiles, stores, self.kernels, self.devices);
+        for (k, store) in stores.iter().enumerate() {
+            with_device(self.devices[self.tiles[k].0 as usize], || self.kernels[k].ghost_fill(store));
+        }
     }
 }
 
@@ -706,12 +748,33 @@ where
             attempt += 1;
         }
         {
-            // the post-step recipe on the accepted step; every operation it admits leaves the
-            // halos as current as the interior, so the next step's first stage reads what the
-            // last exchange left
+            // the post-step recipe on the accepted step: an operation that writes the conserved
+            // interior recovers the primitives and refreshes the cut halos at the post-step
+            // point, so the next step's first reader and the checkpoint see one state. a
+            // recovery the accepted state cannot land ends the run on every worker
             let sh = shared!();
-            let mut step = WorkerStep { devices, tiles };
-            crate::stage::fold_post_step(&sh, kernels, dt, &mut step, |_| true);
+            let mut step = WorkerStep {
+                exchange,
+                tiles,
+                n_tiles,
+                devices,
+                transport,
+                fabric,
+                kernels,
+                step: iter,
+                attempt,
+                deadline,
+                spent: &mut timing.exchange,
+                failure: None,
+            };
+            let folded = crate::stage::fold_post_step(&sh, kernels, dt, &mut step, |_| true);
+            let failure = step.failure.take();
+            if let Some(e) = failure {
+                return Err(fail(fabric, e.into()));
+            }
+            if let Err(e) = folded {
+                return Err(fail(fabric, WorkerError::Numerics(e.to_string())));
+            }
         }
         for s in stores.iter_mut() {
             advance_state_clock(&mut **s, dt);

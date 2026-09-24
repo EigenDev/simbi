@@ -366,7 +366,7 @@ fired against a cut, "restart" a resume onto a changed, uneven partition,
 
 | regime | gated configurations |
 |---|---|
-| newtonian | 2D Cartesian: periodic (fresh, restart, correction, ppm, rollback), periodic with reflecting walls and a gravity source, Neumann and Robin walls, pointwise user sources, the constant-nu viscous transport (fresh, restart, nu shown to act); reflect, outflow, Neumann, Robin walls at cut corners. 2D spherical with a log radial axis over both poles (fresh, correction at the pole, restart); 2D cylindrical with the R = 0 axis and reflecting ends. 3D Cartesian with a tabulated source (four workers, correction); 3D spherical over both poles with a cut azimuth (two, three uneven, four workers, correction at the pole). |
+| newtonian | 2D Cartesian: periodic (fresh, restart, correction, ppm, rollback), periodic with reflecting walls and a gravity source, Neumann and Robin walls, pointwise user sources, the constant-nu viscous transport (fresh, restart equal to the uninterrupted run, nu shown to act); reflect, outflow, Neumann, Robin walls at cut corners. 2D spherical with a log radial axis over both poles (fresh, correction at the pole, restart); 2D cylindrical with the R = 0 axis and reflecting ends. 3D Cartesian with a tabulated source (four workers, correction); 3D spherical over both poles with a cut azimuth (two, three uneven, four workers, correction at the pole). |
 | rhd | 2D Cartesian (fresh, restart, correction, rollback); 3D Cartesian shock tube (two and four workers, correction). |
 | isothermal | 2D Cartesian periodic shear layer (fresh, restart, correction); a locally isothermal closure refused. |
 | nmhd | 2D Cartesian vortex (fresh with the face audit, restart, correction under Contact and UCT in both stages, shared-face mismatch aborting every worker, the numerics its substrate has no door for refused, a forced rejection refused); 2D Cartesian rotor with outflow walls (four workers, correction); reflect and outflow walls at cut corners; 2D (r, phi) disk plane with a periodic azimuth (four workers, correction); ohmic resistivity (two workers, correction, eta shown to act); 3D Cartesian and 3D spherical over both poles with a cut azimuth, in-process worker gates only. |
@@ -390,9 +390,11 @@ rejection of a magnetized step, mesh refinement, mesh motion, immersed
 bodies, tracers, a passive scalar, horizon excision, a driven boundary, an
 equilibrium prescription, a perturbation expression, and the logarithmic
 checkpoint cadence. The post-step operators (the viscous transport, horizon
-excision) are one recipe every driver folds; an operation the recipe
-declares to leave the cut halos stale is refused on the launched path by
-that declaration until the path carries a post-step exchange.
+excision) are one recipe every driver folds: an operation that writes the
+conserved interior has the primitives recovered and the cut halos refreshed
+before the next reader and the checkpoint, and one that refreshes the halos
+more than once per step is refused on the launched path by that
+declaration.
 
 Across two nodes on Frontier the evidence covers 2D Cartesian Newtonian
 hydro alone (equality, rollback, and faults on the shear layer), gathered

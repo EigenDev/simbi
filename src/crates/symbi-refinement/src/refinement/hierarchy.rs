@@ -2838,7 +2838,8 @@ where
                     symbi_sim::stage::StepOp::Viscous => !has_finer,
                     symbi_sim::stage::StepOp::Excise => false,
                 },
-            );
+            )
+            .unwrap_or_else(|e| panic!("level {level}: {e}"));
         }
         // excise runs on every level: the excised (causally-disconnected) region is owned by
         // whichever level contains it, and the refinement request gate keeps every finer patch clear
@@ -3115,7 +3116,8 @@ where
             0.0,
             &mut symbi_sim::stage::SingleGridStep,
             |op| op == symbi_sim::stage::StepOp::Excise,
-        );
+        )
+        .unwrap_or_else(|e| panic!("level {level}: {e}"));
     }
 
     pub fn level_tail_emf(&self, level: usize, dt: f64) {

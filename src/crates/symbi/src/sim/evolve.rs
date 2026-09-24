@@ -248,7 +248,8 @@ where
             sim.dt,
             &mut symbi_sim::stage::SingleGridStep,
             |_| true,
-        );
+        )
+        .unwrap_or_else(|e| panic!("{e}"));
 
         // the GR horizon shell-flux accretion, once per step: the mass_flux / nrg_flux fields still
         // hold the last stage's flux, so a GPU Add-reduction of the boundary flux through the
