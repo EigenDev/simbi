@@ -579,15 +579,10 @@ impl<L: Link> Fabric<L> {
                 .any(|&(_, p)| p == peer)
         };
         if let Some(rules) = self.phase_rules.as_ref() {
-            let same_phase = self
-                .last_opened
-                .is_some_and(|l| (l.step, l.attempt, l.point) == (spec.epoch.step, spec.epoch.attempt, spec.epoch.point));
-            if !same_phase {
-                // a worker opens every phase of the table itself: all of them are owed
-                rules
-                    .allows(self.last_opened, spec.epoch, |_| true)
-                    .map_err(|why| self.local(format!("open of {:?}: {why}", spec.epoch)))?;
-            }
+            // a worker opens every phase of the table itself: all of them are owed
+            rules
+                .allows(self.last_opened, spec.epoch, |_| true)
+                .map_err(|why| self.local(format!("open of {:?}: {why}", spec.epoch)))?;
         }
         self.grants.open(spec.epoch, exchanges_with)?;
         if let Some(&(_, peer)) = spec
@@ -790,14 +785,9 @@ impl<L: Link> Fabric<L> {
                 }
                 if let Some(rules) = self.phase_rules.as_ref() {
                     let reached = self.grants.reached(from);
-                    let same_phase = reached.is_some_and(|r| {
-                        (r.step, r.attempt, r.point) == (header.epoch.step, header.epoch.attempt, header.epoch.point)
-                    });
-                    if !same_phase {
-                        rules
-                            .allows(reached, header.epoch, |b| self.owed_by(from, b))
-                            .map_err(|why| FabricError::protocol(from, format!("grant for {:?}: {why}", header.epoch)))?;
-                    }
+                    rules
+                        .allows(reached, header.epoch, |b| self.owed_by(from, b))
+                        .map_err(|why| FabricError::protocol(from, format!("grant for {:?}: {why}", header.epoch)))?;
                 }
                 self.grants.table(from, header.epoch, header.id)
             }

@@ -298,18 +298,77 @@ fn a_rollback_taken_then_declined_walks_the_table_to_the_end() {
     drained(&mut walkers);
 }
 
-/// b passes root stage 1, which it owes a to: a refuses b's next grant by name
+/// a grant from b that passes root stage 1, which b owes a, is refused by a on receipt; the
+/// premise: an endpoint without the sequence rules tables the same grant
 #[test]
-fn a_peer_that_passes_an_owed_phase_is_refused() {
+fn a_peer_that_passes_an_owed_phase_is_refused_on_receipt() {
     let link = Loopback::new();
     let table = table();
-    let full = two_clean_steps(&table);
-    let stage1 = table.byte_of(ExchangePoint::Stage(1)).unwrap();
-    let short: Vec<Epoch> = full.iter().copied().filter(|e| !(e.step == 0 && e.point == stage1)).collect();
-    let mut walkers = three(&link, &table, [full.clone(), short, full]);
-    let err = run(&mut walkers, |_| vec![1, 0, 2]).unwrap_err();
-    let text = err.to_string();
-    assert!(text.contains("passes the phase"), "another refusal: {text}");
+    let grant = |epoch: Epoch| Header { kind: Kind::Grant, session: S, epoch, id: 1, payload_len: 0 };
+    let stage0 = table.byte_of(ExchangePoint::Stage(0)).unwrap();
+    let prolong = table.byte_of(ExchangePoint::Fine { substep: 0, point: FinePoint::Prolong }).unwrap();
+    // b's grants for the prime and stage 0 arrive and are consumed as a sends to b in those
+    // phases; then b's grant for the first fine prolongation arrives, passing stage 1
+    let walk = |a: &mut Fabric<Loopback>| -> Result<(), FabricError> {
+        for byte in [table.byte_of(ExchangePoint::Prime).unwrap(), stage0] {
+            let epoch = Epoch { step: 0, attempt: 0, point: byte, axis: 0 };
+            link.inject(B, A, grant(epoch), &[]);
+            a.pack(t(0), |buf| buf.fill(1.0))?;
+            a.open(PhaseSpec { epoch, sends: &[(t(0), B)], receives: &[] })?;
+            while a.progress()? == Progress::Pending {}
+            a.close()?;
+        }
+        link.inject(B, A, grant(Epoch { step: 0, attempt: 0, point: prolong, axis: 0 }), &[]);
+        a.service()
+    };
+    let mut ruled = endpoint(&link, A, &table);
+    let err = walk(&mut ruled).unwrap_err().to_string();
+    assert!(err.contains("grant for") && err.contains("passes the phase"), "another refusal: {err}");
+    let counts = counts_by_byte(&table, A);
+    let default = counts[table.byte_of(ExchangePoint::Prime).unwrap() as usize].clone();
+    let mut unruled = Fabric::new(link.clone(), A, S, WORKERS, AXES, &LENS, default).with_phase_counts(counts);
+    walk(&mut unruled).expect("without the sequence rules the grant is tabled; the premise is vacuous");
+}
+
+/// a worker's own opens are judged strictly: an axis repeated or reversed, a phase moved
+/// backward, a checkpoint audit inside the subcycle, a rollback audit without a rollback
+#[test]
+fn a_worker_is_refused_at_its_own_open_for_every_illegal_transition() {
+    let table = table();
+    let byte = |p| table.byte_of(p).unwrap();
+    let e = |attempt: u16, point: u8, axis: u8| Epoch { step: 0, attempt, point, axis };
+    let prolong = byte(ExchangePoint::Fine { substep: 0, point: FinePoint::Prolong });
+    let cases: [(&str, Vec<Epoch>, &str); 5] = [
+        ("a repeated axis", vec![e(0, byte(ExchangePoint::Prime), 0), e(0, byte(ExchangePoint::Prime), 0)], "repeats or reverses the axis"),
+        ("a reversed axis", vec![e(0, byte(ExchangePoint::Stage(0)), 0), e(0, byte(ExchangePoint::Stage(0)), 1), e(0, byte(ExchangePoint::Stage(0)), 0)], "repeats or reverses the axis"),
+        ("a backward phase", vec![e(0, byte(ExchangePoint::Stage(0)), 0), e(0, byte(ExchangePoint::Stage(1)), 0), e(0, byte(ExchangePoint::Stage(0)), 0)], "moves backward"),
+        ("a checkpoint audit inside the subcycle", vec![e(0, byte(ExchangePoint::Stage(0)), 0), e(0, byte(ExchangePoint::Stage(1)), 0), e(0, prolong, 0), e(symbi_fabric::CHECKPOINT_ATTEMPT, byte(ExchangePoint::Audit(AuditAt::Checkpoint)), 0)], "passes the phase"),
+        ("a rollback audit without a rollback", vec![e(0, byte(ExchangePoint::Stage(0)), 0), e(0, byte(ExchangePoint::Audit(AuditAt::Rollback)), 0)], "audits a rollback"),
+    ];
+    for (label, script, marker) in cases {
+        let link = Loopback::new();
+        // two axes, so an axis can reverse
+        let counts: Vec<Vec<Vec<u32>>> = counts_by_byte(&table, A)
+            .into_iter()
+            .map(|per_peer| per_peer.into_iter().map(|per_axis| vec![per_axis[0], 0]).collect())
+            .collect();
+        let default = counts[table.byte_of(ExchangePoint::Prime).unwrap() as usize].clone();
+        let mut a = Fabric::new(link.clone(), A, S, WORKERS, 2, &LENS, default)
+            .with_phase_counts(counts)
+            .with_phase_rules(table.rules());
+        let mut result = Ok(());
+        for epoch in script {
+            if a.is_open() {
+                a.close().unwrap();
+            }
+            result = a.open(PhaseSpec { epoch, sends: &[], receives: &[] });
+            if result.is_err() {
+                break;
+            }
+        }
+        let err = result.expect_err(label).to_string();
+        assert!(err.contains("open of") && err.contains(marker), "{label}: another refusal: {err}");
+    }
 }
 
 /// a grant for a byte the table lacks and a prime after the first attempt are refused

@@ -16,19 +16,29 @@
 use crate::error::FabricError;
 use crate::ident::{Epoch, WorkerId};
 
-/// the legal sequence of phases within one attempt, as the phase table states it, indexed
-/// by the phase byte: `skippable` marks a phase a worker may pass without opening (the
-/// troubled-flag exchange of a clean stage, an audit when audits are off, the checkpoint
-/// audit between checkpoints), `branch` a phase a worker may jump to from any phase of the
-/// attempt (the rollback and its audit), and `init_only` a phase that occurs at the first
-/// attempt of the first step alone (the prime and its audit). a grant, or a local open,
-/// that passes a phase outside these names a divergent sequence.
+/// the legal sequence of phases of a session, as the phase table states it, indexed by the
+/// phase byte: `skippable` marks a phase a worker may pass without opening (the troubled
+/// exchange of a clean stage, an audit when audits are off, the post-step when no recovery
+/// wrote the interior), `init_only` a phase of the first attempt of the first step alone
+/// (the prime and its audit), and the named bytes anchor the transitions: an attempt is
+/// accepted once its sequence reaches `accept` (the last phase every worker opens), a
+/// retry follows a `rollback`, the `rollback_audit` follows the rollback alone, and the
+/// `checkpoint_audit` runs at the checkpoint epoch (attempt `u16::MAX`) of a step whose
+/// attempt was accepted, or of the primed state before any step.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PhaseRules {
     pub skippable: Vec<bool>,
-    pub branch: Vec<bool>,
     pub init_only: Vec<bool>,
+    pub accept: usize,
+    pub post_step: usize,
+    pub rollback: usize,
+    pub rollback_audit: usize,
+    pub checkpoint_audit: usize,
 }
+
+/// the checkpoint epoch's attempt: the audit before a checkpoint sorts after every exchange
+/// of its step and before the next step's
+pub const CHECKPOINT_ATTEMPT: u16 = u16::MAX;
 
 impl PhaseRules {
     pub fn len(&self) -> usize {
@@ -39,12 +49,34 @@ impl PhaseRules {
         self.skippable.is_empty()
     }
 
-    /// whether `next` may follow `last` in one worker's sequence: a branch target always;
-    /// otherwise every phase between them inside one attempt, or every phase before `next`
-    /// in a new attempt, is skippable or is one the worker does not owe (`owed` is false): a
-    /// peer's sequence is observed through the grants it owes this worker, so a phase in
-    /// which it receives nothing from this worker leaves no trace and passes unjudged, while
-    /// a worker's own opens are all owed
+    fn passable(&self, byte: usize, owed: &impl Fn(usize) -> bool) -> bool {
+        self.skippable[byte] || self.init_only[byte] || !owed(byte)
+    }
+
+    /// every phase in `range` a worker must open and owes: none may be passed
+    fn no_owed_phase_passed(
+        &self,
+        range: std::ops::Range<usize>,
+        owed: &impl Fn(usize) -> bool,
+        next: Epoch,
+    ) -> Result<(), String> {
+        for b in range {
+            if !self.passable(b, owed) {
+                return Err(format!("{next:?} passes the phase {b}, which every worker opens"));
+            }
+        }
+        Ok(())
+    }
+
+    /// whether `next` may follow `last` in one worker's sequence. `owed(byte)` says whether
+    /// the worker owes this observer a grant at that phase: a peer's sequence is observed
+    /// through the grants it owes, so a phase in which it receives nothing leaves no trace
+    /// and passes unjudged, while a worker's own opens are all owed. the transitions:
+    /// inside one attempt the phases rise (the same phase advances its axis), the rollback
+    /// opens from any phase before the post-step, its audit from the rollback alone; a
+    /// retry (the next attempt of the step) follows a rollback; the next step follows an
+    /// accepted attempt; the checkpoint audit runs at the checkpoint epoch after an
+    /// accepted attempt or the primed state, and the next step follows it.
     pub fn allows(
         &self,
         last: Option<Epoch>,
@@ -58,19 +90,95 @@ impl PhaseRules {
         if self.init_only[byte] && (next.step, next.attempt) != (0, 0) {
             return Err(format!("{next:?} names a phase of the first attempt alone"));
         }
-        if self.branch[byte] {
-            return Ok(());
+        if (byte == self.checkpoint_audit) != (next.attempt == CHECKPOINT_ATTEMPT) {
+            return Err(format!("{next:?}: the checkpoint audit and the checkpoint epoch go together"));
         }
-        let start = match last {
-            Some(l) if (l.step, l.attempt) == (next.step, next.attempt) => l.point as usize + 1,
-            _ => 0,
-        };
-        for b in start..byte {
-            if !(self.skippable[b] || self.init_only[b]) && owed(b) {
-                return Err(format!("{next:?} passes the phase {b}, which every worker opens"));
+        let owed = &owed;
+        // the phases of a fresh attempt before `upto`: a rollback opens from any phase, so
+        // it may be the first phase observed of an attempt; its audit then owes the rollback
+        let prefix = |upto: usize| {
+            if upto == self.rollback {
+                return Ok(());
             }
+            if upto == self.rollback_audit {
+                return if owed(self.rollback) {
+                    Err(format!("{next:?} audits a rollback that was never opened"))
+                } else {
+                    Ok(())
+                };
+            }
+            self.no_owed_phase_passed(0..upto, owed, next)
+        };
+        let Some(l) = last else {
+            return prefix(byte);
+        };
+        let lb = l.point as usize;
+        let same_attempt = (l.step, l.attempt) == (next.step, next.attempt);
+        if same_attempt && lb == byte {
+            return if next.axis > l.axis {
+                Ok(())
+            } else {
+                Err(format!("{next:?} repeats or reverses the axis of {l:?}"))
+            };
         }
-        Ok(())
+        // the previous attempt ended in acceptance: nothing owed between its last phase and
+        // the accept point was passed, and it did not roll back
+        let accepted = |l: Epoch| -> Result<(), String> {
+            if lb == self.rollback || lb == self.rollback_audit {
+                return Err(format!("{next:?} follows the rollback {l:?} without a retry"));
+            }
+            if self.init_only[lb] {
+                return Ok(());
+            }
+            self.no_owed_phase_passed(lb + 1..self.accept + 1, owed, next)
+        };
+        if next.attempt == CHECKPOINT_ATTEMPT {
+            if l.attempt == CHECKPOINT_ATTEMPT || l.step != next.step {
+                return Err(format!("{next:?} audits a checkpoint of another step than {l:?}"));
+            }
+            return accepted(l);
+        }
+        if same_attempt {
+            if byte < lb {
+                return Err(format!("{next:?} moves backward from {l:?}"));
+            }
+            if byte == self.rollback {
+                return if lb < self.post_step {
+                    Ok(())
+                } else {
+                    Err(format!("{next:?} rolls back after {l:?} accepted the step"))
+                };
+            }
+            if byte == self.rollback_audit {
+                return if lb == self.rollback || !owed(self.rollback) {
+                    Ok(())
+                } else {
+                    Err(format!("{next:?} audits a rollback that {l:?} did not open"))
+                };
+            }
+            if lb == self.rollback || lb == self.rollback_audit {
+                return Err(format!("{next:?} continues the attempt after the rollback {l:?}"));
+            }
+            return self.no_owed_phase_passed(lb + 1..byte, owed, next);
+        }
+        if l.attempt == CHECKPOINT_ATTEMPT {
+            return if next.step == l.step + 1 && next.attempt == 0 {
+                prefix(byte)
+            } else {
+                Err(format!("{next:?} does not start the step after the checkpoint {l:?}"))
+            };
+        }
+        if next.step == l.step && next.attempt == l.attempt + 1 {
+            if lb == self.rollback || lb == self.rollback_audit || !owed(self.rollback) {
+                return prefix(byte);
+            }
+            return Err(format!("{next:?} retries the step without a rollback after {l:?}"));
+        }
+        if next.step == l.step + 1 && next.attempt == 0 {
+            accepted(l)?;
+            return prefix(byte);
+        }
+        Err(format!("{next:?} does not follow {l:?}"))
     }
 }
 
@@ -88,6 +196,8 @@ pub struct GrantTable {
     consumed: Vec<Option<Epoch>>,
     /// the last grant tabled from each peer, the phase its sequence has reached
     tabled_last: Vec<Option<Epoch>>,
+    /// the most grants held at once from each peer over the session
+    high_water: Vec<usize>,
 }
 
 fn same_point(a: &Epoch, b: &Epoch) -> bool {
@@ -101,7 +211,14 @@ impl GrantTable {
             slots: vec![None; workers * axes],
             consumed: vec![None; workers],
             tabled_last: vec![None; workers],
+            high_water: vec![0; workers],
         }
+    }
+
+    /// the most grants held at once from `peer` over the session: the storage the peer's
+    /// lead needed
+    pub fn high_water(&self, peer: WorkerId) -> usize {
+        self.high_water[peer.0 as usize]
     }
 
     /// the phase a peer's sequence has reached as this worker sees it: its last tabled
@@ -149,6 +266,9 @@ impl GrantTable {
             Some(slot) => {
                 *slot = Some(Tabled { epoch, count });
                 self.tabled_last[peer.0 as usize] = Some(epoch);
+                let held = self.tabled(peer);
+                let hw = &mut self.high_water[peer.0 as usize];
+                *hw = (*hw).max(held);
                 Ok(())
             }
             None => Err(FabricError::protocol(
@@ -237,6 +357,84 @@ mod tests {
             point,
             axis,
         }
+    }
+
+    /// a flat two-stage table: prime 0, prime audit 1, troubled 2, stage 3, audit 4,
+    /// troubled 5, stage 6, audit 7, post-step 8, rollback 9, rollback audit 10, checkpoint
+    /// audit 11; the accept point is stage 6
+    fn flat_rules() -> PhaseRules {
+        let skippable = vec![false, true, true, false, true, true, false, true, true, true, true, true];
+        let mut init_only = vec![false; 12];
+        init_only[0] = true;
+        init_only[1] = true;
+        PhaseRules { skippable, init_only, accept: 6, post_step: 8, rollback: 9, rollback_audit: 10, checkpoint_audit: 11 }
+    }
+
+    fn all(_: usize) -> bool {
+        true
+    }
+
+    #[test]
+    fn inside_an_attempt_the_phases_rise_and_owed_phases_are_never_passed() {
+        let r = flat_rules();
+        assert!(r.allows(None, e(0, 0, 0, 0), all).is_ok());
+        assert!(r.allows(Some(e(0, 0, 0, 0)), e(0, 0, 0, 1), all).is_ok(), "the next axis of the same phase");
+        assert!(r.allows(Some(e(0, 0, 0, 1)), e(0, 0, 0, 1), all).is_err(), "a repeated axis");
+        assert!(r.allows(Some(e(0, 0, 0, 1)), e(0, 0, 0, 0), all).is_err(), "a reversed axis");
+        assert!(r.allows(Some(e(0, 0, 0, 0)), e(0, 0, 3, 0), all).is_ok(), "the skippable prime audit and troubled passed");
+        assert!(r.allows(Some(e(0, 0, 3, 0)), e(0, 0, 8, 0), all).is_err(), "stage 1 passed");
+        assert!(r.allows(Some(e(0, 0, 3, 0)), e(0, 0, 8, 0), |b| b != 6).is_ok(), "stage 1 passed by a peer that owes nothing there");
+        assert!(r.allows(Some(e(0, 0, 6, 0)), e(0, 0, 3, 0), all).is_err(), "backward");
+    }
+
+    #[test]
+    fn a_rollback_opens_before_the_post_step_and_its_audit_follows_it_alone() {
+        let r = flat_rules();
+        assert!(r.allows(Some(e(0, 0, 3, 0)), e(0, 0, 9, 0), all).is_ok(), "rollback after stage 0");
+        assert!(r.allows(Some(e(0, 0, 8, 0)), e(0, 0, 9, 0), all).is_err(), "rollback after the post-step");
+        assert!(r.allows(Some(e(0, 0, 9, 0)), e(0, 0, 10, 0), all).is_ok(), "the rollback audit after the rollback");
+        assert!(r.allows(Some(e(0, 0, 6, 0)), e(0, 0, 10, 0), all).is_err(), "the rollback audit without a rollback");
+        assert!(r.allows(Some(e(0, 0, 6, 0)), e(0, 0, 10, 0), |b| b != 9).is_ok(), "a peer that owes no rollback grant");
+        assert!(r.allows(Some(e(0, 0, 9, 0)), e(0, 0, 8, 0), all).is_err(), "the attempt continues after a rollback");
+    }
+
+    #[test]
+    fn a_retry_follows_a_rollback_and_the_next_step_follows_an_accepted_attempt() {
+        let r = flat_rules();
+        assert!(r.allows(Some(e(0, 0, 9, 0)), e(0, 1, 3, 0), all).is_ok(), "the retry after the rollback");
+        assert!(r.allows(Some(e(0, 0, 10, 0)), e(0, 1, 3, 0), all).is_ok(), "the retry after the rollback audit");
+        assert!(r.allows(Some(e(0, 0, 6, 0)), e(0, 1, 3, 0), all).is_err(), "a retry without a rollback");
+        assert!(r.allows(Some(e(0, 0, 6, 0)), e(0, 1, 3, 0), |b| b != 9).is_ok(), "a peer that owes no rollback grant");
+        assert!(r.allows(Some(e(0, 0, 6, 0)), e(1, 0, 3, 0), all).is_ok(), "the next step after the accept point");
+        assert!(r.allows(Some(e(0, 0, 8, 0)), e(1, 0, 3, 0), all).is_ok(), "the next step after the post-step");
+        assert!(r.allows(Some(e(0, 0, 3, 0)), e(1, 0, 3, 0), all).is_err(), "the next step with stage 1 unfinished");
+        assert!(r.allows(Some(e(0, 0, 3, 0)), e(1, 0, 3, 0), |b| b != 6).is_ok(), "unfinished only where nothing was owed");
+        assert!(r.allows(Some(e(0, 0, 9, 0)), e(1, 0, 3, 0), all).is_err(), "the next step after a rollback");
+        assert!(r.allows(Some(e(0, 0, 6, 0)), e(2, 0, 3, 0), all).is_err(), "a step skipped");
+        assert!(r.allows(Some(e(0, 0, 6, 0)), e(0, 2, 3, 0), all).is_err(), "an attempt skipped");
+        assert!(r.allows(Some(e(0, 0, 6, 0)), e(1, 0, 0, 0), all).is_err(), "the prime after the first attempt");
+        assert!(r.allows(Some(e(0, 0, 6, 0)), e(1, 0, 9, 0), all).is_ok(), "a rollback before any exchange of the step");
+        assert!(r.allows(None, e(3, 0, 9, 0), all).is_ok(), "a rollback as the first phase observed");
+        assert!(r.allows(None, e(3, 0, 10, 0), all).is_err(), "a rollback audit whose rollback was owed");
+        assert!(r.allows(None, e(3, 0, 10, 0), |b| b != 9).is_ok(), "a rollback audit by a peer owing no rollback grant");
+    }
+
+    #[test]
+    fn the_checkpoint_audit_runs_at_the_checkpoint_epoch_of_an_accepted_or_primed_step() {
+        let r = flat_rules();
+        let cp = |step| e(step, CHECKPOINT_ATTEMPT, 11, 0);
+        assert!(r.allows(Some(e(0, 0, 6, 0)), cp(0), all).is_ok(), "after the accept point");
+        assert!(r.allows(Some(e(0, 0, 1, 0)), cp(0), all).is_ok(), "after the prime audit");
+        assert!(r.allows(Some(e(0, 0, 3, 0)), cp(0), all).is_err(), "mid-attempt");
+        assert!(r.allows(Some(e(0, 0, 9, 0)), cp(0), all).is_err(), "after a rollback");
+        assert!(r.allows(Some(e(0, 0, 6, 0)), cp(1), all).is_err(), "another step's checkpoint");
+        assert!(r.allows(Some(e(0, 0, 6, 0)), e(0, 0, 11, 0), all).is_err(), "the audit outside the checkpoint epoch");
+        assert!(r.allows(Some(e(0, 0, 6, 0)), e(0, CHECKPOINT_ATTEMPT, 6, 0), all).is_err(), "a stage at the checkpoint epoch");
+        assert!(r.allows(Some(cp(0)), e(1, 0, 3, 0), all).is_ok(), "the next step after the checkpoint");
+        assert!(r.allows(Some(cp(0)), e(0, 1, 3, 0), all).is_err(), "a retry after the checkpoint");
+        assert!(r.allows(Some(cp(0)), cp(1), all).is_err(), "two checkpoints with no step between");
+        assert!(r.allows(Some(cp(0)), cp(0), all).is_err(), "the checkpoint audit repeated");
+        assert!(r.allows(Some(cp(0)), e(0, CHECKPOINT_ATTEMPT, 11, 1), all).is_ok(), "its next axis");
     }
 
     #[test]

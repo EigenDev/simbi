@@ -27,11 +27,8 @@ use symbi_fabric::{Digest, Epoch, Fnv, PhaseRules};
 pub struct Phase {
     pub point: ExchangePoint,
     /// a worker may pass this phase without opening it (a clean stage's flag exchange, an
-    /// audit when audits are off, the checkpoint audit between checkpoints)
+    /// audit when audits are off, the post-step when no recovery wrote the interior)
     pub skippable: bool,
-    /// a worker may open this phase from any phase of the attempt (the rollback and its
-    /// audit, after a rejection at any stage)
-    pub branch: bool,
     /// this phase occurs at the first attempt of the first step alone (the prime and its
     /// audit)
     pub init_only: bool,
@@ -84,11 +81,11 @@ impl PhaseTable {
         if stages == 0 || (substeps > 0 && fine_stages == 0) {
             return Err(PhaseTableError::Empty);
         }
-        let mandatory = |point| Phase { point, skippable: false, branch: false, init_only: false };
-        let skippable = |point| Phase { point, skippable: true, branch: false, init_only: false };
+        let mandatory = |point| Phase { point, skippable: false, init_only: false };
+        let skippable = |point| Phase { point, skippable: true, init_only: false };
         let mut phases = vec![
-            Phase { point: ExchangePoint::Prime, skippable: false, branch: false, init_only: true },
-            Phase { point: ExchangePoint::Audit(AuditAt::Prime), skippable: true, branch: false, init_only: true },
+            Phase { point: ExchangePoint::Prime, skippable: false, init_only: true },
+            Phase { point: ExchangePoint::Audit(AuditAt::Prime), skippable: true, init_only: true },
         ];
         for k in 0..stages {
             phases.push(skippable(ExchangePoint::Troubled(k)));
@@ -108,12 +105,12 @@ impl PhaseTable {
             phases.push(mandatory(ExchangePoint::Restrict));
             phases.push(skippable(ExchangePoint::Audit(AuditAt::Restrict)));
         }
-        phases.push(mandatory(ExchangePoint::PostStep));
-        phases.push(Phase { point: ExchangePoint::Rollback, skippable: true, branch: true, init_only: false });
-        phases.push(Phase { point: ExchangePoint::Audit(AuditAt::Rollback), skippable: true, branch: true, init_only: false });
-        // the checkpoint audit follows the accepted step's last exchange, and the initial
-        // checkpoint's follows the prime: reachable from any phase
-        phases.push(Phase { point: ExchangePoint::Audit(AuditAt::Checkpoint), skippable: true, branch: true, init_only: false });
+        // the post-step refresh runs when a recovery wrote the interior; the accept point is
+        // the last phase every worker opens, the phase before it
+        phases.push(skippable(ExchangePoint::PostStep));
+        phases.push(skippable(ExchangePoint::Rollback));
+        phases.push(skippable(ExchangePoint::Audit(AuditAt::Rollback)));
+        phases.push(skippable(ExchangePoint::Audit(AuditAt::Checkpoint)));
         if phases.len() > Self::CAPACITY {
             return Err(PhaseTableError::Overflow { phases: phases.len() });
         }
@@ -154,12 +151,24 @@ impl PhaseTable {
         self.phases.get(byte as usize).map(|p| p.point)
     }
 
-    /// the sequence rules the fabric enforces, indexed by byte
+    /// the sequence rules the fabric enforces, indexed by byte: the accept point is the
+    /// last phase every worker opens (the last root stage on a flat table, the restriction
+    /// on a refined one)
     pub fn rules(&self) -> PhaseRules {
+        let byte = |point| self.byte_of(point).expect("every table holds its anchors") as usize;
+        let accept = if self.substeps > 0 {
+            byte(ExchangePoint::Restrict)
+        } else {
+            byte(ExchangePoint::Stage(self.stages - 1))
+        };
         PhaseRules {
             skippable: self.phases.iter().map(|p| p.skippable).collect(),
-            branch: self.phases.iter().map(|p| p.branch).collect(),
             init_only: self.phases.iter().map(|p| p.init_only).collect(),
+            accept,
+            post_step: byte(ExchangePoint::PostStep),
+            rollback: byte(ExchangePoint::Rollback),
+            rollback_audit: byte(ExchangePoint::Audit(AuditAt::Rollback)),
+            checkpoint_audit: byte(ExchangePoint::Audit(AuditAt::Checkpoint)),
         }
     }
 
@@ -173,7 +182,7 @@ impl PhaseTable {
         h.u32(self.phases.len() as u32);
         for p in &self.phases {
             h.u32(p.point.kind_code());
-            h.u32(u32::from(p.skippable) | u32::from(p.branch) << 1 | u32::from(p.init_only) << 2);
+            h.u32(u32::from(p.skippable) | u32::from(p.init_only) << 1);
         }
         h.finish()
     }
@@ -240,15 +249,20 @@ mod tests {
     }
 
     #[test]
-    fn the_rules_name_the_skippable_branch_and_init_phases() {
+    fn the_rules_name_the_skippable_and_init_phases_and_the_anchors() {
         let t = PhaseTable::flat(2).unwrap();
         let r = t.rules();
         let b = |p| t.byte_of(p).unwrap() as usize;
         assert!(r.init_only[b(ExchangePoint::Prime)] && !r.skippable[b(ExchangePoint::Prime)]);
-        assert!(r.skippable[b(ExchangePoint::Troubled(0))] && !r.branch[b(ExchangePoint::Troubled(0))]);
+        assert!(r.skippable[b(ExchangePoint::Troubled(0))]);
         assert!(!r.skippable[b(ExchangePoint::Stage(0))]);
-        assert!(r.branch[b(ExchangePoint::Rollback)] && r.skippable[b(ExchangePoint::Rollback)]);
-        assert!(!r.skippable[b(ExchangePoint::PostStep)]);
-        assert!(r.skippable[b(ExchangePoint::Audit(AuditAt::Checkpoint))] && r.branch[b(ExchangePoint::Audit(AuditAt::Checkpoint))]);
+        assert!(r.skippable[b(ExchangePoint::PostStep)] && r.skippable[b(ExchangePoint::Rollback)]);
+        assert_eq!(r.accept, b(ExchangePoint::Stage(1)));
+        assert_eq!(r.post_step, b(ExchangePoint::PostStep));
+        assert_eq!(r.rollback, b(ExchangePoint::Rollback));
+        assert_eq!(r.rollback_audit, b(ExchangePoint::Audit(AuditAt::Rollback)));
+        assert_eq!(r.checkpoint_audit, b(ExchangePoint::Audit(AuditAt::Checkpoint)));
+        let refined = PhaseTable::refined(2, 2, 2).unwrap();
+        assert_eq!(refined.rules().accept, refined.byte_of(ExchangePoint::Restrict).unwrap() as usize);
     }
 }
