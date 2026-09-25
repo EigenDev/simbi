@@ -69,8 +69,14 @@ pub struct Held<'a> {
 #[derive(Debug, Clone)]
 pub struct RefinedConfig {
     pub base: WorkerConfig,
-    /// a forced rejection at a fine stage: (step, substep, stage), first attempt alone
-    pub reject_fine_at: Option<(u64, u8, usize)>,
+    /// report a NaN timestep candidate from this level of the worker's first hierarchy at
+    /// this step, leaving every other candidate valid: (step, level)
+    pub invalid_level_cfl_at: Option<(u64, usize)>,
+    /// raise the troubled-cell flag on a fine cell at (step, substep, stage) on the first
+    /// attempt, on whichever worker holds it; the cell is indexed on the fine plan's grid.
+    /// the cell's state stays physical, so the correction it triggers is the conservative
+    /// first-order redo
+    pub fine_trouble_at: Option<(u64, u8, usize, [isize; 3])>,
 }
 
 /// evolve this worker's hierarchies from the configured start until the final time or
@@ -151,7 +157,7 @@ where
                 WorkerError::Refused("a magnetized refined run is outside the launched refinement until its registers move".into()),
             ));
         }
-        let forced = !base.injection.reject_at.is_empty() || cfg.reject_fine_at.is_some();
+        let forced = !base.injection.reject_at.is_empty() || tiles.iter().any(|h| h.forced_fine_rejection_pending());
         if forced {
             for h in tiles.iter() {
                 for level in &h.levels {
@@ -292,22 +298,27 @@ where
     while t < base.t_final && (base.max_steps == 0 || iter < base.max_steps) {
         // the global timestep: the minimum root cfl over the held hierarchies, then over the
         // workers, consumed as the coordinator's bits
+        // every level's raw candidate is judged before the user clamp, which would replace a
+        // NaN with the cap
         let mut local = f64::INFINITY;
         for (k, h) in tiles.iter().enumerate() {
-            let mut candidate = with_device(root_dev(k), || h.root_cfl_dt());
-            if k == 0 && base.injection.invalid_cfl_at == Some(iter) {
-                candidate = f64::NAN;
+            let mut raw = f64::INFINITY;
+            for (ll, mut candidate) in with_device(root_dev(k), || h.level_cfl_candidates()).into_iter().enumerate() {
+                if k == 0 && (base.injection.invalid_cfl_at == Some(iter) && ll == 0 || cfg.invalid_level_cfl_at == Some((iter, ll))) {
+                    candidate = f64::NAN;
+                }
+                if !candidate.is_finite() || candidate <= 0.0 {
+                    return Err(fail(
+                        fabric,
+                        WorkerError::Numerics(format!(
+                            "invalid CFL candidate {candidate:e} on level {ll} of tile {:?} at iter {iter} (time {t:.4e})",
+                            held.root_ids[k]
+                        )),
+                    ));
+                }
+                raw = raw.min(candidate);
             }
-            if !candidate.is_finite() || candidate <= 0.0 {
-                return Err(fail(
-                    fabric,
-                    WorkerError::Numerics(format!(
-                        "invalid CFL candidate {candidate:e} on tile {:?} at iter {iter} (time {t:.4e})",
-                        held.root_ids[k]
-                    )),
-                ));
-            }
-            local = local.min(candidate);
+            local = local.min(h.clamp_dt(raw));
         }
         let clock = Instant::now();
         let global = fabric
@@ -363,6 +374,7 @@ where
                 )?;
                 let mut retry = false;
                 for k in 0..n {
+                    report.neighbor_corrections += u64::from(cut_trouble[k] && marks[k].troubled == 0);
                     retry |= with_device(root_dev(k), || {
                         tiles[k].level_stage_from_correction(0, ii, dt, 0.0, cut_trouble[k], marks[k].receipt_start)
                     });
@@ -406,8 +418,21 @@ where
                             .iter()
                             .map(|&k| with_device(fine_dev(k), || tiles[k].level_stage_through_mark(1, jj, fine_dt, alpha)))
                             .collect();
-                        let troubled: u64 = marks.iter().map(|m| m.troubled).sum();
+                        let mut troubled: u64 = marks.iter().map(|m| m.troubled).sum();
                         let fine_ids: Vec<TileId> = refined.iter().map(|&k| held.fine_ids[k].unwrap()).collect();
+                        if attempt == 0 {
+                            if let Some((at_step, at_sub, at_stage, cell)) = cfg.fine_trouble_at {
+                                if (at_step, at_sub, at_stage) == (iter, sub as u8, jj) {
+                                    let cell: [isize; D] = std::array::from_fn(|ax| cell[ax]);
+                                    for (r, &k) in refined.iter().enumerate() {
+                                        if let Some(local) = plans.fine.local_cell(fine_ids[r], cell) {
+                                            *tiles[k].levels[1].state.workspace.fofc_flag.view_mut().at_mut(local) = 1.0;
+                                            troubled += 1;
+                                        }
+                                    }
+                                }
+                            }
+                        }
                         let cut_trouble = fine_level_trouble(
                             tiles, &refined, &plans.fine, &fine_ids, held.fine_devices, troubled,
                             ExchangePoint::Fine { substep: sub as u8, point: FinePoint::Troubled(jj as u8) },
@@ -415,12 +440,10 @@ where
                         )?;
                         let mut retry = false;
                         for (r, &k) in refined.iter().enumerate() {
+                            report.fine_neighbor_corrections += u64::from(cut_trouble[r] && marks[r].troubled == 0);
                             retry |= with_device(fine_dev(k), || {
                                 tiles[k].level_stage_from_correction(1, jj, fine_dt, alpha, cut_trouble[r], marks[r].receipt_start)
                             });
-                        }
-                        if attempt == 0 && cfg.reject_fine_at == Some((iter, sub as u8, jj)) {
-                            retry = true;
                         }
                         if vote_retry(fabric, retry, deadline, &mut timing)? {
                             rejected = true;

@@ -355,6 +355,12 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize> Kerne
             &[],
             &[],
         );
+        // the dye concentration is part of the recovered primitive state: prim.chi =
+        // cons.chi / den, so a restored conserved state carries its concentration with it
+        if sim.has_passive_scalar() {
+            let cname = format!("chi_c2p_{D}d");
+            dispatch_named(sim, &self.pre, None, 0, &cname, &sim.geom.interior, &[], &[]);
+        }
     }
 
     fn godunov_stage(&self, sim: &FieldStore<D, D, Mem, Sc>, dt: f64, a0: f64, ac: f64) {

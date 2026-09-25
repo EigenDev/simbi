@@ -5,23 +5,29 @@
 // refined patch of ratio 2 spanning tile cuts, each worker holding its root
 // tiles and the fine tiles under them, advanced through the fabric by
 // `evolve_refined_worker`, against the single hierarchy driven with the same
-// timesteps, interior cell for interior cell over the composite (the uncovered
-// root and the fine level). arms: two ragged layouts with cuts off the patch's
-// center over several root steps; a layout where two of three workers hold no
-// fine tile; a rejection forced in the second fine substep on one worker
-// against a clean run capped to the accepted smaller timestep. every worker
-// reports its grant high-water per peer.
+// timesteps in a process of its own. the comparison covers every conserved and
+// primitive component of every interior cell on both levels (the covered root
+// cells included) and every cut halo primitive against the single hierarchy's
+// interior value at that cell. arms: two ragged layouts with cuts off the
+// patch's center over several root steps; a layout where two of three workers
+// hold no fine tile; a rejection forced at a root stage and one in the second
+// fine substep, each against a clean run capped to the accepted smaller
+// timestep, on both layouts; an invalid timestep candidate on the fine level
+// under a positive user cap; two cold streams parting beside a fine cut so the
+// first-order correction crosses the cut one-sided. every worker reports its
+// grant high-water per peer.
 //
 // run: cargo test -p symbi --test worker_refined_processes
 // =============================================================================
+use std::collections::HashMap;
 use std::io::Read;
 use std::ops::ControlFlow;
 use std::path::PathBuf;
 use std::process::{Child, Command, Stdio};
 use std::time::{Duration, Instant};
 
+use symbi::regimes::fofc::{fofc_reset_stats, fofc_stats};
 use symbi::regimes::substrate_newton::AdiabaticSubstrateKernelSet;
-use symbi_sim::atlas::{ExchangePlan, Placement, TileId};
 use symbi::sim::decomp::{FinePartition, LocalCopy, Partition, Topology, flatten, plan_cons_schema, plan_schema, unflatten};
 use symbi::sim::refinement::launched::{Held, RefinedConfig, RefinedPlans, evolve_refined_worker};
 use symbi::sim::refinement::{Hierarchy, ProlongOrder, RefinementRegion};
@@ -34,6 +40,7 @@ use symbi_hydro::eos::IdealGas;
 use symbi_hydro::newtonian::Newtonian;
 use symbi_hydro::quantity::{Density, Pressure};
 use symbi_hydro::state::Prim;
+use symbi_sim::atlas::{ExchangePlan, Placement, TileId};
 use symbi_sim::phase_table::PhaseTable;
 use symbi_sim::plan_exchange::{PlanExchange, PlanRole, fabric_for};
 use symbi_sim::substrate_seam::RegimeKind;
@@ -107,6 +114,7 @@ struct Arm {
     cuts0: Vec<usize>,
     cuts1: Vec<usize>,
     owner: Vec<u32>,
+    steps: u64,
 }
 
 impl Arm {
@@ -116,22 +124,17 @@ impl Arm {
             ("W_CUTS0", list(&self.cuts0)),
             ("W_CUTS1", list(&self.cuts1)),
             ("W_OWNER", self.owner.iter().map(|x| x.to_string()).collect::<Vec<_>>().join(",")),
+            ("W_STEPS", self.steps.to_string()),
         ]
     }
 
     fn from_env() -> Self {
-        let list = |name: &str| -> Vec<usize> {
-            std::env::var(name)
-                .unwrap_or_default()
-                .split(',')
-                .filter(|s| !s.is_empty())
-                .map(|s| s.parse().unwrap())
-                .collect()
-        };
+        let list = |name: &str| -> Vec<usize> { env_list(name).into_iter().map(|x| x as usize).collect() };
         Self {
             cuts0: list("W_CUTS0"),
             cuts1: list("W_CUTS1"),
             owner: list("W_OWNER").into_iter().map(|x| x as u32).collect(),
+            steps: env_u64("W_STEPS").unwrap(),
         }
     }
 
@@ -142,6 +145,7 @@ impl Arm {
     fn workers(&self) -> u32 {
         self.owner.iter().max().unwrap() + 1
     }
+
 }
 
 /// one root tile's hierarchy: the patch clipped to the tile with the whole patch beside it
@@ -173,6 +177,15 @@ fn env_u64(name: &str) -> Option<u64> {
     std::env::var(name).ok().and_then(|v| v.parse().ok())
 }
 
+fn env_list(name: &str) -> Vec<u64> {
+    std::env::var(name)
+        .unwrap_or_default()
+        .split(',')
+        .filter(|s| !s.is_empty())
+        .map(|s| s.parse().unwrap())
+        .collect()
+}
+
 fn injection_from_env(me: WorkerId) -> Injection {
     let mut injection = Injection::default();
     if let Some(worker) = env_u64("W_REJECT_ROOT_WORKER") {
@@ -192,14 +205,132 @@ fn injection_from_env(me: WorkerId) -> Injection {
     injection
 }
 
+/// the forced fine rejection of this worker: (step, substep, stage) from `W_REJECT_FINE`
 fn reject_fine_from_env(me: WorkerId) -> Option<(u64, u8, usize)> {
     let worker = env_u64("W_REJECT_FINE_WORKER")?;
     if worker != u64::from(me.0) {
         return None;
     }
-    let spec = std::env::var("W_REJECT_FINE").ok()?;
-    let parts: Vec<u64> = spec.split(',').map(|s| s.parse().unwrap()).collect();
+    let parts = env_list("W_REJECT_FINE");
     Some((parts[0], parts[1] as u8, parts[2] as usize))
+}
+
+/// the fine cell every worker carries as troubled, raised by the one holding it: (step,
+/// substep, stage, i, j) from `W_FINE_TROUBLE`, the cell on the fine plan's grid
+fn fine_trouble_from_env() -> Option<(u64, u8, usize, [isize; 3])> {
+    let parts = env_list("W_FINE_TROUBLE");
+    (parts.len() == 5).then(|| (parts[0], parts[1] as u8, parts[2] as usize, [parts[3] as isize, parts[4] as isize, 0]))
+}
+
+/// the invalid timestep candidate of this worker: (step, level) from `W_BAD_CFL`
+fn bad_cfl_from_env(me: WorkerId) -> Option<(u64, usize)> {
+    let worker = env_u64("W_BAD_CFL_WORKER")?;
+    if worker != u64::from(me.0) {
+        return None;
+    }
+    let parts = env_list("W_BAD_CFL");
+    Some((parts[0], parts[1] as usize))
+}
+
+/// one cell's value in the dump: `kind` 0 = interior conserved, 1 = interior primitive,
+/// 2 = cut halo primitive; `(i, j)` global on the record's level; `field` in schema order
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+struct Key {
+    kind: u8,
+    level: u8,
+    i: usize,
+    j: usize,
+    field: u8,
+}
+
+const RECORD_BYTES: usize = 48;
+
+fn encode(records: &[(Key, u64)]) -> Vec<u8> {
+    let mut out = Vec::with_capacity(records.len() * RECORD_BYTES);
+    for (k, bits) in records {
+        for w in [k.kind as u64, k.level as u64, k.i as u64, k.j as u64, k.field as u64, *bits] {
+            out.extend_from_slice(&w.to_le_bytes());
+        }
+    }
+    out
+}
+
+fn decode(bytes: &[u8]) -> Vec<(Key, u64)> {
+    bytes
+        .chunks_exact(RECORD_BYTES)
+        .map(|c| {
+            let u = |k: usize| u64::from_le_bytes(c[8 * k..8 * k + 8].try_into().unwrap());
+            (Key { kind: u(0) as u8, level: u(1) as u8, i: u(2) as usize, j: u(3) as usize, field: u(4) as u8 }, u(5))
+        })
+        .collect()
+}
+
+/// every conserved and primitive component of a level's cells: the interior as kinds 0 and
+/// 1, the cut halos (the ghost cells inside the level's global domain) as kind 2
+fn dump_level(
+    out: &mut Vec<(Key, u64)>,
+    state: &FieldStore<2, 2, HostMemory, f64>,
+    level: u8,
+    global: impl Fn(&[isize; 2]) -> [isize; 2],
+    domain_lo: [isize; 2],
+    domain_hi: [isize; 2],
+) {
+    let cons = &state.fields.cons;
+    let prim = &state.fields.prim;
+    let mut cons_fields = vec![&cons.den, &cons.mom[0], &cons.mom[1]];
+    cons_fields.extend(cons.nrg_field());
+    cons_fields.extend(cons.chi_field());
+    let mut prim_fields = vec![&prim.rho, &prim.vel[0], &prim.vel[1]];
+    prim_fields.extend(prim.pre_field());
+    prim_fields.extend(prim.chi_field());
+    for c in state.geom.allocated.iter() {
+        let g = global(&c);
+        if (0..2).any(|a| g[a] < domain_lo[a] || g[a] >= domain_hi[a]) {
+            continue;
+        }
+        let (i, j) = (g[0] as usize, g[1] as usize);
+        if state.geom.interior.contains(c) {
+            for (f, field) in cons_fields.iter().enumerate() {
+                out.push((Key { kind: 0, level, i, j, field: f as u8 }, field.view().at(c).to_bits()));
+            }
+            for (f, field) in prim_fields.iter().enumerate() {
+                out.push((Key { kind: 1, level, i, j, field: f as u8 }, field.view().at(c).to_bits()));
+            }
+        } else {
+            for (f, field) in prim_fields.iter().enumerate() {
+                out.push((Key { kind: 2, level, i, j, field: f as u8 }, field.view().at(c).to_bits()));
+            }
+        }
+    }
+}
+
+/// the dump of one hierarchy whose root tile starts at root cell `ext` of the whole grid
+fn dump(h: &Hier, ext: [(usize, usize); 2]) -> Vec<(Key, u64)> {
+    let mut out = Vec::new();
+    let root = &h.levels[0].state;
+    let rlo: [isize; 2] = std::array::from_fn(|a| root.geom.interior.spaces[a].lo);
+    dump_level(
+        &mut out,
+        root,
+        0,
+        |c| std::array::from_fn(|a| ext[a].0 as isize + c[a] - rlo[a]),
+        [0, 0],
+        [N as isize, N as isize],
+    );
+    if h.levels.len() > 1 {
+        let fine = &h.levels[1].state;
+        let flo: [isize; 2] = std::array::from_fn(|a| fine.geom.interior.spaces[a].lo);
+        let clo: [isize; 2] = std::array::from_fn(|a| h.levels[0].coverage.as_ref().unwrap().spaces[a].lo);
+        dump_level(
+            &mut out,
+            fine,
+            1,
+            |c| std::array::from_fn(|a| (ext[a].0 as isize + clo[a] - rlo[a]) * RATIO as isize + c[a] - flo[a]),
+            std::array::from_fn(|a| (PATCH[a].0 * RATIO) as isize),
+            std::array::from_fn(|a| (PATCH[a].1 * RATIO) as isize),
+        );
+    }
+    out
 }
 
 fn run_worker(arm: &Arm, me: WorkerId, out: PathBuf) -> Result<(), WorkerError> {
@@ -217,6 +348,15 @@ fn run_worker(arm: &Arm, me: WorkerId, out: PathBuf) -> Result<(), WorkerError> 
     let fine_placement = Placement::with_idle_workers(arm.workers(), fine_owner).expect("fine placement");
     let mine: Vec<usize> = (0..n_root).filter(|&f| placement.owner_of(TileId(f as u32)) == me).collect();
     let mut tiles: Vec<Hier> = mine.iter().map(|&f| tile(&partition, f)).collect();
+    if let Some(bits) = env_u64("W_MAX_DT_BITS") {
+        for h in tiles.iter_mut() {
+            h.levels[0].state.max_dt = f64::from_bits(bits);
+        }
+    }
+    if let Some((step, substep, stage)) = reject_fine_from_env(me) {
+        let refined = tiles.iter_mut().find(|h| h.levels.len() > 1).expect("the rejecting worker holds a fine tile");
+        refined.reject_fine_once_at(step, substep, stage);
+    }
     let root_ids: Vec<TileId> = mine.iter().map(|&f| TileId(f as u32)).collect();
     let fine_ids: Vec<Option<TileId>> = mine
         .iter()
@@ -284,12 +424,13 @@ fn run_worker(arm: &Arm, me: WorkerId, out: PathBuf) -> Result<(), WorkerError> 
             timestepping: Timestepping::Rk2,
             start_time: 0.0,
             t_final: T_FINAL,
-            max_steps: STEPS,
+            max_steps: arm.steps,
             deadline: TRANSFER_DEADLINE,
             injection: injection_from_env(me),
             audit_every_point: false,
         },
-        reject_fine_at: reject_fine_from_env(me),
+        invalid_level_cfl_at: bad_cfl_from_env(me),
+        fine_trouble_at: fine_trouble_from_env(),
     };
     let root_devices = vec![0i32; n_root];
     let fine_devices = vec![0i32; n_fine];
@@ -301,114 +442,52 @@ fn run_worker(arm: &Arm, me: WorkerId, out: PathBuf) -> Result<(), WorkerError> 
         root_devices: &root_devices,
         fine_devices: &fine_devices,
     };
+    fofc_reset_stats();
     let report = evolve_refined_worker(&mut tiles, &held, &plans, &LocalCopy, &mut fabric, &cfg, |_, _, _| {
         Ok(ControlFlow::Continue(()))
     })?;
     fabric.finish(TRANSFER_DEADLINE)?;
-    // the composite this worker holds: every uncovered root interior cell as its 2x2 fine
-    // block and every fine interior cell, by global fine index, conserved density bits
-    let mut cells: Vec<u8> = Vec::new();
-    let mut put = |i: usize, j: usize, bits: u64| {
-        cells.extend_from_slice(&(i as u64).to_le_bytes());
-        cells.extend_from_slice(&(j as u64).to_le_bytes());
-        cells.extend_from_slice(&bits.to_le_bytes());
-    };
+    let mut records = Vec::new();
     for (&flat, h) in mine.iter().zip(&tiles) {
-        let ext = partition.tile_extents(unflatten(flat, counts));
-        let root = &h.levels[0].state;
-        let rlo: [isize; 2] = std::array::from_fn(|a| root.geom.interior.spaces[a].lo);
-        let cov = h.levels[0].coverage.as_ref();
-        let den = root.fields.cons.den.view();
-        for c in root.geom.interior.iter() {
-            if cov.is_some_and(|cov| cov.contains(c)) {
-                continue;
-            }
-            let g: [usize; 2] = std::array::from_fn(|a| ext[a].0 + (c[a] - rlo[a]) as usize);
-            let bits = den.at(c).to_bits();
-            for sy in 0..RATIO {
-                for sx in 0..RATIO {
-                    put(RATIO * g[0] + sx, RATIO * g[1] + sy, bits);
-                }
-            }
-        }
-        if h.levels.len() > 1 {
-            let fine = &h.levels[1].state;
-            let flo: [isize; 2] = std::array::from_fn(|a| fine.geom.interior.spaces[a].lo);
-            let cov = cov.unwrap();
-            let clo: [isize; 2] = std::array::from_fn(|a| cov.spaces[a].lo);
-            let den = fine.fields.cons.den.view();
-            for c in fine.geom.interior.iter() {
-                let gf: [usize; 2] = std::array::from_fn(|a| {
-                    let cov_global_root = ext[a].0 + (clo[a] - rlo[a]) as usize;
-                    cov_global_root * RATIO + (c[a] - flo[a]) as usize
-                });
-                put(gf[0], gf[1], den.at(c).to_bits());
-            }
-        }
+        records.extend(dump(h, partition.tile_extents(unflatten(flat, counts))));
     }
-    std::fs::write(&out, cells).unwrap();
-    // every cut halo cell this worker holds at the end of the run, by level and global index
-    // on that level, primitive density bits: the exchange moves primitives, so the root
-    // halos stand as the post-restriction exchange left them and the fine halos as the last
-    // post-tail exchange left them
-    let mut halos: Vec<u8> = Vec::new();
-    let mut put_halo = |level: u64, i: isize, j: isize, bits: u64| {
-        halos.extend_from_slice(&level.to_le_bytes());
-        halos.extend_from_slice(&(i as u64).to_le_bytes());
-        halos.extend_from_slice(&(j as u64).to_le_bytes());
-        halos.extend_from_slice(&bits.to_le_bytes());
-    };
-    let inside = |g: [isize; 2], lo: [isize; 2], hi: [isize; 2]| (0..2).all(|a| lo[a] <= g[a] && g[a] < hi[a]);
-    for (&flat, h) in mine.iter().zip(&tiles) {
-        let ext = partition.tile_extents(unflatten(flat, counts));
-        let root = &h.levels[0].state;
-        let rlo: [isize; 2] = std::array::from_fn(|a| root.geom.interior.spaces[a].lo);
-        let den = root.fields.prim.rho.view();
-        for c in root.geom.allocated.iter() {
-            if root.geom.interior.contains(c) {
-                continue;
-            }
-            let g: [isize; 2] = std::array::from_fn(|a| ext[a].0 as isize + c[a] - rlo[a]);
-            if inside(g, [0, 0], [N as isize, N as isize]) {
-                put_halo(0, g[0], g[1], den.at(c).to_bits());
-            }
-        }
-        if h.levels.len() > 1 {
-            let fine = &h.levels[1].state;
-            let flo: [isize; 2] = std::array::from_fn(|a| fine.geom.interior.spaces[a].lo);
-            let clo: [isize; 2] = std::array::from_fn(|a| h.levels[0].coverage.as_ref().unwrap().spaces[a].lo);
-            let den = fine.fields.prim.rho.view();
-            let patch_lo: [isize; 2] = std::array::from_fn(|a| (PATCH[a].0 * RATIO) as isize);
-            let patch_hi: [isize; 2] = std::array::from_fn(|a| (PATCH[a].1 * RATIO) as isize);
-            for c in fine.geom.allocated.iter() {
-                if fine.geom.interior.contains(c) {
-                    continue;
-                }
-                let gf: [isize; 2] =
-                    std::array::from_fn(|a| (ext[a].0 as isize + clo[a] - rlo[a]) * RATIO as isize + c[a] - flo[a]);
-                if inside(gf, patch_lo, patch_hi) {
-                    put_halo(1, gf[0], gf[1], den.at(c).to_bits());
-                }
-            }
-        }
-    }
-    std::fs::write(out.with_extension("halos"), halos).unwrap();
+    std::fs::write(&out, encode(&records)).unwrap();
+    let (fallbacks, freezes) = fofc_stats();
     println!(
-        "REPORT steps={} rejections={} time={} fine_troubled={} hw={} dts={}",
+        "REPORT steps={} rejections={} time={} fine_troubled={} fine_neighbor={} neighbor={} fofc={fallbacks},{freezes} hw={} dts={}",
         report.steps,
         report.rejections,
         report.time.to_bits(),
         report.fine_troubled_exchanges,
+        report.fine_neighbor_corrections,
+        report.neighbor_corrections,
         report.grant_high_water.iter().map(|h| h.to_string()).collect::<Vec<_>>().join(","),
         report.dt_sequence.iter().map(|d| d.to_bits().to_string()).collect::<Vec<_>>().join(",")
     );
     Ok(())
 }
 
+/// the single hierarchy driven with the given timesteps, dumped like a worker; a process of
+/// its own so the correction census is its own
+fn mono_main(out: PathBuf) {
+    let mut mono = build_mono();
+    fofc_reset_stats();
+    for bits in env_list("W_MONO_DTS") {
+        mono.step_root_with_dt(f64::from_bits(bits));
+    }
+    let (fallbacks, freezes) = fofc_stats();
+    std::fs::write(&out, encode(&dump(&mono, [(0, N), (0, N)]))).unwrap();
+    println!("REPORT steps=0 rejections=0 time=0 fine_troubled=0 fine_neighbor=0 neighbor=0 fofc={fallbacks},{freezes} hw= dts=");
+}
+
 fn worker_main() -> ! {
     let arm = Arm::from_env();
-    let me = WorkerId(env_u64("W_ME").unwrap() as u32);
     let out = PathBuf::from(std::env::var("W_OUT").unwrap());
+    if std::env::var_os("W_MONO_DTS").is_some() {
+        mono_main(out);
+        std::process::exit(0);
+    }
+    let me = WorkerId(env_u64("W_ME").unwrap() as u32);
     match run_worker(&arm, me, out) {
         Ok(()) => std::process::exit(0),
         Err(e) => {
@@ -453,6 +532,10 @@ struct Report {
     rejections: u64,
     time: u64,
     fine_troubled: u64,
+    fine_neighbor: u64,
+    neighbor: u64,
+    /// the correction census of the process: (fallback cells, frozen cells)
+    fofc: (u64, u64),
     high_water: Vec<usize>,
     dts: Vec<u64>,
 }
@@ -461,10 +544,7 @@ struct Outcome {
     code: Option<i32>,
     stderr: String,
     report: Option<Report>,
-    /// (global fine i, global fine j, conserved density bits) of every composite cell held
-    cells: Vec<(usize, usize, u64)>,
-    /// (level, global i, global j, primitive density bits) of every cut halo cell held
-    halos: Vec<(u8, usize, usize, u64)>,
+    records: Vec<(Key, u64)>,
 }
 
 fn parse_report(stdout: &str) -> Option<Report> {
@@ -476,20 +556,39 @@ fn parse_report(stdout: &str) -> Option<Report> {
     let list = |name: &str| -> Option<Vec<u64>> {
         Some(field(name)?.split(',').filter(|s| !s.is_empty()).map(|s| s.parse().unwrap()).collect())
     };
+    let fofc = list("fofc")?;
     Some(Report {
         steps: field("steps")?.parse().ok()?,
         rejections: field("rejections")?.parse().ok()?,
         time: field("time")?.parse().ok()?,
         fine_troubled: field("fine_troubled")?.parse().ok()?,
+        fine_neighbor: field("fine_neighbor")?.parse().ok()?,
+        neighbor: field("neighbor")?.parse().ok()?,
+        fofc: (fofc[0], fofc[1]),
         high_water: list("hw")?.into_iter().map(|h| h as usize).collect(),
         dts: list("dts")?,
     })
 }
 
-fn run_arm(test: &str, tag: &str, arm: &Arm, extra: &[(&str, String)]) -> Vec<Outcome> {
+fn collect(mut s: Spawned) -> Outcome {
+    let status = s.child.wait().unwrap();
+    let mut stdout = String::new();
+    s.child.stdout.take().unwrap().read_to_string(&mut stdout).unwrap();
+    let mut stderr = String::new();
+    s.child.stderr.take().unwrap().read_to_string(&mut stderr).unwrap();
+    let records = std::fs::read(&s.out).map(|bytes| decode(&bytes)).unwrap_or_default();
+    Outcome { code: status.code(), stderr, report: parse_report(&stdout), records }
+}
+
+fn run_dir(test: &str, tag: &str) -> PathBuf {
     let dir = std::env::temp_dir().join(format!("symbi_refined_worker_{}_{test}_{tag}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).unwrap();
+    dir
+}
+
+fn run_arm(test: &str, tag: &str, arm: &Arm, extra: &[(&str, String)]) -> Vec<Outcome> {
+    let dir = run_dir(test, tag);
     let coord = dir.join("rendezvous");
     let mut spawned: Vec<Spawned> = (0..arm.workers()).map(|w| spawn(test, w, arm, &coord, &dir, extra)).collect();
     let start = Instant::now();
@@ -505,39 +604,7 @@ fn run_arm(test: &str, tag: &str, arm: &Arm, extra: &[(&str, String)]) -> Vec<Ou
         }
         std::thread::sleep(Duration::from_millis(10));
     }
-    spawned
-        .into_iter()
-        .map(|mut s| {
-            let status = s.child.wait().unwrap();
-            let mut stdout = String::new();
-            s.child.stdout.take().unwrap().read_to_string(&mut stdout).unwrap();
-            let mut stderr = String::new();
-            s.child.stderr.take().unwrap().read_to_string(&mut stderr).unwrap();
-            let cells = std::fs::read(&s.out)
-                .map(|bytes| {
-                    bytes
-                        .chunks_exact(24)
-                        .map(|c| {
-                            let u = |k: usize| u64::from_le_bytes(c[8 * k..8 * k + 8].try_into().unwrap());
-                            (u(0) as usize, u(1) as usize, u(2))
-                        })
-                        .collect()
-                })
-                .unwrap_or_default();
-            let halos = std::fs::read(s.out.with_extension("halos"))
-                .map(|bytes| {
-                    bytes
-                        .chunks_exact(32)
-                        .map(|c| {
-                            let u = |k: usize| u64::from_le_bytes(c[8 * k..8 * k + 8].try_into().unwrap());
-                            (u(0) as u8, u(1) as usize, u(2) as usize, u(3))
-                        })
-                        .collect()
-                })
-                .unwrap_or_default();
-            Outcome { code: status.code(), stderr, report: parse_report(&stdout), cells, halos }
-        })
-        .collect()
+    spawned.into_iter().map(collect).collect()
 }
 
 fn assert_all_ok(outcomes: &[Outcome], label: &str) {
@@ -546,105 +613,86 @@ fn assert_all_ok(outcomes: &[Outcome], label: &str) {
     }
 }
 
-/// the composite of every worker's cells on the 2N x 2N fine grid; every cell written once
-fn composite(outcomes: &[Outcome]) -> Vec<u64> {
-    let fn_n = RATIO * N;
-    let mut out = vec![u64::MAX; fn_n * fn_n];
-    let mut seen = vec![false; fn_n * fn_n];
-    for o in outcomes {
-        for &(i, j, bits) in &o.cells {
-            let at = j * fn_n + i;
-            assert!(!seen[at], "composite cell ({i}, {j}) held by two workers");
-            seen[at] = true;
-            out[at] = bits;
-        }
-    }
-    assert!(seen.iter().all(|&s| s), "a composite cell was never written");
-    out
-}
-
-/// the single hierarchy driven with the launched run's timesteps
+/// the single hierarchy driven with the launched run's timesteps, as a record map, with its
+/// correction census
 struct Reference {
-    /// the same composite on the 2N x 2N fine grid
-    composite: Vec<u64>,
-    /// primitive density of every root interior cell on the N x N root grid, the covered
-    /// ones restricted
-    root_rho: Vec<u64>,
-    /// primitive density of every fine interior cell on the 2N x 2N fine grid
-    fine_rho: Vec<u64>,
+    values: HashMap<Key, u64>,
+    fofc: (u64, u64),
 }
 
-fn reference(dts: &[u64]) -> Reference {
-    let mut mono = build_mono();
-    for &bits in dts {
-        mono.step_root_with_dt(f64::from_bits(bits));
-    }
-    let fn_n = RATIO * N;
-    let mut composite = vec![u64::MAX; fn_n * fn_n];
-    let mut root_rho = vec![u64::MAX; N * N];
-    let mut fine_rho = vec![u64::MAX; fn_n * fn_n];
-    let root = &mono.levels[0].state;
-    let cov = mono.levels[0].coverage.as_ref().unwrap();
-    let rlo: [isize; 2] = std::array::from_fn(|a| root.geom.interior.spaces[a].lo);
-    let den = root.fields.cons.den.view();
-    let rho = root.fields.prim.rho.view();
-    for c in root.geom.interior.iter() {
-        let g: [usize; 2] = std::array::from_fn(|a| (c[a] - rlo[a]) as usize);
-        root_rho[g[1] * N + g[0]] = rho.at(c).to_bits();
-        if cov.contains(c) {
-            continue;
-        }
-        for sy in 0..RATIO {
-            for sx in 0..RATIO {
-                composite[(RATIO * g[1] + sy) * fn_n + RATIO * g[0] + sx] = den.at(c).to_bits();
+impl Reference {
+    /// the interior records of a run with no cut: the single hierarchy or one worker
+    fn of(outcomes: &[Outcome], label: &str) -> Self {
+        let mut values = HashMap::new();
+        let mut fofc = (0, 0);
+        for o in outcomes {
+            assert_eq!(o.code, Some(0), "{label} failed:\n{}", o.stderr);
+            for &(k, bits) in &o.records {
+                assert!(k.kind < 2, "{label} holds a cut halo");
+                assert!(values.insert(k, bits).is_none());
             }
+            let f = o.report.as_ref().unwrap().fofc;
+            fofc = (fofc.0 + f.0, fofc.1 + f.1);
         }
+        Reference { values, fofc }
     }
-    let fine = &mono.levels[1].state;
-    let flo: [isize; 2] = std::array::from_fn(|a| fine.geom.interior.spaces[a].lo);
-    let fden = fine.fields.cons.den.view();
-    let frho = fine.fields.prim.rho.view();
-    for c in fine.geom.interior.iter() {
-        let gf: [usize; 2] = std::array::from_fn(|a| PATCH[a].0 * RATIO + (c[a] - flo[a]) as usize);
-        composite[gf[1] * fn_n + gf[0]] = fden.at(c).to_bits();
-        fine_rho[gf[1] * fn_n + gf[0]] = frho.at(c).to_bits();
-    }
-    Reference { composite, root_rho, fine_rho }
 }
 
-/// every cut halo a worker holds equals the single hierarchy's value at that cell: the root
-/// halos as the post-restriction exchange left them, the fine halos as the last post-tail
-/// exchange left them
-fn assert_halos_fresh(outcomes: &[Outcome], expected: &Reference, label: &str) {
-    let fn_n = RATIO * N;
-    let (mut root_halos, mut fine_halos, mut stale) = (0usize, 0usize, 0usize);
+fn reference(test: &str, tag: &str, arm: &Arm, dts: &[u64]) -> Reference {
+    let dir = run_dir(test, &format!("{tag}_mono"));
+    let coord = dir.join("rendezvous");
+    let dts = ("W_MONO_DTS", dts.iter().map(|d| d.to_string()).collect::<Vec<_>>().join(","));
+    Reference::of(&[collect(spawn(test, 0, arm, &coord, &dir, &[dts]))], "the single hierarchy")
+}
+
+/// the name of a differing record class for the failure message
+fn class(k: &Key) -> String {
+    let kind = ["conserved", "primitive", "halo primitive"][k.kind as usize];
+    format!("level {} {kind} field {}", k.level, k.field)
+}
+
+/// every interior cell of both levels held exactly once across the workers and equal to
+/// the single hierarchy in every conserved and primitive component; every cut halo
+/// primitive equal to the single hierarchy's interior value at that cell
+fn assert_state_equal(outcomes: &[Outcome], expected: &Reference, label: &str) {
+    let mut held: HashMap<Key, u64> = HashMap::new();
+    let mut halos = 0usize;
+    let mut differing: HashMap<String, usize> = HashMap::new();
     for (w, o) in outcomes.iter().enumerate() {
-        for &(level, i, j, bits) in &o.halos {
-            let want = match level {
-                0 => expected.root_rho[j * N + i],
-                _ => expected.fine_rho[j * fn_n + i],
-            };
-            if level == 0 {
-                root_halos += 1;
+        for &(k, bits) in &o.records {
+            let want = if k.kind == 2 {
+                halos += 1;
+                expected.values.get(&Key { kind: 1, ..k })
             } else {
-                fine_halos += 1;
-            }
+                assert!(held.insert(k, bits).is_none(), "{label}: {k:?} held by two workers");
+                expected.values.get(&k)
+            };
+            let Some(&want) = want else {
+                panic!("{label}: worker {w} holds {k:?}, which the single hierarchy has no value for");
+            };
             if want != bits {
-                stale += 1;
-                eprintln!("{label}: worker {w} level {level} halo ({i}, {j}) is stale");
+                *differing.entry(class(&k)).or_default() += 1;
             }
         }
     }
-    assert!(root_halos > 0 && fine_halos > 0, "{label}: no cut halo on both levels; the freshness gate is vacuous");
-    assert_eq!(stale, 0, "{label}: {stale} of {} halo cells are stale", root_halos + fine_halos);
+    assert_eq!(
+        held.len(),
+        expected.values.len(),
+        "{label}: the workers hold {} interior values, the single hierarchy {}",
+        held.len(),
+        expected.values.len()
+    );
+    assert!(halos > 0, "{label}: no cut halo was dumped; the freshness comparison is vacuous");
+    assert!(differing.is_empty(), "{label}: values differing from the single hierarchy by class: {differing:?}");
 }
 
-fn assert_matches_reference(outcomes: &[Outcome], label: &str) {
+/// the launched run agrees with itself across workers and with the single hierarchy
+fn assert_matches_reference(test: &str, tag: &str, outcomes: &[Outcome], arm: &Arm, label: &str) -> Reference {
     assert_all_ok(outcomes, label);
     let reports: Vec<&Report> = outcomes.iter().map(|o| o.report.as_ref().expect("report")).collect();
     for (w, r) in reports.iter().enumerate() {
         assert_eq!(r.dts, reports[0].dts, "{label}: worker {w} took other timesteps");
-        assert_eq!(r.steps, STEPS, "{label}: worker {w} took {} steps", r.steps);
+        assert_eq!(r.steps, arm.steps, "{label}: worker {w} took {} steps", r.steps);
         assert!(
             r.high_water.iter().all(|&h| h <= 2),
             "{label}: worker {w} held more grants than one per axis per peer: {:?}",
@@ -652,25 +700,28 @@ fn assert_matches_reference(outcomes: &[Outcome], label: &str) {
         );
         eprintln!("{label}: worker {w} grant high-water {:?}", r.high_water);
     }
-    let launched = composite(outcomes);
-    let expected = reference(&reports[0].dts);
-    let differing = launched.iter().zip(&expected.composite).filter(|(a, b)| a != b).count();
-    assert_eq!(differing, 0, "{label}: {differing} composite cells differ from the single hierarchy");
-    assert_halos_fresh(outcomes, &expected, label);
+    let expected = reference(test, tag, arm, &reports[0].dts);
+    assert_state_equal(outcomes, &expected, label);
+    expected
 }
 
 fn ragged_17_13() -> Arm {
-    Arm { cuts0: vec![17], cuts1: vec![13], owner: vec![0, 1, 2, 3] }
+    Arm { cuts0: vec![17], cuts1: vec![13], owner: vec![0, 1, 2, 3], steps: STEPS }
 }
 
 fn ragged_18_14() -> Arm {
-    Arm { cuts0: vec![18], cuts1: vec![14], owner: vec![0, 1, 2, 3] }
+    Arm { cuts0: vec![18], cuts1: vec![14], owner: vec![0, 1, 2, 3], steps: STEPS }
 }
 
-/// the patch lies under the middle column of tiles and spans the y cut; the outer columns'
-/// workers hold no fine tile
+/// one worker holding the whole grid: the launched path with no cut
+fn uncut() -> Arm {
+    Arm { cuts0: vec![], cuts1: vec![], owner: vec![0], steps: STEPS }
+}
+
+/// three workers on a 3x2 tile grid: the patch lies in the middle column, whose two tiles
+/// worker 1 owns, so workers 0 and 2 hold no fine tile
 fn no_fine_on_two_workers() -> Arm {
-    Arm { cuts0: vec![10, 22], cuts1: vec![16], owner: vec![0, 0, 1, 1, 2, 2] }
+    Arm { cuts0: vec![10, 22], cuts1: vec![16], owner: vec![0, 0, 1, 1, 2, 2], steps: STEPS }
 }
 
 #[test]
@@ -679,8 +730,9 @@ fn a_ragged_layout_matches_the_single_hierarchy_over_several_root_steps() {
         worker_main();
     }
     let test = "a_ragged_layout_matches_the_single_hierarchy_over_several_root_steps";
-    assert_matches_reference(&run_arm(test, "17_13", &ragged_17_13(), &[]), "cuts 17,13");
-    assert_matches_reference(&run_arm(test, "18_14", &ragged_18_14(), &[]), "cuts 18,14");
+    for (tag, arm) in [("17_13", ragged_17_13()), ("18_14", ragged_18_14())] {
+        assert_matches_reference(test, tag, &run_arm(test, tag, &arm, &[]), &arm, &format!("cuts {tag}"));
+    }
 }
 
 #[test]
@@ -689,28 +741,12 @@ fn workers_without_fine_tiles_walk_the_transaction_with_the_others() {
         worker_main();
     }
     let test = "workers_without_fine_tiles_walk_the_transaction_with_the_others";
-    let outcomes = run_arm(test, "no_fine", &no_fine_on_two_workers(), &[]);
-    assert_matches_reference(&outcomes, "two of three workers without fine tiles");
+    let arm = no_fine_on_two_workers();
+    let outcomes = run_arm(test, "no_fine", &arm, &[]);
+    assert_matches_reference(test, "no_fine", &outcomes, &arm, "two of three workers without fine tiles");
 }
 
-/// where two composites differ: the cells inside the fine patch and outside it
-fn diff_report(a: &[u64], b: &[u64]) -> String {
-    let fn_n = RATIO * N;
-    let (mut fine, mut root) = (0usize, 0usize);
-    let mut first: Option<(usize, usize)> = None;
-    for j in 0..fn_n {
-        for i in 0..fn_n {
-            if a[j * fn_n + i] != b[j * fn_n + i] {
-                let inside = (RATIO * PATCH[0].0..RATIO * PATCH[0].1).contains(&i) && (RATIO * PATCH[1].0..RATIO * PATCH[1].1).contains(&j);
-                if inside { fine += 1 } else { root += 1 }
-                first.get_or_insert((i, j));
-            }
-        }
-    }
-    format!("{fine} fine cells and {root} root cells differ, first at {first:?}")
-}
-
-/// the run whose timestep at `step` is capped to `bits`, on every worker
+/// a clean run capped to `bits` at `step` on every worker
 fn capped(test: &str, tag: &str, arm: &Arm, step: u64, bits: u64) -> Vec<Outcome> {
     run_arm(
         test,
@@ -724,8 +760,28 @@ fn capped(test: &str, tag: &str, arm: &Arm, step: u64, bits: u64) -> Vec<Outcome
     )
 }
 
-/// a rejection forced on worker 1 at root stage 1 of step 3: the control for the fine
-/// rollback, on the path the flat gates already hold
+/// the rejecting run took the same timesteps as its clean control, rejected once on every
+/// worker, and holds the same records; both equal the single hierarchy
+fn assert_rejection_matches_capped_control(test: &str, arm: &Arm, rejecting: Vec<Outcome>, step: u64, label: &str) {
+    assert_all_ok(&rejecting, label);
+    let reports: Vec<&Report> = rejecting.iter().map(|o| o.report.as_ref().unwrap()).collect();
+    for (w, r) in reports.iter().enumerate() {
+        assert_eq!(r.rejections, 1, "{label}: worker {w} reports {} rejections", r.rejections);
+    }
+    let dts = reports[0].dts.clone();
+    assert_matches_reference(test, "rejecting", &rejecting, arm, label);
+    let clean = capped(test, "clean", arm, step, dts[step as usize]);
+    assert_matches_reference(test, "clean", &clean, arm, &format!("{label}, the clean control"));
+    let clean_reports: Vec<&Report> = clean.iter().map(|o| o.report.as_ref().unwrap()).collect();
+    assert_eq!(clean_reports[0].dts, dts, "{label}: the capped clean run took other timesteps than the rejecting one");
+    assert!(clean_reports.iter().all(|r| r.rejections == 0));
+    for (w, (a, b)) in rejecting.iter().zip(&clean).enumerate() {
+        assert!(a.records == b.records, "{label}: worker {w} holds other records than in the clean control");
+    }
+}
+
+/// worker 1 rejects the last stage of step 3 on the root; every worker rolls the step back
+/// and replays it at the halved timestep
 #[test]
 fn a_rejection_at_a_root_stage_rolls_every_worker_back() {
     if in_worker_role() {
@@ -743,13 +799,7 @@ fn a_rejection_at_a_root_stage_rolls_every_worker_back() {
             ("W_REJECT_ROOT_STAGE", "1".into()),
         ],
     );
-    assert_all_ok(&rejecting, "the root-rejecting run");
-    let reports: Vec<&Report> = rejecting.iter().map(|o| o.report.as_ref().unwrap()).collect();
-    assert!(reports.iter().all(|r| r.rejections == 1), "every worker rejects once");
-    let clean = capped(test, "clean", &arm, 3, reports[0].dts[3]);
-    assert_matches_reference(&clean, "the clean run capped to the accepted timestep");
-    let (a, b) = (composite(&rejecting), composite(&clean));
-    assert!(a == b, "the root-rejecting run differs from the clean run: {}", diff_report(&a, &b));
+    assert_rejection_matches_capped_control(test, &arm, rejecting, 3, "the root-rejecting run");
 }
 
 /// worker 1 rejects the last stage of the second fine substep of step 3; every worker rolls
@@ -768,17 +818,92 @@ fn a_rejection_in_the_second_fine_substep_rolls_every_worker_back() {
         &arm,
         &[("W_REJECT_FINE_WORKER", "1".into()), ("W_REJECT_FINE", "3,1,1".into())],
     );
-    assert_all_ok(&rejecting, "the rejecting run");
-    let reports: Vec<&Report> = rejecting.iter().map(|o| o.report.as_ref().unwrap()).collect();
-    for (w, r) in reports.iter().enumerate() {
-        assert_eq!(r.rejections, 1, "worker {w} reports {} rejections", r.rejections);
-        assert_eq!(r.dts, reports[0].dts, "worker {w} took other timesteps");
+    assert_rejection_matches_capped_control(test, &arm, rejecting, 3, "the fine-rejecting run");
+}
+
+/// the only worker holding fine tiles rejects in the second fine substep while the other
+/// two hold none: the sequence closes through their empty fine phases and every worker
+/// rolls back
+#[test]
+fn a_fine_rejection_rolls_back_workers_without_fine_tiles() {
+    if in_worker_role() {
+        worker_main();
     }
-    let clean = capped(test, "clean", &arm, 3, reports[0].dts[3]);
-    assert_matches_reference(&clean, "the clean run capped to the accepted timestep");
-    let clean_reports: Vec<&Report> = clean.iter().map(|o| o.report.as_ref().unwrap()).collect();
-    assert_eq!(clean_reports[0].dts, reports[0].dts, "the capped clean run took other timesteps than the rejecting one");
-    assert!(clean_reports.iter().all(|r| r.rejections == 0));
-    let (a, b) = (composite(&rejecting), composite(&clean));
-    assert!(a == b, "the rejecting run differs from the clean run at the accepted timestep: {}", diff_report(&a, &b));
+    let test = "a_fine_rejection_rolls_back_workers_without_fine_tiles";
+    let arm = no_fine_on_two_workers();
+    let rejecting = run_arm(
+        test,
+        "rejecting",
+        &arm,
+        &[("W_REJECT_FINE_WORKER", "1".into()), ("W_REJECT_FINE", "3,1,1".into())],
+    );
+    assert_rejection_matches_capped_control(test, &arm, rejecting, 3, "the fine-rejecting run with empty fine workers");
+}
+
+/// a NaN timestep candidate on the fine level of one worker under a positive user cap ends
+/// the session on every worker: the cap applies after the candidate is judged
+#[test]
+fn an_invalid_fine_candidate_under_a_positive_cap_aborts_every_worker() {
+    if in_worker_role() {
+        worker_main();
+    }
+    let test = "an_invalid_fine_candidate_under_a_positive_cap_aborts_every_worker";
+    let arm = ragged_17_13();
+    let started = Instant::now();
+    let outcomes = run_arm(
+        test,
+        "nan",
+        &arm,
+        &[
+            ("W_MAX_DT_BITS", 0.005f64.to_bits().to_string()),
+            ("W_BAD_CFL_WORKER", "1".into()),
+            ("W_BAD_CFL", "3,1".into()),
+        ],
+    );
+    assert!(started.elapsed() < TRANSFER_DEADLINE * 3, "termination took {:?}", started.elapsed());
+    for (w, o) in outcomes.iter().enumerate() {
+        assert_ne!(o.code, Some(0), "worker {w} exited zero: the cap hid the invalid candidate");
+    }
+    assert!(outcomes[1].stderr.contains("invalid CFL candidate"), "{}", outcomes[1].stderr);
+    assert!(outcomes[1].stderr.contains("on level 1"), "{}", outcomes[1].stderr);
+}
+
+/// a fine cell against the fine cut is flagged troubled on the worker holding it, in the
+/// second fine substep, with the worker across the cut clean: the flags cross the cut, the
+/// clean worker redoes its side of the shared faces, the freeze tier stays silent, and the
+/// run equals one worker holding the whole grid with the same flag raised
+#[test]
+fn trouble_on_one_side_of_a_fine_cut_is_corrected_on_both() {
+    if in_worker_role() {
+        worker_main();
+    }
+    let test = "trouble_on_one_side_of_a_fine_cut_is_corrected_on_both";
+    // the fine cut of the cuts (17, 13) layout sits at fine column 10 of the patch's grid;
+    // the flagged cell is the column left of it, in a row above the fine cut at row 2
+    let flag = ("W_FINE_TROUBLE", "3,1,0,9,7".to_string());
+    let uncut_clean = run_arm(test, "uncut_clean", &uncut(), &[]);
+    let uncut_flagged = run_arm(test, "uncut_flagged", &uncut(), &[flag.clone()]);
+    let clean = Reference::of(&uncut_clean, "the uncut clean run");
+    let expected = Reference::of(&uncut_flagged, "the uncut flagged run");
+    assert!(clean.values != expected.values, "the flag left the uncut run unchanged; the gate is vacuous");
+    assert_eq!(expected.fofc.1, 0, "the freeze tier acted in the uncut run");
+    let arm = ragged_17_13();
+    let outcomes = run_arm(test, "cut", &arm, &[flag]);
+    assert_all_ok(&outcomes, "the cut flagged run");
+    let reports: Vec<&Report> = outcomes.iter().map(|o| o.report.as_ref().unwrap()).collect();
+    let uncut_report = uncut_flagged[0].report.as_ref().unwrap();
+    assert_eq!(uncut_report.dts, reports[0].dts, "the cut run took other timesteps than the uncut one");
+    for (w, r) in reports.iter().enumerate() {
+        assert_eq!(r.dts, reports[0].dts, "worker {w} took other timesteps");
+        assert_eq!(r.fine_troubled, 1, "worker {w} saw {} fine troubled exchanges", r.fine_troubled);
+        assert_eq!(r.fofc.1, 0, "worker {w} froze {} cells", r.fofc.1);
+        assert!(r.high_water.iter().all(|&h| h <= 2), "worker {w} grant high-water {:?}", r.high_water);
+        eprintln!("worker {w}: fine neighbor corrections {}, fofc {:?}", r.fine_neighbor, r.fofc);
+    }
+    // the worker across the fine cut holds a clean fine interior and corrects once from the
+    // exchanged flag; the flagged worker corrects from its own mark
+    let neighbors: Vec<usize> = (0..4).filter(|&w| reports[w].fine_neighbor > 0).collect();
+    assert_eq!(neighbors, vec![3], "the workers correcting a clean fine tile from the flag");
+    assert_eq!(reports[3].fine_neighbor, 1);
+    assert_state_equal(&outcomes, &expected, "the cut flagged run");
 }

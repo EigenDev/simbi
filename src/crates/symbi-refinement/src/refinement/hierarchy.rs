@@ -321,6 +321,9 @@ where
     /// rejection both shrink; comparing a fresh cfl estimate against it reports a "collapse" every
     /// time a rejected step is replayed at a smaller dt and then recovers. 0 before the first step.
     pub prev_dt_cfl: f64,
+    /// a pending forced rejection at (root step, fine substep, fine stage), consumed when it
+    /// fires
+    forced_fine_rejection: Option<(u64, u8, usize)>,
 
     /// whether the coarse-fine ghost transfer prolongs departures from the local hydrostatic
     /// equilibrium; when off it prolongs the raw primitive state. `None` follows the kernel set:
@@ -1080,6 +1083,7 @@ where
             crash: None,
             equilibrium_mask_radius: None,
             prev_dt_cfl: 0.0,
+            forced_fine_rejection: None,
             balance_aware_transfer: None,
         }
     }
@@ -1270,8 +1274,11 @@ where
                 last.bface_old = Some(bf.try_into().unwrap_or_else(|_| unreachable!()));
             }
             last.coverage = Some(coverage);
-            let attempt_entry =
+            let mut attempt_entry =
                 ConsFieldsGeneric::zeros_with_energy(&fine.geom.allocated, fine.fields.cons.has_energy())?;
+            if fine.fields.cons.chi_field().is_some() {
+                attempt_entry.alloc_chi(&fine.geom.allocated)?;
+            }
             levels.push(LevelData {
                 state: fine,
                 kernels,
@@ -1351,6 +1358,7 @@ where
             crash: None,
             equilibrium_mask_radius: None,
             prev_dt_cfl: 0.0,
+            forced_fine_rejection: None,
             balance_aware_transfer: None,
         })
     }
@@ -1941,18 +1949,44 @@ where
         dt
     }
 
+    /// the raw timestep candidate of every level in root units, in level order; a
+    /// candidate that is NaN or non-positive is returned as it is, so a caller judges it
+    /// before any clamp can hide it
+    pub fn level_cfl_candidates(&self) -> Vec<f64> {
+        prof("cfl", || {
+            self.levels
+                .iter()
+                .enumerate()
+                .map(|(ll, lvl)| lvl.kernels.cfl(&lvl.state) * RATIO.pow(ll as u32) as f64)
+                .collect()
+        })
+    }
+
+    /// the user clamp (max_dt > 0): pins the dt sequence across runs whose CFL estimators
+    /// differ. a fatal candidate (NaN or non-positive) passes through unclamped, since
+    /// `f64::min` would replace a NaN with the clamp
+    pub fn clamp_dt(&self, dt_cfl: f64) -> f64 {
+        let clamp = self.levels[0].state.max_dt;
+        if clamp > 0.0 && !fatal_cfl_dt(dt_cfl) { dt_cfl.min(clamp) } else { dt_cfl }
+    }
+
     pub fn root_cfl_dt(&self) -> f64 {
         // same full-grid wave-speed pass as `step_root`; instrumented under the same phase name so a
         // decomposed run attributes it identically.
         let dt_cfl = prof("cfl", || self.raw_root_cfl());
-        // the user clamp (max_dt > 0): pins the dt sequence across runs whose CFL
-        // estimators differ. applied after the raw-cfl crash heuristics elsewhere.
-        let clamp = self.levels[0].state.max_dt;
-        if clamp > 0.0 {
-            dt_cfl.min(clamp)
-        } else {
-            dt_cfl
-        }
+        self.clamp_dt(dt_cfl)
+    }
+
+    /// reject the fine stage `stage` of substep `substep` of root step `step` once: the
+    /// attempt that reaches it requests a retry as a failed recovery would, and the retry
+    /// runs clean. a test facility for the rollback of every driver
+    pub fn reject_fine_once_at(&mut self, step: u64, substep: u8, stage: usize) {
+        self.forced_fine_rejection = Some((step, substep, stage));
+    }
+
+    /// whether a forced fine rejection is still pending
+    pub fn forced_fine_rejection_pending(&self) -> bool {
+        self.forced_fine_rejection.is_some()
     }
 
     /// keep every finer level's conserved state at the root attempt's entry in a buffer of
@@ -2617,6 +2651,14 @@ where
         };
         if outcome == symbi_sim::stage::StageOutcome::RetryStep {
             return true;
+        }
+        if level == 1 {
+            let substep = (alpha0 * RATIO as f64).round() as u8;
+            let here = (self.levels[0].state.iteration, substep, ii);
+            if self.forced_fine_rejection == Some(here) {
+                self.forced_fine_rejection = None;
+                return true;
+            }
         }
         if self.levels[level].state.continuous_tracers.is_some() {
             symbi_substrate::regimes::substrate_gpu::device_sync::<Mem>();

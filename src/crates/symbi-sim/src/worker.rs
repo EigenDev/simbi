@@ -96,6 +96,8 @@ pub struct WorkerReport {
     pub audit_cost: AuditCost,
     /// the fine level's troubled exchanges on a refined run
     pub fine_troubled_exchanges: u64,
+    /// `neighbor_corrections` on the fine level
+    pub fine_neighbor_corrections: u64,
     /// the most grants held at once from each peer over the session
     pub grant_high_water: Vec<usize>,
 }
