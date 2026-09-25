@@ -25,6 +25,7 @@ use symbi_hydro::newtonian::Newtonian;
 use symbi_hydro::quantity::{Density, Pressure};
 use symbi_hydro::state::Prim;
 use symbi_sim::atlas::{ExchangePlan, Placement, TileId};
+use symbi_sim::phase_table::PhaseTable;
 use symbi_sim::plan_exchange::PlanExchange;
 use symbi_sim::worker::{Injection, WorkerConfig, WorkerError, evolve_worker};
 use symbi_xpu::{CpuSpace, HostMemory};
@@ -71,7 +72,7 @@ fn run2(sim: &mut Sim2, kern: &Kern2, regime: RegimeKind) -> Result<(), WorkerEr
     let schema = plan_schema(&**sim);
     let plan = ExchangePlan::compile(&partition, &Topology::open(), &schema, sim.geom.ng).unwrap();
     let placement = Placement::new(1, vec![WorkerId(0)]).unwrap();
-    let exchange = PlanExchange::new(&plan, &placement, WorkerId(0));
+    let exchange = PlanExchange::new(&plan, &placement, WorkerId(0), PhaseTable::flat(2).unwrap());
     let mut fabric = exchange.fabric(Loopback::new(), SessionId(1));
     let mut stores = [&mut **sim];
     evolve_worker(
@@ -129,7 +130,7 @@ fn a_forced_rejection_without_a_complete_rollback_snapshot_is_refused() {
     let schema = plan_schema(&*sim);
     let plan = ExchangePlan::compile(&partition, &Topology::wrapping([true; 2]), &schema, sim.geom.ng).unwrap();
     let placement = Placement::new(1, vec![WorkerId(0)]).unwrap();
-    let exchange = PlanExchange::new(&plan, &placement, WorkerId(0));
+    let exchange = PlanExchange::new(&plan, &placement, WorkerId(0), PhaseTable::flat(2).unwrap());
     let mut fabric = exchange.fabric(Loopback::new(), SessionId(1));
     let mut stores = [&mut *sim];
     let mut cfg = config(RegimeKind::NewtonianMhd);
@@ -207,7 +208,7 @@ fn a_locally_isothermal_closure_is_refused_and_a_global_one_admitted() {
         let schema = plan_schema(&**sim);
         let plan = ExchangePlan::compile(&partition, &Topology::open(), &schema, sim.geom.ng).unwrap();
         let placement = Placement::new(1, vec![WorkerId(0)]).unwrap();
-        let exchange = PlanExchange::new(&plan, &placement, WorkerId(0));
+        let exchange = PlanExchange::new(&plan, &placement, WorkerId(0), PhaseTable::flat(2).unwrap());
         let mut fabric = exchange.fabric(Loopback::new(), SessionId(1));
         let mut stores = [&mut **sim];
         evolve_worker(
@@ -271,7 +272,7 @@ fn a_one_dimensional_grid_is_refused() {
     let schema = plan_schema(&*sim);
     let plan = ExchangePlan::compile(&partition, &Topology::open(), &schema, sim.geom.ng).unwrap();
     let placement = Placement::new(1, vec![WorkerId(0)]).unwrap();
-    let exchange = PlanExchange::new(&plan, &placement, WorkerId(0));
+    let exchange = PlanExchange::new(&plan, &placement, WorkerId(0), PhaseTable::flat(2).unwrap());
     let mut fabric = exchange.fabric(Loopback::new(), SessionId(1));
     let mut stores = [&mut *sim];
     let result = evolve_worker(

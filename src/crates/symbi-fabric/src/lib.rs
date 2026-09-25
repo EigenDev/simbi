@@ -30,6 +30,6 @@ pub use endpoint::{
 };
 pub use error::{AbortReason, Deadline, FabricError};
 pub use frame::{HEADER_LEN, Header, Kind, MAGIC, VERSION};
-pub use grant::GrantTable;
+pub use grant::{GrantTable, PhaseRules};
 pub use ident::{Digest, Epoch, Fnv, OpId, SessionId, TransferId, WorkerId};
 pub use tcp::{LinkStats, TcpLink};

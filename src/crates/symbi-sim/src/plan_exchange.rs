@@ -13,7 +13,7 @@
 // (scatter and close).
 //
 // usage:
-//  let exchange = PlanExchange::new(&plan, &placement, me);
+//  let exchange = PlanExchange::new(&plan, &placement, me, PhaseTable::flat(stages)?);
 //  let mut fabric = exchange.fabric(link, session);
 //  exchange.open_axis(&fields, &devices, &LocalCopy, &mut fabric, epoch)?;
 //  while fabric.progress()? == Progress::Pending {}
@@ -22,6 +22,7 @@
 
 use crate::atlas::{AuditAt, ExchangePlan, ExchangePoint, Placement, Span, TileId, domain_of};
 use crate::decomp::HaloTransport;
+use crate::phase_table::PhaseTable;
 use symbi_fabric::{Epoch, Fabric, FabricError, Link, PhaseSpec, TransferId, WorkerId};
 use symbi_grid::Field;
 use symbi_xpu::MemorySpace;
@@ -30,15 +31,19 @@ pub struct PlanExchange<'p, const D: usize> {
     plan: &'p ExchangePlan<D>,
     placement: &'p Placement,
     me: WorkerId,
+    table: PhaseTable,
 }
 
 impl<'p, const D: usize> PlanExchange<'p, D> {
-    pub fn new(plan: &'p ExchangePlan<D>, placement: &'p Placement, me: WorkerId) -> Self {
+    /// `table` is the phase table every worker of the session walks; its digest is part of
+    /// the handshake identity
+    pub fn new(plan: &'p ExchangePlan<D>, placement: &'p Placement, me: WorkerId, table: PhaseTable) -> Self {
         debug_assert_eq!(placement.owner.len(), plan.n_tiles());
         Self {
             plan,
             placement,
             me,
+            table,
         }
     }
 
@@ -50,11 +55,20 @@ impl<'p, const D: usize> PlanExchange<'p, D> {
         self.placement
     }
 
-    pub fn epoch(point: ExchangePoint, step: u64, attempt: u16, axis: usize) -> Epoch {
+    pub fn table(&self) -> &PhaseTable {
+        &self.table
+    }
+
+    /// the epoch of `point`'s phase on `axis`; a point the table lacks is a driver error
+    pub fn epoch(&self, point: ExchangePoint, step: u64, attempt: u16, axis: usize) -> Epoch {
+        let byte = self
+            .table
+            .byte_of(point)
+            .unwrap_or_else(|| panic!("exchange point {point:?} outside the session's phase table"));
         Epoch {
             step,
             attempt,
-            point: point.to_wire(),
+            point: byte,
             axis: axis as u8,
         }
     }
@@ -86,8 +100,18 @@ impl<'p, const D: usize> PlanExchange<'p, D> {
         self.sends_at(ExchangePoint::Troubled(0))
     }
 
-    /// the fabric endpoint for this plan: every transfer's buffer, the send counts a grant
-    /// must carry at the state points, and the counts of the `Troubled` points.
+    /// the send counts of every phase of the table, `[byte][peer][axis]`: what this plan
+    /// moves at each point, nothing at a fine point
+    pub fn phase_counts(&self) -> Vec<Vec<Vec<u32>>> {
+        self.table
+            .phases()
+            .iter()
+            .map(|phase| self.sends_at(phase.point))
+            .collect()
+    }
+
+    /// the fabric endpoint for this plan: every transfer's buffer, the send counts of every
+    /// phase of the table, and the table's sequence rules.
     pub fn fabric<L: Link>(&self, link: L, session: symbi_fabric::SessionId) -> Fabric<L> {
         Fabric::new(
             link,
@@ -98,14 +122,8 @@ impl<'p, const D: usize> PlanExchange<'p, D> {
             &self.lens(),
             self.sends_per_peer_axis(),
         )
-        .with_point_sends(
-            ExchangePoint::is_troubled_wire,
-            self.trouble_sends_per_peer_axis(),
-        )
-        .with_point_sends(
-            ExchangePoint::is_audit_wire,
-            self.sends_at(ExchangePoint::Audit(AuditAt::Prime)),
-        )
+        .with_phase_counts(self.phase_counts())
+        .with_phase_rules(self.table.rules())
     }
 
     /// audit every shared interface face after the exchange `at`: the tile below each cut
@@ -126,7 +144,7 @@ impl<'p, const D: usize> PlanExchange<'p, D> {
         let clock = std::time::Instant::now();
         let mut cost = AuditCost::default();
         for axis in 0..D {
-            let epoch = Self::epoch(ExchangePoint::Audit(at), step, attempt, axis);
+            let epoch = self.epoch(ExchangePoint::Audit(at), step, attempt, axis);
             self.audit_open_axis(fields, fabric, epoch, &mut cost)?;
             fabric.wait(deadline)?;
             self.audit_finish_axis(fields, fabric, axis, &mut cost)?;
@@ -243,7 +261,10 @@ impl<'p, const D: usize> PlanExchange<'p, D> {
         epoch: Epoch,
     ) -> Result<(), FabricError> {
         let phase = &self.plan.axes[epoch.axis as usize];
-        let point = ExchangePoint::from_wire(epoch.point).expect("an exchange epoch names a point");
+        let point = self
+            .table
+            .point_of(epoch.point)
+            .expect("an exchange epoch names a point of the session's phase table");
         let mut sends = Vec::new();
         let mut receives = Vec::new();
         for t in phase.transfers.iter().filter(|t| self.plan.moves_at(t, point)) {

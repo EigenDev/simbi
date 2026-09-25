@@ -27,6 +27,7 @@ use symbi_geometry::Cartesian;
 use symbi_hydro::eos::IdealGas;
 use symbi_hydro::newtonian::Newtonian;
 use symbi_sim::atlas::{ExchangePlan, ExchangePoint, Placement};
+use symbi_sim::phase_table::PhaseTable;
 use symbi_sim::plan_exchange::PlanExchange;
 use symbi_xpu::{CpuSpace, HostMemory};
 
@@ -174,7 +175,7 @@ fn run_worker(arm: &Arm, me: WorkerId, out: PathBuf) -> Result<(), FabricError> 
     }
     let schema = plan_schema(&*mine[0].1);
     let plan = ExchangePlan::compile(&partition, &topology, &schema, arm.ng).expect("plan");
-    let exchange = PlanExchange::new(&plan, &placement, me);
+    let exchange = PlanExchange::new(&plan, &placement, me, PhaseTable::flat(2).unwrap());
     let mut fields: Vec<Vec<&symbi_grid::Field<f64, 2, HostMemory>>> =
         (0..n).map(|_| Vec::new()).collect();
     for (flat, sim) in &mine {
@@ -193,6 +194,7 @@ fn run_worker(arm: &Arm, me: WorkerId, out: PathBuf) -> Result<(), FabricError> 
             config_digest: Digest(1),
             plan_digest: plan.digest,
             placement_digest: placement.digest(),
+            phase_table_digest: PhaseTable::flat(2).unwrap().digest(),
             ng: arm.ng as u32,
             workers: arm.workers(),
             block_credit: 4096,
@@ -235,7 +237,7 @@ fn run_phases(
             // this worker arrives late at every phase, servicing the link as it waits
             fabric.service_for(Duration::from_millis(slow_ms))?;
         }
-        let epoch = PlanExchange::<2>::epoch(ExchangePoint::Prime, 0, 0, axis);
+        let epoch = exchange.epoch(ExchangePoint::Prime, 0, 0, axis);
         exchange.open_axis(fields, devices, &LocalCopy, fabric, epoch)?;
         fabric.wait(TRANSFER_DEADLINE)?;
         exchange.finish_axis(fields, fabric, axis)?;

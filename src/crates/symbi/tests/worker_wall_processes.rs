@@ -39,6 +39,7 @@ use symbi_hydro::newtonian_mhd::NewtonianMhd;
 use symbi_hydro::quantity::{Density, Pressure};
 use symbi_hydro::state::Prim;
 use symbi_sim::atlas::{ExchangePlan, Placement, TileId};
+use symbi_sim::phase_table::PhaseTable;
 use symbi_sim::plan_exchange::PlanExchange;
 use symbi_sim::substrate_seam::RegimeKind;
 use symbi_sim::worker::{Injection, WorkerConfig, WorkerError, evolve_worker};
@@ -275,6 +276,7 @@ fn rendezvous(s: &Session, arm: &Arm, plan_digest: Digest, ng: usize) -> Rendezv
             config_digest: Digest(1),
             plan_digest,
             placement_digest: s.placement.digest(),
+            phase_table_digest: PhaseTable::flat(2).unwrap().digest(),
             ng: ng as u32,
             workers: arm.workers(),
             block_credit: 4096,
@@ -333,7 +335,7 @@ fn run_gas(arm: &Arm, me: WorkerId, out: PathBuf, wall: &str) -> Result<(), Work
         .collect();
     let schema = plan_schema(&*built[0]);
     let plan = ExchangePlan::compile(&s.partition, &Topology::open(), &schema, built[0].geom.ng).expect("plan");
-    let exchange = PlanExchange::new(&plan, &s.placement, me);
+    let exchange = PlanExchange::new(&plan, &s.placement, me, PhaseTable::flat(2).unwrap());
     let r = rendezvous(&s, arm, plan.digest, built[0].geom.ng);
     let max_payload = (exchange.lens().iter().max().copied().unwrap_or(0) * 8).max(64);
     let (link, session_id) = connect(&r, max_payload)?;
@@ -370,7 +372,7 @@ fn run_mhd(arm: &Arm, me: WorkerId, out: PathBuf, wall: &str) -> Result<(), Work
     let kernels: Vec<_> = built.iter().map(|sim| sim.substrate()).collect();
     let schema = plan_schema(&*built[0]);
     let plan = ExchangePlan::compile(&s.partition, &Topology::open(), &schema, built[0].geom.ng).expect("plan");
-    let exchange = PlanExchange::new(&plan, &s.placement, me);
+    let exchange = PlanExchange::new(&plan, &s.placement, me, PhaseTable::flat(2).unwrap());
     let r = rendezvous(&s, arm, plan.digest, built[0].geom.ng);
     let max_payload = (exchange.lens().iter().max().copied().unwrap_or(0) * 8).max(64);
     let (link, session_id) = connect(&r, max_payload)?;

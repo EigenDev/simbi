@@ -38,6 +38,7 @@ use symbi_hydro::newtonian_mhd::NewtonianMhd;
 use symbi_hydro::quantity::{Density, Pressure};
 use symbi_hydro::state::Prim;
 use symbi_sim::atlas::{ExchangePlan, Placement, TileId};
+use symbi_sim::phase_table::PhaseTable;
 use symbi_sim::plan_exchange::PlanExchange;
 use symbi_sim::substrate_seam::RegimeKind;
 use symbi_sim::worker::{Injection, WorkerConfig, WorkerError, evolve_worker};
@@ -212,7 +213,7 @@ fn run_worker(arm: &Arm, me: WorkerId, out: PathBuf) -> Result<(), WorkerError> 
     let schema = plan_schema(&*built[0]);
     let plan = ExchangePlan::compile(&partition, &Topology::wrapping([true; 3]), &schema, built[0].geom.ng)
         .expect("plan");
-    let exchange = PlanExchange::new(&plan, &placement, me);
+    let exchange = PlanExchange::new(&plan, &placement, me, PhaseTable::flat(2).unwrap());
     let devices = vec![0i32; n];
     let r = Rendezvous {
         me,
@@ -226,6 +227,7 @@ fn run_worker(arm: &Arm, me: WorkerId, out: PathBuf) -> Result<(), WorkerError> 
             config_digest: Digest(1),
             plan_digest: plan.digest,
             placement_digest: placement.digest(),
+            phase_table_digest: PhaseTable::flat(2).unwrap().digest(),
             ng: built[0].geom.ng as u32,
             workers: arm.workers(),
             block_credit: 4096,

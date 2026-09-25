@@ -45,6 +45,9 @@ pub struct Identity {
     pub config_digest: Digest,
     pub plan_digest: Digest,
     pub placement_digest: Digest,
+    /// the phase table every worker walks: its digest, so two workers with different
+    /// tables part at the handshake
+    pub phase_table_digest: Digest,
     pub ng: u32,
     pub workers: u32,
     pub block_credit: u32,
@@ -234,6 +237,7 @@ impl Hello {
         put_u64(&mut out, self.identity.config_digest.0);
         put_u64(&mut out, self.identity.plan_digest.0);
         put_u64(&mut out, self.identity.placement_digest.0);
+        put_u64(&mut out, self.identity.phase_table_digest.0);
         put_u32(&mut out, self.identity.ng);
         put_u32(&mut out, self.identity.workers);
         put_u32(&mut out, self.identity.block_credit);
@@ -258,6 +262,7 @@ impl Hello {
         let config_digest = Digest(c.u64()?);
         let plan_digest = Digest(c.u64()?);
         let placement_digest = Digest(c.u64()?);
+        let phase_table_digest = Digest(c.u64()?);
         let ng = c.u32()?;
         let workers = c.u32()?;
         let block_credit = c.u32()?;
@@ -272,6 +277,7 @@ impl Hello {
                 config_digest,
                 plan_digest,
                 placement_digest,
+                phase_table_digest,
                 ng,
                 workers,
                 block_credit,
@@ -318,6 +324,9 @@ fn disagreement(mine: &Hello, theirs: &Hello, worker: WorkerId) -> Option<String
         return Some(format!(
             "placement disagreement with {worker:?} (launcher error)"
         ));
+    }
+    if t.phase_table_digest != m.phase_table_digest {
+        return Some(format!("phase table disagreement with {worker:?}"));
     }
     None
 }
@@ -667,6 +676,7 @@ mod tests {
             config_digest: Digest(1),
             plan_digest: Digest(2),
             placement_digest: Digest(3),
+            phase_table_digest: Digest(4),
             ng: 2,
             workers: 2,
             block_credit: 4096,
@@ -699,7 +709,14 @@ mod tests {
         assert!(
             disagreement(&mine, &previous, WorkerId(1))
                 .unwrap()
-                .contains("protocol 1 against 4")
+                .contains("protocol 1 against 5")
+        );
+        let mut table = mine.clone();
+        table.identity.phase_table_digest = Digest(11);
+        assert!(
+            disagreement(&mine, &table, WorkerId(1))
+                .unwrap()
+                .contains("phase table")
         );
         let mut plan = mine.clone();
         plan.identity.plan_digest = Digest(9);
@@ -782,6 +799,7 @@ mod trickle_tests {
                 config_digest: Digest(1),
                 plan_digest: Digest(2),
                 placement_digest: Digest(3),
+                phase_table_digest: Digest(4),
                 ng: 2,
                 workers: 2,
                 block_credit: 1,
@@ -805,6 +823,7 @@ mod trickle_tests {
                 config_digest: Digest(1),
                 plan_digest: Digest(2),
                 placement_digest: Digest(3),
+                phase_table_digest: Digest(4),
                 ng: 2,
                 workers: 2,
                 block_credit: 1,

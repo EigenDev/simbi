@@ -35,7 +35,7 @@ pub const MAGIC: [u8; 4] = *b"SFAB";
 /// occurrence with an audit after each exchange (prime 0, its audit 1, then per stage k from
 /// 2 + 3k: flag exchange, halos, audit); version 2 had no audit points and version 1
 /// numbered stage k's halos 1 + k.
-pub const VERSION: u16 = 4;
+pub const VERSION: u16 = 5;
 pub const HEADER_LEN: usize = 36;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -206,12 +206,12 @@ mod tests {
         v[4] = 9;
         assert!(matches!(Header::decode(&v), Err(FrameError::Version(_))));
         // the previous protocol versions, whose exchange-point bytes mean different points
-        for previous in [1u16, 2, 3] {
+        for previous in [1u16, 2, 3, 4] {
             let mut old = bytes;
             old[4..6].copy_from_slice(&previous.to_le_bytes());
             assert!(matches!(Header::decode(&old), Err(FrameError::Version(v)) if v == previous));
         }
-        assert_eq!(VERSION, 4, "a change of wire meaning takes a new version and a new pin");
+        assert_eq!(VERSION, 5, "a change of wire meaning takes a new version and a new pin");
         let mut k = bytes;
         k[6] = 200;
         assert!(matches!(Header::decode(&k), Err(FrameError::Kind(200))));

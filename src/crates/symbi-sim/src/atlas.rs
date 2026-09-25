@@ -304,6 +304,26 @@ pub enum ExchangePoint {
     /// interface face to the tile above, which compares it with its own bit for bit. the
     /// audit reads both copies and writes neither.
     Audit(AuditAt),
+    /// one point of one fine substep of a refined run: the fine plan moves here, the root
+    /// plan carries nothing
+    Fine { substep: u8, point: FinePoint },
+    /// after the restriction and the reflux into the root: the root halos carry the
+    /// restricted covered cells before the next step's prolongation snapshot and the
+    /// checkpoint read them
+    Restrict,
+}
+
+/// the points of one fine substep, in order
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum FinePoint {
+    /// after the prolongation and the physical fill: the fine cut halos
+    Prolong,
+    Troubled(u8),
+    Stage(u8),
+    Audit(u8),
+    /// after the fine tail's recovery and physical fill: the fine cut halos again, and the
+    /// EMF contributions of the substep
+    PostTail,
 }
 
 /// the exchange an interface audit follows.
@@ -312,71 +332,56 @@ pub enum AuditAt {
     Prime,
     Stage(u8),
     Rollback,
+    Restrict,
     /// before a checkpoint is opened, after the step's last exchange
     Checkpoint,
 }
 
 impl ExchangePoint {
-    pub const ROLLBACK_WIRE: u8 = 0xF0;
-    /// the post-step exchange sits after every stage's bytes and before the rollback's
-    pub const POST_STEP_WIRE: u8 = 0xEF;
-    pub const CHECKPOINT_AUDIT_WIRE: u8 = 0xF8;
-    /// stage `k` owns three bytes from `STAGE_BASE + 3k`: its flag exchange, its halos, its
-    /// audit.
-    const STAGE_BASE: u8 = 2;
-    /// the largest stage index the wire byte holds below the post-step byte.
-    pub const MAX_STAGE: u8 = (Self::POST_STEP_WIRE - Self::STAGE_BASE) / 3 - 1;
-
-    /// whether a wire byte names a `Troubled` point.
-    pub fn is_troubled_wire(byte: u8) -> bool {
-        matches!(Self::from_wire(byte), Some(ExchangePoint::Troubled(_)))
+    /// whether this point is a `Troubled` exchange on any level
+    pub fn is_troubled(self) -> bool {
+        matches!(
+            self,
+            ExchangePoint::Troubled(_) | ExchangePoint::Fine { point: FinePoint::Troubled(_), .. }
+        )
     }
 
-    /// whether a wire byte names an `Audit` point.
-    pub fn is_audit_wire(byte: u8) -> bool {
-        matches!(Self::from_wire(byte), Some(ExchangePoint::Audit(_)))
+    /// whether this point is an interface audit on any level
+    pub fn is_audit(self) -> bool {
+        matches!(
+            self,
+            ExchangePoint::Audit(_) | ExchangePoint::Fine { point: FinePoint::Audit(_), .. }
+        )
     }
 
-    pub fn to_wire(self) -> u8 {
-        match self {
-            ExchangePoint::Prime => 0,
-            // the bytes rise in the order the points occur inside one attempt, which is the
-            // order the grant table requires of successive phases: stage k's flags cross
-            // before stage k's halos.
-            // before stage k's halos, and every audit follows the exchange it audits.
-            ExchangePoint::Audit(AuditAt::Prime) => 1,
-            ExchangePoint::Troubled(k) => Self::STAGE_BASE + 3 * k,
-            ExchangePoint::Stage(k) => Self::STAGE_BASE + 3 * k + 1,
-            ExchangePoint::Audit(AuditAt::Stage(k)) => Self::STAGE_BASE + 3 * k + 2,
-            ExchangePoint::PostStep => Self::POST_STEP_WIRE,
-            ExchangePoint::Rollback => Self::ROLLBACK_WIRE,
-            ExchangePoint::Audit(AuditAt::Rollback) => Self::ROLLBACK_WIRE + 1,
-            ExchangePoint::Audit(AuditAt::Checkpoint) => Self::CHECKPOINT_AUDIT_WIRE,
-        }
+    /// whether this point belongs to the fine level
+    pub fn is_fine(self) -> bool {
+        matches!(self, ExchangePoint::Fine { .. })
     }
 
-    pub fn from_wire(byte: u8) -> Option<Self> {
-        match byte {
-            0 => Some(ExchangePoint::Prime),
-            Self::POST_STEP_WIRE => Some(ExchangePoint::PostStep),
-            Self::ROLLBACK_WIRE => Some(ExchangePoint::Rollback),
-            Epoch::NO_POINT => None,
-            1 => Some(ExchangePoint::Audit(AuditAt::Prime)),
-            k if k == Self::ROLLBACK_WIRE + 1 => Some(ExchangePoint::Audit(AuditAt::Rollback)),
-            Self::CHECKPOINT_AUDIT_WIRE => Some(ExchangePoint::Audit(AuditAt::Checkpoint)),
-            k if k < Self::POST_STEP_WIRE => {
-                let stage = (k - Self::STAGE_BASE) / 3;
-                if stage > Self::MAX_STAGE {
-                    return None;
-                }
-                Some(match (k - Self::STAGE_BASE) % 3 {
-                    0 => ExchangePoint::Troubled(stage),
-                    1 => ExchangePoint::Stage(stage),
-                    _ => ExchangePoint::Audit(AuditAt::Stage(stage)),
-                })
-            }
-            _ => None,
-        }
+    /// a stable code of the point's kind and indices for the phase table's digest
+    pub fn kind_code(self) -> u32 {
+        let (kind, a, b): (u32, u32, u32) = match self {
+            ExchangePoint::Prime => (0, 0, 0),
+            ExchangePoint::Stage(k) => (1, k as u32, 0),
+            ExchangePoint::Troubled(k) => (2, k as u32, 0),
+            ExchangePoint::PostStep => (3, 0, 0),
+            ExchangePoint::Rollback => (4, 0, 0),
+            ExchangePoint::Audit(AuditAt::Prime) => (5, 0, 0),
+            ExchangePoint::Audit(AuditAt::Stage(k)) => (6, k as u32, 0),
+            ExchangePoint::Audit(AuditAt::Rollback) => (7, 0, 0),
+            ExchangePoint::Audit(AuditAt::Restrict) => (8, 0, 0),
+            ExchangePoint::Audit(AuditAt::Checkpoint) => (9, 0, 0),
+            ExchangePoint::Restrict => (10, 0, 0),
+            ExchangePoint::Fine { substep, point } => match point {
+                FinePoint::Prolong => (11, substep as u32, 0),
+                FinePoint::Troubled(k) => (12, substep as u32, k as u32),
+                FinePoint::Stage(k) => (13, substep as u32, k as u32),
+                FinePoint::Audit(k) => (14, substep as u32, k as u32),
+                FinePoint::PostTail => (15, substep as u32, 0),
+            },
+        };
+        kind << 16 | a << 8 | b
     }
 }
 
@@ -670,13 +675,15 @@ impl<const D: usize> ExchangePlan<D> {
     }
 
     /// whether `transfer` moves at `point`: an interface audit at the `Audit` points, a banded
-    /// cell field at the `Troubled` points, every other transfer at every other point.
+    /// cell field at the `Troubled` points, every other transfer at every other root point;
+    /// a root plan moves nothing at a fine point.
     pub fn moves_at(&self, transfer: &Transfer<D>, point: ExchangePoint) -> bool {
         let banded = matches!(
             self.schema.entries[transfer.field as usize].kind,
             FieldKind::CellBand(_)
         );
         match point {
+            ExchangePoint::Fine { .. } => false,
             ExchangePoint::Audit(_) => transfer.audit,
             ExchangePoint::Troubled(_) => banded,
             _ => !banded && !transfer.audit,
@@ -1177,23 +1184,6 @@ mod tests {
         assert!(Placement::new(2, vec![WorkerId(1), WorkerId(0)]).is_ok());
     }
 
-    #[test]
-    fn exchange_point_round_trips_the_wire_byte() {
-        for p in [
-            ExchangePoint::Prime,
-            ExchangePoint::Troubled(0),
-            ExchangePoint::Stage(0),
-            ExchangePoint::Troubled(1),
-            ExchangePoint::Stage(1),
-            ExchangePoint::Troubled(ExchangePoint::MAX_STAGE),
-            ExchangePoint::Stage(ExchangePoint::MAX_STAGE),
-            ExchangePoint::Rollback,
-        ] {
-            assert_eq!(ExchangePoint::from_wire(p.to_wire()), Some(p));
-        }
-        assert_eq!(ExchangePoint::from_wire(Epoch::NO_POINT), None);
-    }
-
     /// a banded cell field moves the one ghost layer next to the interior under a three-cell
     /// allocation, at the `Troubled` points and no other; every other field moves at every
     /// other point.
@@ -1225,34 +1215,19 @@ mod tests {
         assert!(banded > 0, "the plan carries no banded transfer");
     }
 
-    /// the grant table accepts successive phases in rising epoch order, so the point bytes
-    /// rise in the order the points occur inside one attempt: prime, then per stage the flag
-    /// exchange before the halo exchange, then the rollback.
+    /// a root plan moves nothing at a fine point and everything but bands and audits at the
+    /// restriction
     #[test]
-    fn exchange_point_bytes_rise_in_the_order_the_points_occur() {
-        let order = [
-            ExchangePoint::Prime,
-            ExchangePoint::Audit(AuditAt::Prime),
-            ExchangePoint::Troubled(0),
-            ExchangePoint::Stage(0),
-            ExchangePoint::Audit(AuditAt::Stage(0)),
-            ExchangePoint::Troubled(1),
-            ExchangePoint::Stage(1),
-            ExchangePoint::Audit(AuditAt::Stage(1)),
-            ExchangePoint::PostStep,
-            ExchangePoint::Rollback,
-            ExchangePoint::Audit(AuditAt::Rollback),
-            ExchangePoint::Audit(AuditAt::Checkpoint),
-        ];
-        let bytes: Vec<u8> = order.iter().map(|p| p.to_wire()).collect();
-        assert_eq!(bytes, vec![0, 1, 2, 3, 4, 5, 6, 7, 0xEF, 0xF0, 0xF1, 0xF8]);
-        for p in order {
-            assert_eq!(ExchangePoint::from_wire(p.to_wire()), Some(p));
+    fn a_root_plan_is_idle_at_fine_points_and_moves_state_at_the_restriction() {
+        let p = ragged();
+        let schema = FieldSchema::new().cell("rho").cell_band("fofc_flag", 1);
+        let plan = ExchangePlan::compile(&p, &Topology::open(), &schema, 3).unwrap();
+        for t in plan.transfers() {
+            let is_band = t.field == 1;
+            assert!(!plan.moves_at(t, ExchangePoint::Fine { substep: 0, point: FinePoint::Stage(0) }));
+            assert!(!plan.moves_at(t, ExchangePoint::Fine { substep: 1, point: FinePoint::Prolong }));
+            assert_eq!(plan.moves_at(t, ExchangePoint::Restrict), !is_band && !t.audit);
         }
-        assert!(ExchangePoint::Audit(AuditAt::Stage(ExchangePoint::MAX_STAGE)).to_wire() < ExchangePoint::POST_STEP_WIRE);
-        assert!(ExchangePoint::is_troubled_wire(2) && !ExchangePoint::is_troubled_wire(3));
-        assert!(ExchangePoint::is_audit_wire(1) && ExchangePoint::is_audit_wire(4));
-        assert!(!ExchangePoint::is_troubled_wire(ExchangePoint::ROLLBACK_WIRE));
     }
 
     /// over every tile and field kind, the owned boxes are pairwise disjoint and cover the global

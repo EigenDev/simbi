@@ -234,7 +234,7 @@ where
     let fields = field_lists(tiles, stores, n_tiles);
     let mut run = || -> Result<(), FabricError> {
         for axis in 0..D {
-            let epoch = PlanExchange::<D>::epoch(point, step, attempt, axis);
+            let epoch = exchange.epoch(point, step, attempt, axis);
             exchange.open_axis(&fields, devices, transport, fabric, epoch)?;
             fabric.wait(deadline)?;
             exchange.finish_axis_at(&fields, fabric, axis, point)?;
@@ -451,6 +451,18 @@ where
     let march_start = Instant::now();
     let mut in_callback = Duration::ZERO;
     let stages = cfg.timestepping.stages();
+    if exchange.table().stages() as usize != stages.len() || exchange.table().substeps() != 0 {
+        return Err(fail(
+            fabric,
+            WorkerError::Refused(format!(
+                "the session's phase table holds {} root stages and {} fine substeps; this worker \
+                 runs {} stages on a flat grid",
+                exchange.table().stages(),
+                exchange.table().substeps(),
+                stages.len()
+            )),
+        ));
+    }
     let multistage = needs_step_snapshot(stages);
     let schedule = stage_schedule(stages);
 

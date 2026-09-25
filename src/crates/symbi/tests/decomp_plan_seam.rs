@@ -23,6 +23,7 @@ use symbi_hydro::eos::IdealGas;
 use symbi_hydro::newtonian::Newtonian;
 use symbi_hydro::newtonian_mhd::NewtonianMhd;
 use symbi_sim::atlas::{ExchangePlan, ExchangePoint, Placement, WorkerId};
+use symbi_sim::phase_table::PhaseTable;
 use symbi_sim::plan_exchange::PlanExchange;
 use symbi_xpu::{CpuSpace, HostMemory};
 
@@ -163,7 +164,7 @@ fn assert_matches<const DOF: usize, S, F>(
         Placement::new(workers, arm.owner.iter().map(|&w| WorkerId(w)).collect()).unwrap();
     let link = Loopback::new();
     let exchanges: Vec<PlanExchange<'_, 2>> = (0..workers)
-        .map(|w| PlanExchange::new(&plan, &placement, WorkerId(w)))
+        .map(|w| PlanExchange::new(&plan, &placement, WorkerId(w), PhaseTable::flat(2).unwrap()))
         .collect();
     let mut fabrics: Vec<Fabric<Loopback>> = exchanges
         .iter()
@@ -172,7 +173,7 @@ fn assert_matches<const DOF: usize, S, F>(
 
     let mut restore: Option<Box<dyn Fn(&[&FieldStore<2, DOF, HostMemory, f64>])>> = None;
     for axis in 0..2 {
-        let epoch = PlanExchange::<2>::epoch(ExchangePoint::Prime, 0, 0, axis);
+        let epoch = exchanges[0].epoch(ExchangePoint::Prime, 0, 0, axis);
         for (ex, fabric) in exchanges.iter().zip(fabrics.iter_mut()) {
             ex.open_axis(&fields, &devices, &LocalCopy, fabric, epoch)
                 .unwrap();
@@ -385,7 +386,7 @@ fn run_audit(
     let placement = Placement::new(workers, owner.iter().map(|&w| WorkerId(w)).collect()).unwrap();
     let link = Loopback::new();
     let exchanges: Vec<PlanExchange<'_, 2>> = (0..workers)
-        .map(|w| PlanExchange::new(&plan, &placement, WorkerId(w)))
+        .map(|w| PlanExchange::new(&plan, &placement, WorkerId(w), PhaseTable::flat(2).unwrap()))
         .collect();
     let mut fabrics: Vec<Fabric<Loopback>> = exchanges
         .iter()
@@ -394,7 +395,7 @@ fn run_audit(
     let mut costs = vec![AuditCost::default(); workers as usize];
     for axis in 0..2 {
         let epoch =
-            PlanExchange::<2>::epoch(ExchangePoint::Audit(AuditAt::Prime), 0, 0, axis);
+            exchanges[0].epoch(ExchangePoint::Audit(AuditAt::Prime), 0, 0, axis);
         for ((ex, fabric), cost) in exchanges.iter().zip(fabrics.iter_mut()).zip(&mut costs) {
             ex.audit_open_axis(&fields, fabric, epoch, cost)?;
         }

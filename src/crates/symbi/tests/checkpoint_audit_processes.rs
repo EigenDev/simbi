@@ -37,6 +37,7 @@ use symbi_sim::checkpoint::{GlobalGrid, LevelTiles, PhysicsIdentity, TileView};
 use symbi_sim::distributed_checkpoint::{
     AuditBasis, CheckpointError, CheckpointRequest, audited_checkpoint, block_credit_for,
 };
+use symbi_sim::phase_table::PhaseTable;
 use symbi_sim::plan_exchange::PlanExchange;
 use symbi_sim::substrate_seam::KernelSet;
 use symbi_sim::worker::field_lists;
@@ -117,7 +118,7 @@ fn run_worker(me: WorkerId, ckpt: &Path) -> Result<(), String> {
     let identity = PhysicsIdentity::of(&built[0]);
     let schema = plan_schema(&*built[0]);
     let plan = ExchangePlan::compile(&p, &Topology::open(), &schema, built[0].geom.ng).unwrap();
-    let exchange = PlanExchange::new(&plan, &placement, me);
+    let exchange = PlanExchange::new(&plan, &placement, me, PhaseTable::flat(2).unwrap());
     let credit = block_credit_for(BUDGET, 2);
     let r = Rendezvous {
         me,
@@ -131,6 +132,7 @@ fn run_worker(me: WorkerId, ckpt: &Path) -> Result<(), String> {
             config_digest: Digest(1),
             plan_digest: plan.digest,
             placement_digest: placement.digest(),
+            phase_table_digest: PhaseTable::flat(2).unwrap().digest(),
             ng: built[0].geom.ng as u32,
             workers: WORKERS,
             block_credit: credit,
@@ -149,7 +151,7 @@ fn run_worker(me: WorkerId, ckpt: &Path) -> Result<(), String> {
         }
         let fields = field_lists(&tiles, &stores, n);
         for axis in 0..2 {
-            let epoch = PlanExchange::<2>::epoch(ExchangePoint::Prime, 0, 0, axis);
+            let epoch = exchange.epoch(ExchangePoint::Prime, 0, 0, axis);
             exchange
                 .open_axis(&fields, &vec![0; n], &LocalCopy, &mut fabric, epoch)
                 .map_err(|e| e.to_string())?;

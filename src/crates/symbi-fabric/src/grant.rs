@@ -16,6 +16,64 @@
 use crate::error::FabricError;
 use crate::ident::{Epoch, WorkerId};
 
+/// the legal sequence of phases within one attempt, as the phase table states it, indexed
+/// by the phase byte: `skippable` marks a phase a worker may pass without opening (the
+/// troubled-flag exchange of a clean stage, an audit when audits are off, the checkpoint
+/// audit between checkpoints), `branch` a phase a worker may jump to from any phase of the
+/// attempt (the rollback and its audit), and `init_only` a phase that occurs at the first
+/// attempt of the first step alone (the prime and its audit). a grant, or a local open,
+/// that passes a phase outside these names a divergent sequence.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PhaseRules {
+    pub skippable: Vec<bool>,
+    pub branch: Vec<bool>,
+    pub init_only: Vec<bool>,
+}
+
+impl PhaseRules {
+    pub fn len(&self) -> usize {
+        self.skippable.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.skippable.is_empty()
+    }
+
+    /// whether `next` may follow `last` in one worker's sequence: a branch target always;
+    /// otherwise every phase between them inside one attempt, or every phase before `next`
+    /// in a new attempt, is skippable or is one the worker does not owe (`owed` is false): a
+    /// peer's sequence is observed through the grants it owes this worker, so a phase in
+    /// which it receives nothing from this worker leaves no trace and passes unjudged, while
+    /// a worker's own opens are all owed
+    pub fn allows(
+        &self,
+        last: Option<Epoch>,
+        next: Epoch,
+        owed: impl Fn(usize) -> bool,
+    ) -> Result<(), String> {
+        let byte = next.point as usize;
+        if byte >= self.len() {
+            return Err(format!("phase byte {} outside the table of {} phases", next.point, self.len()));
+        }
+        if self.init_only[byte] && (next.step, next.attempt) != (0, 0) {
+            return Err(format!("{next:?} names a phase of the first attempt alone"));
+        }
+        if self.branch[byte] {
+            return Ok(());
+        }
+        let start = match last {
+            Some(l) if (l.step, l.attempt) == (next.step, next.attempt) => l.point as usize + 1,
+            _ => 0,
+        };
+        for b in start..byte {
+            if !(self.skippable[b] || self.init_only[b]) && owed(b) {
+                return Err(format!("{next:?} passes the phase {b}, which every worker opens"));
+            }
+        }
+        Ok(())
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct Tabled {
     epoch: Epoch,
@@ -28,6 +86,8 @@ pub struct GrantTable {
     slots: Vec<Option<Tabled>>,
     /// the most recent epoch consumed from each peer
     consumed: Vec<Option<Epoch>>,
+    /// the last grant tabled from each peer, the phase its sequence has reached
+    tabled_last: Vec<Option<Epoch>>,
 }
 
 fn same_point(a: &Epoch, b: &Epoch) -> bool {
@@ -40,7 +100,14 @@ impl GrantTable {
             axes,
             slots: vec![None; workers * axes],
             consumed: vec![None; workers],
+            tabled_last: vec![None; workers],
         }
+    }
+
+    /// the phase a peer's sequence has reached as this worker sees it: its last tabled
+    /// grant, else its last consumed one
+    pub fn reached(&self, peer: WorkerId) -> Option<Epoch> {
+        self.tabled_last[peer.0 as usize].or(self.consumed[peer.0 as usize])
     }
 
     fn slots_of(&self, peer: WorkerId) -> &[Option<Tabled>] {
@@ -81,6 +148,7 @@ impl GrantTable {
         match slots.iter_mut().find(|s| s.is_none()) {
             Some(slot) => {
                 *slot = Some(Tabled { epoch, count });
+                self.tabled_last[peer.0 as usize] = Some(epoch);
                 Ok(())
             }
             None => Err(FabricError::protocol(

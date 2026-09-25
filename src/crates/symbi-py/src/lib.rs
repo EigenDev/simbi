@@ -10793,6 +10793,7 @@ where
     use symbi_sim::checkpoint::{LevelTiles, PhysicsIdentity, TileView};
     use symbi_sim::distributed_checkpoint::{AuditBasis, CheckpointRequest, audited_checkpoint, block_credit_for};
     use symbi_sim::plan_exchange::PlanExchange;
+    use symbi_sim::phase_table::PhaseTable;
     use symbi_sim::substrate_seam::RegimeKind;
     use symbi_sim::worker::{WorkerConfig, WorkerError, evolve_worker};
 
@@ -10807,7 +10808,8 @@ where
     let schema = plan_schema(&*tiles[0].0);
     let seam = polar_seam_of_partition::<D>(&cfg.coord_system, &boundaries_nd::<D>(&cfg.boundaries), topology, partition);
     let plan = ExchangePlan::compile_with_seam(partition, topology, &schema, ng, seam).map_err(|e| e.to_string())?;
-    let exchange = PlanExchange::new(&plan, &placement, me);
+    let table = PhaseTable::flat(cfg.timestepping.stages().len() as u8).map_err(|e| e.to_string())?;
+    let exchange = PlanExchange::new(&plan, &placement, me, table);
     let budget = launch.staging_cells.max(1);
     let credit = block_credit_for(budget, D);
     let bind: std::net::IpAddr = launch
@@ -10826,6 +10828,7 @@ where
             config_digest: symbi_fabric::Digest(launch.config_digest),
             plan_digest: plan.digest,
             placement_digest: placement.digest(),
+            phase_table_digest: exchange.table().digest(),
             ng: ng as u32,
             workers: launch.workers as u32,
             block_credit: credit,
@@ -11492,7 +11495,7 @@ mod tile_coord_tests {
              linear hi {linear_hi})"
         );
         assert!(
-            kept[0].x_hi[0] <= true_hi + 1e-12 * true_hi,
+            kept[0].0.x_hi[0] <= true_hi + 1e-12 * true_hi,
             "clipped region extends past the tile's far face"
         );
     }

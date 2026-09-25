@@ -318,7 +318,14 @@ pub struct Fabric<L: Link> {
     /// exchange points whose phases move a different set of transfers: a selector over the
     /// point byte with its own `[peer][axis]` send counts, against which a grant for such a
     /// point is validated.
-    point_sends: Vec<(fn(u8) -> bool, Vec<Vec<u32>>)>,
+    /// the send counts of every phase of the table, `[byte][peer][axis]`; absent, every
+    /// phase carries `sends_per_peer_axis`
+    phase_counts: Option<Vec<Vec<Vec<u32>>>>,
+    /// the last phase this worker opened, the position of its own sequence
+    last_opened: Option<Epoch>,
+    /// the phase table's sequence rules, enforced on every peer's grants and on this
+    /// worker's opens
+    phase_rules: Option<crate::grant::PhaseRules>,
     phase: Phase,
     scratch: Vec<u8>,
     inbox: Vec<u8>,
@@ -391,7 +398,9 @@ impl<L: Link> Fabric<L> {
                 })
                 .collect(),
             sends_per_peer_axis,
-            point_sends: Vec::new(),
+            phase_counts: None,
+            last_opened: None,
+            phase_rules: None,
             phase: Phase {
                 open: false,
                 epoch: none_epoch(),
@@ -424,14 +433,34 @@ impl<L: Link> Fabric<L> {
         }
     }
 
-    /// give the exchange points whose byte `selects` accepts their own `[peer][axis]` send
-    /// counts: a grant for such a point must carry that count, and one for a peer and axis
-    /// with a zero count is refused, exactly as for every other point.
-    pub fn with_point_sends(mut self, selects: fn(u8) -> bool, counts: Vec<Vec<u32>>) -> Self {
-        assert_eq!(counts.len(), self.workers);
-        assert!(counts.iter().all(|p| p.len() == self.axes));
-        self.point_sends.push((selects, counts));
+    /// the send counts of every phase of the table, `[byte][peer][axis]`: a grant for a
+    /// phase must carry that count, one for a peer and axis with a zero count is refused,
+    /// and a phase byte beyond the table is a protocol error.
+    pub fn with_phase_counts(mut self, counts: Vec<Vec<Vec<u32>>>) -> Self {
+        assert!(counts.iter().all(|c| c.len() == self.workers && c.iter().all(|p| p.len() == self.axes)));
+        self.phase_counts = Some(counts);
         self
+    }
+
+    /// enforce the phase table's sequence on every peer's grants and on this worker's opens
+    pub fn with_phase_rules(mut self, rules: crate::grant::PhaseRules) -> Self {
+        self.phase_rules = Some(rules);
+        self
+    }
+
+    /// whether `peer` owes this worker a grant at phase `byte`: this worker sends it
+    /// something there
+    fn owed_by(&self, peer: WorkerId, byte: usize) -> bool {
+        let counts = match self.phase_counts.as_ref() {
+            Some(table) => match table.get(byte) {
+                Some(c) => c,
+                None => return false,
+            },
+            None => &self.sends_per_peer_axis,
+        };
+        counts
+            .get(peer.0 as usize)
+            .is_some_and(|per_axis| per_axis.iter().any(|&c| c > 0))
     }
 
     /// set the block credit agreed at the handshake: the bytes a worker may have in flight
@@ -549,6 +578,17 @@ impl<L: Link> Fabric<L> {
                 .chain(spec.sends.iter())
                 .any(|&(_, p)| p == peer)
         };
+        if let Some(rules) = self.phase_rules.as_ref() {
+            let same_phase = self
+                .last_opened
+                .is_some_and(|l| (l.step, l.attempt, l.point) == (spec.epoch.step, spec.epoch.attempt, spec.epoch.point));
+            if !same_phase {
+                // a worker opens every phase of the table itself: all of them are owed
+                rules
+                    .allows(self.last_opened, spec.epoch, |_| true)
+                    .map_err(|why| self.local(format!("open of {:?}: {why}", spec.epoch)))?;
+            }
+        }
         self.grants.open(spec.epoch, exchanges_with)?;
         if let Some(&(_, peer)) = spec
             .receives
@@ -608,6 +648,7 @@ impl<L: Link> Fabric<L> {
         }
         self.phase.epoch = spec.epoch;
         self.phase.open = true;
+        self.last_opened = Some(spec.epoch);
         Ok(())
     }
 
@@ -714,12 +755,17 @@ impl<L: Link> Fabric<L> {
         match header.kind {
             Kind::Grant => {
                 let axis = header.epoch.axis as usize;
-                let point = header.epoch.point;
-                let expected = self
-                    .point_sends
-                    .iter()
-                    .find(|(selects, _)| selects(point))
-                    .map_or(&self.sends_per_peer_axis, |(_, counts)| counts)
+                let point = header.epoch.point as usize;
+                let counts = match self.phase_counts.as_ref() {
+                    Some(table) => table.get(point).ok_or_else(|| {
+                        FabricError::protocol(
+                            from,
+                            format!("grant for {:?}, a phase outside the table of {} phases", header.epoch, table.len()),
+                        )
+                    })?,
+                    None => &self.sends_per_peer_axis,
+                };
+                let expected = counts
                     .get(from.0 as usize)
                     .and_then(|p| p.get(axis))
                     .copied()
@@ -741,6 +787,17 @@ impl<L: Link> Fabric<L> {
                             header.epoch, header.id
                         ),
                     ));
+                }
+                if let Some(rules) = self.phase_rules.as_ref() {
+                    let reached = self.grants.reached(from);
+                    let same_phase = reached.is_some_and(|r| {
+                        (r.step, r.attempt, r.point) == (header.epoch.step, header.epoch.attempt, header.epoch.point)
+                    });
+                    if !same_phase {
+                        rules
+                            .allows(reached, header.epoch, |b| self.owed_by(from, b))
+                            .map_err(|why| FabricError::protocol(from, format!("grant for {:?}: {why}", header.epoch)))?;
+                    }
                 }
                 self.grants.table(from, header.epoch, header.id)
             }
@@ -1355,6 +1412,11 @@ impl<L: Link> Fabric<L> {
         self.phase.receives.clear();
         self.phase.open = false;
         Ok(())
+    }
+
+    /// the epoch of the open phase
+    pub fn phase_epoch(&self) -> Option<Epoch> {
+        self.phase.open.then_some(self.phase.epoch)
     }
 
     pub fn is_open(&self) -> bool {

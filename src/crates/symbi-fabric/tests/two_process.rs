@@ -138,6 +138,7 @@ fn identity(workers: u32) -> Identity {
         config_digest: Digest(env_u64("W_CONFIG", 11)),
         plan_digest: Digest(env_u64("W_PLAN", 22)),
         placement_digest: Digest(env_u64("W_PLACEMENT", 33)),
+        phase_table_digest: Digest(7),
         ng: 2,
         workers,
         block_credit: BLOCK_CREDIT,

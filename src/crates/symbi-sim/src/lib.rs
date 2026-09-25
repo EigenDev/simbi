@@ -30,6 +30,7 @@ pub mod distributed_checkpoint;
 pub mod driver;
 pub mod hydro_ops;
 pub mod mass_transport;
+pub mod phase_table;
 pub mod plan_exchange;
 pub mod stage;
 pub mod state;
