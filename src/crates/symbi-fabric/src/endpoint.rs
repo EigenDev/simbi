@@ -581,7 +581,7 @@ impl<L: Link> Fabric<L> {
         if let Some(rules) = self.phase_rules.as_ref() {
             // a worker opens every phase of the table itself: all of them are owed
             rules
-                .allows(self.last_opened, spec.epoch, |_| true)
+                .allows(self.last_opened, spec.epoch, |_| true, Some(self.axes))
                 .map_err(|why| self.local(format!("open of {:?}: {why}", spec.epoch)))?;
         }
         self.grants.open(spec.epoch, exchanges_with)?;
@@ -786,7 +786,7 @@ impl<L: Link> Fabric<L> {
                 if let Some(rules) = self.phase_rules.as_ref() {
                     let reached = self.grants.reached(from);
                     rules
-                        .allows(reached, header.epoch, |b| self.owed_by(from, b))
+                        .allows(reached, header.epoch, |b| self.owed_by(from, b), None)
                         .map_err(|why| FabricError::protocol(from, format!("grant for {:?}: {why}", header.epoch)))?;
                 }
                 self.grants.table(from, header.epoch, header.id)

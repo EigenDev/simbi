@@ -101,6 +101,11 @@ struct March {
     retries: u64,
     troubled_phases: u64,
     audits: u64,
+    /// the fine stage exchanges opened in the attempt that rejects
+    fine_stage_opens_in_rejected_attempt: u64,
+    /// on c: b's grant for step 1's first stage was tabled while c awaited the held
+    /// troubled result
+    early_grant_seen: bool,
 }
 
 impl March {
@@ -152,20 +157,31 @@ impl March {
             let mut attempt: u16 = 0;
             'attempt: loop {
                 for k in 0..stages {
-                    // a troubled cell on a at the first stage of step 1; the coordinator holds
-                    // c's result back so c learns the branch after a and b have opened it
+                    // a troubled cell on a at the first stage of step 1
                     let troubled_here = self.me == A && step == 1 && k == 0 && attempt == 0;
-                    if self.fabric.is_coordinator() && step == 1 && k == 0 && attempt == 0 {
-                        self.fabric.delay_result_to(C, Duration::from_millis(150));
-                    }
                     if self.any(troubled_here)? {
                         self.troubled_phases += 1;
                         self.open_phase(ExchangePoint::Troubled(k), step, attempt)?;
                     }
-                    self.open_phase(ExchangePoint::Stage(k), step, attempt)?;
+                    // the rejection is decided before the stage's halos move. at step 1's
+                    // first stage the coordinator holds c's result back, so a and b open the
+                    // stage while c still awaits the vote, and b's grant for it (b receives
+                    // from c there) reaches c before its own result
+                    let held = step == 1 && k == 0 && attempt == 0;
+                    if held && self.fabric.is_coordinator() {
+                        self.fabric.delay_result_to(C, Duration::from_millis(150));
+                    }
                     if self.any(false)? {
                         unreachable!("no root stage rejects");
                     }
+                    if held && self.me == C {
+                        let stage = self.table.byte_of(ExchangePoint::Stage(0)).unwrap();
+                        self.early_grant_seen = self
+                            .fabric
+                            .grants()
+                            .is_tabled(B, Epoch { step, attempt, point: stage, axis: 1 });
+                    }
+                    self.open_phase(ExchangePoint::Stage(k), step, attempt)?;
                     self.open_phase(ExchangePoint::Audit(AuditAt::Stage(k)), step, attempt)?;
                     self.audits += 1;
                 }
@@ -175,8 +191,9 @@ impl March {
                         if self.any(false)? {
                             unreachable!("no fine stage is troubled");
                         }
-                        self.open_phase(ExchangePoint::Fine { substep: s, point: FinePoint::Stage(k) }, step, attempt)?;
-                        // b rejects the last stage of the second substep of step 2's first attempt
+                        // b rejects the last stage of the second substep of step 2's first
+                        // attempt; the rejection is decided before the stage's halos move, so
+                        // the rejected stage sends no state
                         let reject_here = self.me == B && step == 2 && attempt == 0 && s == 1 && k == 1;
                         if self.any(reject_here)? {
                             self.open_phase(ExchangePoint::Rollback, step, attempt)?;
@@ -185,6 +202,10 @@ impl March {
                             attempt += 1;
                             continue 'attempt;
                         }
+                        if step == 2 && attempt == 0 {
+                            self.fine_stage_opens_in_rejected_attempt += 1;
+                        }
+                        self.open_phase(ExchangePoint::Fine { substep: s, point: FinePoint::Stage(k) }, step, attempt)?;
                     }
                     self.open_phase(ExchangePoint::Fine { substep: s, point: FinePoint::PostTail }, step, attempt)?;
                 }
@@ -227,7 +248,16 @@ fn worker_main() -> ! {
         let fabric = Fabric::new(link, me, session, WORKERS, AXES, &LENS, default)
             .with_phase_counts(counts)
             .with_phase_rules(table.rules());
-        let mut march = March { me, table: table.clone(), fabric, retries: 0, troubled_phases: 0, audits: 0 };
+        let mut march = March {
+            me,
+            table: table.clone(),
+            fabric,
+            retries: 0,
+            troubled_phases: 0,
+            audits: 0,
+            fine_stage_opens_in_rejected_attempt: 0,
+            early_grant_seen: false,
+        };
         let walked = march.walk();
         if let Err(e) = &walked {
             march.fabric.abort(&e.to_string());
@@ -237,8 +267,14 @@ fn worker_main() -> ! {
         let high: Vec<usize> = (0..WORKERS as u32).map(|p| march.fabric.grants().high_water(WorkerId(p))).collect();
         march.fabric.finish(DEADLINE)?;
         Ok(format!(
-            "REPORT worker={} retries={} troubled_phases={} audits={} high_water={:?}",
-            me.0, march.retries, march.troubled_phases, march.audits, high
+            "REPORT worker={} retries={} troubled_phases={} audits={} rejected_attempt_fine_stage_opens={} early_grant={} high_water={:?}",
+            me.0,
+            march.retries,
+            march.troubled_phases,
+            march.audits,
+            march.fine_stage_opens_in_rejected_attempt,
+            u8::from(march.early_grant_seen),
+            high
         ))
     };
     match run() {
@@ -339,6 +375,12 @@ fn three_workers_walk_the_refined_table_over_tcp_with_collectives() {
         };
         assert_eq!(field("retries"), "1", "{line}");
         assert_eq!(field("troubled_phases"), "1", "{line}");
+        // the rejected attempt exchanged the first substep's two stages and the second
+        // substep's first; the rejected stage moved no state
+        assert_eq!(field("rejected_attempt_fine_stage_opens"), "3", "{line}");
+        if field("worker") == "2" {
+            assert_eq!(field("early_grant"), "1", "c never held b's grant while awaiting the held result; the skew premise is vacuous: {line}");
+        }
         // the prime audit, one per root stage per attempt (3 steps of 2 stages, one retried
         // step adds 2), one per checkpoint
         assert_eq!(field("audits"), (1 + 2 * 3 + 2 + 3).to_string(), "{line}");

@@ -330,20 +330,26 @@ fn a_peer_that_passes_an_owed_phase_is_refused_on_receipt() {
     walk(&mut unruled).expect("without the sequence rules the grant is tabled; the premise is vacuous");
 }
 
-/// a worker's own opens are judged strictly: an axis repeated or reversed, a phase moved
-/// backward, a checkpoint audit inside the subcycle, a rollback audit without a rollback
+/// a worker's own opens are judged strictly on a two-axis endpoint: an axis repeated,
+/// reversed or omitted, a phase left before its last axis or opened past its first, a
+/// phase moved backward, step zero skipped from the prime, a checkpoint audit inside the
+/// subcycle, a rollback audit without a rollback
 #[test]
 fn a_worker_is_refused_at_its_own_open_for_every_illegal_transition() {
     let table = table();
     let byte = |p| table.byte_of(p).unwrap();
     let e = |attempt: u16, point: u8, axis: u8| Epoch { step: 0, attempt, point, axis };
     let prolong = byte(ExchangePoint::Fine { substep: 0, point: FinePoint::Prolong });
-    let cases: [(&str, Vec<Epoch>, &str); 5] = [
-        ("a repeated axis", vec![e(0, byte(ExchangePoint::Prime), 0), e(0, byte(ExchangePoint::Prime), 0)], "repeats or reverses the axis"),
-        ("a reversed axis", vec![e(0, byte(ExchangePoint::Stage(0)), 0), e(0, byte(ExchangePoint::Stage(0)), 1), e(0, byte(ExchangePoint::Stage(0)), 0)], "repeats or reverses the axis"),
-        ("a backward phase", vec![e(0, byte(ExchangePoint::Stage(0)), 0), e(0, byte(ExchangePoint::Stage(1)), 0), e(0, byte(ExchangePoint::Stage(0)), 0)], "moves backward"),
-        ("a checkpoint audit inside the subcycle", vec![e(0, byte(ExchangePoint::Stage(0)), 0), e(0, byte(ExchangePoint::Stage(1)), 0), e(0, prolong, 0), e(symbi_fabric::CHECKPOINT_ATTEMPT, byte(ExchangePoint::Audit(AuditAt::Checkpoint)), 0)], "passes the phase"),
-        ("a rollback audit without a rollback", vec![e(0, byte(ExchangePoint::Stage(0)), 0), e(0, byte(ExchangePoint::Audit(AuditAt::Rollback)), 0)], "audits a rollback"),
+    let stage = |k, axis| e(0, byte(ExchangePoint::Stage(k)), axis);
+    let cases: [(&str, Vec<Epoch>, &str); 8] = [
+        ("a repeated axis", vec![e(0, byte(ExchangePoint::Prime), 0), e(0, byte(ExchangePoint::Prime), 0)], "skips an axis"),
+        ("a reversed axis", vec![stage(0, 0), stage(0, 1), stage(0, 0)], "skips an axis"),
+        ("a backward phase", vec![stage(0, 0), stage(0, 1), stage(1, 0), stage(1, 1), stage(0, 0)], "moves backward"),
+        ("a phase left before its last axis", vec![stage(0, 0), stage(1, 0)], "leaves"),
+        ("a phase opened past its first axis", vec![stage(0, 0), stage(0, 1), stage(1, 1)], "past its first axis"),
+        ("step zero skipped from the prime", vec![e(0, byte(ExchangePoint::Prime), 0), e(0, byte(ExchangePoint::Prime), 1), Epoch { step: 1, attempt: 0, point: byte(ExchangePoint::Stage(0)), axis: 0 }], "leaves the primed state"),
+        ("a checkpoint audit inside the subcycle", vec![stage(0, 0), stage(0, 1), stage(1, 0), stage(1, 1), e(0, prolong, 0), e(0, prolong, 1), e(symbi_fabric::CHECKPOINT_ATTEMPT, byte(ExchangePoint::Audit(AuditAt::Checkpoint)), 0)], "passes the phase"),
+        ("a rollback audit without a rollback", vec![stage(0, 0), stage(0, 1), e(0, byte(ExchangePoint::Audit(AuditAt::Rollback)), 0)], "audits a rollback"),
     ];
     for (label, script, marker) in cases {
         let link = Loopback::new();

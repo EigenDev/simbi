@@ -150,15 +150,19 @@ fn run_worker(me: WorkerId, ckpt: &Path) -> Result<(), String> {
             k.ghost_fill(s);
         }
         let fields = field_lists(&tiles, &stores, n);
-        for axis in 0..2 {
-            let epoch = exchange.epoch(ExchangePoint::Prime, 0, 0, axis);
-            exchange
-                .open_axis(&fields, &vec![0; n], &LocalCopy, &mut fabric, epoch)
-                .map_err(|e| e.to_string())?;
-            fabric.wait(DEADLINE).map_err(|e| e.to_string())?;
-            exchange
-                .finish_axis(&fields, &mut fabric, axis)
-                .map_err(|e| e.to_string())?;
+        // the prime, then the stage exchanges of one accepted attempt of step 0 (the state
+        // itself is unchanged): the audited checkpoint of step 0 follows an accepted attempt
+        for point in [ExchangePoint::Prime, ExchangePoint::Stage(0), ExchangePoint::Stage(1)] {
+            for axis in 0..2 {
+                let epoch = exchange.epoch(point, 0, 0, axis);
+                exchange
+                    .open_axis(&fields, &vec![0; n], &LocalCopy, &mut fabric, epoch)
+                    .map_err(|e| e.to_string())?;
+                fabric.wait(DEADLINE).map_err(|e| e.to_string())?;
+                exchange
+                    .finish_axis(&fields, &mut fabric, axis)
+                    .map_err(|e| e.to_string())?;
+            }
         }
         for (s, k) in stores.iter().zip(&kernels) {
             k.ghost_fill(s);
