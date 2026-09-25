@@ -358,7 +358,7 @@ impl<const D: usize, const DOF: usize, Mem: MemorySpace> FluxRegister<D, DOF, Me
     pub fn zero(&self) {
         self.debug_coarse_den.set(0.0);
         self.debug_fine_den.set(0.0);
-        for (face, dom) in self.faces.iter().zip(self.domains.iter()) {
+        for (face, dom) in self.faces.iter().chain(self.inboxes.iter()).zip(self.domains.iter().cycle()) {
             if let (Some(reg), Some(dom)) = (face, dom) {
                 for field in comps(reg) {
                     for coord in dom.iter() {
@@ -380,6 +380,9 @@ impl<const D: usize, const DOF: usize, Mem: MemorySpace> FluxRegister<D, DOF, Me
     ) {
         for side in 0..2usize {
             let idx = 2 * dir + side;
+            if self.roles[idx] == FaceRole::Contributing {
+                continue;
+            }
             let sign = if side == 0 { -1.0 } else { 1.0 };
             if let (Some(reg), Some(dom)) = (&self.faces[idx], &self.domains[idx]) {
                 for (cc, (rf, ff)) in comps(reg).into_iter().zip(comps(&flux[dir])).enumerate() {
@@ -412,6 +415,9 @@ impl<const D: usize, const DOF: usize, Mem: MemorySpace> FluxRegister<D, DOF, Me
         let r = ratio as isize;
         for side in 0..2usize {
             let idx = 2 * dir + side;
+            if self.roles[idx] == FaceRole::Receiving {
+                continue;
+            }
             let sign = if side == 0 { -1.0 } else { 1.0 };
             if let (Some(reg), Some(dom)) = (&self.faces[idx], &self.domains[idx]) {
                 for (cc, (rf, ff)) in comps(reg)
@@ -454,6 +460,9 @@ impl<const D: usize, const DOF: usize, Mem: MemorySpace> FluxRegister<D, DOF, Me
         for ax in 0..D {
             for side in 0..2usize {
                 let idx = 2 * ax + side;
+                if self.roles[idx] == FaceRole::Contributing {
+                    continue;
+                }
                 if let (Some(reg), Some(dom)) = (&self.faces[idx], &self.domains[idx]) {
                     let sign: f64 = if side == 0 { -1.0 } else { 1.0 };
                     for (rf, uf) in comps(reg).into_iter().zip(comps(cons)) {

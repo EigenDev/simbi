@@ -166,6 +166,7 @@ where
                 WorkerError::Refused("a magnetized refined run is outside the launched refinement until its registers move".into()),
             ));
         }
+        refuse_transported_registers(tiles).map_err(|e| fail(fabric, e))?;
         let forced = !base.injection.reject_at.is_empty() || tiles.iter().any(|h| h.forced_fine_rejection_pending());
         if forced {
             for h in tiles.iter() {
@@ -739,4 +740,28 @@ where
         });
     }
     Ok(cut_trouble)
+}
+
+/// a register unit crossing a cut is admitted on a uniform cartesian root alone: the
+/// constant-area register kernels are the gated arithmetic; the metric-weighted register
+/// path of a curvilinear chart awaits its own arithmetic and process gates
+pub fn refuse_transported_registers<R, const D: usize, const DOF: usize, M, E, S, Mem, K>(
+    tiles: &[Hierarchy<R, D, DOF, M, E, S, Mem, K>],
+) -> Result<(), WorkerError>
+where
+    R: Regime<f64, D> + Copy,
+    M: Metric<f64, D> + Copy + Send + Sync,
+    E: symbi_hydro::eos::EosFor<f64, <R as Regime<f64, D>>::Energy> + Copy + Send + Sync,
+    S: ExecutionSpace,
+    Mem: MemorySpace + Sync,
+    K: KernelSet<D, DOF, Mem, f64>,
+{
+    if tiles.iter().any(|h| h.transports_registers()) && !tiles.iter().all(|h| h.root_is_uniform_cartesian()) {
+        return Err(WorkerError::Refused(
+            "a flux-register contribution across a cut on a curvilinear chart is outside the launched \
+             refinement until its metric-weighted arithmetic is gated"
+                .into(),
+        ));
+    }
+    Ok(())
 }

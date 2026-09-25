@@ -1163,6 +1163,17 @@ where
         level < self.flux_registers.len()
     }
 
+    /// whether a register of this hierarchy sends or receives a unit across a cut
+    pub fn transports_registers(&self) -> bool {
+        self.flux_registers.iter().any(|r| r.has_contributing() || r.has_receiving())
+    }
+
+    /// whether the root lies on a uniform cartesian grid, where the register kernels carry
+    /// a constant face area and cell volume
+    pub fn root_is_uniform_cartesian(&self) -> bool {
+        uniform_cartesian(&self.levels[0].state)
+    }
+
     fn refine_levels(
         coarse: SimStateGeneric<R, NDIM, DOF, M, E, S, Mem>,
         coarse_kernels: K,
