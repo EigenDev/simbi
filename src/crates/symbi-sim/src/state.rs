@@ -2158,7 +2158,7 @@ impl<const D: usize> CompositeOwnership<D> {
     /// every refinement seam, and a coverage face on the level's own boundary keeps its core
     pub fn new(coverage: Option<Domain<D>>, interior: &Domain<D>, donor_width: usize) -> Self {
         match coverage {
-            Some(covered) => Self::clipped(covered.clone(), &covered, interior, donor_width),
+            Some(covered) => Self::clipped(covered.clone(), &covered, interior, donor_width, [[false; 2]; D]),
             None => Self { coverage: None, inactive: None },
         }
     }
@@ -2167,16 +2167,26 @@ impl<const D: usize> CompositeOwnership<D> {
     /// both in the tile's own cell indices. the inactive core is the patch's core: the donor
     /// shell contracts the patch's real faces (the refinement seams) wherever they lie, on this
     /// tile or beyond a cut, so a tile sees the same core the single hierarchy does. a patch
-    /// face on the tile boundary that is also the patch's real face is a physical boundary and
-    /// keeps its core; a coverage face at a cut continues into the neighbor tile.
-    pub fn clipped(coverage: Domain<D>, global: &Domain<D>, interior: &Domain<D>, donor_width: usize) -> Self {
+    /// face on a physical boundary of the tile that is also the patch's real face keeps its
+    /// core, since the single hierarchy's face there is a physical boundary too; a coverage
+    /// face on a cut (`cut[axis][side]`) either continues into the neighbor tile or is the
+    /// patch's real face with its donor shell on this side of the cut, and contracts.
+    pub fn clipped(
+        coverage: Domain<D>,
+        global: &Domain<D>,
+        interior: &Domain<D>,
+        donor_width: usize,
+        cut: [[bool; 2]; D],
+    ) -> Self {
         let width = donor_width as isize;
         let spaces = std::array::from_fn(|axis| {
             let local = &coverage.spaces[axis];
             let whole = &global.spaces[axis];
             let tile = &interior.spaces[axis];
-            let lo = if whole.lo == local.lo && local.lo == tile.lo { local.lo } else { local.lo.max(whole.lo + width) };
-            let hi = if whole.hi == local.hi && local.hi == tile.hi { local.hi } else { local.hi.min(whole.hi - width) };
+            let physical_lo = whole.lo == local.lo && local.lo == tile.lo && !cut[axis][0];
+            let physical_hi = whole.hi == local.hi && local.hi == tile.hi && !cut[axis][1];
+            let lo = if physical_lo { local.lo } else { local.lo.max(whole.lo + width) };
+            let hi = if physical_hi { local.hi } else { local.hi.min(whole.hi - width) };
             Space { name: local.name, lo, hi }
         });
         let inactive = spaces
@@ -3905,8 +3915,8 @@ mod tests {
         let whole = domain(8, 24);
         let global = CompositeOwnership::new(Some(whole.clone()), &domain(0, 32), 2);
         for cut in [9, 10, 22, 23] {
-            let left = CompositeOwnership::clipped(domain(8, cut), &whole, &domain(0, cut), 2);
-            let right = CompositeOwnership::clipped(domain(cut, 24), &whole, &domain(cut, 32), 2);
+            let left = CompositeOwnership::clipped(domain(8, cut), &whole, &domain(0, cut), 2, [[false, true]]);
+            let right = CompositeOwnership::clipped(domain(cut, 24), &whole, &domain(cut, 32), 2, [[true, false]]);
             for cell in domain(0, 32).iter() {
                 let global_inactive = global.inactive.as_ref().unwrap().contains(cell);
                 let side = if cell[0] < cut { &left } else { &right };
@@ -3919,15 +3929,30 @@ mod tests {
         let bounds = |o: &CompositeOwnership<1>| o.inactive.as_ref().map(|d| (d.spaces[0].lo, d.spaces[0].hi));
         let right_of_9 = (domain(9, 24), domain(9, 32));
         let left_of_23 = (domain(8, 23), domain(0, 23));
-        for (coverage, tile) in [right_of_9, left_of_23] {
+        for (coverage, tile, cut) in [(right_of_9.0, right_of_9.1, [[true, false]]), (left_of_23.0, left_of_23.1, [[false, true]])] {
             let per_tile = CompositeOwnership::new(Some(coverage.clone()), &tile, 2);
-            let of_patch = CompositeOwnership::clipped(coverage, &whole, &tile, 2);
+            let of_patch = CompositeOwnership::clipped(coverage, &whole, &tile, 2, cut);
             assert_ne!(
                 bounds(&per_tile),
                 bounds(&of_patch),
                 "the per-tile rule agrees with the patch's core; the premise is vacuous"
             );
         }
+    }
+
+    // the patch's real face lying on a cut: the tile holding the fine faces keeps the donor
+    // shell inside its interior as the single hierarchy does; the same face on a physical
+    // boundary keeps its core
+    #[test]
+    fn composite_core_contracts_at_a_real_face_on_a_cut_and_keeps_it_on_a_physical_boundary() {
+        let domain = |lo, hi| Domain::new([Space { name: "x", lo, hi }]);
+        let whole = domain(8, 20);
+        let global = CompositeOwnership::new(Some(whole.clone()), &domain(0, 32), 2);
+        let on_cut = CompositeOwnership::clipped(domain(8, 20), &whole, &domain(0, 20), 2, [[false, true]]);
+        let bounds = |o: &CompositeOwnership<1>| o.inactive.as_ref().map(|d| (d.spaces[0].lo, d.spaces[0].hi));
+        assert_eq!(bounds(&global), bounds(&on_cut), "the real face on a cut contracts like the single hierarchy's");
+        let at_edge = CompositeOwnership::clipped(domain(8, 32), &domain(8, 32), &domain(0, 32), 2, [[false, false]]);
+        assert_eq!(at_edge.inactive.unwrap().spaces[0].hi, 32, "a real face on a physical boundary keeps its core");
     }
 
     // the atlas invariant: the decomposition transport set is derived from the store's

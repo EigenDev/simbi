@@ -31,7 +31,7 @@ use symbi_sim::atlas::{AuditAt, ExchangePoint, FinePoint, TileId};
 use symbi_sim::decomp::{HaloTransport, plan_cons_fields, plan_fields};
 use symbi_sim::driver::{advance_clock, retry_timestep, select_timestep};
 use symbi_sim::hydro_ops::scan_c2p_errors;
-use symbi_sim::plan_exchange::{AuditError, PlanExchange, PlanRole};
+use symbi_sim::plan_exchange::{AuditError, PlanExchange, PlanRole, StagingFault};
 use symbi_sim::state::FieldStore;
 use symbi_sim::substrate_seam::KernelSet;
 use symbi_sim::worker::{
@@ -51,6 +51,9 @@ pub struct RefinedPlans<'p, const D: usize> {
     pub seed: PlanExchange<'p, D>,
     /// the fine state, bands and audits at the fine points and the rollback
     pub fine: PlanExchange<'p, D>,
+    /// the flux-register contributions of the patch faces lying on cuts, at every fine
+    /// stage point; absent when no patch face lies on a cut
+    pub flux: Option<PlanExchange<'p, D>>,
 }
 
 /// the tiles this worker holds: parallel over the held root tiles
@@ -77,6 +80,9 @@ pub struct RefinedConfig {
     /// the cell's state stays physical, so the correction it triggers is the conservative
     /// first-order redo
     pub fine_trouble_at: Option<(u64, u8, usize, [isize; 3])>,
+    /// a fault in this worker's flux contributions at (step, substep, stage) on the first
+    /// attempt, for the exactly-once gates
+    pub contribution_fault: Option<(u64, u8, usize, StagingFault)>,
 }
 
 /// evolve this worker's hierarchies from the configured start until the final time or
@@ -108,6 +114,9 @@ where
     assert_eq!(plans.root.role(), PlanRole::RootState);
     assert_eq!(plans.seed.role(), PlanRole::RootSeed);
     assert_eq!(plans.fine.role(), PlanRole::Fine);
+    if let Some(flux) = plans.flux.as_ref() {
+        assert_eq!(flux.role(), PlanRole::FluxContribution);
+    }
     let base = &cfg.base;
     let deadline = base.deadline;
     let stages = base.timestepping.stages();
@@ -212,7 +221,7 @@ where
     macro_rules! root_point {
         ($point:expr, $step:expr, $attempt:expr) => {{
             let fields = root_fields!();
-            let part = PlanPart { plan: &plans.root, fields: &fields, devices: held.root_devices };
+            let part = PlanPart { plan: &plans.root, fields: &fields, devices: held.root_devices, fault: None };
             exchange_point_plans(&[part], transport, fabric, $point, $step, $attempt, deadline, &mut timing.exchange)
                 .map_err(|e| fail(fabric, e.into()))?;
             for (k, h) in tiles.iter().enumerate() {
@@ -223,12 +232,58 @@ where
     macro_rules! fine_point {
         ($point:expr, $step:expr, $attempt:expr) => {{
             let fields = fine_fields!();
-            let part = PlanPart { plan: &plans.fine, fields: &fields, devices: held.fine_devices };
+            let part = PlanPart { plan: &plans.fine, fields: &fields, devices: held.fine_devices, fault: None };
             exchange_point_plans(&[part], transport, fabric, $point, $step, $attempt, deadline, &mut timing.exchange)
                 .map_err(|e| fail(fabric, e.into()))?;
             for &k in &refined {
                 let h = &tiles[k];
                 with_device(fine_dev(k), || h.levels[1].kernels.ghost_fill(&h.levels[1].state));
+            }
+        }};
+    }
+    // the register slabs of the contributions plan, per root tile: a tile without a
+    // register lists nothing, since the plan references none of its slots
+    macro_rules! flux_fields {
+        () => {{
+            let mut lists: Vec<Vec<&Field<f64, D, Mem>>> = (0..held.n_root).map(|_| Vec::new()).collect();
+            for (k, h) in tiles.iter().enumerate() {
+                if h.has_flux_register(0) {
+                    lists[held.root_ids[k].0 as usize] = h.flux_registers[0].plan_fields(&h.levels[0].state.fields.cons.den);
+                }
+            }
+            lists
+        }};
+    }
+    // the fine stage point: the fine state and, with it, the flux contributions of the
+    // stage; every contributing face is then cleared for the next stage and every landed
+    // unit folded into its receiving face, in the order the register's owner accumulates
+    macro_rules! fine_stage_point {
+        ($sub:expr, $stage:expr, $step:expr, $attempt:expr) => {{
+            let point = ExchangePoint::Fine { substep: $sub as u8, point: FinePoint::Stage($stage as u8) };
+            let fields = fine_fields!();
+            let flux_fields = flux_fields!();
+            let mut parts = vec![PlanPart { plan: &plans.fine, fields: &fields, devices: held.fine_devices, fault: None }];
+            if let Some(flux) = plans.flux.as_ref() {
+                let fault = cfg.contribution_fault.and_then(|(at_step, at_sub, at_stage, fault)| {
+                    ($attempt == 0 && (at_step, at_sub, at_stage) == ($step, $sub as u8, $stage)).then_some(fault)
+                });
+                parts.push(PlanPart { plan: flux, fields: &flux_fields, devices: held.root_devices, fault });
+            }
+            exchange_point_plans(&parts, transport, fabric, point, $step, $attempt, deadline, &mut timing.exchange)
+                .map_err(|e| fail(fabric, e.into()))?;
+            for &k in &refined {
+                let h = &tiles[k];
+                with_device(fine_dev(k), || h.levels[1].kernels.ghost_fill(&h.levels[1].state));
+            }
+            if plans.flux.is_some() {
+                for (k, h) in tiles.iter().enumerate() {
+                    if h.has_flux_register(0) {
+                        with_device(root_dev(k), || {
+                            h.flux_registers[0].zero_contributions();
+                            h.flux_registers[0].fold_inboxes();
+                        });
+                    }
+                }
             }
         }};
     }
@@ -264,8 +319,8 @@ where
             let prims = root_fields!();
             let cons = seed_fields!();
             let parts = [
-                PlanPart { plan: &plans.root, fields: &prims, devices: held.root_devices },
-                PlanPart { plan: &plans.seed, fields: &cons, devices: held.root_devices },
+                PlanPart { plan: &plans.root, fields: &prims, devices: held.root_devices, fault: None },
+                PlanPart { plan: &plans.seed, fields: &cons, devices: held.root_devices, fault: None },
             ];
             exchange_point_plans(&parts, transport, fabric, ExchangePoint::Prime, 0, 0, deadline, &mut timing.exchange)
                 .map_err(|e| fail(fabric, e.into()))?;
@@ -449,7 +504,7 @@ where
                             rejected = true;
                             break 'subcycle;
                         }
-                        fine_point!(ExchangePoint::Fine { substep: sub as u8, point: FinePoint::Stage(jj as u8) }, iter, attempt);
+                        fine_stage_point!(sub, jj, iter, attempt);
                         if base.audit_every_point {
                             audit!(plans.fine, fine_fields!(), ExchangePoint::Fine { substep: sub as u8, point: FinePoint::Audit(jj as u8) }, iter, attempt);
                         }
@@ -471,8 +526,12 @@ where
                 }
             }
             if !rejected {
-                for &k in &refined {
-                    with_device(root_dev(k), || tiles[k].level_restrict_reflux(0, 0.0));
+                // restriction on the refined tiles, the reflux on every tile whose register
+                // holds a face: a receiving register corrects the cell beside a neighbor's patch
+                for k in 0..n {
+                    if tiles[k].levels.len() > 1 || tiles[k].has_flux_register(0) {
+                        with_device(root_dev(k), || tiles[k].level_restrict_reflux(0, 0.0));
+                    }
                 }
                 root_point!(ExchangePoint::Restrict, iter, attempt);
                 if base.audit_every_point {
@@ -513,8 +572,8 @@ where
                 let prims = root_fields!();
                 let fine = fine_fields!();
                 let parts = [
-                    PlanPart { plan: &plans.root, fields: &prims, devices: held.root_devices },
-                    PlanPart { plan: &plans.fine, fields: &fine, devices: held.fine_devices },
+                    PlanPart { plan: &plans.root, fields: &prims, devices: held.root_devices, fault: None },
+                    PlanPart { plan: &plans.fine, fields: &fine, devices: held.fine_devices, fault: None },
                 ];
                 exchange_point_plans(&parts, transport, fabric, ExchangePoint::Rollback, iter, attempt, deadline, &mut timing.exchange)
                     .map_err(|e| fail(fabric, e.into()))?;
@@ -616,7 +675,7 @@ where
     for (k, h) in tiles.iter().enumerate() {
         lists[ids[k].0 as usize] = plan_fields(&h.levels[level].state);
     }
-    let part = PlanPart { plan, fields: &lists, devices };
+    let part = PlanPart { plan, fields: &lists, devices, fault: None };
     exchange_point_plans(&[part], transport, fabric, point, step, attempt, deadline, &mut timing.exchange)
         .map_err(|e| fail(fabric, e.into()))?;
     for (k, h) in tiles.iter().enumerate() {
@@ -670,7 +729,7 @@ where
     for (r, &k) in refined.iter().enumerate() {
         lists[fine_ids[r].0 as usize] = plan_fields(&tiles[k].levels[1].state);
     }
-    let part = PlanPart { plan, fields: &lists, devices };
+    let part = PlanPart { plan, fields: &lists, devices, fault: None };
     exchange_point_plans(&[part], transport, fabric, point, step, attempt, deadline, &mut timing.exchange)
         .map_err(|e| fail(fabric, e.into()))?;
     for (r, &k) in refined.iter().enumerate() {

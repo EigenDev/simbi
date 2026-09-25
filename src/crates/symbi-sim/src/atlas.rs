@@ -18,7 +18,7 @@
 //  let placement = Placement::new(2, vec![WorkerId(0), WorkerId(0), WorkerId(1), WorkerId(1)])?;
 // =============================================================================
 
-use crate::decomp::{Partition, PolarSeam, Schedule, Topology, leg_regions, unflatten};
+use crate::decomp::{Partition, PolarSeam, Schedule, Topology, flatten, leg_regions, unflatten};
 use crate::state::{PartitionGeometry, axis_name};
 use symbi_algebra::{Domain, Side, Space};
 pub use symbi_fabric::{Digest, Epoch, Fnv, TransferId, WorkerId};
@@ -716,6 +716,94 @@ impl<const D: usize> ExchangePlan<D> {
             polar_bands,
             digest: Digest(0),
         };
+        plan.validate()?;
+        let digest = plan.compute_digest(counts, topology);
+        Ok(Self { digest, ..plan })
+    }
+
+    /// the plan of the flux-register contributions of one refined patch of ratio 2 under a
+    /// root partition: for every real face of `patch` (root cell ranges per axis) that lies
+    /// on a cut, one transfer per register component from the tile holding the fine faces
+    /// (the coverage ends at its interior boundary) to the neighbor across the cut, which
+    /// holds the corrected coarse cell. the fields are the register slabs themselves,
+    /// `2 * D * n_comp` per tile in `(2 * ax + side) * n_comp + comp` order: the contributing
+    /// face on the sender, the inbox on the owner, both one cell thick along the face's axis
+    /// and the patch's extent clipped to the tile across it, in the tile's root index space.
+    /// a plan with no transfer means no patch face lies on a cut.
+    pub fn flux_contributions(
+        partition: &Partition<D>,
+        topology: &Topology<D>,
+        patch: [(usize, usize); D],
+        ng: usize,
+        n_comp: usize,
+    ) -> Result<Self, PlanError> {
+        let counts = partition.counts();
+        let n_tiles = partition.n_tiles();
+        let tiles: Vec<TileLayout<D>> = (0..n_tiles).map(|t| TileLayout::of_partition(partition, TileId(t as u32), ng)).collect();
+        let mut schema = FieldSchema::new();
+        for idx in 0..2 * D {
+            for comp in 0..n_comp {
+                schema = schema.cell(&format!("register_{idx}_{comp}"));
+            }
+        }
+        let empty = FieldLayout { interior: [Span { lo: 0, hi: 0 }; D], allocated: [Span { lo: 0, hi: 0 }; D], halo: [0; D] };
+        let mut fields: Vec<Vec<FieldLayout<D>>> = vec![vec![empty; 2 * D * n_comp]; n_tiles];
+        let mut axes: Vec<AxisPhase<D>> = (0..D).map(|ax| AxisPhase { axis: ax as u8, transfers: Vec::new() }).collect();
+        let mut next = 0u32;
+        for ax in 0..D {
+            for side in 0..2 {
+                let face_pos = if side == 0 { patch[ax].0 } else { patch[ax].1 };
+                for src in 0..n_tiles {
+                    let tc = unflatten(src, counts);
+                    let ext = partition.tile_extents(tc);
+                    // the sender: its interior ends at the patch's face on this side and it
+                    // covers part of the patch across the face
+                    let ends_at_face = if side == 0 { ext[ax].0 == face_pos } else { ext[ax].0 + ext[ax].1 == face_pos };
+                    let covers = (0..D).all(|aa| ext[aa].0 < patch[aa].1 && ext[aa].0 + ext[aa].1 > patch[aa].0);
+                    let neighbor_exists = if side == 0 { tc[ax] > 0 } else { tc[ax] + 1 < counts[ax] };
+                    if !(ends_at_face && covers && neighbor_exists) {
+                        continue;
+                    }
+                    let mut ntc = tc;
+                    ntc[ax] = if side == 0 { tc[ax] - 1 } else { tc[ax] + 1 };
+                    let dst = flatten(ntc, counts);
+                    let dst_ext = partition.tile_extents(ntc);
+                    // the slab across the face: the patch clipped to the tile's extent, which the
+                    // neighbor shares on every transverse axis
+                    let slab = |tile_ext: [(usize, usize); D], along: isize| -> [Span; D] {
+                        std::array::from_fn(|aa| {
+                            if aa == ax {
+                                Span { lo: along, hi: along + 1 }
+                            } else {
+                                let lo = patch[aa].0.max(tile_ext[aa].0) as isize - tile_ext[aa].0 as isize;
+                                let hi = patch[aa].1.min(tile_ext[aa].0 + tile_ext[aa].1) as isize - tile_ext[aa].0 as isize;
+                                Span { lo, hi }
+                            }
+                        })
+                    };
+                    let src_region = slab(ext, face_pos as isize - ext[ax].0 as isize);
+                    let dst_region = slab(dst_ext, face_pos as isize - dst_ext[ax].0 as isize);
+                    for comp in 0..n_comp {
+                        let f = (2 * ax + side) * n_comp + comp;
+                        fields[src][f] = FieldLayout { interior: src_region, allocated: src_region, halo: [0; D] };
+                        fields[dst][f] = FieldLayout { interior: dst_region, allocated: dst_region, halo: [0; D] };
+                        axes[ax].transfers.push(Transfer {
+                            id: TransferId(next),
+                            axis: ax as u8,
+                            src: TileId(src as u32),
+                            dst: TileId(dst as u32),
+                            field: f as u16,
+                            len: volume(&dst_region),
+                            src_region,
+                            dst_region,
+                            audit: false,
+                        });
+                        next += 1;
+                    }
+                }
+            }
+        }
+        let plan = Self { reach: ng, tiles, fields, schema, axes, seam: None, polar_bands: Vec::new(), digest: Digest(0) };
         plan.validate()?;
         let digest = plan.compute_digest(counts, topology);
         Ok(Self { digest, ..plan })

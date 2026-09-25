@@ -21,6 +21,18 @@
 // den / mom[0..DOF] / optional nrg / optional chi (energy-optional regimes skip
 // nrg; runs without a passive scalar skip chi).
 //
+// a register face has one of three roles. a local face holds both the fine
+// faces and the coarse cell it corrects on this tile. a contributing face lies
+// on a patch face that coincides with a decomposition cut: the fine faces are
+// here and the corrected coarse cell is on the neighbor tile, so the face
+// accumulates the fine sum of one stage alone and the driver sends it to the
+// neighbor and zeroes it; the coarse flux and the application belong to the
+// neighbor. a receiving face is that neighbor's side: it accumulates the coarse flux at
+// its own stages, folds each received unit from its inbox in stage order, and
+// is applied to the corrected cell. an owner adds a received unit with the
+// same operation the local accumulation would have used, so the register
+// agrees bit for bit with a single grid's.
+//
 // two execution paths: uniform-cartesian geometry runs substrate kernels
 // (field_fill / field_axpy_shift / refine_acc_face — cpu and gpu through the
 // kernel dispatch; the face area and cell volume are constant scales), while
@@ -46,12 +58,29 @@ use symbi_ir::KernelId;
 use symbi_sim::state::{BcellFields, BfluxFields, ConsFieldsGeneric, axis_name};
 use symbi_substrate::regimes::substrate_kernels::dispatch_fields_each;
 
+/// the part a register face plays on this tile
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FaceRole {
+    /// the fine faces and the corrected coarse cell are both on this tile
+    Local,
+    /// the fine faces are here, the corrected cell on the neighbor across a cut: the face
+    /// holds one stage's fine unit for the driver to send
+    Contributing,
+    /// the corrected cell is here, the fine faces on the neighbor across a cut: the face
+    /// takes the coarse flux here and the fine units from its inbox
+    Receiving,
+}
+
 /// per coarse-fine interface accumulator. faces[2*ax + side] is the register
 /// for the coverage boundary slab on that side; None where the coverage
-/// touches the coarse interior boundary (no coarse cell to correct there).
+/// touches the coarse interior boundary and no register crosses the cut there.
 pub struct FluxRegister<const D: usize, const DOF: usize, Mem: MemorySpace> {
     faces: [Option<ConsFieldsGeneric<D, DOF, Mem>>; 6],
     domains: [Option<Domain<D>>; 6],
+    roles: [FaceRole; 6],
+    /// the landing slab of a receiving face: the neighbor's unit arrives here and is folded
+    /// into the face
+    inboxes: [Option<ConsFieldsGeneric<D, DOF, Mem>>; 6],
     /// the out-of-plane magnetic components of a partially gridded chart (the cell-centered
     /// B_z of a 2.5D grid), conserved by their induction-flux divergence and refluxed like the
     /// gas: one register face field per component, `DOF - D` of them, magnetized runs only.
@@ -152,10 +181,178 @@ impl<const D: usize, const DOF: usize, Mem: MemorySpace> FluxRegister<D, DOF, Me
         Ok(FluxRegister {
             faces,
             domains,
+            roles: [FaceRole::Local; 6],
+            inboxes: std::array::from_fn(|_| None),
             oop,
             debug_coarse_den: std::cell::Cell::new(0.0),
             debug_fine_den: std::cell::Cell::new(0.0),
         })
+    }
+
+    /// the face slab of `coverage` on `(ax, side)`, in the coverage's index space
+    fn face_domain(coverage: &Domain<D>, ax: usize, side: usize) -> Domain<D> {
+        let face_pos = if side == 0 { coverage.spaces[ax].lo } else { coverage.spaces[ax].hi };
+        Domain::new(std::array::from_fn(|aa| {
+            if aa == ax {
+                Space { name: axis_name(aa), lo: face_pos, hi: face_pos + 1 }
+            } else {
+                Space { name: axis_name(aa), lo: coverage.spaces[aa].lo, hi: coverage.spaces[aa].hi }
+            }
+        }))
+    }
+
+    fn alloc_face(
+        domain: &Domain<D>,
+        has_energy: bool,
+        has_dye: bool,
+    ) -> symbi_xpu::Result<ConsFieldsGeneric<D, DOF, Mem>> {
+        let mut face = ConsFieldsGeneric::zeros_with_energy(domain, has_energy)?;
+        if has_dye {
+            face.alloc_chi(domain)?;
+        }
+        Ok(face)
+    }
+
+    /// add contributing faces on the coverage sides named by `faces[ax][side]`: patch
+    /// faces flush with this tile's interior boundary that are the patch's real faces,
+    /// whose corrected coarse cell lies on the neighbor across the cut
+    pub fn with_contributing_faces(
+        mut self,
+        coverage: &Domain<D>,
+        faces: [[bool; 2]; D],
+        has_energy: bool,
+        has_dye: bool,
+    ) -> symbi_xpu::Result<Self> {
+        for ax in 0..D {
+            for side in 0..2 {
+                if !faces[ax][side] {
+                    continue;
+                }
+                let idx = 2 * ax + side;
+                assert!(self.faces[idx].is_none(), "a contributing face replaces no local face");
+                assert!(self.oop[idx].is_none(), "out-of-plane components cross no cut");
+                let domain = Self::face_domain(coverage, ax, side);
+                self.faces[idx] = Some(Self::alloc_face(&domain, has_energy, has_dye)?);
+                self.domains[idx] = Some(domain);
+                self.roles[idx] = FaceRole::Contributing;
+            }
+        }
+        Ok(self)
+    }
+
+    /// a register of receiving faces alone, for a tile whose interior holds the coarse
+    /// cells corrected by a neighbor's fine faces: `slabs` names each face by `(ax, side)`
+    /// of the patch it bounds and the slab domain in this tile's index space (the cell at
+    /// the face for a hi face, the cell above the corrected one for a lo face, as a local
+    /// register's slab lies)
+    pub fn receiving(
+        slabs: &[(usize, usize, Domain<D>)],
+        has_energy: bool,
+        has_dye: bool,
+    ) -> symbi_xpu::Result<Self> {
+        let mut faces: [Option<ConsFieldsGeneric<D, DOF, Mem>>; 6] = std::array::from_fn(|_| None);
+        let mut inboxes: [Option<ConsFieldsGeneric<D, DOF, Mem>>; 6] = std::array::from_fn(|_| None);
+        let mut domains: [Option<Domain<D>>; 6] = std::array::from_fn(|_| None);
+        let mut roles = [FaceRole::Local; 6];
+        for (ax, side, domain) in slabs {
+            let idx = 2 * ax + side;
+            assert!(faces[idx].is_none(), "one receiving face per side");
+            faces[idx] = Some(Self::alloc_face(domain, has_energy, has_dye)?);
+            inboxes[idx] = Some(Self::alloc_face(domain, has_energy, has_dye)?);
+            domains[idx] = Some(domain.clone());
+            roles[idx] = FaceRole::Receiving;
+        }
+        Ok(FluxRegister {
+            faces,
+            domains,
+            roles,
+            inboxes,
+            oop: std::array::from_fn(|_| None),
+            debug_coarse_den: std::cell::Cell::new(f64::NAN),
+            debug_fine_den: std::cell::Cell::new(f64::NAN),
+        })
+    }
+
+    /// the contributing faces: `(2 * ax + side, components in register order, slab domain)`
+    pub fn contributing(&self) -> Vec<(usize, Vec<&Field<f64, D, Mem>>, &Domain<D>)> {
+        (0..2 * D)
+            .filter(|&idx| self.roles[idx] == FaceRole::Contributing)
+            .map(|idx| (idx, comps(self.faces[idx].as_ref().unwrap()), self.domains[idx].as_ref().unwrap()))
+            .collect()
+    }
+
+    /// the inboxes of the receiving faces, keyed like `contributing`
+    pub fn inboxes(&self) -> Vec<(usize, Vec<&Field<f64, D, Mem>>, &Domain<D>)> {
+        (0..2 * D)
+            .filter(|&idx| self.roles[idx] == FaceRole::Receiving)
+            .map(|idx| (idx, comps(self.inboxes[idx].as_ref().unwrap()), self.domains[idx].as_ref().unwrap()))
+            .collect()
+    }
+
+    pub fn has_contributing(&self) -> bool {
+        self.roles.iter().any(|r| *r == FaceRole::Contributing)
+    }
+
+    pub fn has_receiving(&self) -> bool {
+        self.roles.iter().any(|r| *r == FaceRole::Receiving)
+    }
+
+    /// zero the contributing faces after their units left, so the next stage's
+    /// accumulation is that stage's unit alone
+    pub fn zero_contributions(&self) {
+        let name = KernelId::FieldFill { ndim: D as u8 }.name();
+        for (idx, fields, dom) in self.contributing() {
+            let _ = idx;
+            for field in fields {
+                dispatch_fields_each::<f64, Mem, D>(name, dom, &[], &[field], &[], &[0.0]);
+            }
+        }
+    }
+
+    /// fold every landed unit into its receiving face, `R += unit`, the operation the
+    /// local accumulation performs with the unit it computes itself, then clear the inbox
+    pub fn fold_inboxes(&self) {
+        let axpy = KernelId::FieldAxpyShift { ndim: D as u8 }.name();
+        let fill = KernelId::FieldFill { ndim: D as u8 }.name();
+        let ints = [0i32; 3];
+        for (idx, inbox, dom) in self.inboxes() {
+            let face = comps(self.faces[idx].as_ref().unwrap());
+            for (rf, uf) in face.into_iter().zip(inbox) {
+                dispatch_fields_each::<f64, Mem, D>(axpy, dom, &[uf], &[rf], &ints[..D], &[1.0]);
+                dispatch_fields_each::<f64, Mem, D>(fill, dom, &[], &[uf], &[], &[0.0]);
+            }
+        }
+    }
+
+    /// the component count of a face: den, the momenta, energy and dye when present
+    pub fn n_components(&self) -> usize {
+        self.faces.iter().flatten().next().map(|f| comps(f).len()).unwrap_or(0)
+    }
+
+    /// the slabs the contributions plan moves, in `(2 * ax + side) * n_comp + comp` order: a
+    /// contributing face's components, a receiving face's inbox, `filler` where this tile
+    /// has neither (the plan references no such slot)
+    pub fn plan_fields<'a>(&'a self, filler: &'a Field<f64, D, Mem>) -> Vec<&'a Field<f64, D, Mem>> {
+        let n_comp = self.n_components();
+        let mut out = Vec::with_capacity(2 * D * n_comp);
+        for idx in 0..2 * D {
+            let slab = match self.roles[idx] {
+                FaceRole::Contributing => self.faces[idx].as_ref().map(comps),
+                FaceRole::Receiving => self.inboxes[idx].as_ref().map(comps),
+                FaceRole::Local => None,
+            };
+            match slab {
+                Some(c) => out.extend(c),
+                None => out.extend(std::iter::repeat_n(filler, n_comp)),
+            }
+        }
+        out
+    }
+
+    /// the register face `(ax, side)` for a gate: its components in register order
+    pub fn face(&self, ax: usize, side: usize) -> Option<(Vec<&Field<f64, D, Mem>>, &Domain<D>)> {
+        let idx = 2 * ax + side;
+        Some((comps(self.faces[idx].as_ref()?), self.domains[idx].as_ref()?))
     }
 
     pub fn zero(&self) {
@@ -288,7 +485,7 @@ impl<const D: usize, const DOF: usize, Mem: MemorySpace> FluxRegister<D, DOF, Me
         self.debug_coarse_den.set(f64::NAN);
         self.debug_fine_den.set(f64::NAN);
         let name = KernelId::FieldFill { ndim: D as u8 }.name();
-        for (face, dom) in self.faces.iter().zip(self.domains.iter()) {
+        for (face, dom) in self.faces.iter().chain(self.inboxes.iter()).zip(self.domains.iter().cycle()) {
             if let (Some(reg), Some(dom)) = (face, dom) {
                 for field in comps(reg) {
                     dispatch_fields_each::<f64, Mem, D>(name, dom, &[], &[field], &[], &[0.0]);
@@ -319,6 +516,9 @@ impl<const D: usize, const DOF: usize, Mem: MemorySpace> FluxRegister<D, DOF, Me
         let scalars = [-area * w];
         for side in 0..2usize {
             let idx = 2 * dir + side;
+            if self.roles[idx] == FaceRole::Contributing {
+                continue;
+            }
             if let (Some(reg), Some(dom)) = (&self.faces[idx], &self.domains[idx]) {
                 for (rf, ff) in comps(reg).into_iter().zip(comps(&flux[dir])) {
                     dispatch_fields_each::<f64, Mem, D>(
@@ -352,6 +552,9 @@ impl<const D: usize, const DOF: usize, Mem: MemorySpace> FluxRegister<D, DOF, Me
         let scalars = [area * w];
         for side in 0..2usize {
             let idx = 2 * dir + side;
+            if self.roles[idx] == FaceRole::Receiving {
+                continue;
+            }
             if let (Some(reg), Some(dom)) = (&self.faces[idx], &self.domains[idx]) {
                 for (rf, ff) in comps(reg).into_iter().zip(comps(&fine_flux[dir])) {
                     dispatch_fields_each::<f64, Mem, D>(name, dom, &[ff], &[rf], &[], &scalars);
@@ -370,6 +573,9 @@ impl<const D: usize, const DOF: usize, Mem: MemorySpace> FluxRegister<D, DOF, Me
         for ax in 0..D {
             for side in 0..2usize {
                 let idx = 2 * ax + side;
+                if self.roles[idx] == FaceRole::Contributing {
+                    continue;
+                }
                 if let (Some(reg), Some(dom)) = (&self.faces[idx], &self.domains[idx]) {
                     let (cell_dom, arg, sign) = if side == 0 {
                         // corrected cells sit one below the face plane.

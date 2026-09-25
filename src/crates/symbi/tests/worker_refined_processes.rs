@@ -13,9 +13,11 @@
 // hold no fine tile; a rejection forced at a root stage and one in the second
 // fine substep, each against a clean run capped to the accepted smaller
 // timestep, on both layouts; an invalid timestep candidate on the fine level
-// under a positive user cap; two cold streams parting beside a fine cut so the
-// first-order correction crosses the cut one-sided. every worker reports its
-// grant high-water per peer.
+// under a positive user cap; a fine cell flagged troubled against the fine cut
+// so the first-order correction crosses the cut one-sided; a patch face lying
+// on a cut, whose flux-register units cross to the neighbor holding the
+// corrected cells, with a duplicated and a dropped contribution each ending the
+// run. every worker reports its grant high-water per peer.
 //
 // run: cargo test -p symbi --test worker_refined_processes
 // =============================================================================
@@ -42,7 +44,7 @@ use symbi_hydro::quantity::{Density, Pressure};
 use symbi_hydro::state::Prim;
 use symbi_sim::atlas::{ExchangePlan, Placement, TileId};
 use symbi_sim::phase_table::PhaseTable;
-use symbi_sim::plan_exchange::{PlanExchange, PlanRole, fabric_for};
+use symbi_sim::plan_exchange::{PlanExchange, PlanRole, StagingFault, fabric_for};
 use symbi_sim::substrate_seam::RegimeKind;
 use symbi_sim::worker::{Injection, WorkerConfig, WorkerError};
 use symbi_xpu::{CpuSpace, HostMemory};
@@ -60,8 +62,10 @@ const NG: usize = 2;
 const RATIO: usize = 2;
 const STEPS: u64 = 8;
 const T_FINAL: f64 = 10.0;
-// the refined patch: root cells 12..20 on both axes
+// the refined patch of most arms: root cells 12..20 on both axes
 const PATCH: [(usize, usize); 2] = [(12, 20), (12, 20)];
+/// the register components of an adiabatic 2D run: den, two momenta, energy
+const N_COMP: usize = 4;
 const TRANSFER_DEADLINE: Duration = Duration::from_secs(10);
 const STARTUP_DEADLINE: Duration = Duration::from_secs(10);
 const WATCHDOG: Duration = Duration::from_secs(120);
@@ -70,14 +74,14 @@ fn bump(x: f64, y: f64) -> f64 {
     0.3 * (-(((x - 0.5) / 0.08).powi(2) + ((y - 0.5) / 0.08).powi(2))).exp()
 }
 
-fn build_root(cells: [usize; 2], origin: [f64; 2], bnd: Boundaries<2>) -> Sim {
+fn build_root(cells: [usize; 2], origin: [f64; 2], bnd: Boundaries<2>, ng: usize) -> Sim {
     Sim::build(Newtonian, IdealGas { gamma: GAMMA }, Cartesian)
         .cells(cells)
         .spacing([DX; 2])
         .origin(origin)
         .boundaries(bnd)
         .cfl(CFL)
-        .ghosts(NG)
+        .ghosts(ng)
         .timestepping(Timestepping::Rk2)
         .allocate()
         .expect("root sim")
@@ -92,18 +96,18 @@ fn kset(sim: &Sim) -> Kern {
     Kern::new(GAMMA, CFL, &sim.geom.allocated)
 }
 
-fn patch_region() -> RefinementRegion<2> {
+fn patch_region(patch: [(usize, usize); 2]) -> RefinementRegion<2> {
     RefinementRegion {
-        x_lo: [PATCH[0].0 as f64 * DX, PATCH[1].0 as f64 * DX],
-        x_hi: [PATCH[0].1 as f64 * DX, PATCH[1].1 as f64 * DX],
+        x_lo: [patch[0].0 as f64 * DX, patch[1].0 as f64 * DX],
+        x_hi: [patch[0].1 as f64 * DX, patch[1].1 as f64 * DX],
     }
 }
 
 /// the single hierarchy: the whole root with the whole patch
-fn build_mono() -> Hier {
-    let root = build_root([N, N], [0.0, 0.0], Boundaries::uniform(BoundaryType::Outflow));
+fn build_mono(patch: [(usize, usize); 2], ng: usize) -> Hier {
+    let root = build_root([N, N], [0.0, 0.0], Boundaries::uniform(BoundaryType::Outflow), ng);
     let k = kset(&root);
-    let mut h = Hier::with_refinement(root, k, &[patch_region()], ProlongOrder::Ppm, kset).expect("mono hier");
+    let mut h = Hier::with_refinement(root, k, &[patch_region(patch)], ProlongOrder::Ppm, kset).expect("mono hier");
     h.seed_fine_from_coarse().expect("seed fine");
     h.prime();
     h
@@ -115,6 +119,11 @@ struct Arm {
     cuts1: Vec<usize>,
     owner: Vec<u32>,
     steps: u64,
+    /// the refined patch in root cells per axis
+    patch: [(usize, usize); 2],
+    /// the root ghost depth: a patch face on a cut prolongs its fine ghosts from the root
+    /// halo, which then has to hold the prolongation stencil
+    ng: usize,
 }
 
 impl Arm {
@@ -125,6 +134,8 @@ impl Arm {
             ("W_CUTS1", list(&self.cuts1)),
             ("W_OWNER", self.owner.iter().map(|x| x.to_string()).collect::<Vec<_>>().join(",")),
             ("W_STEPS", self.steps.to_string()),
+            ("W_PATCH", format!("{},{},{},{}", self.patch[0].0, self.patch[0].1, self.patch[1].0, self.patch[1].1)),
+            ("W_NG", self.ng.to_string()),
         ]
     }
 
@@ -135,7 +146,18 @@ impl Arm {
             cuts1: list("W_CUTS1"),
             owner: list("W_OWNER").into_iter().map(|x| x as u32).collect(),
             steps: env_u64("W_STEPS").unwrap(),
+            patch: {
+                let p = env_list("W_PATCH");
+                [(p[0] as usize, p[1] as usize), (p[2] as usize, p[3] as usize)]
+            },
+            ng: env_u64("W_NG").unwrap() as usize,
         }
+    }
+
+    fn with_patch(mut self, patch: [(usize, usize); 2], ng: usize) -> Self {
+        self.patch = patch;
+        self.ng = ng;
+        self
     }
 
     fn partition(&self) -> Partition<2> {
@@ -148,8 +170,10 @@ impl Arm {
 
 }
 
-/// one root tile's hierarchy: the patch clipped to the tile with the whole patch beside it
-fn tile(partition: &Partition<2>, flat: usize) -> Hier {
+/// one root tile's hierarchy: the patch clipped to the tile with the whole patch beside it,
+/// a patch face on a cut as a contributing register face; a tile beside such a face with no
+/// part of the patch carries the receiving register of the cells that face corrects
+fn tile(partition: &Partition<2>, flat: usize, patch: [(usize, usize); 2], ng: usize) -> Hier {
     let counts = partition.counts();
     let tc = unflatten(flat, counts);
     let ext = partition.tile_extents(tc);
@@ -160,17 +184,43 @@ fn tile(partition: &Partition<2>, flat: usize) -> Hier {
         let face = |edge: bool| if edge { BoundaryType::Outflow } else { BoundaryType::CoarseFine };
         [face(tc[a] == 0), face(tc[a] == counts[a] - 1)]
     }));
-    let root = build_root(m, origin, bnd);
-    let whole = patch_region();
+    let root = build_root(m, origin, bnd, ng);
+    let whole = patch_region(patch);
     let cx = [whole.x_lo[0].max(origin[0]), whole.x_hi[0].min(hi[0])];
     let cy = [whole.x_lo[1].max(origin[1]), whole.x_hi[1].min(hi[1])];
     let k = kset(&root);
     if cx[0] < cx[1] && cy[0] < cy[1] {
         let clipped = RefinementRegion { x_lo: [cx[0], cy[0]], x_hi: [cx[1], cy[1]] };
-        Hier::with_refinement_of(root, k, &[clipped], &[whole], ProlongOrder::Ppm, kset).expect("tile hier")
-    } else {
-        Hier::single(root, k)
+        return Hier::with_refinement_of_contributing(root, k, &[clipped], &[whole], ProlongOrder::Ppm, kset)
+            .expect("tile hier");
     }
+    let mut slabs = Vec::new();
+    for ax in 0..2 {
+        for side in 0..2 {
+            let face_pos = if side == 0 { patch[ax].0 } else { patch[ax].1 };
+            // the owner beyond a hi face starts at it; the owner beyond a lo face ends at it
+            let beside = if side == 1 { ext[ax].0 == face_pos } else { ext[ax].0 + ext[ax].1 == face_pos };
+            let across = (0..2).all(|aa| aa == ax || (ext[aa].0 < patch[aa].1 && ext[aa].0 + ext[aa].1 > patch[aa].0));
+            if !(beside && across) {
+                continue;
+            }
+            let slab = symbi_algebra::Domain::new(std::array::from_fn(|aa| {
+                let (lo, hi) = if aa == ax {
+                    let at = face_pos as isize - ext[ax].0 as isize;
+                    (at, at + 1)
+                } else {
+                    (
+                        patch[aa].0.max(ext[aa].0) as isize - ext[aa].0 as isize,
+                        patch[aa].1.min(ext[aa].0 + ext[aa].1) as isize - ext[aa].0 as isize,
+                    )
+                };
+                symbi_algebra::Space { name: axis_name(aa), lo, hi }
+            }));
+            slabs.push((ax, side, slab));
+        }
+    }
+    let h = Hier::single(root, k);
+    if slabs.is_empty() { h } else { h.with_receiving_register(&slabs).expect("receiving register") }
 }
 
 fn env_u64(name: &str) -> Option<u64> {
@@ -220,6 +270,19 @@ fn reject_fine_from_env(me: WorkerId) -> Option<(u64, u8, usize)> {
 fn fine_trouble_from_env() -> Option<(u64, u8, usize, [isize; 3])> {
     let parts = env_list("W_FINE_TROUBLE");
     (parts.len() == 5).then(|| (parts[0], parts[1] as u8, parts[2] as usize, [parts[3] as isize, parts[4] as isize, 0]))
+}
+
+/// the flux contribution fault of this worker: (step, substep, stage, dup|drop) from
+/// `W_CONTRIB_FAULT`
+fn contribution_fault_from_env(me: WorkerId) -> Option<(u64, u8, usize, StagingFault)> {
+    let worker = env_u64("W_CONTRIB_FAULT_WORKER")?;
+    if worker != u64::from(me.0) {
+        return None;
+    }
+    let spec = std::env::var("W_CONTRIB_FAULT").ok()?;
+    let parts: Vec<&str> = spec.split(',').collect();
+    let fault = if parts[3] == "dup" { StagingFault::Duplicate } else { StagingFault::Drop };
+    Some((parts[0].parse().unwrap(), parts[1].parse().unwrap(), parts[2].parse().unwrap(), fault))
 }
 
 /// the invalid timestep candidate of this worker: (step, level) from `W_BAD_CFL`
@@ -305,7 +368,7 @@ fn dump_level(
 }
 
 /// the dump of one hierarchy whose root tile starts at root cell `ext` of the whole grid
-fn dump(h: &Hier, ext: [(usize, usize); 2]) -> Vec<(Key, u64)> {
+fn dump(h: &Hier, ext: [(usize, usize); 2], patch: [(usize, usize); 2]) -> Vec<(Key, u64)> {
     let mut out = Vec::new();
     let root = &h.levels[0].state;
     let rlo: [isize; 2] = std::array::from_fn(|a| root.geom.interior.spaces[a].lo);
@@ -326,8 +389,8 @@ fn dump(h: &Hier, ext: [(usize, usize); 2]) -> Vec<(Key, u64)> {
             fine,
             1,
             |c| std::array::from_fn(|a| (ext[a].0 as isize + clo[a] - rlo[a]) * RATIO as isize + c[a] - flo[a]),
-            std::array::from_fn(|a| (PATCH[a].0 * RATIO) as isize),
-            std::array::from_fn(|a| (PATCH[a].1 * RATIO) as isize),
+            std::array::from_fn(|a| (patch[a].0 * RATIO) as isize),
+            std::array::from_fn(|a| (patch[a].1 * RATIO) as isize),
         );
     }
     out
@@ -339,7 +402,7 @@ fn run_worker(arm: &Arm, me: WorkerId, out: PathBuf) -> Result<(), WorkerError> 
     let n_root = partition.n_tiles();
     let owner: Vec<WorkerId> = arm.owner.iter().map(|&w| WorkerId(w)).collect();
     let placement = Placement::new(arm.workers(), owner.clone()).expect("placement");
-    let fine_partition = FinePartition::of(&partition, PATCH, RATIO).expect("fine partition");
+    let fine_partition = FinePartition::of(&partition, arm.patch, RATIO).expect("fine partition");
     let fine_counts = fine_partition.partition.counts();
     let n_fine = fine_partition.partition.n_tiles();
     let fine_owner: Vec<WorkerId> = (0..n_fine)
@@ -347,7 +410,7 @@ fn run_worker(arm: &Arm, me: WorkerId, out: PathBuf) -> Result<(), WorkerError> 
         .collect();
     let fine_placement = Placement::with_idle_workers(arm.workers(), fine_owner).expect("fine placement");
     let mine: Vec<usize> = (0..n_root).filter(|&f| placement.owner_of(TileId(f as u32)) == me).collect();
-    let mut tiles: Vec<Hier> = mine.iter().map(|&f| tile(&partition, f)).collect();
+    let mut tiles: Vec<Hier> = mine.iter().map(|&f| tile(&partition, f, arm.patch, arm.ng)).collect();
     if let Some(bits) = env_u64("W_MAX_DT_BITS") {
         for h in tiles.iter_mut() {
             h.levels[0].state.max_dt = f64::from_bits(bits);
@@ -365,26 +428,33 @@ fn run_worker(arm: &Arm, me: WorkerId, out: PathBuf) -> Result<(), WorkerError> 
     let root_store = &*tiles[0].levels[0].state;
     let schema = plan_schema(root_store);
     let cons_schema = plan_cons_schema(root_store);
-    let root_plan = ExchangePlan::compile(&partition, &Topology::open(), &schema, NG).expect("root plan");
-    let seed_plan = ExchangePlan::compile(&partition, &Topology::open(), &cons_schema, NG).expect("seed plan");
+    let ng = arm.ng;
+    let root_plan = ExchangePlan::compile(&partition, &Topology::open(), &schema, ng).expect("root plan");
+    let seed_plan = ExchangePlan::compile(&partition, &Topology::open(), &cons_schema, ng).expect("seed plan");
     // a fine store indexes its cells in its parent's frame, whose interior starts at zero:
     // its first interior cell sits at the ratio times the patch's offset inside the tile
     let fine_lo = |t: TileId| -> [isize; 2] {
         let tc = unflatten(t.0 as usize, fine_counts);
         let root_ext = partition.tile_extents(fine_partition.root_tile_of(tc));
-        std::array::from_fn(|a| (RATIO * PATCH[a].0.saturating_sub(root_ext[a].0)) as isize)
+        std::array::from_fn(|a| (RATIO * arm.patch[a].0.saturating_sub(root_ext[a].0)) as isize)
     };
-    let fine_plan = ExchangePlan::compile_shifted(&fine_partition.partition, &Topology::open(), &schema, NG + 1, &fine_lo)
+    let fine_plan = ExchangePlan::compile_shifted(&fine_partition.partition, &Topology::open(), &schema, ng + 1, &fine_lo)
         .expect("fine plan");
+    let flux_plan = ExchangePlan::flux_contributions(&partition, &Topology::open(), arm.patch, ng, N_COMP).expect("flux plan");
+    let contributions = flux_plan.transfers().count();
     let table = PhaseTable::refined(2, RATIO as u8, 2).expect("table");
     let root = PlanExchange::new(&root_plan, &placement, me, table.clone());
     let seed = PlanExchange::new(&seed_plan, &placement, me, table.clone())
         .with_role(PlanRole::RootSeed, root.lens().len() as u32);
     let fine = PlanExchange::new(&fine_plan, &fine_placement, me, table.clone())
         .with_role(PlanRole::Fine, (root.lens().len() + seed.lens().len()) as u32);
+    let flux = (contributions > 0).then(|| {
+        PlanExchange::new(&flux_plan, &placement, me, table.clone())
+            .with_role(PlanRole::FluxContribution, (root.lens().len() + seed.lens().len() + fine.lens().len()) as u32)
+    });
     let plan_digest = {
         let mut h = Fnv::new();
-        for d in [root_plan.digest, seed_plan.digest, fine_plan.digest] {
+        for d in [root_plan.digest, seed_plan.digest, fine_plan.digest, flux_plan.digest] {
             h.u32((d.0 >> 32) as u32);
             h.u32(d.0 as u32);
         }
@@ -403,21 +473,18 @@ fn run_worker(arm: &Arm, me: WorkerId, out: PathBuf) -> Result<(), WorkerError> 
             plan_digest,
             placement_digest: placement.digest(),
             phase_table_digest: table.digest(),
-            ng: NG as u32,
+            ng: ng as u32,
             workers: arm.workers(),
             block_credit: 4096,
         },
         startup: STARTUP_DEADLINE,
     };
-    let max_payload = [&root, &seed, &fine]
-        .iter()
-        .flat_map(|p| p.lens())
-        .max()
-        .unwrap_or(0)
-        * 8;
+    let mut all: Vec<&PlanExchange<'_, 2>> = vec![&root, &seed, &fine];
+    all.extend(flux.as_ref());
+    let max_payload = all.iter().flat_map(|p| p.lens()).max().unwrap_or(0) * 8;
     let (link, session) = connect(&r, max_payload.max(64))?;
-    let mut fabric = fabric_for(&[&root, &seed, &fine], link, session);
-    let plans = RefinedPlans { root, seed, fine };
+    let mut fabric = fabric_for(&all, link, session);
+    let plans = RefinedPlans { root, seed, fine, flux };
     let cfg = RefinedConfig {
         base: WorkerConfig {
             regime: RegimeKind::of::<f64, 2, Newtonian>(),
@@ -431,6 +498,7 @@ fn run_worker(arm: &Arm, me: WorkerId, out: PathBuf) -> Result<(), WorkerError> 
         },
         invalid_level_cfl_at: bad_cfl_from_env(me),
         fine_trouble_at: fine_trouble_from_env(),
+        contribution_fault: contribution_fault_from_env(me),
     };
     let root_devices = vec![0i32; n_root];
     let fine_devices = vec![0i32; n_fine];
@@ -449,12 +517,12 @@ fn run_worker(arm: &Arm, me: WorkerId, out: PathBuf) -> Result<(), WorkerError> 
     fabric.finish(TRANSFER_DEADLINE)?;
     let mut records = Vec::new();
     for (&flat, h) in mine.iter().zip(&tiles) {
-        records.extend(dump(h, partition.tile_extents(unflatten(flat, counts))));
+        records.extend(dump(h, partition.tile_extents(unflatten(flat, counts)), arm.patch));
     }
     std::fs::write(&out, encode(&records)).unwrap();
     let (fallbacks, freezes) = fofc_stats();
     println!(
-        "REPORT steps={} rejections={} time={} fine_troubled={} fine_neighbor={} neighbor={} fofc={fallbacks},{freezes} hw={} dts={}",
+        "REPORT steps={} rejections={} time={} fine_troubled={} fine_neighbor={} neighbor={} fofc={fallbacks},{freezes} contrib={contributions} hw={} dts={}",
         report.steps,
         report.rejections,
         report.time.to_bits(),
@@ -469,22 +537,22 @@ fn run_worker(arm: &Arm, me: WorkerId, out: PathBuf) -> Result<(), WorkerError> 
 
 /// the single hierarchy driven with the given timesteps, dumped like a worker; a process of
 /// its own so the correction census is its own
-fn mono_main(out: PathBuf) {
-    let mut mono = build_mono();
+fn mono_main(arm: &Arm, out: PathBuf) {
+    let mut mono = build_mono(arm.patch, arm.ng);
     fofc_reset_stats();
     for bits in env_list("W_MONO_DTS") {
         mono.step_root_with_dt(f64::from_bits(bits));
     }
     let (fallbacks, freezes) = fofc_stats();
-    std::fs::write(&out, encode(&dump(&mono, [(0, N), (0, N)]))).unwrap();
-    println!("REPORT steps=0 rejections=0 time=0 fine_troubled=0 fine_neighbor=0 neighbor=0 fofc={fallbacks},{freezes} hw= dts=");
+    std::fs::write(&out, encode(&dump(&mono, [(0, N), (0, N)], arm.patch))).unwrap();
+    println!("REPORT steps=0 rejections=0 time=0 fine_troubled=0 fine_neighbor=0 neighbor=0 fofc={fallbacks},{freezes} contrib=0 hw= dts=");
 }
 
 fn worker_main() -> ! {
     let arm = Arm::from_env();
     let out = PathBuf::from(std::env::var("W_OUT").unwrap());
     if std::env::var_os("W_MONO_DTS").is_some() {
-        mono_main(out);
+        mono_main(&arm, out);
         std::process::exit(0);
     }
     let me = WorkerId(env_u64("W_ME").unwrap() as u32);
@@ -536,6 +604,8 @@ struct Report {
     neighbor: u64,
     /// the correction census of the process: (fallback cells, frozen cells)
     fofc: (u64, u64),
+    /// the flux contributions of the session's plan
+    contrib: u64,
     high_water: Vec<usize>,
     dts: Vec<u64>,
 }
@@ -565,6 +635,7 @@ fn parse_report(stdout: &str) -> Option<Report> {
         fine_neighbor: field("fine_neighbor")?.parse().ok()?,
         neighbor: field("neighbor")?.parse().ok()?,
         fofc: (fofc[0], fofc[1]),
+        contrib: field("contrib")?.parse().ok()?,
         high_water: list("hw")?.into_iter().map(|h| h as usize).collect(),
         dts: list("dts")?,
     })
@@ -657,7 +728,8 @@ fn class(k: &Key) -> String {
 fn assert_state_equal(outcomes: &[Outcome], expected: &Reference, label: &str) {
     let mut held: HashMap<Key, u64> = HashMap::new();
     let mut halos = 0usize;
-    let mut differing: HashMap<String, usize> = HashMap::new();
+    // per class: the count of differing cells and the index box they span
+    let mut differing: HashMap<String, (usize, [usize; 2], [usize; 2])> = HashMap::new();
     for (w, o) in outcomes.iter().enumerate() {
         for &(k, bits) in &o.records {
             let want = if k.kind == 2 {
@@ -671,7 +743,10 @@ fn assert_state_equal(outcomes: &[Outcome], expected: &Reference, label: &str) {
                 panic!("{label}: worker {w} holds {k:?}, which the single hierarchy has no value for");
             };
             if want != bits {
-                *differing.entry(class(&k)).or_default() += 1;
+                let e = differing.entry(class(&k)).or_insert((0, [usize::MAX; 2], [0; 2]));
+                e.0 += 1;
+                e.1 = [e.1[0].min(k.i), e.1[1].min(k.j)];
+                e.2 = [e.2[0].max(k.i), e.2[1].max(k.j)];
             }
         }
     }
@@ -682,8 +757,16 @@ fn assert_state_equal(outcomes: &[Outcome], expected: &Reference, label: &str) {
         held.len(),
         expected.values.len()
     );
-    assert!(halos > 0, "{label}: no cut halo was dumped; the freshness comparison is vacuous");
-    assert!(differing.is_empty(), "{label}: values differing from the single hierarchy by class: {differing:?}");
+    let mut report: Vec<String> = differing
+        .iter()
+        .map(|(c, (n, lo, hi))| format!("{c}: {n} cells in [{}, {}] x [{}, {}]", lo[0], hi[0], lo[1], hi[1]))
+        .collect();
+    report.sort();
+    assert!(differing.is_empty(), "{label}: values differing from the single hierarchy by class:\n{}", report.join("\n"));
+    assert!(
+        halos > 0 || outcomes.len() == 1,
+        "{label}: no cut halo was dumped; the freshness comparison is vacuous"
+    );
 }
 
 /// the launched run agrees with itself across workers and with the single hierarchy
@@ -706,22 +789,29 @@ fn assert_matches_reference(test: &str, tag: &str, outcomes: &[Outcome], arm: &A
 }
 
 fn ragged_17_13() -> Arm {
-    Arm { cuts0: vec![17], cuts1: vec![13], owner: vec![0, 1, 2, 3], steps: STEPS }
+    Arm { cuts0: vec![17], cuts1: vec![13], owner: vec![0, 1, 2, 3], steps: STEPS, patch: PATCH, ng: NG }
 }
 
 fn ragged_18_14() -> Arm {
-    Arm { cuts0: vec![18], cuts1: vec![14], owner: vec![0, 1, 2, 3], steps: STEPS }
+    Arm { cuts0: vec![18], cuts1: vec![14], owner: vec![0, 1, 2, 3], steps: STEPS, patch: PATCH, ng: NG }
 }
 
 /// one worker holding the whole grid: the launched path with no cut
 fn uncut() -> Arm {
-    Arm { cuts0: vec![], cuts1: vec![], owner: vec![0], steps: STEPS }
+    Arm { cuts0: vec![], cuts1: vec![], owner: vec![0], steps: STEPS, patch: PATCH, ng: NG }
+}
+
+/// the patch's hi face on axis 0 lies on the cut at 17: workers 0 and 1 hold the fine faces
+/// of that face, workers 2 and 3 the corrected root cells beside it. the fine ghosts beyond
+/// that face are prolonged from the root halo, which then holds the PPM stencil at five cells
+fn patch_face_on_cut() -> Arm {
+    ragged_17_13().with_patch([(12, 17), (12, 20)], 5)
 }
 
 /// three workers on a 3x2 tile grid: the patch lies in the middle column, whose two tiles
 /// worker 1 owns, so workers 0 and 2 hold no fine tile
 fn no_fine_on_two_workers() -> Arm {
-    Arm { cuts0: vec![10, 22], cuts1: vec![16], owner: vec![0, 0, 1, 1, 2, 2], steps: STEPS }
+    Arm { cuts0: vec![10, 22], cuts1: vec![16], owner: vec![0, 0, 1, 1, 2, 2], steps: STEPS, patch: PATCH, ng: NG }
 }
 
 #[test]
@@ -907,3 +997,61 @@ fn trouble_on_one_side_of_a_fine_cut_is_corrected_on_both() {
     assert_eq!(reports[3].fine_neighbor, 1);
     assert_state_equal(&outcomes, &expected, "the cut flagged run");
 }
+
+/// the patch's hi face lies on a cut: the fine faces' units cross to the neighbor holding
+/// the corrected cells at every fine stage and the run equals the single hierarchy in every
+/// component; a rejection in the second fine substep rolls the registers back with the rest
+#[test]
+fn a_patch_face_on_a_cut_refluxes_through_the_neighbor() {
+    if in_worker_role() {
+        worker_main();
+    }
+    let test = "a_patch_face_on_a_cut_refluxes_through_the_neighbor";
+    let arm = patch_face_on_cut();
+    let outcomes = run_arm(test, "cut_face", &arm, &[]);
+    assert_matches_reference(test, "cut_face", &outcomes, &arm, "the patch face on the cut");
+    for (w, o) in outcomes.iter().enumerate() {
+        let r = o.report.as_ref().unwrap();
+        assert_eq!(r.contrib, 2 * N_COMP as u64, "worker {w}: the plan holds {} contributions", r.contrib);
+    }
+    let rejecting = run_arm(
+        test,
+        "rejecting",
+        &arm,
+        &[("W_REJECT_FINE_WORKER", "1".into()), ("W_REJECT_FINE", "3,1,1".into())],
+    );
+    assert_rejection_matches_capped_control(test, &arm, rejecting, 3, "the fine-rejecting run with a patch face on the cut");
+}
+
+/// a contribution sent twice and one never sent each end the session on every worker
+/// before the reflux, with no state published
+#[test]
+fn a_duplicated_or_missing_contribution_ends_the_run_before_the_reflux() {
+    if in_worker_role() {
+        worker_main();
+    }
+    let test = "a_duplicated_or_missing_contribution_ends_the_run_before_the_reflux";
+    let arm = patch_face_on_cut();
+    // a duplicate is caught where the phase opens: the grant of the receiving worker
+    // carries the plan's send count and the phase lists twice as many
+    for (tag, spec, marker) in [("dup", "3,1,0,dup", "this phase sends it"), ("drop", "3,1,0,drop", "deadline")] {
+        let started = Instant::now();
+        let outcomes = run_arm(
+            test,
+            tag,
+            &arm,
+            &[("W_CONTRIB_FAULT_WORKER", "0".into()), ("W_CONTRIB_FAULT", spec.into())],
+        );
+        assert!(started.elapsed() < TRANSFER_DEADLINE * 4, "{tag}: termination took {:?}", started.elapsed());
+        for (w, o) in outcomes.iter().enumerate() {
+            assert_ne!(o.code, Some(0), "{tag}: worker {w} exited zero");
+            assert!(o.records.is_empty(), "{tag}: worker {w} published its state");
+        }
+        assert!(
+            outcomes.iter().any(|o| o.stderr.contains(marker)),
+            "{tag}: no worker reported the fault:\n{}",
+            outcomes.iter().map(|o| o.stderr.clone()).collect::<Vec<_>>().join("\n---\n")
+        );
+    }
+}
+

@@ -33,6 +33,18 @@ pub enum PlanRole {
     RootState,
     RootSeed,
     Fine,
+    /// the flux-register contributions: every transfer moves at every fine stage point
+    FluxContribution,
+}
+
+/// a fault injected into one plan's staging at one point, for the gates of the
+/// exactly-once rule
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StagingFault {
+    /// list every send of this worker twice
+    Duplicate,
+    /// pack and list none of this worker's sends
+    Drop,
 }
 use symbi_fabric::{Epoch, Fabric, FabricError, Link, PhaseSpec, TransferId, WorkerId};
 use symbi_grid::Field;
@@ -100,6 +112,7 @@ impl<'p, const D: usize> PlanExchange<'p, D> {
                 ExchangePoint::Rollback => self.plan.moves_at(t, ExchangePoint::Rollback),
                 _ => false,
             },
+            PlanRole::FluxContribution => matches!(point, ExchangePoint::Fine { point: FinePoint::Stage(_), .. }),
         }
     }
 
@@ -347,6 +360,19 @@ impl<'p, const D: usize> PlanExchange<'p, D> {
         fabric: &mut Fabric<L>,
         epoch: Epoch,
     ) -> Result<(Vec<(TransferId, WorkerId)>, Vec<(TransferId, WorkerId)>), FabricError> {
+        self.stage_axis_faulted(fields, devices, transport, fabric, epoch, None)
+    }
+
+    /// `stage_axis` with a fault injected into this worker's sends
+    pub fn stage_axis_faulted<M: MemorySpace, T: HaloTransport, L: Link>(
+        &self,
+        fields: &[Vec<&Field<f64, D, M>>],
+        devices: &[i32],
+        transport: &T,
+        fabric: &mut Fabric<L>,
+        epoch: Epoch,
+        fault: Option<StagingFault>,
+    ) -> Result<(Vec<(TransferId, WorkerId)>, Vec<(TransferId, WorkerId)>), FabricError> {
         let phase = &self.plan.axes[epoch.axis as usize];
         let point = self
             .table
@@ -367,9 +393,15 @@ impl<'p, const D: usize> PlanExchange<'p, D> {
                     devices[dst],
                 ),
                 (true, false) => {
+                    if fault == Some(StagingFault::Drop) {
+                        continue;
+                    }
                     let field = fields[src][f];
                     fabric.pack(self.fabric_id(t), |buf| gather(field, &t.src_region, buf))?;
                     sends.push((self.fabric_id(t), self.placement.owner_of(t.dst)));
+                    if fault == Some(StagingFault::Duplicate) {
+                        sends.push((self.fabric_id(t), self.placement.owner_of(t.dst)));
+                    }
                 }
                 (false, true) => receives.push((self.fabric_id(t), self.placement.owner_of(t.src))),
                 (false, false) => {}
@@ -550,7 +582,7 @@ fn compare<const D: usize, M: MemorySpace>(
 }
 
 /// read `region` of `field` into `buf` in region iteration order.
-fn gather<const D: usize, M: MemorySpace>(
+pub fn gather<const D: usize, M: MemorySpace>(
     field: &Field<f64, D, M>,
     region: &[Span; D],
     buf: &mut [f64],
@@ -571,7 +603,7 @@ fn gather<const D: usize, M: MemorySpace>(
 }
 
 /// write `buf` over `region` of `field` in region iteration order.
-fn scatter<const D: usize, M: MemorySpace>(
+pub fn scatter<const D: usize, M: MemorySpace>(
     field: &Field<f64, D, M>,
     region: &[Span; D],
     buf: &[f64],

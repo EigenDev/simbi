@@ -261,6 +261,15 @@ fn fatal_cfl_dt(dt_cfl: f64) -> bool {
     dt_cfl.is_nan() || dt_cfl <= 0.0
 }
 
+/// how a builder treats a patch's real face that lies on a decomposition cut
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum CutFaces {
+    /// refuse the layout by name: the driver carries no register contribution across a cut
+    Refuse,
+    /// a contributing register face, its fine unit sent to the neighbor by the driver
+    Contribute,
+}
+
 pub struct HierarchyRetrySidecars<const D: usize> {
     discrete: Vec<Option<symbi_sim::tracers::TracerSet<D>>>,
     continuous: Vec<Option<symbi_sim::tracers::ContinuousTracerSnapshot<D>>>,
@@ -1117,7 +1126,55 @@ where
         prolong_order: ProlongOrder,
         make_kernels: impl Fn(&SimStateGeneric<R, NDIM, DOF, M, E, S, Mem>) -> K,
     ) -> symbi_xpu::Result<Self> {
+        Self::refine_levels(coarse, coarse_kernels, regions, whole, prolong_order, make_kernels, CutFaces::Refuse)
+    }
+
+    /// `with_refinement_of` for a driver that carries register contributions across cuts: a
+    /// patch face that is the patch's real face and lies on a decomposition cut becomes a
+    /// contributing register face, whose fine unit the driver sends to the tile holding the
+    /// corrected coarse cell. that face's fine ghosts are prolonged from the root halo, so
+    /// the prolongation stencil has to fit inside it; a root halo too shallow for it is
+    /// refused with the depth it needs
+    pub fn with_refinement_of_contributing(
+        coarse: SimStateGeneric<R, NDIM, DOF, M, E, S, Mem>,
+        coarse_kernels: K,
+        regions: &[RefinementRegion<NDIM>],
+        whole: &[RefinementRegion<NDIM>],
+        prolong_order: ProlongOrder,
+        make_kernels: impl Fn(&SimStateGeneric<R, NDIM, DOF, M, E, S, Mem>) -> K,
+    ) -> symbi_xpu::Result<Self> {
+        Self::refine_levels(coarse, coarse_kernels, regions, whole, prolong_order, make_kernels, CutFaces::Contribute)
+    }
+
+    /// a single level with receiving register faces: this tile holds the coarse cells a
+    /// neighbor's fine faces correct. `slabs` names each face by `(ax, side)` of the patch it
+    /// bounds and its slab in this tile's index space
+    pub fn with_receiving_register(mut self, slabs: &[(usize, usize, Domain<NDIM>)]) -> symbi_xpu::Result<Self> {
+        assert_eq!(self.levels.len(), 1, "a receiving register lives on a tile without a fine level");
+        assert!(self.flux_registers.is_empty());
+        let cons = &self.levels[0].state.fields.cons;
+        self.flux_registers.push(FluxRegister::receiving(slabs, cons.has_energy(), cons.chi_field().is_some())?);
+        Ok(self)
+    }
+
+    /// whether level `level` carries a flux register on its interface with a finer level,
+    /// held here or on a neighbor tile
+    pub fn has_flux_register(&self, level: usize) -> bool {
+        level < self.flux_registers.len()
+    }
+
+    fn refine_levels(
+        coarse: SimStateGeneric<R, NDIM, DOF, M, E, S, Mem>,
+        coarse_kernels: K,
+        regions: &[RefinementRegion<NDIM>],
+        whole: &[RefinementRegion<NDIM>],
+        prolong_order: ProlongOrder,
+        make_kernels: impl Fn(&SimStateGeneric<R, NDIM, DOF, M, E, S, Mem>) -> K,
+        cut_faces: CutFaces,
+    ) -> symbi_xpu::Result<Self> {
         assert_eq!(regions.len(), whole.len(), "one whole patch per clipped region");
+        // the root patch's real faces lying on a cut: contributing register faces
+        let mut contributing = [[false; 2]; NDIM];
         let mut whole_coverages: Vec<Domain<NDIM>> = Vec::with_capacity(regions.len());
         let root_ng = coarse.geom.ng;
         let mut levels = vec![LevelData {
@@ -1171,19 +1228,21 @@ where
                 });
             }
             // a patch face lying on a root cut: the fine faces on it live on this tile and
-            // the coarse cell their reflux corrects lives on the neighbor, and no register
-            // carries a contribution across a cut yet. the root's coarse-fine boundary is a
-            // cut by construction (a single hierarchy's root has physical boundaries alone).
+            // the coarse cell their reflux corrects lives on the neighbor. a driver carrying
+            // register contributions across cuts takes it as a contributing face; the others
+            // refuse it. the root's coarse-fine boundary is a cut by construction (a single
+            // hierarchy's root has physical boundaries alone).
+            let mut real_on_cut = [[false; 2]; NDIM];
             if levels.len() == 1 {
                 for ax in 0..NDIM {
                     let whole_face = &whole_coverages.last().unwrap().spaces[ax];
-                    let on_lo_cut = coverage.spaces[ax].lo == parent.geom.interior.spaces[ax].lo
+                    real_on_cut[ax][0] = coverage.spaces[ax].lo == parent.geom.interior.spaces[ax].lo
                         && whole_face.lo == coverage.spaces[ax].lo
                         && parent.boundaries.lo(ax) == BoundaryType::CoarseFine;
-                    let on_hi_cut = coverage.spaces[ax].hi == parent.geom.interior.spaces[ax].hi
+                    real_on_cut[ax][1] = coverage.spaces[ax].hi == parent.geom.interior.spaces[ax].hi
                         && whole_face.hi == coverage.spaces[ax].hi
                         && parent.boundaries.hi(ax) == BoundaryType::CoarseFine;
-                    if on_lo_cut || on_hi_cut {
+                    if (real_on_cut[ax][0] || real_on_cut[ax][1]) && cut_faces == CutFaces::Refuse {
                         return Err(symbi_xpu::XpuError {
                             operation: "refinement region",
                             code: 0,
@@ -1196,11 +1255,12 @@ where
                         });
                     }
                 }
+                contributing = real_on_cut;
             }
             // fine ghost depth: one above the root's (the prolongation stencil
             // is one order above the evolution reconstruction).
             let ng = root_ng + 1;
-            validate_coverage(&coverage, parent, ng, prolong_order).map_err(|detail| {
+            validate_coverage(&coverage, parent, ng, prolong_order, real_on_cut).map_err(|detail| {
                 symbi_xpu::XpuError { operation: "refinement region", code: 0, detail }
             })?;
 
@@ -1306,12 +1366,19 @@ where
             let donor_width = (level.kernels.reconstruction_reach() as usize)
                 .max(prolong_order.ghost_width())
                 + 1;
+            let cut: [[bool; 2]; NDIM] = std::array::from_fn(|ax| {
+                [
+                    level.state.boundaries.lo(ax) == BoundaryType::CoarseFine,
+                    level.state.boundaries.hi(ax) == BoundaryType::CoarseFine,
+                ]
+            });
             level.state.composite_ownership = match level.coverage.clone() {
                 Some(coverage) => symbi_sim::state::CompositeOwnership::clipped(
                     coverage,
                     &whole_coverages[ll],
                     &level.state.geom.interior,
                     donor_width,
+                    cut,
                 ),
                 None => symbi_sim::state::CompositeOwnership::new(None, &level.state.geom.interior, donor_width),
             };
@@ -1320,11 +1387,16 @@ where
             // the out-of-plane magnetic components of a partially gridded chart reflux with the
             // gas; a fully gridded chart and a hydrodynamic run carry none.
             let oop_components = if levels[ll].state.fields.mhd.is_some() { DOF - NDIM } else { 0 };
-            flux_registers.push(FluxRegister::new(
-                levels[ll].coverage.as_ref().unwrap(),
-                &levels[ll].state.geom.interior,
-                levels[ll].state.fields.cons.has_energy(),
-                levels[ll].state.fields.cons.chi_field().is_some(), oop_components)?);
+            let has_energy = levels[ll].state.fields.cons.has_energy();
+            let has_dye = levels[ll].state.fields.cons.chi_field().is_some();
+            let coverage = levels[ll].coverage.as_ref().unwrap();
+            let mut register =
+                FluxRegister::new(coverage, &levels[ll].state.geom.interior, has_energy, has_dye, oop_components)?;
+            if ll == 0 && contributing.iter().flatten().any(|&c| c) {
+                assert_eq!(oop_components, 0, "a contributing face carries the gas components");
+                register = register.with_contributing_faces(coverage, contributing, has_energy, has_dye)?;
+            }
+            flux_registers.push(register);
             emf_registers.push(if levels[ll].state.fields.mhd.is_some() {
                 Some(EmfRegister::new(
                     levels[ll].coverage.as_ref().unwrap(),
@@ -2747,7 +2819,6 @@ where
     /// registers and field writes go through interior mutability), so the fold's borrow of the
     /// level state stays compatible.
     fn stage_hook(&self, level: usize, ii: usize, dt: f64, alpha0: f64) -> impl FnMut(HookPoint) + '_ {
-        let has_finer = level + 1 < self.levels.len();
         let has_coarser = level > 0;
         let stages = self.levels[level].state.timestepping.stages();
         let weights = flux_weights(stages);
@@ -2764,7 +2835,7 @@ where
                     // state sitting on the target then accumulates zero, while the two grids'
                     // reconstructions of the target itself — which differ, and which the plain
                     // register would apply to the coarse cells as a force — cancel.
-                    if has_finer {
+                    if this.has_flux_register(level) {
                         let reg = &this.flux_registers[level];
                         if uniform_cartesian(&l.state) {
                             if ii == 0 {
@@ -3359,7 +3430,9 @@ where
     /// a pure extraction.
     pub fn level_restrict_reflux(&mut self, level: usize, alpha0: f64) {
         let has_coarser = level > 0;
+        let has_finer = level + 1 < self.levels.len();
         let is_mhd = self.levels[level].state.fields.mhd.is_some();
+        if has_finer {
         prof("refine_restrict", || {
             let (lo, hi) = self.levels.split_at(level + 1);
             let coarse = &lo[level];
@@ -3386,6 +3459,8 @@ where
                 bcell_from_bface_region(cmhd, coarse.state.fields.cons.nrg_field(), &shell);
             }
         });
+        }
+        if self.has_flux_register(level) {
         prof("refine_reflux_apply", || {
             let l = &self.levels[level];
             if uniform_cartesian(&l.state) {
@@ -3400,9 +3475,10 @@ where
                 self.flux_registers[level].apply(&l.state.fields.cons, &geo);
             }
         });
+        }
         let l = &self.levels[level];
         prof("c2p", || l.kernels.c2p(&l.state));
-        if self.levels[level].cons_eq.is_none() && self.cf_transfer_balanced(level + 1) {
+        if has_finer && self.levels[level].cons_eq.is_none() && self.cf_transfer_balanced(level + 1) {
             // SYMBI_WB_BAND=0 withholds the band rewrite so the seam carries the
             // conservative restriction alone; the identical binary then runs the
             // counterfactual arm of the seam admissibility census, attributing
@@ -4404,6 +4480,7 @@ fn validate_coverage<R, const D: usize, const DOF: usize, M, E, S, Mem>(
     parent: &SimStateGeneric<R, D, DOF, M, E, S, Mem>,
     fine_ng: usize,
     order: ProlongOrder,
+    real_on_cut: [[bool; 2]; D],
 ) -> Result<(), String>
 where
     R: Regime<f64, D>,
@@ -4425,6 +4502,15 @@ where
         }
         let ng = (int.lo - alloc.lo) as isize;
         let clearance = reach - ng;
+        // the patch's real face on a cut: its fine ghosts are prolonged from the root halo
+        // alone, so the stencil has to fit inside it
+        if (real_on_cut[ax][0] || real_on_cut[ax][1]) && clearance > 0 {
+            return Err(format!(
+                "the refinement patch's real face on axis {ax} lies on a decomposition cut and its \
+                 prolongation stencil reaches {clearance} beyond the root halo; give the root {reach} \
+                 ghost cells or move the face off the cut"
+            ));
+        }
         if clo != int.lo && clo - reach < alloc.lo {
             return Err(format!(
                 "the refinement patch's low face on axis {ax} sits {} parent cell(s) from the \

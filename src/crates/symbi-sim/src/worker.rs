@@ -30,7 +30,7 @@ use crate::driver::{
     advance_clock, advance_state_clock, downstream_injection_weight, needs_step_snapshot,
     retry_timestep, select_timestep, stage_schedule,
 };
-use crate::plan_exchange::{AuditCost, AuditError, PlanExchange};
+use crate::plan_exchange::{AuditCost, AuditError, PlanExchange, StagingFault};
 use crate::stage::{StageArgs, StageOutcome, fold_stage_from_correction, fold_stage_through_mark};
 use crate::state::{FieldStore, Timestepping};
 use crate::substrate_seam::{KernelSet, RegimeKind};
@@ -246,6 +246,8 @@ pub struct PlanPart<'a, const D: usize, M: MemorySpace> {
     pub plan: &'a PlanExchange<'a, D>,
     pub fields: &'a [Vec<&'a Field<f64, D, M>>],
     pub devices: &'a [i32],
+    /// a fault injected into this worker's sends of the part, for the exactly-once gates
+    pub fault: Option<StagingFault>,
 }
 
 /// one exchange point over several plans: every axis phase opens once with the union of
@@ -275,7 +277,7 @@ where
             let mut sends = Vec::new();
             let mut receives = Vec::new();
             for part in parts {
-                let (s, r) = part.plan.stage_axis(part.fields, part.devices, transport, fabric, epoch)?;
+                let (s, r) = part.plan.stage_axis_faulted(part.fields, part.devices, transport, fabric, epoch, part.fault)?;
                 sends.extend(s);
                 receives.extend(r);
             }
