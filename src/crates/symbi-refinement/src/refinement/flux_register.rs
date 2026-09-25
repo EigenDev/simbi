@@ -273,6 +273,35 @@ impl<const D: usize, const DOF: usize, Mem: MemorySpace> FluxRegister<D, DOF, Me
         })
     }
 
+    /// `receiving` over the faces `faces[ax][side]` of `coverage`, the patch box in this tile's
+    /// index space, lying beyond its interior
+    pub fn receiving_on(
+        coverage: &Domain<D>,
+        faces: [[bool; 2]; D],
+        has_energy: bool,
+        has_dye: bool,
+    ) -> symbi_xpu::Result<Self> {
+        let mut slabs = Vec::new();
+        for ax in 0..D {
+            for side in 0..2 {
+                if faces[ax][side] {
+                    slabs.push((ax, side, Self::face_domain(coverage, ax, side)));
+                }
+            }
+        }
+        Self::receiving(&slabs, has_energy, has_dye)
+    }
+
+    /// clear the inboxes without folding them: a rejected attempt's landed units are discarded
+    pub fn clear_inboxes(&self) {
+        let fill = KernelId::FieldFill { ndim: D as u8 }.name();
+        for (_, inbox, dom) in self.inboxes() {
+            for field in inbox {
+                dispatch_fields_each::<f64, Mem, D>(fill, dom, &[], &[field], &[], &[0.0]);
+            }
+        }
+    }
+
     /// the contributing faces: `(2 * ax + side, components in register order, slab domain)`
     pub fn contributing(&self) -> Vec<(usize, Vec<&Field<f64, D, Mem>>, &Domain<D>)> {
         (0..2 * D)

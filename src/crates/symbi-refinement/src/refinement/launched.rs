@@ -54,6 +54,12 @@ pub struct RefinedPlans<'p, const D: usize> {
     /// the flux-register contributions of the patch faces lying on cuts, at every fine
     /// stage point; absent when no patch face lies on a cut
     pub flux: Option<PlanExchange<'p, D>>,
+    /// the EMF-register contributions of those faces, at every fine post-tail point; absent
+    /// on a hydrodynamic run or when no patch face lies on a cut
+    pub emf: Option<PlanExchange<'p, D>>,
+    /// the neighbor's copies of the staggered faces on those cuts, at the last substep's
+    /// post-tail point after the restriction; absent with `emf`
+    pub faces: Option<PlanExchange<'p, D>>,
 }
 
 /// the tiles this worker holds: parallel over the held root tiles
@@ -117,6 +123,13 @@ where
     if let Some(flux) = plans.flux.as_ref() {
         assert_eq!(flux.role(), PlanRole::FluxContribution);
     }
+    if let Some(emf) = plans.emf.as_ref() {
+        assert_eq!(emf.role(), PlanRole::EmfContribution);
+    }
+    if let Some(faces) = plans.faces.as_ref() {
+        assert_eq!(faces.role(), PlanRole::InterfaceFace);
+    }
+    assert_eq!(plans.emf.is_some(), plans.faces.is_some(), "the EMF contributions and the interface faces travel together");
     let base = &cfg.base;
     let deadline = base.deadline;
     let stages = base.timestepping.stages();
@@ -253,6 +266,64 @@ where
                 }
             }
             lists
+        }};
+    }
+    // the EMF slabs of the contributions plan and the staggered faces of the replacement
+    // plan, per root tile
+    macro_rules! emf_fields {
+        () => {{
+            let mut lists: Vec<Vec<&Field<f64, D, Mem>>> = (0..held.n_root).map(|_| Vec::new()).collect();
+            for (k, h) in tiles.iter().enumerate() {
+                if let Some(Some(reg)) = h.emf_registers.first() {
+                    lists[held.root_ids[k].0 as usize] = reg.plan_fields(&h.levels[0].state.fields.cons.den);
+                }
+            }
+            lists
+        }};
+    }
+    macro_rules! face_fields {
+        () => {{
+            let mut lists: Vec<Vec<&Field<f64, D, Mem>>> = (0..held.n_root).map(|_| Vec::new()).collect();
+            for (k, h) in tiles.iter().enumerate() {
+                if let Some(mhd) = h.levels[0].state.fields.mhd.as_ref() {
+                    lists[held.root_ids[k].0 as usize] = mhd.bface.b.iter().collect();
+                }
+            }
+            lists
+        }};
+    }
+    // the fine post-tail point: the fine state and, with it, the EMF contributions of the
+    // substep and, at the last substep, the corrected staggered faces on the cuts; every
+    // contributing slab is then cleared and every landed unit folded in substep order
+    macro_rules! fine_tail_point {
+        ($sub:expr, $step:expr, $attempt:expr) => {{
+            let point = ExchangePoint::Fine { substep: $sub as u8, point: FinePoint::PostTail };
+            let fields = fine_fields!();
+            let emf_fields = emf_fields!();
+            let face_fields = face_fields!();
+            let mut parts = vec![PlanPart { plan: &plans.fine, fields: &fields, devices: held.fine_devices, fault: None }];
+            if let Some(emf) = plans.emf.as_ref() {
+                parts.push(PlanPart { plan: emf, fields: &emf_fields, devices: held.root_devices, fault: None });
+            }
+            if let Some(faces) = plans.faces.as_ref() {
+                parts.push(PlanPart { plan: faces, fields: &face_fields, devices: held.root_devices, fault: None });
+            }
+            exchange_point_plans(&parts, transport, fabric, point, $step, $attempt, deadline, &mut timing.exchange)
+                .map_err(|e| fail(fabric, e.into()))?;
+            for &k in &refined {
+                let h = &tiles[k];
+                with_device(fine_dev(k), || h.levels[1].kernels.ghost_fill(&h.levels[1].state));
+            }
+            if plans.emf.is_some() {
+                for (k, h) in tiles.iter().enumerate() {
+                    if let Some(Some(reg)) = h.emf_registers.first() {
+                        with_device(root_dev(k), || {
+                            reg.zero_contributions();
+                            reg.fold_inboxes();
+                        });
+                    }
+                }
+            }
         }};
     }
     // the fine stage point: the fine state and, with it, the flux contributions of the
@@ -520,17 +591,25 @@ where
                         rejected = true;
                         break 'subcycle;
                     }
-                    fine_point!(ExchangePoint::Fine { substep: sub as u8, point: FinePoint::PostTail }, iter, attempt);
+                    // the last substep: the refined tiles restrict and reflux before the
+                    // post-tail exchange, so the staggered faces it carries to the neighbors
+                    // across the cuts are the corrected ones
+                    if sub + 1 == RATIO {
+                        for &k in &refined {
+                            with_device(root_dev(k), || tiles[k].level_restrict_reflux(0, 0.0));
+                        }
+                    }
+                    fine_tail_point!(sub, iter, attempt);
                     if base.audit_every_point {
                         audit!(plans.fine, fine_fields!(), ExchangePoint::Fine { substep: sub as u8, point: FinePoint::AuditTail }, iter, attempt);
                     }
                 }
             }
             if !rejected {
-                // restriction on the refined tiles, the reflux on every tile whose register
-                // holds a face: a receiving register corrects the cell beside a neighbor's patch
+                // the reflux on every tile whose registers receive a neighbor's units: the
+                // cells and faces beside that neighbor's patch, with every unit landed
                 for k in 0..n {
-                    if tiles[k].levels.len() > 1 || tiles[k].has_flux_register(0) {
+                    if tiles[k].levels.len() == 1 && tiles[k].has_flux_register(0) {
                         with_device(root_dev(k), || tiles[k].level_restrict_reflux(0, 0.0));
                     }
                 }
@@ -566,7 +645,10 @@ where
                     }
                     with_device(root_dev(k), || level.kernels.restore_step(&level.state));
                 }
-                with_device(root_dev(k), || h.restore_attempt_entry());
+                with_device(root_dev(k), || {
+                    h.restore_attempt_entry();
+                    h.clear_pending_contributions();
+                });
                 h.restore_retry_sidecars(&sidecars[k]);
             }
             {

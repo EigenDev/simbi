@@ -1149,12 +1149,27 @@ where
     /// a single level with receiving register faces: this tile holds the coarse cells a
     /// neighbor's fine faces correct. `slabs` names each face by `(ax, side)` of the patch it
     /// bounds and its slab in this tile's index space
-    pub fn with_receiving_register(mut self, slabs: &[(usize, usize, Domain<NDIM>)]) -> symbi_xpu::Result<Self> {
+    pub fn with_receiving_register(mut self, patch: &Domain<NDIM>, faces: [[bool; 2]; NDIM]) -> symbi_xpu::Result<Self> {
         assert_eq!(self.levels.len(), 1, "a receiving register lives on a tile without a fine level");
         assert!(self.flux_registers.is_empty());
-        let cons = &self.levels[0].state.fields.cons;
-        self.flux_registers.push(FluxRegister::receiving(slabs, cons.has_energy(), cons.chi_field().is_some())?);
+        let state = &self.levels[0].state;
+        let cons = &state.fields.cons;
+        self.flux_registers.push(FluxRegister::receiving_on(patch, faces, cons.has_energy(), cons.chi_field().is_some())?);
+        self.emf_registers.push(if state.fields.mhd.is_some() { Some(EmfRegister::receiving(patch, faces)?) } else { None });
         Ok(self)
+    }
+
+    /// discard every pending register unit of a rejected attempt: the contributing faces and
+    /// slabs accumulated after their last send, and the landed units in the inboxes
+    pub fn clear_pending_contributions(&self) {
+        for reg in &self.flux_registers {
+            reg.zero_contributions();
+            reg.clear_inboxes();
+        }
+        for reg in self.emf_registers.iter().flatten() {
+            reg.zero_contributions();
+            reg.clear_inboxes();
+        }
     }
 
     /// whether level `level` carries a flux register on its interface with a finer level,
@@ -1166,6 +1181,7 @@ where
     /// whether a register of this hierarchy sends or receives a unit across a cut
     pub fn transports_registers(&self) -> bool {
         self.flux_registers.iter().any(|r| r.has_contributing() || r.has_receiving())
+            || self.emf_registers.iter().flatten().any(|r| r.has_contributing() || r.has_receiving())
     }
 
     /// whether the root lies on a uniform cartesian grid, where the register kernels carry
@@ -1409,10 +1425,11 @@ where
             }
             flux_registers.push(register);
             emf_registers.push(if levels[ll].state.fields.mhd.is_some() {
-                Some(EmfRegister::new(
-                    levels[ll].coverage.as_ref().unwrap(),
-                    &levels[ll].state.geom.interior,
-                )?)
+                let mut register = EmfRegister::new(coverage, &levels[ll].state.geom.interior)?;
+                if ll == 0 && contributing.iter().flatten().any(|&c| c) {
+                    register = register.with_contributing_planes(coverage, contributing)?;
+                }
+                Some(register)
             } else {
                 None
             });
@@ -3339,14 +3356,12 @@ where
     }
 
     pub fn level_tail_emf(&self, level: usize, dt: f64) {
-        let has_finer = level + 1 < self.levels.len();
         let has_coarser = level > 0;
         let is_mhd = self.levels[level].state.fields.mhd.is_some();
-        if has_finer && is_mhd {
+        // the register of this level's interface with a finer one, held here or beside a
+        // neighbor's patch: zeroed and sampled once per level step
+        if let Some(Some(reg)) = self.emf_registers.get(level) {
             prof("refine_emf", || {
-                let reg = self.emf_registers[level]
-                    .as_ref()
-                    .expect("mhd pair carries an emf register");
                 reg.zero();
                 let l = &self.levels[level];
                 reg.accumulate_coarse(&l.state.fields.mhd.as_ref().unwrap().efield, dt);
@@ -3470,6 +3485,18 @@ where
                 bcell_from_bface_region(cmhd, coarse.state.fields.cons.nrg_field(), &shell);
             }
         });
+        }
+        // a receiving EMF register beside a neighbor's patch: the outside faces this tile
+        // holds, then cell B and the magnetic energy over the shell those faces bound
+        if !has_finer {
+            if let Some(Some(reg)) = self.emf_registers.get(level) {
+                let l = &self.levels[level];
+                let mhd = l.state.fields.mhd.as_ref().expect("an emf register lives on a magnetized level");
+                let inv_dx: [f64; NDIM] = std::array::from_fn(|ax| 1.0 / l.state.geom.dx[ax]);
+                reg.apply(&mhd.bface, &inv_dx);
+                let shell = shell_around(reg.coverage(), &l.state.geom.interior);
+                bcell_from_bface_region(mhd, l.state.fields.cons.nrg_field(), &shell);
+            }
         }
         if self.has_flux_register(level) {
         prof("refine_reflux_apply", || {

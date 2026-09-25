@@ -194,33 +194,33 @@ fn tile(partition: &Partition<2>, flat: usize, patch: [(usize, usize); 2], ng: u
         return Hier::with_refinement_of_contributing(root, k, &[clipped], &[whole], ProlongOrder::Ppm, kset)
             .expect("tile hier");
     }
-    let mut slabs = Vec::new();
+    // the patch faces this tile sits beside: beyond a hi face the tile starts at it, beyond
+    // a lo face it ends at it, its transverse extent meeting the patch
+    let mut faces = [[false; 2]; 2];
     for ax in 0..2 {
         for side in 0..2 {
             let face_pos = if side == 0 { patch[ax].0 } else { patch[ax].1 };
-            // the owner beyond a hi face starts at it; the owner beyond a lo face ends at it
             let beside = if side == 1 { ext[ax].0 == face_pos } else { ext[ax].0 + ext[ax].1 == face_pos };
             let across = (0..2).all(|aa| aa == ax || (ext[aa].0 < patch[aa].1 && ext[aa].0 + ext[aa].1 > patch[aa].0));
-            if !(beside && across) {
-                continue;
-            }
-            let slab = symbi_algebra::Domain::new(std::array::from_fn(|aa| {
-                let (lo, hi) = if aa == ax {
-                    let at = face_pos as isize - ext[ax].0 as isize;
-                    (at, at + 1)
-                } else {
-                    (
-                        patch[aa].0.max(ext[aa].0) as isize - ext[aa].0 as isize,
-                        patch[aa].1.min(ext[aa].0 + ext[aa].1) as isize - ext[aa].0 as isize,
-                    )
-                };
-                symbi_algebra::Space { name: axis_name(aa), lo, hi }
-            }));
-            slabs.push((ax, side, slab));
+            faces[ax][side] = beside && across;
         }
     }
     let h = Hier::single(root, k);
-    if slabs.is_empty() { h } else { h.with_receiving_register(&slabs).expect("receiving register") }
+    if faces.iter().flatten().any(|&f| f) {
+        // the patch box in this tile's index space, clipped to its transverse extent
+        let patch_local = symbi_algebra::Domain::new(std::array::from_fn(|aa| {
+            let origin = ext[aa].0 as isize;
+            let (lo, hi) = if faces[aa].iter().any(|&f| f) {
+                (patch[aa].0 as isize - origin, patch[aa].1 as isize - origin)
+            } else {
+                (patch[aa].0.max(ext[aa].0) as isize - origin, patch[aa].1.min(ext[aa].0 + ext[aa].1) as isize - origin)
+            };
+            symbi_algebra::Space { name: axis_name(aa), lo, hi }
+        }));
+        h.with_receiving_register(&patch_local, faces).expect("receiving register")
+    } else {
+        h
+    }
 }
 
 fn env_u64(name: &str) -> Option<u64> {
@@ -484,7 +484,7 @@ fn run_worker(arm: &Arm, me: WorkerId, out: PathBuf) -> Result<(), WorkerError> 
     let max_payload = all.iter().flat_map(|p| p.lens()).max().unwrap_or(0) * 8;
     let (link, session) = connect(&r, max_payload.max(64))?;
     let mut fabric = fabric_for(&all, link, session);
-    let plans = RefinedPlans { root, seed, fine, flux };
+    let plans = RefinedPlans { root, seed, fine, flux, emf: None, faces: None };
     let cfg = RefinedConfig {
         base: WorkerConfig {
             regime: RegimeKind::of::<f64, 2, Newtonian>(),

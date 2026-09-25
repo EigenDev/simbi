@@ -37,6 +37,20 @@
 // the single curl; euler keeps the raw stage EMF). cartesian only — the curl
 // coefficients are 1/dx.
 //
+// a slab has a role like a flux-register face. a local slab holds the fine
+// sub-edges and the corrected outside faces on this tile. a contributing slab
+// lies on a patch plane coinciding with a decomposition cut: the fine sub-edges
+// are here and the corrected faces on the neighbor, so the slab accumulates one
+// substep's unit from zero for the driver to send and clear; the coarse EMF and
+// the application belong to the neighbor. a receiving slab is that neighbor's
+// side: the coarse EMF at its own root step, each substep's unit folded from an
+// inbox with `R += unit` in substep order, then applied to its outside faces.
+// a box-corner edge of a cut plane lies in the transported slab and in the
+// transverse plane's local slab of the tile holding the fine sub-edges; each
+// copy accumulates the identical value, the local one corrects that tile's
+// copy of the faces at the corner, and the neighbor's copy of a face on the
+// cut takes the corrected value from the tile that holds the fine faces.
+//
 // usage:
 //  let reg = EmfRegister::new(&coverage, &coarse_interior)?;
 //  reg.zero();
@@ -51,6 +65,8 @@ use symbi_xpu::MemorySpace;
 
 use symbi_ir::KernelId;
 use symbi_sim::state::{BfaceFields, EfieldFields, axis_name};
+
+pub use super::flux_register::FaceRole;
 use symbi_substrate::regimes::substrate_kernels::dispatch_fields_each;
 
 /// the refinement ratio baked into the registered edge kernels.
@@ -70,6 +86,9 @@ struct EdgeSlab<const D: usize, Mem: MemorySpace> {
     side: usize,
     dom: Domain<D>,
     reg: Field<f64, D, Mem>,
+    role: FaceRole,
+    /// the landing slab of a receiving slab: the neighbor's unit arrives here and is folded
+    inbox: Option<Field<f64, D, Mem>>,
 }
 
 /// per coarse-fine interface edge-EMF accumulator, slab-field storage.
@@ -89,14 +108,11 @@ impl<const D: usize, Mem: MemorySpace> EmfRegister<D, Mem> {
     pub fn new(coverage: &Domain<D>, coarse_interior: &Domain<D>) -> symbi_xpu::Result<Self> {
         assert!(D == 2 || D == 3, "EmfRegister: the staggered CT stack is 2.5D or 3D");
         let mut slabs = Vec::new();
-        // (edge axis, storage slot) families: the three grid axes in 3D, the missing axis in 2D.
-        let families: Vec<(usize, usize)> = if D == 3 { vec![(0, 0), (1, 1), (2, 2)] } else { vec![(2, 0)] };
-        for (tt, slot) in families {
+        for (tt, slot) in Self::families() {
             for bb in 0..D {
                 if bb == tt {
                     continue;
                 }
-                let aa = 3 - tt - bb;
                 for side in 0..2usize {
                     if side == 0 && coverage.spaces[bb].lo == coarse_interior.spaces[bb].lo {
                         continue;
@@ -104,38 +120,7 @@ impl<const D: usize, Mem: MemorySpace> EmfRegister<D, Mem> {
                     if side == 1 && coverage.spaces[bb].hi == coarse_interior.spaces[bb].hi {
                         continue;
                     }
-                    let plane = if side == 0 {
-                        coverage.spaces[bb].lo
-                    } else {
-                        coverage.spaces[bb].hi
-                    };
-                    let dom = Domain::new(std::array::from_fn(|ax| {
-                        let s = &coverage.spaces[ax];
-                        let (lo, hi) = if ax == bb {
-                            (plane, plane + 1)
-                        } else if ax == aa {
-                            // a-node range, both extremes (the box corners).
-                            (s.lo, s.hi + 1)
-                        } else {
-                            // t-cell range along the edge direction.
-                            (s.lo, s.hi)
-                        };
-                        Space {
-                            name: axis_name(ax),
-                            lo,
-                            hi,
-                        }
-                    }));
-                    let reg = Field::zeros(&dom)?;
-                    slabs.push(EdgeSlab {
-                        tt,
-                        slot,
-                        bb,
-                        aa,
-                        side,
-                        dom,
-                        reg,
-                    });
+                    slabs.push(Self::slab(coverage, tt, slot, bb, side, FaceRole::Local)?);
                 }
             }
         }
@@ -145,10 +130,174 @@ impl<const D: usize, Mem: MemorySpace> EmfRegister<D, Mem> {
         })
     }
 
+    /// (edge axis, storage slot) families: the three grid axes in 3D, the missing axis in 2D
+    fn families() -> Vec<(usize, usize)> {
+        if D == 3 { vec![(0, 0), (1, 1), (2, 2)] } else { vec![(2, 0)] }
+    }
+
+    /// the in-plane t-edge slab of `coverage` on the side plane `(bb, side)`
+    fn slab(
+        coverage: &Domain<D>,
+        tt: usize,
+        slot: usize,
+        bb: usize,
+        side: usize,
+        role: FaceRole,
+    ) -> symbi_xpu::Result<EdgeSlab<D, Mem>> {
+        let aa = 3 - tt - bb;
+        let plane = if side == 0 { coverage.spaces[bb].lo } else { coverage.spaces[bb].hi };
+        let dom = Domain::new(std::array::from_fn(|ax| {
+            let s = &coverage.spaces[ax];
+            let (lo, hi) = if ax == bb {
+                (plane, plane + 1)
+            } else if ax == aa {
+                // a-node range, both extremes (the box corners).
+                (s.lo, s.hi + 1)
+            } else {
+                // t-cell range along the edge direction.
+                (s.lo, s.hi)
+            };
+            Space { name: axis_name(ax), lo, hi }
+        }));
+        let reg = Field::zeros(&dom)?;
+        let inbox = if role == FaceRole::Receiving { Some(Field::zeros(&dom)?) } else { None };
+        Ok(EdgeSlab { tt, slot, bb, aa, side, dom, reg, role, inbox })
+    }
+
+    /// add contributing slabs on the coverage planes named by `faces[bb][side]`: patch
+    /// planes flush with this tile's interior boundary that are the patch's real faces,
+    /// whose corrected outside faces lie on the neighbor across the cut
+    pub fn with_contributing_planes(mut self, coverage: &Domain<D>, faces: [[bool; 2]; D]) -> symbi_xpu::Result<Self> {
+        for (tt, slot) in Self::families() {
+            for bb in 0..D {
+                if bb == tt {
+                    continue;
+                }
+                for side in 0..2usize {
+                    if !faces[bb][side] {
+                        continue;
+                    }
+                    assert!(
+                        !self.slabs.iter().any(|s| s.tt == tt && s.bb == bb && s.side == side),
+                        "a contributing slab replaces no local slab"
+                    );
+                    self.slabs.push(Self::slab(coverage, tt, slot, bb, side, FaceRole::Contributing)?);
+                }
+            }
+        }
+        Ok(self)
+    }
+
+    /// a register of receiving slabs alone, for a tile whose interior holds the outside
+    /// faces a neighbor's fine sub-edges correct: `coverage` is the patch box in this tile's
+    /// index space (lying beyond its interior), `faces[bb][side]` the patch planes on the
+    /// cuts it sits beside
+    pub fn receiving(coverage: &Domain<D>, faces: [[bool; 2]; D]) -> symbi_xpu::Result<Self> {
+        assert!(D == 2 || D == 3, "EmfRegister: the staggered CT stack is 2.5D or 3D");
+        let mut slabs = Vec::new();
+        for (tt, slot) in Self::families() {
+            for bb in 0..D {
+                if bb == tt {
+                    continue;
+                }
+                for side in 0..2usize {
+                    if faces[bb][side] {
+                        slabs.push(Self::slab(coverage, tt, slot, bb, side, FaceRole::Receiving)?);
+                    }
+                }
+            }
+        }
+        Ok(EmfRegister { slabs, coverage: coverage.clone() })
+    }
+
+    /// the coverage box the slabs bound, in this tile's index space
+    pub fn coverage(&self) -> &Domain<D> {
+        &self.coverage
+    }
+
+    /// the field slot of a slab in the contributions plan: `(2 * bb + side) * families + family`
+    fn plan_slot(tt: usize, bb: usize, side: usize) -> usize {
+        let families = Self::families();
+        let family = families.iter().position(|(t, _)| *t == tt).expect("a known edge family");
+        (2 * bb + side) * families.len() + family
+    }
+
+    /// the contributing slabs: `(plan slot, register field, slab domain)`
+    pub fn contributing(&self) -> Vec<(usize, &Field<f64, D, Mem>, &Domain<D>)> {
+        self.slabs
+            .iter()
+            .filter(|s| s.role == FaceRole::Contributing)
+            .map(|s| (Self::plan_slot(s.tt, s.bb, s.side), &s.reg, &s.dom))
+            .collect()
+    }
+
+    /// the inboxes of the receiving slabs, keyed like `contributing`
+    pub fn inboxes(&self) -> Vec<(usize, &Field<f64, D, Mem>, &Domain<D>)> {
+        self.slabs
+            .iter()
+            .filter(|s| s.role == FaceRole::Receiving)
+            .map(|s| (Self::plan_slot(s.tt, s.bb, s.side), s.inbox.as_ref().unwrap(), &s.dom))
+            .collect()
+    }
+
+    pub fn has_contributing(&self) -> bool {
+        self.slabs.iter().any(|s| s.role == FaceRole::Contributing)
+    }
+
+    pub fn has_receiving(&self) -> bool {
+        self.slabs.iter().any(|s| s.role == FaceRole::Receiving)
+    }
+
+    /// the slabs the contributions plan moves, `2 * D * families` slots: a contributing
+    /// slab's register, a receiving slab's inbox, `filler` where this tile has neither
+    pub fn plan_fields<'a>(&'a self, filler: &'a Field<f64, D, Mem>) -> Vec<&'a Field<f64, D, Mem>> {
+        let mut out = vec![filler; 2 * D * Self::families().len()];
+        for (slot, field, _) in self.contributing().into_iter().chain(self.inboxes()) {
+            out[slot] = field;
+        }
+        out
+    }
+
+    /// zero the contributing slabs after their units left
+    pub fn zero_contributions(&self) {
+        let name = KernelId::FieldFill { ndim: D as u8 }.name();
+        for (_, field, dom) in self.contributing() {
+            dispatch_fields_each::<f64, Mem, D>(name, dom, &[], &[field], &[], &[0.0]);
+        }
+    }
+
+    /// clear the inboxes without folding them: a rejected attempt's landed units are discarded
+    pub fn clear_inboxes(&self) {
+        let fill = KernelId::FieldFill { ndim: D as u8 }.name();
+        for (_, inbox, dom) in self.inboxes() {
+            dispatch_fields_each::<f64, Mem, D>(fill, dom, &[], &[inbox], &[], &[0.0]);
+        }
+    }
+
+    /// fold every landed unit into its receiving slab, `R += unit`, then clear the inbox
+    pub fn fold_inboxes(&self) {
+        let axpy = KernelId::FieldAxpyShift { ndim: D as u8 }.name();
+        let fill = KernelId::FieldFill { ndim: D as u8 }.name();
+        let ints = [0i32; 3];
+        for slab in self.slabs.iter().filter(|s| s.role == FaceRole::Receiving) {
+            let inbox = slab.inbox.as_ref().unwrap();
+            dispatch_fields_each::<f64, Mem, D>(axpy, &slab.dom, &[inbox], &[&slab.reg], &ints[..D], &[1.0]);
+            dispatch_fields_each::<f64, Mem, D>(fill, &slab.dom, &[], &[inbox], &[], &[0.0]);
+        }
+    }
+
+    /// the slab of edge family `tt` on the plane `(bb, side)` for a gate: its register and domain
+    pub fn slab_of(&self, tt: usize, bb: usize, side: usize) -> Option<(&Field<f64, D, Mem>, &Domain<D>)> {
+        self.slabs.iter().find(|s| s.tt == tt && s.bb == bb && s.side == side).map(|s| (&s.reg, &s.dom))
+    }
+
     pub fn zero(&self) {
         let name = KernelId::FieldFill { ndim: D as u8 }.name();
         for slab in &self.slabs {
             dispatch_fields_each::<f64, Mem, D>(name, &slab.dom, &[], &[&slab.reg], &[], &[0.0]);
+            if let Some(inbox) = slab.inbox.as_ref() {
+                dispatch_fields_each::<f64, Mem, D>(name, &slab.dom, &[], &[inbox], &[], &[0.0]);
+            }
         }
     }
 
@@ -158,7 +307,7 @@ impl<const D: usize, Mem: MemorySpace> EmfRegister<D, Mem> {
     pub fn accumulate_coarse(&self, efield: &EfieldFields<D, Mem>, dt: f64) {
         let name = KernelId::FieldAxpyShift { ndim: D as u8 }.name();
         let ints = [0i32; 3];
-        for slab in &self.slabs {
+        for slab in self.slabs.iter().filter(|s| s.role != FaceRole::Contributing) {
             dispatch_fields_each::<f64, Mem, D>(
                 name,
                 &slab.dom,
@@ -175,7 +324,7 @@ impl<const D: usize, Mem: MemorySpace> EmfRegister<D, Mem> {
     /// `2g` and `2g + e_t`): `R += (dt_f / 2) * (E_f(2g) + E_f(2g + e_t))`.
     /// call after each fine substep's stage loop.
     pub fn accumulate_fine(&self, efield: &EfieldFields<D, Mem>, dt_f: f64) {
-        for slab in &self.slabs {
+        for slab in self.slabs.iter().filter(|s| s.role != FaceRole::Receiving) {
             // a 3D coarse edge covers two fine sub-edges, length-averaged; a 2.5D coarse corner
             // edge runs along the missing axis and covers the one coincident fine corner.
             let (name, scale) = if D == 3 {
@@ -209,7 +358,7 @@ impl<const D: usize, Mem: MemorySpace> EmfRegister<D, Mem> {
     /// on every outside cell.
     pub fn apply(&self, bface: &BfaceFields<D, Mem>, inv_dx: &[f64; D]) {
         let name = KernelId::FieldAxpyShift { ndim: D as u8 }.name();
-        for slab in &self.slabs {
+        for slab in self.slabs.iter().filter(|s| s.role != FaceRole::Contributing) {
             let (tt, bb, side, aa) = (slab.tt, slab.bb, slab.side, slab.aa);
             // the curl coefficient of edge E_t in face bface_a: with
             // (p1, p2) cyclic of a, t == p1 pairs the faces (g: -1/dx_p2,

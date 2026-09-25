@@ -32,7 +32,7 @@ pub mod transfer;
 
 pub use emf_register::EmfRegister;
 pub use equilibrium::EquilibriumFlux;
-pub use flux_register::FluxRegister;
+pub use flux_register::{FaceRole, FluxRegister};
 pub use hierarchy::{
     FineSubgrid, Hierarchy, LevelData, RefinementRegion, evolve_hierarchy_decomposed, fine_subgrid,
     gather_decomposed_hierarchy_tracers, seed_decomposed_fine_from_coarse,

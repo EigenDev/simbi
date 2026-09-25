@@ -35,6 +35,11 @@ pub enum PlanRole {
     Fine,
     /// the flux-register contributions: every transfer moves at every fine stage point
     FluxContribution,
+    /// the EMF-register contributions: every transfer moves at every fine post-tail point
+    EmfContribution,
+    /// the neighbor's copies of the staggered faces on a cut: every transfer moves at the
+    /// last substep's post-tail point, after the restriction on the tile holding the fine faces
+    InterfaceFace,
 }
 
 /// a fault injected into one plan's staging at one point, for the gates of the
@@ -113,6 +118,11 @@ impl<'p, const D: usize> PlanExchange<'p, D> {
                 _ => false,
             },
             PlanRole::FluxContribution => matches!(point, ExchangePoint::Fine { point: FinePoint::Stage(_), .. }),
+            PlanRole::EmfContribution => matches!(point, ExchangePoint::Fine { point: FinePoint::PostTail, .. }),
+            PlanRole::InterfaceFace => matches!(
+                point,
+                ExchangePoint::Fine { substep, point: FinePoint::PostTail } if substep + 1 == self.table.substeps()
+            ),
         }
     }
 

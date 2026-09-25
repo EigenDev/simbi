@@ -400,6 +400,18 @@ impl ExchangePoint {
     }
 }
 
+/// a real patch face lying on a cut: the tile holding the fine faces and the neighbor
+/// across the cut, with their extents
+struct CutFace<const D: usize> {
+    ax: usize,
+    side: usize,
+    face_pos: usize,
+    src: TileId,
+    src_ext: [(usize, usize); D],
+    dst: TileId,
+    dst_ext: [(usize, usize); D],
+}
+
 /// one region move: `len` values of field `field` from `src_region` of tile
 /// `src` to `dst_region` of tile `dst`, both in the tiles' local index spaces
 /// and of equal shape. ids run in plan order.
@@ -807,6 +819,173 @@ impl<const D: usize> ExchangePlan<D> {
         plan.validate()?;
         let digest = plan.compute_digest(counts, topology);
         Ok(Self { digest, ..plan })
+    }
+
+    /// the sender and owner of every real face of `patch` lying on a cut, with the tiles'
+    /// extents: `(ax, side, face_pos, src, src_ext, dst, dst_ext)`
+    fn cut_faces(partition: &Partition<D>, patch: [(usize, usize); D]) -> Vec<CutFace<D>> {
+        let counts = partition.counts();
+        let mut out = Vec::new();
+        for ax in 0..D {
+            for side in 0..2 {
+                let face_pos = if side == 0 { patch[ax].0 } else { patch[ax].1 };
+                for src in 0..partition.n_tiles() {
+                    let tc = unflatten(src, counts);
+                    let ext = partition.tile_extents(tc);
+                    let ends_at_face = if side == 0 { ext[ax].0 == face_pos } else { ext[ax].0 + ext[ax].1 == face_pos };
+                    let covers = (0..D).all(|aa| ext[aa].0 < patch[aa].1 && ext[aa].0 + ext[aa].1 > patch[aa].0);
+                    let neighbor_exists = if side == 0 { tc[ax] > 0 } else { tc[ax] + 1 < counts[ax] };
+                    if !(ends_at_face && covers && neighbor_exists) {
+                        continue;
+                    }
+                    let mut ntc = tc;
+                    ntc[ax] = if side == 0 { tc[ax] - 1 } else { tc[ax] + 1 };
+                    out.push(CutFace {
+                        ax,
+                        side,
+                        face_pos,
+                        src: TileId(src as u32),
+                        src_ext: ext,
+                        dst: TileId(flatten(ntc, counts) as u32),
+                        dst_ext: partition.tile_extents(ntc),
+                    });
+                }
+            }
+        }
+        out
+    }
+
+    /// a plan over slabs the caller lays out: `slabs` yields, per transfer, the field index,
+    /// the source and destination tiles and their regions in each tile's index space
+    fn slab_plan(
+        partition: &Partition<D>,
+        topology: &Topology<D>,
+        ng: usize,
+        schema: FieldSchema,
+        slabs: Vec<(usize, TileId, [Span; D], TileId, [Span; D])>,
+    ) -> Result<Self, PlanError> {
+        let counts = partition.counts();
+        let n_tiles = partition.n_tiles();
+        let tiles: Vec<TileLayout<D>> = (0..n_tiles).map(|t| TileLayout::of_partition(partition, TileId(t as u32), ng)).collect();
+        let empty = FieldLayout { interior: [Span { lo: 0, hi: 0 }; D], allocated: [Span { lo: 0, hi: 0 }; D], halo: [0; D] };
+        let mut fields: Vec<Vec<FieldLayout<D>>> = vec![vec![empty; schema.len()]; n_tiles];
+        let mut axes: Vec<AxisPhase<D>> = (0..D).map(|ax| AxisPhase { axis: ax as u8, transfers: Vec::new() }).collect();
+        for (f, src, src_region, dst, dst_region) in slabs {
+            fields[src.0 as usize][f] = FieldLayout { interior: src_region, allocated: src_region, halo: [0; D] };
+            fields[dst.0 as usize][f] = FieldLayout { interior: dst_region, allocated: dst_region, halo: [0; D] };
+            // the axis whose extent is one: the plane's normal
+            let ax = (0..D).find(|&a| src_region[a].size() == 1 && dst_region[a].size() == 1).unwrap_or(0);
+            axes[ax].transfers.push(Transfer {
+                id: TransferId(0),
+                axis: ax as u8,
+                src,
+                dst,
+                field: f as u16,
+                len: volume(&dst_region),
+                src_region,
+                dst_region,
+                audit: false,
+            });
+        }
+        let mut next = 0u32;
+        for phase in axes.iter_mut() {
+            for t in phase.transfers.iter_mut() {
+                t.id = TransferId(next);
+                next += 1;
+            }
+        }
+        let plan = Self { reach: ng, tiles, fields, schema, axes, seam: None, polar_bands: Vec::new(), digest: Digest(0) };
+        plan.validate()?;
+        let digest = plan.compute_digest(counts, topology);
+        Ok(Self { digest, ..plan })
+    }
+
+    /// the plan of the EMF-register contributions of one refined patch of ratio 2 under a
+    /// root partition: for every real face of `patch` lying on a cut and every edge family
+    /// with edges in that plane (the three grid axes in 3D, the missing axis on a 2.5D grid),
+    /// one transfer of the in-plane edge slab from the tile holding the fine sub-edges to the
+    /// neighbor across the cut, which holds the corrected outside faces. the fields are the
+    /// slabs themselves, `2 * D * families` per tile in `(2 * bb + side) * families + family`
+    /// order, one node thick along the plane's normal, the patch's node range clipped to the
+    /// tile along the corrected faces' axis (both box corners included) and its cell range
+    /// along the edge, in the tile's root index space.
+    pub fn emf_contributions(
+        partition: &Partition<D>,
+        topology: &Topology<D>,
+        patch: [(usize, usize); D],
+        ng: usize,
+    ) -> Result<Self, PlanError> {
+        let families: Vec<usize> = if D == 3 { vec![0, 1, 2] } else { vec![2] };
+        let mut schema = FieldSchema::new();
+        for plane in 0..2 * D {
+            for family in 0..families.len() {
+                schema = schema.cell(&format!("emf_{plane}_{family}"));
+            }
+        }
+        let mut slabs = Vec::new();
+        for face in Self::cut_faces(partition, patch) {
+            let bb = face.ax;
+            for (family, &tt) in families.iter().enumerate() {
+                if tt == bb {
+                    continue;
+                }
+                let aa = 3 - tt - bb;
+                let region = |ext: [(usize, usize); D]| -> [Span; D] {
+                    std::array::from_fn(|axis| {
+                        let lo_abs = patch[axis].0.max(ext[axis].0) as isize;
+                        let hi_abs = patch[axis].1.min(ext[axis].0 + ext[axis].1) as isize;
+                        let origin = ext[axis].0 as isize;
+                        if axis == bb {
+                            let at = face.face_pos as isize - origin;
+                            Span { lo: at, hi: at + 1 }
+                        } else if axis == aa {
+                            Span { lo: lo_abs - origin, hi: hi_abs + 1 - origin }
+                        } else {
+                            Span { lo: lo_abs - origin, hi: hi_abs - origin }
+                        }
+                    })
+                };
+                let f = (2 * bb + face.side) * families.len() + family;
+                slabs.push((f, face.src, region(face.src_ext), face.dst, region(face.dst_ext)));
+            }
+        }
+        Self::slab_plan(partition, topology, ng, schema, slabs)
+    }
+
+    /// the plan replacing the neighbor's copy of the staggered faces on a cut that the
+    /// restriction and the corner refluxes wrote on the tile holding the fine faces: for
+    /// every real face of `patch` lying on a cut, the face field normal to the cut over the
+    /// patch's transverse extent widened by one cell on each side (the corner-corrected
+    /// faces), from that tile's copy to the neighbor's. the fields are the face fields, one
+    /// per axis, in each tile's root index space.
+    pub fn interface_faces(
+        partition: &Partition<D>,
+        topology: &Topology<D>,
+        patch: [(usize, usize); D],
+        ng: usize,
+    ) -> Result<Self, PlanError> {
+        let mut schema = FieldSchema::new();
+        for ax in 0..D {
+            schema = schema.face(&format!("bface{ax}"), ax as u8);
+        }
+        let mut slabs = Vec::new();
+        for face in Self::cut_faces(partition, patch) {
+            let region = |ext: [(usize, usize); D]| -> [Span; D] {
+                std::array::from_fn(|axis| {
+                    let origin = ext[axis].0 as isize;
+                    if axis == face.ax {
+                        let at = face.face_pos as isize - origin;
+                        Span { lo: at, hi: at + 1 }
+                    } else {
+                        let lo_abs = (patch[axis].0 as isize - 1).max(ext[axis].0 as isize);
+                        let hi_abs = (patch[axis].1 as isize + 1).min((ext[axis].0 + ext[axis].1) as isize);
+                        Span { lo: lo_abs - origin, hi: hi_abs - origin }
+                    }
+                })
+            };
+            slabs.push((face.ax, face.src, region(face.src_ext), face.dst, region(face.dst_ext)));
+        }
+        Self::slab_plan(partition, topology, ng, schema, slabs)
     }
 
     /// whether `transfer` moves at `point`: an interface audit at the `Audit` points, a banded

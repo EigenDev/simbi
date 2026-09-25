@@ -142,6 +142,17 @@ fn a_contribution_folded_by_its_owner_equals_the_local_accumulation_bit_for_bit(
     }
     assert_eq!(units_seen, 4 * 4, "four stages of four components crossed");
     assert!(face_bits(&sender, 0, 1).iter().all(|b| *b == 0), "the contributing face is cleared after its unit left");
+    // a rejected attempt discards a landed unit: the inbox is cleared without a fold and the
+    // register keeps its value
+    let before = face_bits(&owner, 0, 1);
+    for dst in &owner.inboxes()[0].1 {
+        scatter(dst, &dst_region, &wire);
+    }
+    owner.clear_inboxes();
+    for dst in &owner.inboxes()[0].1 {
+        assert!(owner.inboxes()[0].2.iter().all(|c| *dst.view().at(c) == 0.0), "the inbox is cleared");
+    }
+    assert_eq!(before, face_bits(&owner, 0, 1), "clearing the inbox leaves the register as it was");
 
     let expected = face_bits(&mono, 0, 1);
     let got = face_bits(&owner, 0, 1);
