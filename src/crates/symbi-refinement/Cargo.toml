@@ -20,6 +20,7 @@ symbi-ir = { path = "../symbi-ir" }
 symbi-ib = { path = "../symbi-ib" }
 symbi-xpu = { path = "../symbi-xpu" }
 symbi-sim = { path = "../symbi-sim" }
+symbi-fabric = { path = "../symbi-fabric" }
 symbi-substrate = { path = "../symbi-substrate" }
 rayon = "1"
 

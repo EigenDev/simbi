@@ -36,7 +36,7 @@ use crate::state::{FieldStore, Timestepping};
 use crate::substrate_seam::{KernelSet, RegimeKind};
 use std::ops::ControlFlow;
 use std::time::{Duration, Instant};
-use symbi_fabric::{Fabric, FabricError, Link, OpKind};
+use symbi_fabric::{Fabric, FabricError, Link, OpKind, WorkerId};
 use symbi_grid::Field;
 use symbi_xpu::{MemorySpace, with_device};
 
@@ -94,6 +94,10 @@ pub struct WorkerReport {
     /// interface audits run, and what they cost this worker in total
     pub audits: u64,
     pub audit_cost: AuditCost,
+    /// the fine level's troubled exchanges on a refined run
+    pub fine_troubled_exchanges: u64,
+    /// the most grants held at once from each peer over the session
+    pub grant_high_water: Vec<usize>,
 }
 
 /// where a worker's wall time went. `collectives` and `exchange` include the time spent
@@ -142,7 +146,7 @@ impl From<FabricError> for WorkerError {
 /// adiabatic or globally isothermal, on the cartesian, spherical and cylindrical charts of a
 /// flat spacetime, in host memory, on a static mesh, without dye, bodies, tracers, or
 /// excision.
-fn refuse<const D: usize, const DOF: usize, M: MemorySpace, K: KernelSet<D, DOF, M, f64>>(
+pub fn refuse<const D: usize, const DOF: usize, M: MemorySpace, K: KernelSet<D, DOF, M, f64>>(
     regime: RegimeKind,
     stores: &[&FieldStore<D, DOF, M, f64>],
     kernels: &[&K],
@@ -211,7 +215,7 @@ pub fn field_lists<'a, const D: usize, const DOF: usize, M: MemorySpace>(
 
 /// one exchange point: every axis phase in plan order, each waited to completion.
 #[allow(clippy::too_many_arguments)]
-fn exchange_point<const D: usize, const DOF: usize, M, T, L>(
+pub fn exchange_point<const D: usize, const DOF: usize, M, T, L>(
     exchange: &PlanExchange<'_, D>,
     tiles: &[TileId],
     stores: &[&FieldStore<D, DOF, M, f64>],
@@ -230,8 +234,84 @@ where
     T: HaloTransport,
     L: Link,
 {
-    let clock = Instant::now();
     let fields = field_lists(tiles, stores, n_tiles);
+    exchange_point_fields(exchange, &fields, devices, transport, fabric, point, step, attempt, deadline, spent)
+}
+
+/// one plan's share of a phase several plans open together: the plan, the fields of the
+/// tiles it moves (in its schema order, indexed by its tile ids) and the device per tile
+pub struct PlanPart<'a, const D: usize, M: MemorySpace> {
+    pub plan: &'a PlanExchange<'a, D>,
+    pub fields: &'a [Vec<&'a Field<f64, D, M>>],
+    pub devices: &'a [i32],
+}
+
+/// one exchange point over several plans: every axis phase opens once with the union of
+/// the plans' sends and receives (the plans hold disjoint fabric id ranges), so two levels,
+/// or the root state and its conserved seed, move in one phase of the table
+#[allow(clippy::too_many_arguments)]
+pub fn exchange_point_plans<const D: usize, M, T, L>(
+    parts: &[PlanPart<'_, D, M>],
+    transport: &T,
+    fabric: &mut Fabric<L>,
+    point: ExchangePoint,
+    step: u64,
+    attempt: u16,
+    deadline: Duration,
+    spent: &mut Duration,
+) -> Result<(), FabricError>
+where
+    M: MemorySpace,
+    T: HaloTransport,
+    L: Link,
+{
+    let clock = Instant::now();
+    let first = parts.first().expect("at least one plan");
+    let mut run = || -> Result<(), FabricError> {
+        for axis in 0..D {
+            let epoch = first.plan.epoch(point, step, attempt, axis);
+            let mut sends = Vec::new();
+            let mut receives = Vec::new();
+            for part in parts {
+                let (s, r) = part.plan.stage_axis(part.fields, part.devices, transport, fabric, epoch)?;
+                sends.extend(s);
+                receives.extend(r);
+            }
+            fabric.open(symbi_fabric::PhaseSpec { epoch, sends: &sends, receives: &receives })?;
+            fabric.wait(deadline)?;
+            for part in parts {
+                part.plan.unpack_axis_at(part.fields, fabric, axis, point)?;
+            }
+            fabric.close()?;
+        }
+        Ok(())
+    };
+    let result = run();
+    *spent += clock.elapsed();
+    result
+}
+
+/// `exchange_point` over a prepared field list (`fields[tile][field]` in the plan's schema
+/// order), for a plan over any field set (the conserved seed, a fine level's primitives)
+#[allow(clippy::too_many_arguments)]
+pub fn exchange_point_fields<const D: usize, M, T, L>(
+    exchange: &PlanExchange<'_, D>,
+    fields: &[Vec<&Field<f64, D, M>>],
+    devices: &[i32],
+    transport: &T,
+    fabric: &mut Fabric<L>,
+    point: ExchangePoint,
+    step: u64,
+    attempt: u16,
+    deadline: Duration,
+    spent: &mut Duration,
+) -> Result<(), FabricError>
+where
+    M: MemorySpace,
+    T: HaloTransport,
+    L: Link,
+{
+    let clock = Instant::now();
     let mut run = || -> Result<(), FabricError> {
         for axis in 0..D {
             let epoch = exchange.epoch(point, step, attempt, axis);
@@ -311,7 +391,7 @@ where
 /// negate the odd components of every polar ghost band this worker holds, after an antipodal
 /// exchange filled it with rotated interior copies and before the physical refill reads the
 /// band's edge. a plan without a seam has no band.
-fn flip_polar_bands<const D: usize, const DOF: usize, M, K>(
+pub fn flip_polar_bands<const D: usize, const DOF: usize, M, K>(
     exchange: &PlanExchange<'_, D>,
     tiles: &[TileId],
     stores: &[&FieldStore<D, DOF, M, f64>],
@@ -337,7 +417,7 @@ fn flip_polar_bands<const D: usize, const DOF: usize, M, K>(
 /// audit the shared interface faces after the exchange `at`, booking the cost. a plan with
 /// no face field along a cut has nothing to audit and opens no phase.
 #[allow(clippy::too_many_arguments)]
-fn audit_point<const D: usize, const DOF: usize, M, L>(
+pub fn audit_point<const D: usize, const DOF: usize, M, L>(
     exchange: &PlanExchange<'_, D>,
     tiles: &[TileId],
     stores: &[&FieldStore<D, DOF, M, f64>],
@@ -371,7 +451,7 @@ where
 }
 
 /// a local fatal error: every peer is told before it is returned.
-fn fail<L: Link>(fabric: &mut Fabric<L>, err: WorkerError) -> WorkerError {
+pub fn fail<L: Link>(fabric: &mut Fabric<L>, err: WorkerError) -> WorkerError {
     // the step in progress ends here: its guard acts are discarded, so the run scope closes
     // resolved and the error reaches the caller instead of the ledger's unresolved-step halt.
     if crate::guard_ledger::scope_is_open() {
@@ -811,6 +891,9 @@ where
         .elapsed()
         .saturating_sub(timing.collectives + timing.exchange + in_callback);
     report.timing = timing;
+    report.grant_high_water = (0..exchange.placement().workers)
+        .map(|p| fabric.grants().high_water(WorkerId(p)))
+        .collect();
     let accepted = guard_scope.accepted();
     report.troubled_cells = accepted.troubled_cells.total;
     report.frozen_cells = accepted.frozen_cells.total;

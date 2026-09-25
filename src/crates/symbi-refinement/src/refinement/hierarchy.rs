@@ -139,7 +139,7 @@ use symbi_sim::substrate_seam::KernelSet;
 
 /// the refinement ratio. fixed at 2 (the transfer kernels are baked at 2 in
 /// the aot registry; the builders accept any ratio when that changes).
-const RATIO: usize = 2;
+pub const RATIO: usize = 2;
 
 // =============================================================================
 // refinement regions
@@ -187,6 +187,10 @@ where
     /// finer level's bface transverse-halo prolongation (per-component
     /// staggered domains, cloned from this level's bface).
     pub bface_old: Option<[Field<f64, NDIM, Mem>; NDIM]>,
+    /// the conserved state of a level with a coarser one at the root attempt's entry: the
+    /// level's own step snapshot is rewritten by every substep, so a rejection after the
+    /// first substep restores the attempt's entry from here
+    pub attempt_entry: Option<ConsFieldsGeneric<NDIM, DOF, Mem>>,
     /// per-slab intermediates of the axis-split prolongation into this level,
     /// in `cf_ghost_slabs` order. the refinement slabs are fixed, so
     /// the shapes are too: lazily allocated on the first prolongation, reused
@@ -257,7 +261,7 @@ fn fatal_cfl_dt(dt_cfl: f64) -> bool {
     dt_cfl.is_nan() || dt_cfl <= 0.0
 }
 
-struct HierarchyRetrySidecars<const D: usize> {
+pub struct HierarchyRetrySidecars<const D: usize> {
     discrete: Vec<Option<symbi_sim::tracers::TracerSet<D>>>,
     continuous: Vec<Option<symbi_sim::tracers::ContinuousTracerSnapshot<D>>>,
     bodies: Vec<Option<symbi_ib::BodyCollection<f64, D>>>,
@@ -1056,6 +1060,7 @@ where
                 band_departure: std::sync::OnceLock::new(),
                 bcell_old: None,
                 bface_old: None,
+                attempt_entry: None,
                 coverage: None,
                 flux_eq: None,
                 residual_eq: None,
@@ -1120,6 +1125,7 @@ where
             band_departure: std::sync::OnceLock::new(),
             bcell_old: None,
             bface_old: None,
+            attempt_entry: None,
             coverage: None,
             flux_eq: None,
             residual_eq: None,
@@ -1264,6 +1270,8 @@ where
                 last.bface_old = Some(bf.try_into().unwrap_or_else(|_| unreachable!()));
             }
             last.coverage = Some(coverage);
+            let attempt_entry =
+                ConsFieldsGeneric::zeros_with_energy(&fine.geom.allocated, fine.fields.cons.has_energy())?;
             levels.push(LevelData {
                 state: fine,
                 kernels,
@@ -1273,6 +1281,7 @@ where
                 band_departure: std::sync::OnceLock::new(),
                 bcell_old: None,
                 bface_old: None,
+                attempt_entry: Some(attempt_entry),
                 coverage: None,
                 flux_eq: None,
                 residual_eq: None,
@@ -1946,7 +1955,29 @@ where
         }
     }
 
-    fn snapshot_retry_sidecars(&self) -> HierarchyRetrySidecars<NDIM> {
+    /// keep every finer level's conserved state at the root attempt's entry in a buffer of
+    /// its own: the level's step snapshot is rewritten by each substep of the subcycle
+    pub fn snapshot_attempt_entry(&self) {
+        for level in self.levels.iter().skip(1) {
+            if let Some(entry) = level.attempt_entry.as_ref() {
+                restore_cons_region(&level.state.fields.cons, entry, &level.state.geom.allocated);
+            }
+        }
+    }
+
+    /// restore every finer level to the root attempt's entry after a rejection, the
+    /// primitives re-derived and the physical ghosts filled as the root's own restore does
+    pub fn restore_attempt_entry(&self) {
+        for level in self.levels.iter().skip(1) {
+            if let Some(entry) = level.attempt_entry.as_ref() {
+                restore_cons_region(entry, &level.state.fields.cons, &level.state.geom.allocated);
+                level.kernels.c2p(&level.state);
+                level.kernels.ghost_fill(&level.state);
+            }
+        }
+    }
+
+    pub fn snapshot_retry_sidecars(&self) -> HierarchyRetrySidecars<NDIM> {
         HierarchyRetrySidecars {
             discrete: self
                 .levels
@@ -2002,7 +2033,7 @@ where
         }
     }
 
-    fn restore_retry_sidecars(&mut self, snapshot: &HierarchyRetrySidecars<NDIM>) {
+    pub fn restore_retry_sidecars(&mut self, snapshot: &HierarchyRetrySidecars<NDIM>) {
         for (ii, level) in self.levels.iter_mut().enumerate() {
             level.state.tracers.clone_from(&snapshot.discrete[ii]);
             if let (Some(tracers), Some(saved)) = (
@@ -2151,6 +2182,7 @@ where
                     level.kernels.snapshot_retry(&level.state);
                 }
             }
+            self.snapshot_attempt_entry();
             // a slip-enabled draining body runs the palindromic D-M-H-M-D coupled step in place of the
             // plain RK march; the snapshot above (taken before the first D) is the boundary its retry
             // restores to. a body with no magnetic slip keeps the ordinary advance bit-for-bit.
@@ -2176,6 +2208,7 @@ where
                     level.kernels.restore_step(&level.state);
                 }
             }
+            self.restore_attempt_entry();
             self.restore_retry_sidecars(&retry_sidecars);
             dt = symbi_sim::driver::retry_timestep(dt, time)
                 .unwrap_or_else(|err| panic!("{}", err.detail));
@@ -5055,7 +5088,10 @@ where
                         });
                     }
                 }
-                symbi_xpu::with_device(devices[i], || tiles[i].level_step_begin(0, gdt));
+                symbi_xpu::with_device(devices[i], || {
+                    tiles[i].snapshot_attempt_entry();
+                    tiles[i].level_step_begin(0, gdt)
+                });
                 phase_probe::set_tile(i);
                 phase_probe::sample("begin", 0, &tiles[i].levels[0].state);
             }
@@ -5223,6 +5259,7 @@ where
                         });
                     }
                 }
+                symbi_xpu::with_device(devices[i], || tiles[i].restore_attempt_entry());
                 tiles[i].restore_retry_sidecars(&retry_sidecars[i]);
             }
             drain_devices::<Mem>(devices);

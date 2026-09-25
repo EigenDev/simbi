@@ -521,6 +521,100 @@ pub fn plan_fields<const D: usize, const DOF: usize, M: MemorySpace>(
     fields
 }
 
+/// the conserved cell fields a fine level's seed prolongs from: density, momentum, energy
+/// when present. a plan over `plan_cons_schema` moves them across the cuts at the prime, the
+/// one exchange of conserved halos a run makes.
+pub fn plan_cons_fields<const D: usize, const DOF: usize, M: MemorySpace>(
+    store: &FieldStore<D, DOF, M>,
+) -> Vec<&Field<f64, D, M>> {
+    let cons = &store.fields.cons;
+    let mut fields = vec![&cons.den];
+    fields.extend(cons.mom.iter());
+    if let Some(nrg) = cons.nrg_field() {
+        fields.push(nrg);
+    }
+    fields
+}
+
+/// the schema `plan_cons_fields` realizes
+pub fn plan_cons_schema<const D: usize, const DOF: usize, M: MemorySpace>(
+    store: &FieldStore<D, DOF, M>,
+) -> crate::atlas::FieldSchema {
+    let mut schema = crate::atlas::FieldSchema::new().cell("den");
+    for i in 0..DOF {
+        schema = schema.cell(&format!("mom{i}"));
+    }
+    if store.fields.cons.has_energy() {
+        schema = schema.cell("nrg");
+    }
+    debug_assert_eq!(schema.len(), plan_cons_fields(store).len());
+    schema
+}
+
+/// the tile grid of a refined patch's fine level under a root partition: the root tiles the
+/// patch reaches form a rectangle of tile coordinates (the single-box invariant), and the
+/// fine grid over the patch is cut where a root cut crosses the patch, at twice the root
+/// index inside the patch. a fine tile's owner is its root tile's owner.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FinePartition<const D: usize> {
+    /// the fine grid of the patch and its cuts, in fine cells from the patch's origin
+    pub partition: Partition<D>,
+    /// the root tile coordinate of the fine tile grid's first tile
+    pub root_origin: [usize; D],
+    /// the patch's root cell range per axis
+    pub patch: [(usize, usize); D],
+}
+
+impl<const D: usize> FinePartition<D> {
+    /// `patch` is the refined box in root cells per axis, `ratio` the refinement ratio
+    pub fn of(root: &Partition<D>, patch: [(usize, usize); D], ratio: usize) -> Result<Self, String> {
+        let counts = root.counts();
+        let mut root_origin = [0usize; D];
+        let mut cuts: [Vec<usize>; D] = std::array::from_fn(|_| Vec::new());
+        let mut n_cells = [0usize; D];
+        for ax in 0..D {
+            let (lo, hi) = patch[ax];
+            if lo >= hi || hi > root.n_cells[ax] {
+                return Err(format!("patch range {lo}..{hi} on axis {ax} outside the root grid"));
+            }
+            n_cells[ax] = (hi - lo) * ratio;
+            let first = (0..counts[ax])
+                .find(|&i| {
+                    let (start, len) = root.tile_range(ax, i);
+                    start + len > lo
+                })
+                .ok_or_else(|| format!("no root tile reaches the patch on axis {ax}"))?;
+            root_origin[ax] = first;
+            for &c in &root.cuts[ax] {
+                if c > lo && c < hi {
+                    cuts[ax].push((c - lo) * ratio);
+                }
+            }
+        }
+        let partition = Partition::explicit(n_cells, cuts)?;
+        Ok(Self { partition, root_origin, patch })
+    }
+
+    /// the root tile coordinate under fine tile `fine_tc`
+    pub fn root_tile_of(&self, fine_tc: [usize; D]) -> [usize; D] {
+        std::array::from_fn(|ax| self.root_origin[ax] + fine_tc[ax])
+    }
+
+    /// the fine tile coordinate over root tile `root_tc`, when the patch reaches it
+    pub fn fine_tile_of(&self, root_tc: [usize; D]) -> Option<[usize; D]> {
+        let counts = self.partition.counts();
+        let mut tc = [0usize; D];
+        for ax in 0..D {
+            let i = root_tc[ax].checked_sub(self.root_origin[ax])?;
+            if i >= counts[ax] {
+                return None;
+            }
+            tc[ax] = i;
+        }
+        Some(tc)
+    }
+}
+
 /// the schema `plan_fields` realizes: one entry per field, cells first, faces after, so a
 /// plan compiled from it indexes `plan_fields` directly.
 pub fn plan_schema<const D: usize, const DOF: usize, M: MemorySpace>(

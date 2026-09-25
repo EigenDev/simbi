@@ -1622,6 +1622,7 @@ dependencies = [
  "rayon",
  "symbi-algebra",
  "symbi-discretize",
+ "symbi-fabric",
  "symbi-geometry",
  "symbi-grid",
  "symbi-hydro",

@@ -20,9 +20,20 @@
 //  exchange.finish_axis(&fields, &mut fabric, axis)?;
 // =============================================================================
 
-use crate::atlas::{AuditAt, ExchangePlan, ExchangePoint, Placement, Span, TileId, domain_of};
+use crate::atlas::{AuditAt, ExchangePlan, ExchangePoint, FinePoint, Placement, Span, TileId, domain_of};
 use crate::decomp::HaloTransport;
 use crate::phase_table::PhaseTable;
+
+/// which level's phases a plan moves at. the root plan carries the root state, bands and
+/// audits at the root points; the seed plan carries the root conserved halos at the prime
+/// alone (the fine level's seeding prolongs from them); the fine plan carries the fine
+/// state, bands and audits at the fine points and the fine state at the rollback.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PlanRole {
+    RootState,
+    RootSeed,
+    Fine,
+}
 use symbi_fabric::{Epoch, Fabric, FabricError, Link, PhaseSpec, TransferId, WorkerId};
 use symbi_grid::Field;
 use symbi_xpu::MemorySpace;
@@ -32,6 +43,10 @@ pub struct PlanExchange<'p, const D: usize> {
     placement: &'p Placement,
     me: WorkerId,
     table: PhaseTable,
+    role: PlanRole,
+    /// the fabric transfer id of this plan's first transfer: several plans share one fabric
+    /// with disjoint id ranges
+    id_offset: u32,
 }
 
 impl<'p, const D: usize> PlanExchange<'p, D> {
@@ -44,6 +59,55 @@ impl<'p, const D: usize> PlanExchange<'p, D> {
             placement,
             me,
             table,
+            role: PlanRole::RootState,
+            id_offset: 0,
+        }
+    }
+
+    /// this plan's role in the session and the fabric id its transfers start at
+    pub fn with_role(mut self, role: PlanRole, id_offset: u32) -> Self {
+        self.role = role;
+        self.id_offset = id_offset;
+        self
+    }
+
+    pub fn role(&self) -> PlanRole {
+        self.role
+    }
+
+    pub fn id_offset(&self) -> u32 {
+        self.id_offset
+    }
+
+    fn fabric_id(&self, t: &crate::atlas::Transfer<D>) -> TransferId {
+        TransferId(t.id.0 + self.id_offset)
+    }
+
+    /// whether `t` moves at `point` under this plan's role
+    pub fn moves(&self, t: &crate::atlas::Transfer<D>, point: ExchangePoint) -> bool {
+        match self.role {
+            PlanRole::RootState => self.plan.moves_at(t, point),
+            PlanRole::RootSeed => point == ExchangePoint::Prime && self.plan.moves_at(t, point),
+            PlanRole::Fine => match point {
+                ExchangePoint::Fine { point: fine, .. } => {
+                    let as_root = match fine {
+                        FinePoint::Prolong | FinePoint::Stage(_) | FinePoint::PostTail => ExchangePoint::Stage(0),
+                        FinePoint::Troubled(_) => ExchangePoint::Troubled(0),
+                        FinePoint::Audit(_) | FinePoint::AuditTail => ExchangePoint::Audit(AuditAt::Prime),
+                    };
+                    self.plan.moves_at(t, as_root)
+                }
+                ExchangePoint::Rollback => self.plan.moves_at(t, ExchangePoint::Rollback),
+                _ => false,
+            },
+        }
+    }
+
+    /// the point at which this plan's troubled bands move, for the trouble regions
+    fn troubled_point(&self) -> ExchangePoint {
+        match self.role {
+            PlanRole::Fine => ExchangePoint::Fine { substep: 0, point: FinePoint::Troubled(0) },
+            _ => ExchangePoint::Troubled(0),
         }
     }
 
@@ -101,7 +165,7 @@ impl<'p, const D: usize> PlanExchange<'p, D> {
     }
 
     /// the send counts of every phase of the table, `[byte][peer][axis]`: what this plan
-    /// moves at each point, nothing at a fine point
+    /// moves at each point under its role
     pub fn phase_counts(&self) -> Vec<Vec<Vec<u32>>> {
         self.table
             .phases()
@@ -110,20 +174,10 @@ impl<'p, const D: usize> PlanExchange<'p, D> {
             .collect()
     }
 
-    /// the fabric endpoint for this plan: every transfer's buffer, the send counts of every
-    /// phase of the table, and the table's sequence rules.
+    /// the fabric endpoint for this plan alone: every transfer's buffer, the send counts of
+    /// every phase of the table, and the table's sequence rules.
     pub fn fabric<L: Link>(&self, link: L, session: symbi_fabric::SessionId) -> Fabric<L> {
-        Fabric::new(
-            link,
-            self.me,
-            session,
-            self.placement.workers as usize,
-            D,
-            &self.lens(),
-            self.sends_per_peer_axis(),
-        )
-        .with_phase_counts(self.phase_counts())
-        .with_phase_rules(self.table.rules())
+        fabric_for(&[self], link, session)
     }
 
     /// audit every shared interface face after the exchange `at`: the tile below each cut
@@ -141,10 +195,23 @@ impl<'p, const D: usize> PlanExchange<'p, D> {
         attempt: u16,
         deadline: std::time::Duration,
     ) -> Result<AuditCost, AuditError> {
+        self.audit_at(fields, fabric, ExchangePoint::Audit(at), step, attempt, deadline)
+    }
+
+    /// `audit` at any audit point of the table, a fine level's included
+    pub fn audit_at<M: MemorySpace, L: Link>(
+        &self,
+        fields: &[Vec<&Field<f64, D, M>>],
+        fabric: &mut Fabric<L>,
+        point: ExchangePoint,
+        step: u64,
+        attempt: u16,
+        deadline: std::time::Duration,
+    ) -> Result<AuditCost, AuditError> {
         let clock = std::time::Instant::now();
         let mut cost = AuditCost::default();
         for axis in 0..D {
-            let epoch = self.epoch(ExchangePoint::Audit(at), step, attempt, axis);
+            let epoch = self.epoch(point, step, attempt, axis);
             self.audit_open_axis(fields, fabric, epoch, &mut cost)?;
             fabric.wait(deadline)?;
             self.audit_finish_axis(fields, fabric, axis, &mut cost)?;
@@ -175,11 +242,11 @@ impl<'p, const D: usize> PlanExchange<'p, D> {
                 }
                 (true, false) => {
                     let field = fields[t.src.0 as usize][f];
-                    fabric.pack(t.id, |buf| gather(field, &t.src_region, buf))?;
-                    sends.push((t.id, self.placement.owner_of(t.dst)));
+                    fabric.pack(self.fabric_id(t), |buf| gather(field, &t.src_region, buf))?;
+                    sends.push((self.fabric_id(t), self.placement.owner_of(t.dst)));
                     cost.wire_bytes += 8 * t.len as u64;
                 }
-                (false, true) => receives.push((t.id, self.placement.owner_of(t.src))),
+                (false, true) => receives.push((self.fabric_id(t), self.placement.owner_of(t.src))),
                 (false, false) => {}
             }
         }
@@ -202,8 +269,8 @@ impl<'p, const D: usize> PlanExchange<'p, D> {
         for t in self.audits(axis) {
             if self.owns(t.dst) && !self.owns(t.src) {
                 let field = fields[t.dst.0 as usize][t.field as usize];
-                compare(self.plan, t, field, fabric.payload(t.id)?)?;
-                fabric.mark_unpacked(t.id)?;
+                compare(self.plan, t, field, fabric.payload(self.fabric_id(t))?)?;
+                fabric.mark_unpacked(self.fabric_id(t))?;
                 cost.faces += t.len as u64;
             }
         }
@@ -223,9 +290,10 @@ impl<'p, const D: usize> PlanExchange<'p, D> {
     /// the ghost regions of `tile` that a `Troubled` exchange writes, from every neighbor,
     /// local or remote: where a neighbor's troubled cell shows up on this tile.
     pub fn trouble_regions(&self, tile: TileId) -> Vec<symbi_algebra::Domain<D>> {
+        let at = self.troubled_point();
         self.plan
             .transfers()
-            .filter(|t| t.dst == tile && self.plan.moves_at(t, ExchangePoint::Troubled(0)))
+            .filter(|t| t.dst == tile && self.moves(t, at))
             .map(|t| domain_of(&t.dst_region))
             .collect()
     }
@@ -233,7 +301,7 @@ impl<'p, const D: usize> PlanExchange<'p, D> {
     /// the local index of global cell `cell` on `tile`, when the tile's interior holds it.
     pub fn local_cell(&self, tile: TileId, cell: [isize; D]) -> Option<[isize; D]> {
         let layout = &self.plan.tiles[tile.0 as usize];
-        let local: [isize; D] = std::array::from_fn(|ax| cell[ax] - layout.offset[ax]);
+        let local: [isize; D] = std::array::from_fn(|ax| layout.interior[ax].lo + (cell[ax] - layout.offset[ax]));
         (0..D)
             .all(|ax| layout.interior[ax].lo <= local[ax] && local[ax] < layout.interior[ax].hi)
             .then_some(local)
@@ -241,7 +309,7 @@ impl<'p, const D: usize> PlanExchange<'p, D> {
 
     fn sends_at(&self, point: ExchangePoint) -> Vec<Vec<u32>> {
         let mut counts = vec![vec![0u32; D]; self.placement.workers as usize];
-        for t in self.plan.transfers().filter(|t| self.plan.moves_at(t, point)) {
+        for t in self.plan.transfers().filter(|t| self.moves(t, point)) {
             if self.owns(t.src) && !self.owns(t.dst) {
                 counts[self.placement.owner_of(t.dst).0 as usize][t.axis as usize] += 1;
             }
@@ -260,6 +328,25 @@ impl<'p, const D: usize> PlanExchange<'p, D> {
         fabric: &mut Fabric<L>,
         epoch: Epoch,
     ) -> Result<(), FabricError> {
+        let (sends, receives) = self.stage_axis(fields, devices, transport, fabric, epoch)?;
+        fabric.open(PhaseSpec {
+            epoch,
+            sends: &sends,
+            receives: &receives,
+        })
+    }
+
+    /// the first half of `open_axis`: the both-local transfers moved, the sends packed, and
+    /// the sends and receives of the phase returned for the caller to open, so several
+    /// plans can share one phase
+    pub fn stage_axis<M: MemorySpace, T: HaloTransport, L: Link>(
+        &self,
+        fields: &[Vec<&Field<f64, D, M>>],
+        devices: &[i32],
+        transport: &T,
+        fabric: &mut Fabric<L>,
+        epoch: Epoch,
+    ) -> Result<(Vec<(TransferId, WorkerId)>, Vec<(TransferId, WorkerId)>), FabricError> {
         let phase = &self.plan.axes[epoch.axis as usize];
         let point = self
             .table
@@ -267,7 +354,7 @@ impl<'p, const D: usize> PlanExchange<'p, D> {
             .expect("an exchange epoch names a point of the session's phase table");
         let mut sends = Vec::new();
         let mut receives = Vec::new();
-        for t in phase.transfers.iter().filter(|t| self.plan.moves_at(t, point)) {
+        for t in phase.transfers.iter().filter(|t| self.moves(t, point)) {
             let (src, dst) = (t.src.0 as usize, t.dst.0 as usize);
             let f = t.field as usize;
             match (self.owns(t.src), self.owns(t.dst)) {
@@ -281,18 +368,14 @@ impl<'p, const D: usize> PlanExchange<'p, D> {
                 ),
                 (true, false) => {
                     let field = fields[src][f];
-                    fabric.pack(t.id, |buf| gather(field, &t.src_region, buf))?;
-                    sends.push((t.id, self.placement.owner_of(t.dst)));
+                    fabric.pack(self.fabric_id(t), |buf| gather(field, &t.src_region, buf))?;
+                    sends.push((self.fabric_id(t), self.placement.owner_of(t.dst)));
                 }
-                (false, true) => receives.push((t.id, self.placement.owner_of(t.src))),
+                (false, true) => receives.push((self.fabric_id(t), self.placement.owner_of(t.src))),
                 (false, false) => {}
             }
         }
-        fabric.open(PhaseSpec {
-            epoch,
-            sends: &sends,
-            receives: &receives,
-        })
+        Ok((sends, receives))
     }
 
     /// scatter every landed receive of `axis` into its destination region and close the phase.
@@ -313,19 +396,71 @@ impl<'p, const D: usize> PlanExchange<'p, D> {
         axis: usize,
         point: ExchangePoint,
     ) -> Result<(), FabricError> {
+        self.unpack_axis_at(fields, fabric, axis, point)?;
+        fabric.close()
+    }
+
+    /// the first half of `finish_axis_at`: every landed receive of `axis` scattered into its
+    /// destination region, the phase left open for the caller to close
+    pub fn unpack_axis_at<M: MemorySpace, L: Link>(
+        &self,
+        fields: &[Vec<&Field<f64, D, M>>],
+        fabric: &mut Fabric<L>,
+        axis: usize,
+        point: ExchangePoint,
+    ) -> Result<(), FabricError> {
         let moved = self.plan.axes[axis]
             .transfers
             .iter()
-            .filter(|t| self.plan.moves_at(t, point));
+            .filter(|t| self.moves(t, point));
         for t in moved {
             if self.owns(t.dst) && !self.owns(t.src) {
                 let field = fields[t.dst.0 as usize][t.field as usize];
-                scatter(field, &t.dst_region, fabric.payload(t.id)?);
-                fabric.mark_unpacked(t.id)?;
+                scatter(field, &t.dst_region, fabric.payload(self.fabric_id(t))?);
+                fabric.mark_unpacked(self.fabric_id(t))?;
             }
         }
-        fabric.close()
+        Ok(())
     }
+}
+
+/// one fabric endpoint for several plans of one session: the plans' transfers occupy
+/// disjoint id ranges in offset order (each plan's `id_offset` is the sum of the lengths of
+/// the plans before it), the send counts of every phase are summed over the plans, and the
+/// sequence rules come from the shared phase table. every plan names the same worker, the
+/// same worker count and the same table.
+pub fn fabric_for<const D: usize, L: Link>(
+    plans: &[&PlanExchange<'_, D>],
+    link: L,
+    session: symbi_fabric::SessionId,
+) -> Fabric<L> {
+    let first = plans.first().expect("at least one plan");
+    let mut lens = Vec::new();
+    let mut counts: Vec<Vec<Vec<u32>>> = first
+        .table
+        .phases()
+        .iter()
+        .map(|_| vec![vec![0u32; D]; first.placement.workers as usize])
+        .collect();
+    for plan in plans {
+        assert_eq!(plan.me, first.me, "every plan of a session names one worker");
+        assert_eq!(plan.placement.workers, first.placement.workers);
+        assert_eq!(plan.table.digest(), first.table.digest(), "every plan walks one phase table");
+        assert_eq!(plan.id_offset as usize, lens.len(), "plans occupy disjoint id ranges in offset order");
+        lens.extend(plan.lens());
+        for (byte, per_peer) in plan.phase_counts().into_iter().enumerate() {
+            for (peer, per_axis) in per_peer.into_iter().enumerate() {
+                for (axis, c) in per_axis.into_iter().enumerate() {
+                    counts[byte][peer][axis] += c;
+                }
+            }
+        }
+    }
+    let prime = first.table.byte_of(ExchangePoint::Prime).expect("every table holds the prime") as usize;
+    let default = counts[prime].clone();
+    Fabric::new(link, first.me, session, first.placement.workers as usize, D, &lens, default)
+        .with_phase_counts(counts)
+        .with_phase_rules(first.table.rules())
 }
 
 /// what one interface audit cost this worker.
@@ -420,6 +555,15 @@ fn gather<const D: usize, M: MemorySpace>(
     region: &[Span; D],
     buf: &mut [f64],
 ) {
+    let dom = field.domain();
+    for a in 0..D {
+        assert!(
+            region[a].lo >= dom.spaces[a].lo && region[a].hi <= dom.spaces[a].hi,
+            "a transfer's source region {region:?} lies outside its field's domain {:?} on axis {a}: the \
+             plan's tile layout and the tile's store disagree",
+            dom.spaces
+        );
+    }
     let view = field.view();
     for (slot, c) in buf.iter_mut().zip(domain_of(region).iter()) {
         *slot = *view.at(c);

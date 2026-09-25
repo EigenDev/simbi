@@ -118,6 +118,18 @@ impl<const D: usize> TileLayout<D> {
             offset,
         }
     }
+
+    /// the same tile in an index space whose first interior cell sits at `lo`: a fine level
+    /// indexes its cells in its parent's frame, so its plan's layouts start where its
+    /// stores do. the global index of the first interior cell is unchanged.
+    pub fn shifted(mut self, lo: [isize; D]) -> Self {
+        for ax in 0..D {
+            let shift = lo[ax] - self.interior[ax].lo;
+            self.interior[ax] = Span { lo: self.interior[ax].lo + shift, hi: self.interior[ax].hi + shift };
+            self.allocated[ax] = Span { lo: self.allocated[ax].lo + shift, hi: self.allocated[ax].hi + shift };
+        }
+        self
+    }
 }
 
 /// where a field's values sit. a cell field lives on the tile's cell domain; a
@@ -324,6 +336,8 @@ pub enum FinePoint {
     /// after the fine tail's recovery and physical fill: the fine cut halos again, and the
     /// EMF contributions of the substep
     PostTail,
+    /// the interface audit of the post-tail exchange
+    AuditTail,
 }
 
 /// the exchange an interface audit follows.
@@ -350,7 +364,7 @@ impl ExchangePoint {
     pub fn is_audit(self) -> bool {
         matches!(
             self,
-            ExchangePoint::Audit(_) | ExchangePoint::Fine { point: FinePoint::Audit(_), .. }
+            ExchangePoint::Audit(_) | ExchangePoint::Fine { point: FinePoint::Audit(_) | FinePoint::AuditTail, .. }
         )
     }
 
@@ -379,6 +393,7 @@ impl ExchangePoint {
                 FinePoint::Stage(k) => (13, substep as u32, k as u32),
                 FinePoint::Audit(k) => (14, substep as u32, k as u32),
                 FinePoint::PostTail => (15, substep as u32, 0),
+                FinePoint::AuditTail => (16, substep as u32, 0),
             },
         };
         kind << 16 | a << 8 | b
@@ -496,6 +511,31 @@ impl<const D: usize> ExchangePlan<D> {
         ng: usize,
         seam: Option<PolarSeam>,
     ) -> Result<Self, PlanError> {
+        Self::compile_placed(partition, topology, schema, ng, seam, &|_| None)
+    }
+
+    /// `compile` for tiles whose stores index their cells from `interior_lo(tile)` in place
+    /// of zero: the fine level of a refined run, whose tiles live in their parents' index
+    /// frames. every worker derives the same origins from the partition, so the plan is the
+    /// same on every worker.
+    pub fn compile_shifted(
+        partition: &Partition<D>,
+        topology: &Topology<D>,
+        schema: &FieldSchema,
+        ng: usize,
+        interior_lo: &dyn Fn(TileId) -> [isize; D],
+    ) -> Result<Self, PlanError> {
+        Self::compile_placed(partition, topology, schema, ng, None, &|t| Some(interior_lo(t)))
+    }
+
+    fn compile_placed(
+        partition: &Partition<D>,
+        topology: &Topology<D>,
+        schema: &FieldSchema,
+        ng: usize,
+        seam: Option<PolarSeam>,
+        interior_lo: &dyn Fn(TileId) -> Option<[isize; D]>,
+    ) -> Result<Self, PlanError> {
         let counts = partition.counts();
         if let Some(s) = &seam {
             if s.slabs.iter().sum::<usize>() % 2 != 0 {
@@ -504,7 +544,14 @@ impl<const D: usize> ExchangePlan<D> {
         }
         let schedule = Schedule::derive_with_seam(counts, ng, topology, seam);
         let tiles: Vec<TileLayout<D>> = (0..partition.n_tiles())
-            .map(|t| TileLayout::of_partition(partition, TileId(t as u32), ng))
+            .map(|t| {
+                let id = TileId(t as u32);
+                let layout = TileLayout::of_partition(partition, id, ng);
+                match interior_lo(id) {
+                    Some(lo) => layout.shifted(lo),
+                    None => layout,
+                }
+            })
             .collect();
         let fields: Vec<Vec<FieldLayout<D>>> = tiles
             .iter()
@@ -832,6 +879,19 @@ impl Placement {
             if !owner.iter().any(|o| o.0 == w) {
                 return Err(format!("worker {w} holds no tile"));
             }
+        }
+        Ok(Self { workers, owner })
+    }
+
+    /// a placement of a level some workers hold no tile of: the fine level of a refined run,
+    /// whose patch reaches only some of the root tiles. every worker still walks the level's
+    /// phases; one without a tile sends and receives nothing there.
+    pub fn with_idle_workers(workers: u32, owner: Vec<WorkerId>) -> Result<Self, String> {
+        if workers == 0 {
+            return Err("a placement needs at least one worker".into());
+        }
+        if let Some(bad) = owner.iter().find(|w| w.0 >= workers) {
+            return Err(format!("tile owner {bad:?} is outside the {workers} workers"));
         }
         Ok(Self { workers, owner })
     }
