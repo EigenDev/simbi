@@ -16,8 +16,10 @@
 // values gathered from other tiles included. arms: the patch inside the tiles
 // across fine cuts on both axes and on one axis at a time; a rejection in the
 // second fine substep; a patch face on a cut and a patch corner on two cuts,
-// each with a rejection in the second fine substep; a magnetized run without
-// the stencil refused by name.
+// each with a rejection in the second fine substep; a fine cell against a fine
+// cut flagged troubled in the predictor and in the corrector under the Contact
+// and the UCT edge EMF, the four-worker run held to one worker under the same
+// flag; a magnetized run without the stencil refused by name.
 //
 // run: cargo test -p symbi --test worker_refined_mhd_processes
 // =============================================================================
@@ -28,6 +30,7 @@ use std::path::PathBuf;
 use std::process::{Child, Command, Stdio};
 use std::time::{Duration, Instant};
 
+use symbi::regimes::fofc::{fofc_reset_stats, fofc_stats};
 use symbi::regimes::substrate_newtonian_mhd::NewtonianMhdSubstrateKernelSet;
 use symbi::sim::decomp::{FinePartition, LocalCopy, Partition, Topology, flatten, plan_cons_schema, plan_schema, unflatten};
 use symbi::sim::refinement::launched::{Held, RefinedConfig, RefinedPlans, evolve_refined_worker};
@@ -100,8 +103,10 @@ fn build_root(cells: [usize; 2], origin: [f64; 2], bnd: Boundaries<2>, ng: usize
         .expect("rollback snapshot")
 }
 
+/// the kernel set, its edge EMF Contact or, under `W_CT=uct`, UCT
 fn kset(sim: &Sim) -> Kern {
-    Kern::new(GAMMA, CFL, 1.0, &sim.geom.allocated)
+    let k = Kern::new(GAMMA, CFL, 1.0, &sim.geom.allocated);
+    if std::env::var("W_CT").is_ok_and(|v| v == "uct") { k.ct_method(CtMethod::Uct) } else { k }
 }
 
 fn patch_region(patch: [(usize, usize); 2]) -> RefinementRegion<2> {
@@ -506,7 +511,10 @@ fn run_worker(arm: &Arm, me: WorkerId, out: PathBuf) -> Result<(), WorkerError> 
             audit_every_point: true,
         },
         invalid_level_cfl_at: None,
-        fine_trouble_at: None,
+        fine_trouble_at: {
+            let p = env_list("W_FINE_TROUBLE");
+            (p.len() == 5).then(|| (p[0], p[1] as u8, p[2] as usize, [p[3] as isize, p[4] as isize, 0]))
+        },
         contribution_fault: None,
     };
     let root_devices = vec![0i32; n_root];
@@ -519,6 +527,7 @@ fn run_worker(arm: &Arm, me: WorkerId, out: PathBuf) -> Result<(), WorkerError> 
         root_devices: &root_devices,
         fine_devices: &fine_devices,
     };
+    fofc_reset_stats();
     let report = evolve_refined_worker(&mut tiles, &held, &plans, &LocalCopy, &mut fabric, &cfg, |_, _, _| {
         Ok(ControlFlow::Continue(()))
     })?;
@@ -544,7 +553,7 @@ fn run_worker(arm: &Arm, me: WorkerId, out: PathBuf) -> Result<(), WorkerError> 
     std::fs::write(&out, encode(&records)).unwrap();
     let div = tiles.iter().map(hierarchy_div).fold(0.0, f64::max);
     println!(
-        "REPORT steps={} rejections={} audits={} div={} contrib={} emf={} corrected={} hw={} dts={} corner=0 off_tile={off_tile} oop=0",
+        "REPORT steps={} rejections={} audits={} div={} contrib={} emf={} corrected={} hw={} dts={} corner=0 off_tile={off_tile} oop=0 fine_troubled={} fine_neighbor={} fofc={},{}",
         report.steps,
         report.rejections,
         report.audits,
@@ -553,7 +562,11 @@ fn run_worker(arm: &Arm, me: WorkerId, out: PathBuf) -> Result<(), WorkerError> 
         emf_plan.transfers().count(),
         corrected_plan.transfers().count(),
         report.grant_high_water.iter().map(|h| h.to_string()).collect::<Vec<_>>().join(","),
-        report.dt_sequence.iter().map(|d| d.to_bits().to_string()).collect::<Vec<_>>().join(",")
+        report.dt_sequence.iter().map(|d| d.to_bits().to_string()).collect::<Vec<_>>().join(","),
+        report.fine_troubled_exchanges,
+        report.fine_neighbor_corrections,
+        fofc_stats().0,
+        fofc_stats().1
     );
     Ok(())
 }
@@ -590,7 +603,7 @@ fn mono_main(arm: &Arm, out: PathBuf) {
         .map(|(fields, dom)| dom.iter().map(|c| fields[0].view().at(c).abs()).fold(0.0, f64::max))
         .unwrap_or(0.0);
     println!(
-        "REPORT steps=0 rejections=0 audits=0 div={} contrib=0 emf=0 corrected=0 hw= dts= corner={} off_tile=0 oop={}",
+        "REPORT steps=0 rejections=0 audits=0 div={} contrib=0 emf=0 corrected=0 hw= dts= corner={} off_tile=0 oop={} fine_troubled=0 fine_neighbor=0 fofc=0,0",
         hierarchy_div(&mono).to_bits(),
         corner.to_bits(),
         oop.to_bits()
@@ -656,6 +669,10 @@ struct Report {
     oop: f64,
     /// the stencil values the worker gathered from faces past its own tiles' lattices
     off_tile: u64,
+    fine_troubled: u64,
+    fine_neighbor: u64,
+    /// the correction census of the process: (fallback cells, frozen cells)
+    fofc: (u64, u64),
     high_water: Vec<usize>,
     dts: Vec<u64>,
 }
@@ -688,6 +705,12 @@ fn parse_report(stdout: &str) -> Option<Report> {
         corner: bits("corner")?,
         oop: bits("oop")?,
         off_tile: field("off_tile")?.parse().ok()?,
+        fine_troubled: field("fine_troubled")?.parse().ok()?,
+        fine_neighbor: field("fine_neighbor")?.parse().ok()?,
+        fofc: {
+            let f = list("fofc")?;
+            (f[0], f[1])
+        },
         high_water: list("hw")?.into_iter().map(|h| h as usize).collect(),
         dts: list("dts")?,
     })
@@ -771,6 +794,15 @@ fn class(k: &Key) -> String {
 /// hierarchy's; every cut halo primitive equal to the interior value there; every face held
 /// by two tiles equal in both copies and equal to the single hierarchy's
 fn assert_state_equal(outcomes: &[Outcome], expected: &Reference, label: &str) {
+    assert_state_equal_with(outcomes, expected, label, true)
+}
+
+/// `assert_state_equal` against a reference that holds no stencil values
+fn assert_state_equal_without_stencil(outcomes: &[Outcome], expected: &Reference, label: &str) {
+    assert_state_equal_with(outcomes, expected, label, false)
+}
+
+fn assert_state_equal_with(outcomes: &[Outcome], expected: &Reference, label: &str, with_stencil: bool) {
     let mut held: HashMap<Key, u64> = HashMap::new();
     let mut copies: HashMap<Key, Vec<u64>> = HashMap::new();
     let mut halos = 0usize;
@@ -839,7 +871,7 @@ fn assert_state_equal(outcomes: &[Outcome], expected: &Reference, label: &str) {
     assert!(differing.is_empty(), "{label}: values differing from the single hierarchy by class:\n{}", report.join("\n"));
     assert!(halos > 0 || outcomes.len() == 1, "{label}: no cut halo was dumped; the freshness comparison is vacuous");
     assert!(shared > 0 || outcomes.len() == 1, "{label}: no face was held by two tiles");
-    assert!(stencil > 0, "{label}: no parent face stencil was gathered");
+    assert!(stencil > 0 || !with_stencil, "{label}: no parent face stencil was gathered");
 }
 
 /// the largest |div B| on the assembled root grid from the workers' faces
@@ -1036,4 +1068,95 @@ fn a_magnetized_run_without_the_face_stencil_is_refused_by_name() {
         "no worker named the refusal:\n{}",
         outcomes.iter().map(|o| o.stderr.clone()).collect::<Vec<_>>().join("\n---\n")
     );
+}
+
+/// the record map of a one-worker run, the reference a flagged cut run is held to; its stencil
+/// values are left out, since each layout gathers a stencil of its own shape
+fn uncut_reference(outcomes: &[Outcome], label: &str) -> Reference {
+    assert_all_ok(outcomes, label);
+    let o = &outcomes[0];
+    let values = o.records.iter().filter(|(k, _)| k.kind != 5).cloned().collect();
+    Reference { values, report: o.report.clone().unwrap() }
+}
+
+/// a fine cell against the fine cut, flagged troubled in `stage` of the second fine substep of
+/// step 3 on worker 1, which holds it; worker 3 across the cut holds a clean fine tile. the
+/// flag changes the one-worker run, the correction runs on both sides with no freeze, and the
+/// four-worker run equals the one-worker run under the same flag in every value on both levels
+fn assert_fine_trouble_matches_uncut(test: &str, ct: &str, stage: usize) {
+    let label = format!("{ct}, fine stage {stage}");
+    let base = vec![("W_CT", ct.to_string())];
+    let mut flagged = base.clone();
+    // the fine plan's grid: the patch [12, 20)^2 at ratio 2, the fine cuts at column 10 and row 2
+    flagged.push(("W_FINE_TROUBLE", format!("3,1,{stage},9,7")));
+    let uncut = Arm { cuts0: vec![], cuts1: vec![], owner: vec![0], patch: [(12, 20), (12, 20)], ng: 2 };
+    let clean = run_arm(test, &format!("clean_{ct}_{stage}"), &uncut, &base);
+    let clean_ref = uncut_reference(&clean, &format!("{label}, the clean one-worker run"));
+    assert_eq!(clean_ref.report.fofc, (0, 0), "{label}: the clean run corrected by itself");
+    let one = run_arm(test, &format!("uncut_{ct}_{stage}"), &uncut, &flagged);
+    let expected = uncut_reference(&one, &format!("{label}, the flagged one-worker run"));
+    let changed = expected.values.iter().filter(|(k, v)| clean_ref.values.get(k) != Some(v)).count();
+    assert!(changed > 0, "{label}: the flag left the one-worker run unchanged; the gate is vacuous");
+    assert!(expected.report.fofc.0 > 0, "{label}: the one-worker run never corrected");
+    assert_eq!(expected.report.fofc.1, 0, "{label}: the one-worker run froze a cell");
+    assert!(expected.report.div <= DIV_TOL, "{label}: one-worker |div B| {:e}", expected.report.div);
+
+    let arm = ragged_17_13();
+    let mut outcomes = run_arm(test, &format!("cut_{ct}_{stage}"), &arm, &flagged);
+    assert_all_ok(&outcomes, &label);
+    for (w, o) in outcomes.iter().enumerate() {
+        let r = o.report.as_ref().unwrap();
+        assert_eq!(r.dts, expected.report.dts, "{label}: worker {w} took other timesteps than the one-worker run");
+        assert_eq!(r.fine_troubled, 1, "{label}: worker {w} saw {} fine troubled exchanges", r.fine_troubled);
+        assert_eq!(r.fofc.1, 0, "{label}: worker {w} froze {} cells", r.fofc.1);
+        assert!(r.div <= DIV_TOL, "{label}: worker {w} holds |div B| = {:e} on its own faces", r.div);
+        assert!(r.high_water.iter().all(|&h| h <= 2), "{label}: worker {w} grant high-water {:?}", r.high_water);
+    }
+    let reports: Vec<&Report> = outcomes.iter().map(|o| o.report.as_ref().unwrap()).collect();
+    assert!(reports[1].fofc.0 > 0, "{label}: the worker holding the flag never corrected");
+    let neighbors: Vec<usize> = (0..4).filter(|&w| reports[w].fine_neighbor > 0).collect();
+    assert_eq!(neighbors, vec![3], "{label}: the workers correcting a clean fine tile from the flag");
+    // the correction census counts a tile's own troubled cells: the neighbor's fine tile is
+    // clean, and it corrects its side of the shared faces from the exchanged flag alone
+    assert_eq!(reports[3].fofc.0, 0, "{label}: the neighbor's fine tile flagged a cell of its own");
+    assert_eq!(reports[3].fine_neighbor, 1, "{label}: the neighbor corrected a clean fine tile {} times", reports[3].fine_neighbor);
+    for o in outcomes.iter_mut() {
+        o.records.retain(|(k, _)| k.kind != 5);
+    }
+    let reference = Reference { values: expected.values.into_iter().filter(|(k, _)| k.kind != 5).collect(), report: expected.report };
+    assert_state_equal_without_stencil(&outcomes, &reference, &label);
+    let div = assembled_root_div(&outcomes);
+    assert!(div <= DIV_TOL, "{label}: the assembled root holds |div B| = {div:e}");
+}
+
+#[test]
+fn contact_fine_trouble_in_the_predictor_is_corrected_on_both_sides_of_a_fine_cut() {
+    if in_worker_role() {
+        worker_main();
+    }
+    assert_fine_trouble_matches_uncut("contact_fine_trouble_in_the_predictor_is_corrected_on_both_sides_of_a_fine_cut", "contact", 0);
+}
+
+#[test]
+fn contact_fine_trouble_in_the_corrector_is_corrected_on_both_sides_of_a_fine_cut() {
+    if in_worker_role() {
+        worker_main();
+    }
+    assert_fine_trouble_matches_uncut("contact_fine_trouble_in_the_corrector_is_corrected_on_both_sides_of_a_fine_cut", "contact", 1);
+}
+
+#[test]
+fn uct_fine_trouble_in_the_predictor_is_corrected_on_both_sides_of_a_fine_cut() {
+    if in_worker_role() {
+        worker_main();
+    }
+    assert_fine_trouble_matches_uncut("uct_fine_trouble_in_the_predictor_is_corrected_on_both_sides_of_a_fine_cut", "uct", 0);
+}
+
+#[test]
+fn uct_fine_trouble_in_the_corrector_is_corrected_on_both_sides_of_a_fine_cut() {
+    if in_worker_role() {
+        worker_main();
+    }
+    assert_fine_trouble_matches_uncut("uct_fine_trouble_in_the_corrector_is_corrected_on_both_sides_of_a_fine_cut", "uct", 1);
 }
