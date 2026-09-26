@@ -584,7 +584,7 @@ ROCHE_PASSAGE = str(Path(RochePassage.__module__.replace(".", "/") + ".py"))
 
 @pytest.mark.parametrize(
     ("script", "reason"),
-    [(MHD_BLAST, "the rmhd regime"), (REFINED_KH, "mesh refinement"), (ROCHE_PASSAGE, "an immersed body")],
+    [(MHD_BLAST, "the rmhd regime"), (REFINED_KH, "a periodic boundary with mesh refinement"), (ROCHE_PASSAGE, "an immersed body")],
 )
 def test_out_of_scope_problems_are_refused_by_name(tmp_path: Path, script: str, reason: str) -> None:
     # a layout with as many axes as the problem's grid, so the refusal is the scope's
@@ -596,7 +596,8 @@ def test_out_of_scope_problems_are_refused_by_name(tmp_path: Path, script: str, 
     cmd = [sys.executable, "-m", "simbi.cli", "launch", script, "--layout", str(layout), "--max-steps", "1", "--data-directory", str(out), "--checkpoint-interval", "1e9"]
     done = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
     assert done.returncode != 0, f"the launch succeeded:\n{done.stdout}"
-    assert f"{reason} is outside the distributed first release" in done.stderr, done.stderr
+    # the traceback renderer wraps a long message across lines
+    assert f"{reason} is outside the distributed first release" in " ".join(done.stderr.split()), done.stderr
     assert not (out.exists() and list(out.glob("*.h5"))), "a checkpoint was published"
 
 

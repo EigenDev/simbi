@@ -10383,7 +10383,7 @@ fn validate_launch_scope(cfg: &Config) -> Result<(), String> {
         return refused("a locally isothermal closure");
     }
     if cfg.refinement_enabled {
-        return refused("mesh refinement");
+        validate_refined_launch_scope(cfg)?;
     }
     if cfg.mesh_motion {
         return refused("mesh motion");
@@ -10424,6 +10424,377 @@ fn validate_launch_scope(cfg: &Config) -> Result<(), String> {
     Ok(())
 }
 
+/// the refined launch's gated scope: 2D newtonian hydro on a uniform cartesian grid with one
+/// refined patch of ratio two, plm reconstruction, the ideal gas, open boundaries, no non-ideal
+/// transport or excision. every other refined combination is named and refused.
+fn validate_refined_launch_scope(cfg: &Config) -> Result<(), String> {
+    let refused = |what: &str| Err(format!("{what} with mesh refinement is outside the distributed first release"));
+    if cfg.regime != "newtonian" {
+        return refused(&format!("the {} regime", cfg.regime));
+    }
+    if cfg.dims != 2 {
+        return refused(&format!("a {}-dimensional grid", cfg.dims));
+    }
+    if cfg.coord_system != "cartesian" {
+        return refused(&format!("the {} chart", cfg.coord_system));
+    }
+    if axis_maps::<2>(cfg).is_some() {
+        return refused("a non-uniform spacing");
+    }
+    if cfg.refinement_regions.len() != 1 {
+        return refused(&format!("{} refined regions", cfg.refinement_regions.len()));
+    }
+    if cfg.reconstruction_name != "plm" {
+        return refused(&format!("{} reconstruction", cfg.reconstruction_name));
+    }
+    if cfg.eos_name != "ideal" {
+        return refused(&format!("the {} equation of state", cfg.eos_name));
+    }
+    if cfg.ppm_flatten_full > 0.0 || cfg.ppm_flatten_onset > 0.0 || cfg.wb_reconstruction {
+        return refused("a flattening or well-balanced reconstruction");
+    }
+    if cfg.boundaries.contains(&BoundaryType::Periodic) {
+        return refused("a periodic boundary");
+    }
+    if cfg.viscosity > 0.0 || cfg.resistivity > 0.0 || cfg.excision_radius > 0.0 {
+        return refused("viscosity, resistivity or excision");
+    }
+    if !cfg.source_jsons.is_empty() || !cfg.gradient_bcs.is_empty() {
+        return refused("a user source or a gradient wall");
+    }
+    Ok(())
+}
+
+/// the refined root patch of the launch's one region in root cells per axis, snapped as the
+/// hierarchy snaps a region to its parent's cells
+fn launch_patch(cfg: &Config) -> Result<[(usize, usize); 2], String> {
+    let regions = refinement_regions_nd::<2>(&cfg.refinement_regions)?;
+    let r = &regions[0];
+    let cell = |x: f64, ax: usize| ((x - cfg.x_lo[ax]) / cfg.dx[ax]).round();
+    Ok(std::array::from_fn(|ax| (cell(r.x_lo[ax], ax) as usize, cell(r.x_hi[ax], ax) as usize)))
+}
+
+/// evolve this worker's refined hierarchies through the fabric: the root tiles of the launch's
+/// partition, each refining the patch clipped to it with the whole patch beside it (a patch face
+/// on a cut as a contributing register face) or carrying the receiving register of the shell
+/// beside the patch; the fine level partitioned under the root's cuts; the refined transaction
+/// with the checkpoints of both levels at the linear cadence, a final checkpoint, and a restart
+/// onto any partition.
+fn run_refined_worker_process(
+    cfg: &Config,
+    prims: &[Vec<f64>],
+    launch: &WorkerLaunch,
+    fault: LaunchFault,
+    drained: std::time::Duration,
+) -> Result<(), String> {
+    use symbi::sim::decomp::{FinePartition, LocalCopy, flatten, plan_cons_schema, plan_schema, unflatten};
+    use symbi::sim::refinement::launched::{
+        Held, RefinedConfig, RefinedGrids, RefinedPlans, evolve_refined_worker, load_refined_tiles, receiving_faces_of_tile,
+        refined_checkpoint,
+    };
+    use symbi_fabric::rendezvous::{Identity, Rendezvous, connect};
+    use symbi_fabric::{Fnv, WorkerId};
+    use symbi_sim::atlas::{ExchangePlan, Placement, TileId};
+    use symbi_sim::checkpoint::PhysicsIdentity;
+    use symbi_sim::distributed_checkpoint::{CheckpointRequest, block_credit_for};
+    use symbi_sim::phase_table::PhaseTable;
+    use symbi_sim::plan_exchange::{PlanExchange, PlanRole, fabric_for};
+    use symbi_sim::substrate_seam::RegimeKind;
+    use symbi_sim::worker::{WorkerConfig, WorkerError};
+
+    type Sim = SimDefault<Newtonian, 2, Cartesian, EosSelect<f64>>;
+    type Kern = <Sim as symbi::prelude::SimSubstrate<DefaultMemory, f64, 2>>::KernelSet;
+    type Hier = Hierarchy<Newtonian, 2, 2, Cartesian, EosSelect<f64>, DefaultSpace, DefaultMemory, Kern>;
+
+    let build_clock = std::time::Instant::now();
+    let n: [usize; 2] = std::array::from_fn(|ax| cfg.n_cells[ax]);
+    let total: usize = n.iter().product();
+    if prims.len() != total {
+        return Err(format!("prim_gen yielded {} cells, expected {total}", prims.len()));
+    }
+    let partition = tile_partition(n, cfg)?;
+    let counts = partition.counts();
+    let n_root = partition.n_tiles();
+    if launch.owner.len() != n_root {
+        return Err(format!("the owner map names {} tiles; the partition has {n_root}", launch.owner.len()));
+    }
+    let owner: Vec<WorkerId> = launch.owner.iter().map(|&w| WorkerId(w as u32)).collect();
+    let placement = Placement::new(launch.workers as u32, owner.clone())?;
+    let me = WorkerId(launch.worker as u32);
+    let mine: Vec<usize> = (0..n_root).filter(|&f| placement.owner_of(TileId(f as u32)) == me).collect();
+    if mine.is_empty() {
+        return Err(format!("worker {} holds no tile", launch.worker));
+    }
+    let patch = launch_patch(cfg)?;
+    let regions = refinement_regions_nd::<2>(&cfg.refinement_regions)?;
+    let phys = boundaries_nd::<2>(&cfg.boundaries);
+    let theta = build_theta(cfg);
+    let solver = cfg.solver;
+    let prolong = prolong_order_for(&cfg.reconstruction_name);
+    let dx: [f64; 2] = std::array::from_fn(|ax| cfg.dx[ax]);
+    let kernels_of = |s: &Sim| -> Kern { s.substrate().theta(theta).with_solver(solver).expect("fine kernel set") };
+
+    // the held tiles, each at its own origin: the hierarchy's levels index the parent's absolute
+    // cells from it
+    let mut tiles: Vec<Hier> = Vec::with_capacity(mine.len());
+    for &flat in &mine {
+        let tc = unflatten(flat, counts);
+        let ext = partition.tile_extents(tc);
+        let tile_lo: [usize; 2] = std::array::from_fn(|ax| ext[ax].0);
+        let m: [usize; 2] = std::array::from_fn(|ax| ext[ax].1);
+        let origin = tile_origin::<2>(cfg, tile_lo);
+        let maps: [symbi_geometry::AxisMap; 2] =
+            std::array::from_fn(|ax| symbi_geometry::AxisMap::Uniform { start: origin[ax], dx: dx[ax] });
+        let sim = Sim::build(Newtonian, host_eos(cfg), Cartesian)
+            .cells(m)
+            .ghosts(ghost_width(cfg))
+            .origin(origin)
+            .spacing(dx)
+            .boundaries(tile_boundaries(&phys, tc, counts))
+            .cfl(cfg.cfl)
+            .timestepping(cfg.timestepping)
+            .allocate()
+            .map_err(|e| format!("tile {flat} allocate: {e:?}"))?
+            .set_initial_indexed(|idx, _x| {
+                let lin = global_lin::<2>(&tile_lo, &idx, &n);
+                let row = &prims[lin];
+                Prim::adiabatic(Density(row[0]), Tensor::new([row[1], row[2]]), Pressure(row[3]))
+            })
+            .build();
+        let sub = kernels_of(&sim);
+        let clipped = clip_regions_to_tile::<2>(&regions, origin, m, &maps);
+        let h = if clipped.is_empty() {
+            let h = Hierarchy::single(sim, sub);
+            match receiving_faces_of_tile(&partition, patch, TileId(flat as u32)) {
+                Some((patch_local, faces)) => h
+                    .with_receiving_register(&patch_local, faces)
+                    .map_err(|e| format!("tile {flat} receiving register: {e:?}"))?,
+                None => h,
+            }
+        } else {
+            let (clip, whole): (Vec<_>, Vec<_>) = clipped.into_iter().unzip();
+            Hierarchy::with_refinement_of_contributing(sim, sub, &clip, &whole, prolong, kernels_of)
+                .map_err(|e| format!("tile {flat} refinement build: {e:?}"))?
+        };
+        tiles.push(h);
+    }
+
+    // the fine level's tiles under the root's cuts, each owned by the worker owning its root tile
+    let fine_partition = FinePartition::of(&partition, patch, 2)?;
+    let fine_counts = fine_partition.partition.counts();
+    let n_fine = fine_partition.partition.n_tiles();
+    let fine_owner: Vec<WorkerId> =
+        (0..n_fine).map(|f| owner[flatten(fine_partition.root_tile_of(unflatten(f, fine_counts)), counts)]).collect();
+    let fine_placement = Placement::with_idle_workers(launch.workers as u32, fine_owner)?;
+    let root_ids: Vec<TileId> = mine.iter().map(|&f| TileId(f as u32)).collect();
+    let fine_ids: Vec<Option<TileId>> = mine
+        .iter()
+        .map(|&f| fine_partition.fine_tile_of(unflatten(f, counts)).map(|tc| TileId(flatten(tc, fine_counts) as u32)))
+        .collect();
+    for (k, h) in tiles.iter().enumerate() {
+        if (h.levels.len() > 1) != fine_ids[k].is_some() {
+            return Err(format!("tile {}: the hierarchy and the fine partition disagree on its fine level", mine[k]));
+        }
+    }
+
+    // the plans of the session: root state, root seed, fine level, flux contributions
+    let root_store = &*tiles[0].levels[0].state;
+    let ng = root_store.geom.ng;
+    let schema = plan_schema(root_store);
+    let cons_schema = plan_cons_schema(root_store);
+    let open = symbi::sim::decomp::Topology::open();
+    let root_plan = ExchangePlan::compile(&partition, &open, &schema, ng).map_err(|e| e.to_string())?;
+    let seed_plan = ExchangePlan::compile(&partition, &open, &cons_schema, ng).map_err(|e| e.to_string())?;
+    let fine_lo = |t: TileId| -> [isize; 2] {
+        let tc = unflatten(t.0 as usize, fine_counts);
+        let root_ext = partition.tile_extents(fine_partition.root_tile_of(tc));
+        std::array::from_fn(|a| (2 * patch[a].0.saturating_sub(root_ext[a].0)) as isize)
+    };
+    let fine_plan =
+        ExchangePlan::compile_shifted(&fine_partition.partition, &open, &schema, ng + 1, &fine_lo).map_err(|e| e.to_string())?;
+    let n_comp = cons_schema.len();
+    let flux_plan = ExchangePlan::flux_contributions(&partition, &open, patch, ng, n_comp).map_err(|e| e.to_string())?;
+    let stages = cfg.timestepping.stages().len() as u8;
+    let table = PhaseTable::refined(stages, 2, stages).map_err(|e| e.to_string())?;
+    let root = PlanExchange::new(&root_plan, &placement, me, table.clone());
+    let mut offset = root.lens().len() as u32;
+    let seed = PlanExchange::new(&seed_plan, &placement, me, table.clone()).with_role(PlanRole::RootSeed, offset);
+    offset += seed.lens().len() as u32;
+    let fine = PlanExchange::new(&fine_plan, &fine_placement, me, table.clone()).with_role(PlanRole::Fine, offset);
+    offset += fine.lens().len() as u32;
+    let flux = (flux_plan.transfers().count() > 0)
+        .then(|| PlanExchange::new(&flux_plan, &placement, me, table.clone()).with_role(PlanRole::FluxContribution, offset));
+    let plan_digest = {
+        let mut h = Fnv::new();
+        for d in [root_plan.digest, seed_plan.digest, fine_plan.digest, flux_plan.digest] {
+            h.u32((d.0 >> 32) as u32);
+            h.u32(d.0 as u32);
+        }
+        h.finish()
+    };
+    let budget = launch.staging_cells.max(1);
+    let credit = block_credit_for(budget, 2);
+    let bind: std::net::IpAddr = launch.bind.parse().map_err(|e| format!("bind address '{}': {e}", launch.bind))?;
+    let rendezvous = Rendezvous {
+        me,
+        coordinator: std::net::SocketAddr::new(bind, 0),
+        announce: Some(std::path::PathBuf::from(&launch.rendezvous)),
+        bind: Some(bind),
+        advertise: Some(launch.advertise.clone()),
+        identity: Identity {
+            credential: launch.credential,
+            build_id: build_source_id(),
+            config_digest: symbi_fabric::Digest(launch.config_digest),
+            plan_digest,
+            placement_digest: placement.digest(),
+            phase_table_digest: table.digest(),
+            ng: ng as u32,
+            workers: launch.workers as u32,
+            block_credit: credit,
+        },
+        startup: std::time::Duration::from_secs(120),
+    };
+    let deadline = std::time::Duration::from_secs(600);
+    let mut all: Vec<&PlanExchange<'_, 2>> = vec![&root, &seed, &fine];
+    all.extend(flux.as_ref());
+    let max_payload = (all.iter().flat_map(|p| p.lens()).max().unwrap_or(0) * 8).max(credit as usize);
+    let built = build_clock.elapsed();
+    let connect_clock = std::time::Instant::now();
+    let (link, session) = connect(&rendezvous, max_payload).map_err(|e| e.to_string())?;
+    {
+        use std::io::Write;
+        let line = format!(
+            "SIMBI launch startup: worker={}/{} drain={:.3}s build={:.3}s connect={:.3}s refined=1\n",
+            launch.worker,
+            launch.workers,
+            drained.as_secs_f64(),
+            built.as_secs_f64(),
+            connect_clock.elapsed().as_secs_f64(),
+        );
+        let _ = std::io::stderr().write_all(line.as_bytes());
+    }
+    let mut fabric = fabric_for(&all, link, session).with_block_credit(credit);
+    let plans = RefinedPlans { root, seed, fine, flux, emf: None, faces: None, corrected: None, stencil: None };
+    let root_devices = vec![0i32; n_root];
+    let fine_devices = vec![0i32; n_fine];
+    let held = Held {
+        root_ids: &root_ids,
+        fine_ids: &fine_ids,
+        n_root,
+        n_fine,
+        root_devices: &root_devices,
+        fine_devices: &fine_devices,
+    };
+    let root_grid = decomposed_grid::<2>(cfg, ng);
+    let grids = RefinedGrids::of(n, root_grid.x_lo, root_grid.dx, ng, patch);
+    let restart = cfg.restart_path.is_some();
+    if let Some(path) = cfg.restart_path.as_deref() {
+        load_refined_tiles(&mut tiles, &held, &plans, &grids, path).map_err(|e| e.to_string())?;
+    }
+    let identity = PhysicsIdentity::of(&tiles[0].levels[0].state);
+    let refined_cfg = RefinedConfig {
+        base: WorkerConfig {
+            regime: RegimeKind::of::<f64, 2, Newtonian>(),
+            timestepping: cfg.timestepping,
+            start_time: cfg.start_time,
+            t_final: cfg.t_final,
+            max_steps: cfg.max_steps,
+            deadline,
+            injection: fault.injection.clone(),
+            audit_every_point: std::env::var("SIMBI_FABRIC_AUDIT").is_ok_and(|v| v == "all"),
+        },
+        invalid_level_cfl_at: None,
+        fine_trouble_at: None,
+        contribution_fault: None,
+        restart,
+    };
+    let slabs: Vec<Vec<usize>> = (0..2).map(|ax| (0..counts[ax]).map(|i| partition.tile_range(ax, i).1).collect()).collect();
+    let mut reporter = (me == WorkerId(0)).then(|| DecomposedReporter::new(cfg, total as u64, &counts, &slabs));
+    let cp_dt = if cfg.checkpoint_interval > 0.0 { cfg.checkpoint_interval * cfg.time_unit } else { f64::INFINITY };
+    let cp_width = checkpoint_time_width(cfg);
+    let write = |tiles: &[Hier], fabric: &mut symbi_fabric::Fabric<_>, path: &str, cp_index: u64, accepted: u64| -> Result<(), WorkerError> {
+        let extras = checkpoint_metadata(cfg, cp_index);
+        let req = CheckpointRequest {
+            path,
+            extras: &extras,
+            budget,
+            deadline,
+            drop_block: None,
+            duplicate_first_block: false,
+            vote_no: false,
+        };
+        refined_checkpoint(tiles, &held, &plans, &grids, &identity, &req, fabric, accepted)
+    };
+    let mut next_cp = cfg.start_time + cp_dt;
+    let mut cp_index = cfg.checkpoint_index + 1;
+    let write_initial = !restart && (cfg.checkpoint_index == 0 || cfg.start_time == 0.0);
+    let outcome = evolve_refined_worker(&mut tiles, &held, &plans, &LocalCopy, &mut fabric, &refined_cfg, |accepted, time, tiles, fabric| {
+        if accepted == 0 {
+            if write_initial {
+                let tag = checkpoint_tag(cfg, 0, cp_width, cfg.start_time, cfg.checkpoint_index);
+                let path = checkpoint_name(cfg, &tag);
+                write(tiles, fabric, &path, cfg.checkpoint_index, 0)?;
+                if let Some(r) = reporter.as_mut() {
+                    r.checkpoint_written(cfg, &path, cfg.start_time, 0.0);
+                }
+            }
+            return Ok(std::ops::ControlFlow::Continue(()));
+        }
+        if fault.exit_after == Some(accepted) {
+            std::process::exit(86);
+        }
+        if let Some(r) = reporter.as_mut() {
+            r.progress(accepted, time);
+        }
+        if time + f64::EPSILON >= next_cp {
+            let tag = checkpoint_tag(cfg, 0, cp_width, time, cp_index);
+            let path = checkpoint_name(cfg, &tag);
+            write(tiles, fabric, &path, cp_index, accepted)?;
+            if let Some(r) = reporter.as_mut() {
+                r.checkpoint_written(cfg, &path, time, 0.0);
+            }
+            while next_cp <= time {
+                next_cp += cp_dt;
+            }
+            cp_index += 1;
+        }
+        Ok(std::ops::ControlFlow::Continue(()))
+    });
+    let result: Result<(u64, f64), String> = outcome.map_err(|e| e.to_string()).and_then(|report| {
+        let final_path = checkpoint_name(cfg, checkpoint_status_tag(CheckpointOutcome::Completed));
+        write(&tiles, &mut fabric, &final_path, cp_index, report.steps).map_err(|e| e.to_string())?;
+        if let Some(r) = reporter.as_mut() {
+            r.checkpoint_written(cfg, &final_path, report.time, 0.0);
+        }
+        fabric.finish(deadline).map_err(|e| e.to_string())?;
+        {
+            use std::io::Write;
+            let line = format!(
+                "SIMBI launch: worker={}/{} steps={} rejections={} refined=1\n",
+                launch.worker, launch.workers, report.steps, report.rejections
+            );
+            let _ = std::io::stderr().write_all(line.as_bytes());
+        }
+        Ok((report.steps, report.time))
+    });
+    match result {
+        Ok((iter, time)) => {
+            if let Some(r) = reporter {
+                let final_path = checkpoint_name(cfg, checkpoint_status_tag(CheckpointOutcome::Completed));
+                r.finish(iter, time, &final_path);
+            }
+            Ok(())
+        }
+        Err(msg) => {
+            fabric.abort(&msg);
+            if let Some(r) = reporter {
+                r.fail(&msg);
+            }
+            Err(msg)
+        }
+    }
+}
+
 /// evolve this worker's tiles through the fabric: the per-tile build of the decomposed path
 /// restricted to the tiles this worker holds, the rendezvous under the session credential,
 /// the worker loop with the coordinator-written checkpoints at the linear cadence, and the
@@ -10444,6 +10815,9 @@ fn run_worker_process(
 
     validate_launch_scope(cfg)?;
     let fault = LaunchFault::from_env(launch.worker)?;
+    if cfg.refinement_enabled {
+        return run_refined_worker_process(cfg, prims, launch, fault, drained);
+    }
     // the tiles are built and evolved at the grid's dimension; every helper below is
     // dimension-generic, so one body serves the plane and the volume
     macro_rules! worker_of_dims {

@@ -34,7 +34,8 @@ use symbi::regimes::fofc::{fofc_reset_stats, fofc_stats};
 use symbi::regimes::substrate_newtonian_mhd::NewtonianMhdSubstrateKernelSet;
 use symbi::sim::decomp::{FinePartition, LocalCopy, Partition, Topology, flatten, plan_cons_schema, plan_schema, unflatten};
 use symbi::sim::refinement::launched::{
-    Held, RefinedConfig, RefinedGrids, RefinedPlans, evolve_refined_worker, load_refined_tiles, refined_checkpoint,
+    Held, RefinedConfig, RefinedGrids, RefinedPlans, evolve_refined_worker, face_stencil_boxes_of_tile, load_refined_tiles,
+    refined_checkpoint,
 };
 use symbi_io::{Hdf5Backend, IoBackend, Metadata, TreeBuf};
 use symbi_sim::checkpoint::{PhysicsIdentity, write_hierarchy_checkpoint};
@@ -427,17 +428,26 @@ fn run_worker(arm: &Arm, me: WorkerId, out: PathBuf) -> Result<(), WorkerError> 
     let emf_plan = ExchangePlan::emf_contributions(&partition, &open, arm.patch, ng).expect("emf plan");
     let faces_plan = ExchangePlan::interface_faces(&partition, &open, arm.patch, ng).expect("faces plan");
     let corrected_plan = ExchangePlan::corrected_faces(&partition, &open, arm.patch, ng).expect("corrected plan");
-    // every refined tile's stencil box in whole-grid face indices, from the hierarchy each
-    // tile builds
+    // every refined tile's stencil box in whole-grid face indices, derived from the partition
+    // and the patch; each held tile's hierarchy allocated exactly those boxes
+    for (&f, h) in mine.iter().zip(&tiles) {
+        let derived = face_stencil_boxes_of_tile(&partition, arm.patch, TileId(f as u32));
+        let built = h.face_stencil().map(|_| h.face_stencil_boxes());
+        let spans = |b: Option<[Option<symbi_algebra::Domain<2>>; 2]>| {
+            b.map(|b| b.map(|d| d.map(|d| [(d.spaces[0].lo, d.spaces[0].hi), (d.spaces[1].lo, d.spaces[1].hi)])))
+        };
+        assert_eq!(spans(derived), spans(built), "tile {f}: the derived stencil boxes differ from the hierarchy's");
+    }
     let boxes: Vec<Option<Vec<[Span; 2]>>> = (0..n_root)
         .map(|f| {
-            let h = tile(&partition, f, arm.patch, arm.ng);
             let ext = partition.tile_extents(unflatten(f, counts));
-            h.face_stencil().map(|stencil| {
-                stencil
-                    .domains()
+            face_stencil_boxes_of_tile(&partition, arm.patch, TileId(f as u32)).map(|boxes| {
+                boxes
                     .iter()
-                    .map(|d| std::array::from_fn(|a| Span { lo: d.spaces[a].lo + ext[a].0 as isize, hi: d.spaces[a].hi + ext[a].0 as isize }))
+                    .map(|d| {
+                        let d = d.as_ref().expect("every component");
+                        std::array::from_fn(|a| Span { lo: d.spaces[a].lo + ext[a].0 as isize, hi: d.spaces[a].hi + ext[a].0 as isize })
+                    })
                     .collect()
             })
         })

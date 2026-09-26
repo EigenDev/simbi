@@ -107,9 +107,9 @@ pub struct RefinedConfig {
 }
 
 /// evolve this worker's hierarchies from the configured start until the final time or
-/// the step bound. `on_step` runs after every accepted step with the count of accepted steps,
-/// the time, the tiles and the fabric; a checkpoint written there (`refined_checkpoint`) holds
-/// the accepted state.
+/// the step bound. `on_step` runs once on the primed state with zero accepted steps, then after
+/// every accepted step with the count of accepted steps, the time, the tiles and the fabric; a
+/// checkpoint written there (`refined_checkpoint`) holds that state.
 #[allow(clippy::too_many_arguments)]
 pub fn evolve_refined_worker<R, const D: usize, const DOF: usize, M, E, S, Mem, K, T, L, F>(
     tiles: &mut [Hierarchy<R, D, DOF, M, E, S, Mem, K>],
@@ -488,6 +488,13 @@ where
     let guard_scope = symbi_sim::guard_ledger::open_scope();
     let mut t = base.start_time;
     let mut iter: u64 = 0;
+    // the primed state, before the first step: the callback sees zero accepted steps, where an
+    // initial checkpoint holds the seeded fine level
+    match on_step(0, t, &*tiles, fabric) {
+        Ok(ControlFlow::Continue(())) => {}
+        Ok(ControlFlow::Break(())) => return Ok(report),
+        Err(e) => return Err(fail(fabric, e)),
+    }
     while t < base.t_final && (base.max_steps == 0 || iter < base.max_steps) {
         // the global timestep: the minimum root cfl over the held hierarchies, then over the
         // workers, consumed as the coordinator's bits
@@ -1105,4 +1112,91 @@ where
         }
     }
     Ok(())
+}
+
+/// the parent face stencil boxes of the fine level of root tile `tile`, in that tile's root
+/// index space, derived from the partition and the patch alone as the hierarchy's builder
+/// derives the fine level: its interior over the patch clipped to the tile at twice the
+/// resolution; each side a coarse-fine boundary except where the clipped patch meets the
+/// tile's physical boundary; a side on a cut the patch continues across takes its face halo
+/// from the fine exchange. `None` for a tile the patch misses. every worker derives every
+/// tile's boxes this way to compile the stencil plan; `Hierarchy::face_stencil_boxes` of a
+/// held tile equals it
+pub fn face_stencil_boxes_of_tile<const D: usize>(
+    partition: &symbi_sim::decomp::Partition<D>,
+    patch: [(usize, usize); D],
+    tile: TileId,
+) -> Option<[Option<symbi_algebra::Domain<D>>; D]> {
+    use symbi_algebra::{Domain, Space};
+    use symbi_sim::state::{Boundaries, BoundaryType, axis_name};
+    let counts = partition.counts();
+    let tc = symbi_sim::decomp::unflatten(tile.0 as usize, counts);
+    let ext = partition.tile_extents(tc);
+    let lo: [usize; D] = std::array::from_fn(|a| patch[a].0.max(ext[a].0));
+    let hi: [usize; D] = std::array::from_fn(|a| patch[a].1.min(ext[a].0 + ext[a].1));
+    if (0..D).any(|a| hi[a] <= lo[a]) {
+        return None;
+    }
+    let r = RATIO as isize;
+    let interior = Domain::new(std::array::from_fn(|a| Space {
+        name: axis_name(a),
+        lo: (lo[a] - ext[a].0) as isize * r,
+        hi: (hi[a] - ext[a].0) as isize * r,
+    }));
+    let boundaries = Boundaries(std::array::from_fn(|a| {
+        let side = |at_tile_edge: bool, tile_is_domain_edge: bool, continues: bool| {
+            if !at_tile_edge || continues {
+                // a coarse-fine side, or a cut the patch continues across: the face halo comes
+                // from the root lattice by prolongation, or from the fine exchange
+                if at_tile_edge && continues { BoundaryType::Outflow } else { BoundaryType::CoarseFine }
+            } else if tile_is_domain_edge {
+                BoundaryType::Outflow
+            } else {
+                // the patch's real face on a cut: a coarse-fine side
+                BoundaryType::CoarseFine
+            }
+        };
+        [
+            side(lo[a] == ext[a].0, tc[a] == 0, lo[a] > patch[a].0),
+            side(hi[a] == ext[a].0 + ext[a].1, tc[a] + 1 == counts[a], hi[a] < patch[a].1),
+        ]
+    }));
+    Some(super::transfer::face_stencil_boxes(&interior, &boundaries))
+}
+
+/// the receiving registers of root tile `tile` beside the patch, which it does not hold: the
+/// patch box in the tile's root index space (clipped across the faces it does not sit beside)
+/// and the patch faces on cuts it sits beside. `None` for a tile whose interior misses the
+/// one-cell shell around the patch; a tile meeting the shell with no such face still carries
+/// an empty register, whose recovery reconciles the corrected faces it receives
+pub fn receiving_faces_of_tile<const D: usize>(
+    partition: &symbi_sim::decomp::Partition<D>,
+    patch: [(usize, usize); D],
+    tile: TileId,
+) -> Option<(symbi_algebra::Domain<D>, [[bool; 2]; D])> {
+    use symbi_algebra::{Domain, Space};
+    let ext = partition.tile_extents(symbi_sim::decomp::unflatten(tile.0 as usize, partition.counts()));
+    let mut faces = [[false; 2]; D];
+    for ax in 0..D {
+        for side in 0..2 {
+            let face_pos = if side == 0 { patch[ax].0 } else { patch[ax].1 };
+            let beside = if side == 1 { ext[ax].0 == face_pos } else { ext[ax].0 + ext[ax].1 == face_pos };
+            let across = (0..D).all(|aa| aa == ax || (ext[aa].0 < patch[aa].1 && ext[aa].0 + ext[aa].1 > patch[aa].0));
+            faces[ax][side] = beside && across;
+        }
+    }
+    let meets_shell = (0..D).all(|a| ext[a].0 < patch[a].1 + 1 && ext[a].0 + ext[a].1 > patch[a].0.saturating_sub(1));
+    if !faces.iter().flatten().any(|&f| f) && !meets_shell {
+        return None;
+    }
+    let patch_local = Domain::new(std::array::from_fn(|a| {
+        let origin = ext[a].0 as isize;
+        let (lo, hi) = if faces[a].iter().any(|&f| f) {
+            (patch[a].0 as isize - origin, patch[a].1 as isize - origin)
+        } else {
+            (patch[a].0.max(ext[a].0) as isize - origin, patch[a].1.min(ext[a].0 + ext[a].1) as isize - origin)
+        };
+        Space { name: symbi_sim::state::axis_name(a), lo, hi }
+    }));
+    Some((patch_local, faces))
 }
