@@ -10707,6 +10707,8 @@ fn run_refined_worker_process(
         fine_trouble_at: None,
         contribution_fault: None,
         restart,
+        perturb_fine_face_after: None,
+        clock_fault: None,
     };
     let slabs: Vec<Vec<usize>> = (0..2).map(|ax| (0..counts[ax]).map(|i| partition.tile_range(ax, i).1).collect()).collect();
     let mut reporter = (me == WorkerId(0)).then(|| DecomposedReporter::new(cfg, total as u64, &counts, &slabs));

@@ -121,6 +121,11 @@ impl<'p, const D: usize> PlanExchange<'p, D> {
                     self.plan.moves_at(t, as_root)
                 }
                 ExchangePoint::Rollback => self.plan.moves_at(t, ExchangePoint::Rollback),
+                // the fine level's shared faces are audited with the root's after the prime and
+                // before a checkpoint
+                ExchangePoint::Audit(AuditAt::Prime) | ExchangePoint::Audit(AuditAt::Checkpoint) => {
+                    self.plan.moves_at(t, point)
+                }
                 _ => false,
             },
             PlanRole::FluxContribution => matches!(point, ExchangePoint::Fine { point: FinePoint::Stage(_), .. }),
@@ -260,9 +265,28 @@ impl<'p, const D: usize> PlanExchange<'p, D> {
         epoch: Epoch,
         cost: &mut AuditCost,
     ) -> Result<(), AuditError> {
+        let (sends, receives) = self.audit_stage_axis(fields, fabric, epoch.axis as usize, cost)?;
+        Ok(fabric.open(PhaseSpec {
+            epoch,
+            sends: &sends,
+            receives: &receives,
+        })?)
+    }
+
+    /// the staging half of `audit_open_axis`: compare the interfaces whose two tiles this
+    /// worker holds, pack the lower copies bound for another worker, and name the sends and
+    /// receives the phase opens with
+    #[allow(clippy::type_complexity)]
+    pub fn audit_stage_axis<M: MemorySpace, L: Link>(
+        &self,
+        fields: &[Vec<&Field<f64, D, M>>],
+        fabric: &mut Fabric<L>,
+        axis: usize,
+        cost: &mut AuditCost,
+    ) -> Result<(Vec<(TransferId, WorkerId)>, Vec<(TransferId, WorkerId)>), AuditError> {
         let mut sends = Vec::new();
         let mut receives = Vec::new();
-        for t in self.audits(epoch.axis as usize) {
+        for t in self.audits(axis) {
             let f = t.field as usize;
             match (self.owns(t.src), self.owns(t.dst)) {
                 (true, true) => {
@@ -281,16 +305,25 @@ impl<'p, const D: usize> PlanExchange<'p, D> {
                 (false, false) => {}
             }
         }
-        Ok(fabric.open(PhaseSpec {
-            epoch,
-            sends: &sends,
-            receives: &receives,
-        })?)
+        Ok((sends, receives))
     }
 
     /// compare every landed lower copy of `axis` with this worker's upper copy and close
     /// the phase.
     pub fn audit_finish_axis<M: MemorySpace, L: Link>(
+        &self,
+        fields: &[Vec<&Field<f64, D, M>>],
+        fabric: &mut Fabric<L>,
+        axis: usize,
+        cost: &mut AuditCost,
+    ) -> Result<(), AuditError> {
+        self.audit_land_axis(fields, fabric, axis, cost)?;
+        Ok(fabric.close()?)
+    }
+
+    /// compare every landed lower copy of `axis` with this worker's upper copy, the phase
+    /// left open for the other plans sharing it
+    pub fn audit_land_axis<M: MemorySpace, L: Link>(
         &self,
         fields: &[Vec<&Field<f64, D, M>>],
         fabric: &mut Fabric<L>,
@@ -305,7 +338,7 @@ impl<'p, const D: usize> PlanExchange<'p, D> {
                 cost.faces += t.len as u64;
             }
         }
-        Ok(fabric.close()?)
+        Ok(())
     }
 
     /// whether the plan audits any interface: true exactly when it carries a face field
@@ -646,4 +679,39 @@ pub fn scatter<const D: usize, M: MemorySpace>(
     for (c, value) in domain_of(region).iter().zip(buf) {
         *view.at_mut(c) = *value;
     }
+}
+
+/// audit the shared interface faces of several plans of one session in one phase per axis at
+/// `point`: each plan compares its local pairs and stages its remote copies, the phase opens
+/// once with the union, and every landed copy is compared against its plan's upper copy. the
+/// first differing face ends the audit as an error
+pub fn audit_plans<const D: usize, M: MemorySpace, L: Link>(
+    parts: &[(&PlanExchange<'_, D>, &[Vec<&Field<f64, D, M>>])],
+    fabric: &mut Fabric<L>,
+    point: ExchangePoint,
+    step: u64,
+    attempt: u16,
+    deadline: std::time::Duration,
+) -> Result<AuditCost, AuditError> {
+    let clock = std::time::Instant::now();
+    let mut cost = AuditCost::default();
+    let first = parts.first().expect("at least one plan").0;
+    for axis in 0..D {
+        let epoch = first.epoch(point, step, attempt, axis);
+        let mut sends = Vec::new();
+        let mut receives = Vec::new();
+        for (plan, fields) in parts {
+            let (s, r) = plan.audit_stage_axis(fields, fabric, axis, &mut cost)?;
+            sends.extend(s);
+            receives.extend(r);
+        }
+        fabric.open(PhaseSpec { epoch, sends: &sends, receives: &receives })?;
+        fabric.wait(deadline)?;
+        for (plan, fields) in parts {
+            plan.audit_land_axis(fields, fabric, axis, &mut cost)?;
+        }
+        fabric.close()?;
+    }
+    cost.elapsed = clock.elapsed();
+    Ok(cost)
 }

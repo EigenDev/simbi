@@ -32,6 +32,7 @@ use symbi::regimes::fofc::{fofc_reset_stats, fofc_stats};
 use symbi::regimes::substrate_newton::AdiabaticSubstrateKernelSet;
 use symbi::sim::decomp::{FinePartition, LocalCopy, Partition, Topology, flatten, plan_cons_schema, plan_schema, unflatten};
 use symbi::sim::refinement::launched::{
+    ClockField,
     Held, RefinedConfig, RefinedGrids, RefinedPlans, evolve_refined_worker, load_refined_tiles, refined_checkpoint,
 };
 use symbi_io::{Hdf5Backend, IoBackend, Metadata, TreeBuf};
@@ -238,6 +239,29 @@ fn tile(partition: &Partition<2>, flat: usize, patch: [(usize, usize); 2], ng: u
 
 fn env_u64(name: &str) -> Option<u64> {
     std::env::var(name).ok().and_then(|v| v.parse().ok())
+}
+
+/// the fine face fault of this worker: the step from `W_PERTURB_FINE_FACE` on `W_PERTURB_WORKER`
+fn env_perturb() -> Option<u64> {
+    let me = env_u64("W_ME")?;
+    (env_u64("W_PERTURB_WORKER") == Some(me)).then(|| env_u64("W_PERTURB_FINE_FACE")).flatten()
+}
+
+/// the fine clock fault of this worker: (step, time|dt|iteration, local fine tile ordinal) from
+/// `W_CLOCK_FAULT` on `W_CLOCK_WORKER`
+fn env_clock_fault() -> Option<(u64, ClockField, usize)> {
+    let me = env_u64("W_ME")?;
+    if env_u64("W_CLOCK_WORKER") != Some(me) {
+        return None;
+    }
+    let spec = std::env::var("W_CLOCK_FAULT").ok()?;
+    let parts: Vec<&str> = spec.split(',').collect();
+    let which = match parts[1] {
+        "time" => ClockField::Time,
+        "dt" => ClockField::Dt,
+        _ => ClockField::Iteration,
+    };
+    Some((parts[0].parse().unwrap(), which, parts[2].parse().unwrap()))
 }
 
 fn env_list(name: &str) -> Vec<u64> {
@@ -515,6 +539,8 @@ fn run_worker(arm: &Arm, me: WorkerId, out: PathBuf) -> Result<(), WorkerError> 
         fine_trouble_at: fine_trouble_from_env(),
         contribution_fault: contribution_fault_from_env(me),
         restart: std::env::var_os("W_RESTART_FROM").is_some(),
+        perturb_fine_face_after: env_perturb(),
+        clock_fault: env_clock_fault(),
     };
     let root_devices = vec![0i32; n_root];
     let fine_devices = vec![0i32; n_fine];
@@ -1203,5 +1229,51 @@ fn a_refined_restart_onto_another_partition_continues_bitwise() {
         let arm = arm.with_steps(STEPS - 4);
         let resumed = run_arm(test, tag, &arm, &[("W_RESTART_FROM", ckpt.to_str().unwrap().into())]);
         assert_matches_reference_after(test, tag, &resumed, &arm, &format!("resumed on {tag}"), &before);
+    }
+}
+
+/// the fine level's clock differing across its tiles: time, dt and iteration each moved on one
+/// tile, across workers on the quad layout (each worker one fine tile) and within one worker on a
+/// line where worker 1 holds both fine tiles and the others hold none. every worker ends before
+/// the file opens, naming the fine clock
+#[test]
+fn a_fine_clock_disagreement_ends_the_run_before_publication() {
+    if in_worker_role() {
+        worker_main();
+    }
+    let test = "a_fine_clock_disagreement_ends_the_run_before_publication";
+    let line = Arm { owner: vec![0, 0, 1, 1, 2, 2], ..no_fine_on_two_workers() };
+    let cases: [(&str, Arm, &str, &str); 6] = [
+        ("time_across", ragged_17_13(), "2", "4,time,0"),
+        ("dt_across", ragged_17_13(), "2", "4,dt,0"),
+        ("iteration_across", ragged_17_13(), "0", "4,iteration,0"),
+        ("time_within", line.clone(), "1", "4,time,1"),
+        ("dt_within", line.clone(), "1", "4,dt,1"),
+        ("iteration_within", line, "1", "4,iteration,1"),
+    ];
+    for (tag, arm, worker, fault) in cases {
+        let dir = run_dir(test, &format!("{tag}_files"));
+        let ckpt = dir.join("refined.h5");
+        let outcomes = run_arm(
+            test,
+            tag,
+            &arm,
+            &[
+                ("W_CLOCK_WORKER", worker.into()),
+                ("W_CLOCK_FAULT", fault.into()),
+                ("W_CKPT_AFTER", "4".into()),
+                ("W_CKPT_PATH", ckpt.to_str().unwrap().into()),
+            ],
+        );
+        for (w, o) in outcomes.iter().enumerate() {
+            assert_ne!(o.code, Some(0), "{tag}: worker {w} exited zero");
+            assert!(o.records.is_empty(), "{tag}: worker {w} published its state");
+        }
+        assert!(
+            outcomes.iter().any(|o| o.stderr.contains("the fine level's clock differs")),
+            "{tag}: no worker named the fine clock:\n{}",
+            outcomes.iter().map(|o| o.stderr.clone()).collect::<Vec<_>>().join("\n---\n")
+        );
+        assert!(!ckpt.exists(), "{tag}: a checkpoint was published");
     }
 }

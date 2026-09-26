@@ -35,7 +35,7 @@ use symbi_sim::atlas::{AuditAt, ExchangePoint, FinePoint, TileId};
 use symbi_sim::decomp::{HaloTransport, plan_cons_fields, plan_fields};
 use symbi_sim::driver::{advance_clock, retry_timestep, select_timestep};
 use symbi_sim::hydro_ops::scan_c2p_errors;
-use symbi_sim::plan_exchange::{AuditError, PlanExchange, PlanRole, StagingFault};
+use symbi_sim::plan_exchange::{AuditError, PlanExchange, PlanRole, StagingFault, audit_plans};
 use symbi_sim::state::FieldStore;
 use symbi_sim::substrate_seam::KernelSet;
 use symbi_sim::worker::{
@@ -100,10 +100,47 @@ pub struct RefinedConfig {
     /// a fault in this worker's flux contributions at (step, substep, stage) on the first
     /// attempt, for the exactly-once gates
     pub contribution_fault: Option<(u64, u8, usize, StagingFault)>,
+    /// move one copy of a fine shared face on a fine cut by one unit in the last place after
+    /// this many accepted steps (after the initialization at zero, before the prime audit), on
+    /// the first held tile whose fine level has a cut on its low side of axis 0: the next audit
+    /// of the fine level must name it
+    pub perturb_fine_face_after: Option<u64>,
+    /// move the clock of one held fine tile by one unit in the last place (time, dt) or one
+    /// step (iteration) after this many accepted steps: (step, which, local fine tile ordinal)
+    pub clock_fault: Option<(u64, ClockField, usize)>,
     /// the tiles hold a state loaded from a checkpoint (`load_refined_tiles`): the prime
     /// exchanges and fills it and keeps the loaded fine level, which a fresh start seeds by
     /// prolongation from the root
     pub restart: bool,
+}
+
+/// the member of a fine level's clock a fault moves
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ClockField {
+    Time,
+    Dt,
+    Iteration,
+}
+
+/// the fine faces a fault moves: the first held fine tile with a cut on its low side of axis 0,
+/// its opening face there on the second interior row
+fn perturb_fine_face<R, const D: usize, const DOF: usize, M, E, S, Mem, K>(tiles: &[Hierarchy<R, D, DOF, M, E, S, Mem, K>])
+where
+    R: Regime<f64, D> + Copy,
+    M: Metric<f64, D> + Copy + Send + Sync,
+    E: symbi_hydro::eos::EosFor<f64, <R as Regime<f64, D>>::Energy> + Copy + Send + Sync,
+    S: ExecutionSpace,
+    Mem: MemorySpace + Sync,
+    K: KernelSet<D, DOF, Mem, f64>,
+{
+    let Some(fine) = tiles.iter().filter(|h| h.levels.len() > 1).map(|h| &h.levels[1]).find(|l| l.cut_sides[0][0]) else {
+        return;
+    };
+    let Some(mhd) = fine.state.fields.mhd.as_ref() else { return };
+    let at: [isize; D] = std::array::from_fn(|ax| fine.state.geom.interior.spaces[ax].lo + isize::from(ax == 1));
+    let field = &mhd.bface.b[0];
+    let old = *field.view().at(at);
+    *field.view_mut().at_mut(at) = f64::from_bits(old.to_bits() + 1);
 }
 
 /// evolve this worker's hierarchies from the configured start until the final time or
@@ -417,6 +454,24 @@ where
             }
         }};
     }
+    // the shared faces of both levels in one audit phase
+    macro_rules! audit_levels {
+        ($point:expr, $step:expr, $attempt:expr) => {{
+            if plans.root.has_audits() || plans.fine.has_audits() {
+                let root_lists = root_fields!();
+                let fine_lists = fine_fields!();
+                let cost = audit_plans(&[(&plans.root, &root_lists[..]), (&plans.fine, &fine_lists[..])], fabric, $point, $step, $attempt, deadline)
+                    .map_err(|e| match e {
+                        AuditError::Fabric(e) => fail(fabric, WorkerError::Fabric(e)),
+                        AuditError::Mismatch(m) => fail(fabric, WorkerError::Interface(m)),
+                    })?;
+                report.audits += 1;
+                report.audit_cost.faces += cost.faces;
+                report.audit_cost.wire_bytes += cost.wire_bytes;
+                report.audit_cost.elapsed += cost.elapsed;
+            }
+        }};
+    }
     macro_rules! audit {
         ($plan:expr, $fields:expr, $point:expr, $step:expr, $attempt:expr) => {{
             if $plan.has_audits() {
@@ -458,7 +513,6 @@ where
         for (k, h) in tiles.iter().enumerate() {
             with_device(root_dev(k), || h.levels[0].kernels.ghost_fill(&h.levels[0].state));
         }
-        audit!(plans.root, root_fields!(), ExchangePoint::Audit(AuditAt::Prime), 0, 0);
         for (k, h) in tiles.iter().enumerate() {
             let err = scan_c2p_errors(&h.levels[0].state);
             if err.is_err() {
@@ -483,6 +537,13 @@ where
                 h.prime();
             }
         }
+        if cfg.perturb_fine_face_after == Some(0) {
+            perturb_fine_face(tiles);
+        }
+        // the prime audit certifies the initialized state of both levels: the root after its
+        // exchange, the fine level seeded or loaded and primed. the initial checkpoint writes this
+        // state
+        audit_levels!(ExchangePoint::Audit(AuditAt::Prime), 0, 0);
     }
 
     let guard_scope = symbi_sim::guard_ledger::open_scope();
@@ -783,6 +844,21 @@ where
         report.steps = iter;
         report.time = t;
         report.dt_sequence.push(dt);
+        if cfg.perturb_fine_face_after == Some(iter) {
+            perturb_fine_face(tiles);
+        }
+        if let Some((at, which, ordinal)) = cfg.clock_fault {
+            if at == iter {
+                if let Some(h) = tiles.iter_mut().filter(|h| h.levels.len() > 1).nth(ordinal) {
+                    let st = &mut h.levels[1].state;
+                    match which {
+                        ClockField::Time => st.time = f64::from_bits(st.time.to_bits() + 1),
+                        ClockField::Dt => st.dt = f64::from_bits(st.dt.to_bits() + 1),
+                        ClockField::Iteration => st.iteration += 1,
+                    }
+                }
+            }
+        }
         let clock = Instant::now();
         let flow = on_step(iter, t, &*tiles, fabric);
         in_callback += clock.elapsed();
@@ -1006,37 +1082,31 @@ where
     L: Link,
 {
     let checkpoint_err = |e: String| WorkerError::Checkpoint(e);
-    // the root's shared faces, compared at the checkpoint epoch of the last accepted step
-    if plans.root.has_audits() && accepted > 0 {
-        let mut lists: Vec<Vec<&Field<f64, D, Mem>>> = (0..held.n_root).map(|_| Vec::new()).collect();
+    // the shared faces of both levels at the checkpoint epoch of the last accepted step; the
+    // primed state was certified by the prime audit after initialization
+    if (plans.root.has_audits() || plans.fine.has_audits()) && accepted > 0 {
+        let mut root_lists: Vec<Vec<&Field<f64, D, Mem>>> = (0..held.n_root).map(|_| Vec::new()).collect();
+        let mut fine_lists: Vec<Vec<&Field<f64, D, Mem>>> = (0..held.n_fine).map(|_| Vec::new()).collect();
         for (k, h) in tiles.iter().enumerate() {
-            lists[held.root_ids[k].0 as usize] = plan_fields(&h.levels[0].state);
+            root_lists[held.root_ids[k].0 as usize] = plan_fields(&h.levels[0].state);
+            if let Some(id) = held.fine_ids[k] {
+                fine_lists[id.0 as usize] = plan_fields(&h.levels[1].state);
+            }
         }
-        plans
-            .root
-            .audit(&lists, fabric, AuditAt::Checkpoint, accepted - 1, CHECKPOINT_ATTEMPT, req.deadline)
-            .map_err(|e| match e {
-                AuditError::Fabric(e) => WorkerError::Fabric(e),
-                AuditError::Mismatch(m) => WorkerError::Interface(m),
-            })?;
+        audit_plans(
+            &[(&plans.root, &root_lists[..]), (&plans.fine, &fine_lists[..])],
+            fabric,
+            ExchangePoint::Audit(AuditAt::Checkpoint),
+            accepted - 1,
+            CHECKPOINT_ATTEMPT,
+            req.deadline,
+        )
+        .map_err(|e| match e {
+            AuditError::Fabric(e) => WorkerError::Fabric(e),
+            AuditError::Mismatch(m) => WorkerError::Interface(m),
+        })?;
     }
-    // the fine level's clock from the workers holding fine tiles. the minimum reduces over
-    // positive finite numbers, so each 64-bit word rides as its two 32-bit halves, each sent as
-    // the exact integer one above it; a worker holding no fine tile contributes the largest
-    // finite number, and every holder agrees on the same halves
-    let fine = tiles.iter().find(|h| h.levels.len() > 1).map(|h| &h.levels[1].state);
-    let mut agree = |word: Option<u64>| -> Result<u64, WorkerError> {
-        let mut halves = [0u64; 2];
-        for (i, half) in halves.iter_mut().enumerate() {
-            let mine = word.map(|w| ((w >> (32 * i)) & 0xffff_ffff) as f64 + 1.0).unwrap_or(f64::MAX);
-            let got = f64::from_bits(fabric.collective(OpKind::Min, mine.to_bits(), req.deadline)?);
-            *half = (got - 1.0) as u64;
-        }
-        Ok(halves[0] | halves[1] << 32)
-    };
-    let fine_time = f64::from_bits(agree(fine.map(|s| s.time.to_bits()))?);
-    let fine_dt = f64::from_bits(agree(fine.map(|s| s.dt.to_bits()))?);
-    let fine_iteration = agree(fine.map(|s| s.iteration))?;
+    let (fine_time, fine_dt, fine_iteration) = agree_fine_clock(tiles, fabric, req.deadline)?;
     let root_tiles: Vec<TileView<'_, D, DOF, Mem>> = tiles
         .iter()
         .zip(held.root_ids)
@@ -1199,4 +1269,60 @@ pub fn receiving_faces_of_tile<const D: usize>(
         Space { name: symbi_sim::state::axis_name(a), lo, hi }
     }));
     Some((patch_local, faces))
+}
+
+/// the fine level's clock, agreed by every worker and verified: each worker's fine tiles must
+/// share one clock; the words are reduced over the workers holding fine tiles, each 64-bit word
+/// as its two 32-bit halves sent as the exact integers one above them, since the minimum
+/// reduces over positive finite numbers (a worker holding no fine tile contributes the largest
+/// finite number); every holder compares the agreed words with its own, and one vote refuses
+/// the checkpoint on any disagreement, or when no worker holds a fine tile
+fn agree_fine_clock<R, const D: usize, const DOF: usize, M, E, S, Mem, K, L>(
+    tiles: &[Hierarchy<R, D, DOF, M, E, S, Mem, K>],
+    fabric: &mut Fabric<L>,
+    deadline: Duration,
+) -> Result<(f64, f64, u64), WorkerError>
+where
+    R: Regime<f64, D> + Copy,
+    M: Metric<f64, D> + Copy + Send + Sync,
+    E: symbi_hydro::eos::EosFor<f64, <R as Regime<f64, D>>::Energy> + Copy + Send + Sync,
+    S: ExecutionSpace,
+    Mem: MemorySpace + Sync,
+    K: KernelSet<D, DOF, Mem, f64>,
+    L: Link,
+{
+    let clocks: Vec<[u64; 3]> = tiles
+        .iter()
+        .filter(|h| h.levels.len() > 1)
+        .map(|h| {
+            let s = &h.levels[1].state;
+            [s.time.to_bits(), s.dt.to_bits(), s.iteration]
+        })
+        .collect();
+    let mine = clocks.first().copied();
+    let locally_agreed = clocks.iter().all(|c| Some(*c) == mine);
+    let holders = fabric.collective(OpKind::Any, u64::from(mine.is_some()), deadline)?;
+    if holders == 0 {
+        return Err(WorkerError::Checkpoint("no worker holds a tile of the fine level; the checkpoint has no fine clock".into()));
+    }
+    let mut agreed = [0u64; 3];
+    for (w, word) in agreed.iter_mut().enumerate() {
+        let mut halves = [0u64; 2];
+        for (i, half) in halves.iter_mut().enumerate() {
+            let own = mine.map(|c| ((c[w] >> (32 * i)) & 0xffff_ffff) as f64 + 1.0).unwrap_or(f64::MAX);
+            let got = f64::from_bits(fabric.collective(OpKind::Min, own.to_bits(), deadline)?);
+            *half = (got - 1.0) as u64;
+        }
+        *word = halves[0] | halves[1] << 32;
+    }
+    let differs = !locally_agreed || mine.is_some_and(|c| c != agreed);
+    if fabric.collective(OpKind::Any, u64::from(differs), deadline)? != 0 {
+        return Err(WorkerError::Checkpoint(format!(
+            "the fine level's clock differs across its tiles (this worker's tiles agree: {locally_agreed}; \
+             time, dt, iteration here {:?}, agreed {:?}); no checkpoint is written",
+            mine.map(|c| (f64::from_bits(c[0]), f64::from_bits(c[1]), c[2])),
+            (f64::from_bits(agreed[0]), f64::from_bits(agreed[1]), agreed[2]),
+        )));
+    }
+    Ok((f64::from_bits(agreed[0]), f64::from_bits(agreed[1]), agreed[2]))
 }

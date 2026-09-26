@@ -34,6 +34,7 @@ use symbi::regimes::fofc::{fofc_reset_stats, fofc_stats};
 use symbi::regimes::substrate_newtonian_mhd::NewtonianMhdSubstrateKernelSet;
 use symbi::sim::decomp::{FinePartition, LocalCopy, Partition, Topology, flatten, plan_cons_schema, plan_schema, unflatten};
 use symbi::sim::refinement::launched::{
+    ClockField,
     Held, RefinedConfig, RefinedGrids, RefinedPlans, evolve_refined_worker, face_stencil_boxes_of_tile, load_refined_tiles,
     refined_checkpoint,
 };
@@ -229,6 +230,29 @@ fn tile(partition: &Partition<2>, flat: usize, patch: [(usize, usize); 2], ng: u
 
 fn env_u64(name: &str) -> Option<u64> {
     std::env::var(name).ok().and_then(|v| v.parse().ok())
+}
+
+/// the fine face fault of this worker: the step from `W_PERTURB_FINE_FACE` on `W_PERTURB_WORKER`
+fn env_perturb() -> Option<u64> {
+    let me = env_u64("W_ME")?;
+    (env_u64("W_PERTURB_WORKER") == Some(me)).then(|| env_u64("W_PERTURB_FINE_FACE")).flatten()
+}
+
+/// the fine clock fault of this worker: (step, time|dt|iteration, local fine tile ordinal) from
+/// `W_CLOCK_FAULT` on `W_CLOCK_WORKER`
+fn env_clock_fault() -> Option<(u64, ClockField, usize)> {
+    let me = env_u64("W_ME")?;
+    if env_u64("W_CLOCK_WORKER") != Some(me) {
+        return None;
+    }
+    let spec = std::env::var("W_CLOCK_FAULT").ok()?;
+    let parts: Vec<&str> = spec.split(',').collect();
+    let which = match parts[1] {
+        "time" => ClockField::Time,
+        "dt" => ClockField::Dt,
+        _ => ClockField::Iteration,
+    };
+    Some((parts[0].parse().unwrap(), which, parts[2].parse().unwrap()))
 }
 
 fn env_list(name: &str) -> Vec<u64> {
@@ -525,7 +549,7 @@ fn run_worker(arm: &Arm, me: WorkerId, out: PathBuf) -> Result<(), WorkerError> 
             max_steps: env_u64("W_STEPS").unwrap_or(STEPS),
             deadline: TRANSFER_DEADLINE,
             injection: injection_from_env(me),
-            audit_every_point: true,
+            audit_every_point: std::env::var_os("W_NO_STAGE_AUDIT").is_none(),
         },
         invalid_level_cfl_at: None,
         fine_trouble_at: {
@@ -534,6 +558,8 @@ fn run_worker(arm: &Arm, me: WorkerId, out: PathBuf) -> Result<(), WorkerError> 
         },
         contribution_fault: None,
         restart: std::env::var_os("W_RESTART_FROM").is_some(),
+        perturb_fine_face_after: env_perturb(),
+        clock_fault: env_clock_fault(),
     };
     let root_devices = vec![0i32; n_root];
     let fine_devices = vec![0i32; n_fine];
@@ -1306,4 +1332,44 @@ fn a_magnetized_refined_restart_onto_another_partition_continues_bitwise() {
         assert_eq!(r.rejections, 1, "worker {w} reports {} rejections after the restart", r.rejections);
     }
     assert_matches_reference_after(test, "rejecting", &rejecting, &arm, "resumed with a late rejection", &before, 4);
+}
+
+/// a fine shared-face copy moved by one unit in the last place, with the per-point audits off:
+/// after four steps, the checkpoint's audit of both levels names it; after initialization, the
+/// prime audit of both levels names it. every worker ends before any file is published
+#[test]
+fn a_fine_shared_face_disagreement_ends_the_run_before_publication() {
+    if in_worker_role() {
+        worker_main();
+    }
+    let test = "a_fine_shared_face_disagreement_ends_the_run_before_publication";
+    // worker 3 holds the fine tile whose low side of axis 0 is the fine cut at root 17
+    for (tag, step) in [("after_steps", "4"), ("initial", "0")] {
+        let dir = run_dir(test, &format!("{tag}_files"));
+        let ckpt = dir.join("refined.h5");
+        let outcomes = run_arm(
+            test,
+            tag,
+            &ragged_17_13(),
+            &[
+                ("W_NO_STAGE_AUDIT", "1".into()),
+                ("W_PERTURB_WORKER", "3".into()),
+                ("W_PERTURB_FINE_FACE", step.into()),
+                ("W_CKPT_AFTER", step.into()),
+                ("W_CKPT_PATH", ckpt.to_str().unwrap().into()),
+            ],
+        );
+        for (w, o) in outcomes.iter().enumerate() {
+            assert_ne!(o.code, Some(0), "{tag}: worker {w} exited zero");
+            assert!(o.records.is_empty(), "{tag}: worker {w} published its state");
+        }
+        assert!(
+            outcomes.iter().any(|o| o.stderr.contains("shared-face mismatch")),
+            "{tag}: no worker named the face:\n{}",
+            outcomes.iter().map(|o| o.stderr.clone()).collect::<Vec<_>>().join("\n---\n")
+        );
+        assert!(!ckpt.exists(), "{tag}: a checkpoint was published");
+        let temps = std::fs::read_dir(&dir).unwrap().filter(|e| e.as_ref().unwrap().file_name().to_string_lossy().contains(".tmp.")).count();
+        assert_eq!(temps, 0, "{tag}: a temporary file was left");
+    }
 }
