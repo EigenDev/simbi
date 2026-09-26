@@ -198,6 +198,52 @@ def test_restart_conflict_on_explicit_immutable_flag(monkeypatch, tmp_path):
     assert str(merged.solver.value) == "hlle"
 
 
+def _nmhd_meta(**overrides):
+    class _Meta:
+        time = 1.0
+        gamma = 5.0 / 3.0
+        coord_system = "cartesian"
+        regime = "nmhd"
+        solver = "hlld"
+        reconstruction = "plm"
+        timestepping = "rk2"
+        plm_theta = 1.5
+        cfl = 0.1
+        checkpoint_index = 3
+        checkpoint_interval = 0.5
+        x1_spacing = "linear"
+        x2_spacing = "linear"
+        x3_spacing = "linear"
+        boundary_conditions = ["outflow", "outflow", "outflow", "outflow"]
+        level_dts = ()
+        level_substeps = ()
+        subcycling_mode = "none"
+        ct_method = "uct"
+
+    meta = _Meta()
+    for key, value in overrides.items():
+        setattr(meta, key, value)
+    return meta
+
+
+def test_a_magnetized_restart_continues_the_recorded_edge_emf(monkeypatch, tmp_path):
+    # the edge EMF evolved the file's faces: a resume without the flag continues it, an explicit
+    # demand for the other scheme is refused by name, and a checkpoint predating the attribute
+    # keeps the config's own scheme
+    from simbi.simulation import checkpoint as cp
+    from simbi_configs.examples.newtonian.refined_mhd_blast import RefinedMhdBlast
+
+    monkeypatch.setattr(cp, "load_checkpoint_metadata", lambda _p: (_nmhd_meta(), (32, 32)))
+    merged = cp.merge_with_checkpoint(RefinedMhdBlast.from_cli([]), tmp_path / "fake.h5")
+    assert merged.ct_method.value == "uct", "the resume dropped the recorded edge EMF"
+    with pytest.raises(ConfigError, match="ct_method"):
+        cp.merge_with_checkpoint(RefinedMhdBlast.from_cli(["--ct-method", "contact"]), tmp_path / "fake.h5")
+
+    monkeypatch.setattr(cp, "load_checkpoint_metadata", lambda _p: (_nmhd_meta(ct_method=""), (32, 32)))
+    merged = cp.merge_with_checkpoint(RefinedMhdBlast.from_cli(["--ct-method", "uct"]), tmp_path / "fake.h5")
+    assert merged.ct_method.value == "uct"
+
+
 def test_restart_continues_checkpoint_index_not_reset_to_zero(monkeypatch, tmp_path):
     # restarting from chkpt.030 must number the next dump 031. the checkpoint index is
     # checkpoint_safe (serializable), so a generic field merge would take the config default

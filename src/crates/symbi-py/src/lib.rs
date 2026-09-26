@@ -8963,6 +8963,21 @@ fn checkpoint_metadata(cfg: &Config, checkpoint_index: u64) -> Metadata {
             "equilibrium_target",
             cfg.equilibrium_json.as_deref().unwrap_or(""),
         )
+        // the edge EMF of a magnetized run: a scheme choice with no field of its own, so a run
+        // resumed under the other scheme would continue the file's faces under a different
+        // induction update. an empty string records a run without a staggered field.
+        .with("ct_method", ct_method_name(cfg))
+}
+
+/// the recorded edge-EMF name of a magnetized run, empty for a run without a staggered field
+fn ct_method_name(cfg: &Config) -> &'static str {
+    if !cfg.regime.contains("mhd") {
+        return "";
+    }
+    match cfg.ct_method {
+        CtMethod::Contact => "contact",
+        CtMethod::Uct => "uct",
+    }
 }
 
 /// the integer-digit width for the time portion of a checkpoint name, sized

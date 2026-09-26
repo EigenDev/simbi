@@ -20,6 +20,7 @@ from simbi.types.input import (
     BoundaryCondition,
     CellSpacing,
     CoordSystem,
+    CtMethod,
     Eos,
     Limiter,
     Metadata,
@@ -129,6 +130,12 @@ def metadata_to_config_dict(
     recorded_wb = getattr(metadata, "wb_reconstruction", None)
     if recorded_wb is not None:
         config["wb_reconstruction"] = recorded_wb
+
+    # the edge EMF of a magnetized run, recorded on checkpoints new enough to carry it; the
+    # file's faces continue under the scheme that evolved them
+    recorded_ct = str(getattr(metadata, "ct_method", "") or "")
+    if recorded_ct:
+        config["ct_method"] = CtMethod(recorded_ct)
 
     if metadata.subcycling_mode and metadata.subcycling_mode != "none":
         from simbi.types import SubCycleMode

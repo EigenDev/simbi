@@ -404,6 +404,10 @@ class Metadata:
     # attribute existed.
     equilibrium_target: str = ""
 
+    # the edge-EMF scheme of a magnetized run ("contact" / "uct"). empty on a run without a
+    # staggered field and on checkpoints written before the attribute existed.
+    ct_method: str = ""
+
     # amr fields
     level_dts: tuple[float, ...] = ()
     level_substeps: tuple[int, ...] = ()
