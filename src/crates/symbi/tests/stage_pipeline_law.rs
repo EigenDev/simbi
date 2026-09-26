@@ -41,13 +41,21 @@ type Sim = SimState<Newtonian, 2, Cartesian, IdealGas<f64>, CpuSpace, HostMemory
 type Store = FieldStore<2, 2, HostMemory, f64>;
 
 /// records every kernel-set call in order; touches no fields. `dt` is fixed so
-/// both drivers take identical steps.
+/// both drivers take identical steps. the post-step gates (a viscous transport,
+/// an excision region needing `excise_passes` fill passes) are off unless
+/// `with_post_step` turns them on.
 #[derive(Clone)]
 struct Recorder {
     log: Arc<Mutex<Vec<String>>>,
     additive: bool,
     fofc: bool,
+    viscous: bool,
+    excise_passes: usize,
 }
+
+/// the fill passes the recorded excision region needs; more than one, so the
+/// per-pass multiplicity is part of the compared sequence
+const EXCISE_PASSES: usize = 2;
 
 impl Recorder {
     fn new(additive: bool, fofc: bool) -> Self {
@@ -55,7 +63,15 @@ impl Recorder {
             log: Arc::new(Mutex::new(Vec::new())),
             additive,
             fofc,
+            viscous: false,
+            excise_passes: 0,
         }
+    }
+    /// the post-step operators gated on: the viscous transport and the excision passes
+    fn with_post_step(mut self) -> Self {
+        self.viscous = true;
+        self.excise_passes = EXCISE_PASSES;
+        self
     }
     fn push(&self, s: &str) {
         self.log.lock().unwrap().push(s.to_string());
@@ -125,8 +141,11 @@ impl KernelSet<2, 2, HostMemory, f64> for Recorder {
     fn viscous(&self, _s: &Store, _dt: f64) {
         self.push("viscous");
     }
-    fn excise(&self, _s: &Store) {
-        self.push("excise");
+    fn is_viscous(&self) -> bool {
+        self.viscous
+    }
+    fn excise_pass_count(&self, _s: &Store) -> usize {
+        self.excise_passes
     }
     fn penalize(&self, _s: &Store, _dt: f64) {
         self.push("penalize");
@@ -211,7 +230,7 @@ fn both_drivers_issue_the_identical_per_step_sequence_with_bodies() {
         ),
     ];
     for (tag, bodies) in configs {
-        let rec_a = Recorder::new(false, false);
+        let rec_a = Recorder::new(false, false).with_post_step();
         let mut sim_a = tiny_sim(false);
         if let Some(b) = bodies.clone() {
             sim_a = sim_a.with_bodies(b);
@@ -219,7 +238,7 @@ fn both_drivers_issue_the_identical_per_step_sequence_with_bodies() {
         evolve(&mut sim_a, &rec_a, T).expect("uni-grid drive");
         let uni = rec_a.take();
 
-        let rec_b = Recorder::new(false, false);
+        let rec_b = Recorder::new(false, false).with_post_step();
         let mut sim_b = tiny_sim(false);
         if let Some(b) = bodies.clone() {
             sim_b = sim_b.with_bodies(b);
@@ -232,8 +251,11 @@ fn both_drivers_issue_the_identical_per_step_sequence_with_bodies() {
             uni, hi,
             "per-step sequences diverged for bodies = {tag}:\nuni-grid:  {uni:?}\nhierarchy: {hi:?}"
         );
-        assert!(uni.contains(&"viscous".to_string()));
-        assert!(uni.contains(&"excise".to_string()));
+        // both post-step operators issued, the excision with every one of its passes
+        let count = |name: &str| uni.iter().filter(|p| *p == name).count();
+        assert!(count("viscous") > 0, "the viscous gate is on but no viscous transport was issued");
+        assert!(count("excise_finalize") > 0, "the excision gate is on but no excision was issued");
+        assert_eq!(count("excise_sweep"), EXCISE_PASSES * count("excise_finalize"), "an excision ran short of its passes");
         match tag {
             "none" => assert!(!uni.contains(&"penalize".to_string())),
             "one-way-grav" => {
@@ -264,7 +286,8 @@ fn both_drivers_issue_the_identical_per_step_sequence_with_bodies() {
 //     consistency);
 //   - the excise protocol is sweep-based with its own equivalence oracle
 //     (decomp_excise_equivalence), so excise-family calls are normalized out
-//     of both logs here.
+//     of both logs here, with the halo refresh the decomposed driver issues
+//     after each sweep and after the finalize.
 // the passive scalar is config-fenced off this driver, so chi stays false.
 #[test]
 fn decomposed_driver_matches_the_canonical_sequence_modulo_documented_deltas() {
@@ -351,7 +374,7 @@ fn decomposed_per_step_extras_match_the_canonical_order() {
         )
     };
 
-    let rec_a = Recorder::new(false, false);
+    let rec_a = Recorder::new(false, false).with_post_step();
     let mut sim_a = tiny_sim(false).with_bodies(bodies());
     evolve(&mut sim_a, &rec_a, T).expect("uni-grid body drive");
     let mut expected: Vec<String> = Vec::new();
@@ -371,7 +394,7 @@ fn decomposed_per_step_extras_match_the_canonical_order() {
         }
     }
 
-    let rec_c = Recorder::new(false, false);
+    let rec_c = Recorder::new(false, false).with_post_step();
     let mut sim_c = tiny_sim(false).with_bodies(bodies());
     let stores: &mut [&mut Store] = &mut [&mut sim_c];
     let kernels: Vec<&Recorder> = vec![&rec_c];
@@ -387,11 +410,12 @@ fn decomposed_per_step_extras_match_the_canonical_order() {
         &LocalCopy,
         |_, _, _| std::ops::ControlFlow::Continue(()),
     );
-    let dec: Vec<String> = rec_c
-        .take()
-        .into_iter()
-        .filter(|p| !p.starts_with("excise"))
-        .collect();
+    let raw = rec_c.take();
+    // the decomposed driver ran every excision pass the region asks for
+    let count = |name: &str| raw.iter().filter(|p| *p == name).count();
+    assert!(count("excise_finalize") > 0, "the excision gate is on but the decomposed driver issued no excision");
+    assert_eq!(count("excise_sweep"), EXCISE_PASSES * count("excise_finalize"), "a decomposed excision ran short of its passes");
+    let dec = without_excise_protocol(&raw);
 
     assert_eq!(
         dec, expected,
@@ -400,6 +424,27 @@ fn decomposed_per_step_extras_match_the_canonical_order() {
     assert!(expected.contains(&"penalize".to_string()));
     assert!(expected.contains(&"body_feedback".to_string()));
     assert!(expected.contains(&"viscous".to_string()));
+}
+
+/// a decomposed log with the excise protocol normalized out: every excise-family call and
+/// the one halo refresh (a ghost_fill) the protocol issues after each sweep and after the
+/// finalize. the protocol is gated by its own equivalence oracle (decomp_excise_equivalence)
+fn without_excise_protocol(log: &[String]) -> Vec<String> {
+    let mut out = Vec::with_capacity(log.len());
+    let mut after_excise = false;
+    for p in log {
+        if p.starts_with("excise") {
+            after_excise = true;
+            continue;
+        }
+        if after_excise && p == "ghost_fill" {
+            after_excise = false;
+            continue;
+        }
+        after_excise = false;
+        out.push(p.clone());
+    }
+    out
 }
 
 // law completeness: every phase in the canonical table must actually appear in
@@ -419,8 +464,8 @@ fn every_canonical_phase_appears_in_the_recorded_union() {
     evolve(&mut sim, &rec, T).expect("gated drive");
     union.extend(rec.take());
 
-    // ...plus a body-bearing run for the Bodies gate.
-    let rec = Recorder::new(false, false);
+    // ...plus a body-bearing run for the Bodies gate, with the post-step gates on.
+    let rec = Recorder::new(false, false).with_post_step();
     let mut sim = tiny_sim(false).with_bodies(symbi_ib::BodyCollection::new().add(
         symbi_ib::Body::gravitational(0, Tensor::new([0.0, 0.0]), Tensor::zeros(), 1.0, 0.1, 0.05),
     ));
@@ -435,6 +480,17 @@ fn every_canonical_phase_appears_in_the_recorded_union() {
             present,
             "canonical phase '{}' never appeared in any recorded log — the law's \
              recorder is missing its method, so sequence equality no longer covers it",
+            ph.name,
+        );
+    }
+    // the post-step table under the same demand: the excise phase logs its passes and
+    // its finalize ("excise_sweep", "excise_finalize"); the viscous phase its table name
+    for ph in symbi_sim::stage::POST_STEP_PIPELINE {
+        let present = union.iter().any(|e| e.starts_with(ph.name));
+        assert!(
+            present,
+            "post-step phase '{}' never appeared in any recorded log — its gate is off in \
+             the recorder or its method is missing, so sequence equality no longer covers it",
             ph.name,
         );
     }
