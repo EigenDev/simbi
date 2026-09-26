@@ -63,6 +63,10 @@ pub struct RefinedPlans<'p, const D: usize> {
     /// the copies across a tile's own cut of the faces its received units corrected, at the
     /// corrected-faces point; absent with `emf` or when no such face lies on a cut
     pub corrected: Option<PlanExchange<'p, D>>,
+    /// the refined tiles' parent face stencils at the attempt's entry and after the root
+    /// stages, gathered at the last root stage point: two instances of one face-stencil plan,
+    /// present on every magnetized refined run
+    pub stencil: Option<(PlanExchange<'p, D>, PlanExchange<'p, D>)>,
 }
 
 /// the tiles this worker holds: parallel over the held root tiles
@@ -136,6 +140,9 @@ where
         assert_eq!(corrected.role(), PlanRole::CorrectedFace);
     }
     assert_eq!(plans.emf.is_some(), plans.faces.is_some(), "the EMF contributions and the interface faces travel together");
+    if let Some((old, new)) = plans.stencil.as_ref() {
+        assert_eq!((old.role(), new.role()), (PlanRole::FaceStencil, PlanRole::FaceStencil));
+    }
     let base = &cfg.base;
     let deadline = base.deadline;
     let stages = base.timestepping.stages();
@@ -180,6 +187,21 @@ where
             return Err(fail(fabric, WorkerError::Refused("a polar seam with refinement is outside the launched refinement".into())));
         }
         refuse_transported_registers(tiles).map_err(|e| fail(fabric, e))?;
+        let magnetized = tiles.iter().any(|h| h.levels[0].state.fields.mhd.is_some());
+        if magnetized
+            && (plans.stencil.is_none()
+                || refined.iter().any(|&k| tiles[k].face_stencil().is_none())
+                || tiles.iter().any(|h| h.face_entry().is_none()))
+        {
+            return Err(fail(
+                fabric,
+                WorkerError::Refused(
+                    "a magnetized refined run without the parent face stencil is outside the launched refinement: \
+                     the fine face prolongation reads parent faces past a tile's face lattice"
+                        .into(),
+                ),
+            ));
+        }
         let forced = !base.injection.reject_at.is_empty() || tiles.iter().any(|h| h.forced_fine_rejection_pending());
         if forced {
             for h in tiles.iter() {
@@ -235,7 +257,7 @@ where
     macro_rules! root_point {
         ($point:expr, $step:expr, $attempt:expr) => {{
             let fields = root_fields!();
-            let part = PlanPart { plan: &plans.root, fields: &fields, devices: held.root_devices, fault: None };
+            let part = PlanPart { plan: &plans.root, fields: &fields, devices: held.root_devices, fault: None, dst_fields: None };
             exchange_point_plans(&[part], transport, fabric, $point, $step, $attempt, deadline, &mut timing.exchange)
                 .map_err(|e| fail(fabric, e.into()))?;
             for (k, h) in tiles.iter().enumerate() {
@@ -246,7 +268,7 @@ where
     macro_rules! fine_point {
         ($point:expr, $step:expr, $attempt:expr) => {{
             let fields = fine_fields!();
-            let part = PlanPart { plan: &plans.fine, fields: &fields, devices: held.fine_devices, fault: None };
+            let part = PlanPart { plan: &plans.fine, fields: &fields, devices: held.fine_devices, fault: None, dst_fields: None };
             exchange_point_plans(&[part], transport, fabric, $point, $step, $attempt, deadline, &mut timing.exchange)
                 .map_err(|e| fail(fabric, e.into()))?;
             for &k in &refined {
@@ -292,6 +314,32 @@ where
             lists
         }};
     }
+    // the root faces at the attempt's entry, per root tile, the old-time stencil source
+    macro_rules! entry_fields {
+        () => {{
+            let mut lists: Vec<Vec<&Field<f64, D, Mem>>> = (0..held.n_root).map(|_| Vec::new()).collect();
+            for (k, h) in tiles.iter().enumerate() {
+                if let Some(entry) = h.face_entry() {
+                    lists[held.root_ids[k].0 as usize] = entry.iter().collect();
+                }
+            }
+            lists
+        }};
+    }
+    // the refined tiles' stencil fields at both time levels, per root tile
+    macro_rules! stencil_fields {
+        () => {{
+            let mut old: Vec<Vec<&Field<f64, D, Mem>>> = (0..held.n_root).map(|_| Vec::new()).collect();
+            let mut new: Vec<Vec<&Field<f64, D, Mem>>> = (0..held.n_root).map(|_| Vec::new()).collect();
+            for (k, h) in tiles.iter().enumerate() {
+                if let Some(stencil) = h.face_stencil() {
+                    old[held.root_ids[k].0 as usize] = stencil.old.iter().collect();
+                    new[held.root_ids[k].0 as usize] = stencil.new.iter().collect();
+                }
+            }
+            (old, new)
+        }};
+    }
     // the fine post-tail point: the fine state and, with it, the EMF contributions of the
     // substep and, at the last substep, the corrected staggered faces on the cuts; every
     // contributing slab is then cleared and every landed unit folded in substep order
@@ -301,12 +349,12 @@ where
             let fields = fine_fields!();
             let emf_fields = emf_fields!();
             let face_fields = face_fields!();
-            let mut parts = vec![PlanPart { plan: &plans.fine, fields: &fields, devices: held.fine_devices, fault: None }];
+            let mut parts = vec![PlanPart { plan: &plans.fine, fields: &fields, devices: held.fine_devices, fault: None, dst_fields: None }];
             if let Some(emf) = plans.emf.as_ref() {
-                parts.push(PlanPart { plan: emf, fields: &emf_fields, devices: held.root_devices, fault: None });
+                parts.push(PlanPart { plan: emf, fields: &emf_fields, devices: held.root_devices, fault: None, dst_fields: None });
             }
             if let Some(faces) = plans.faces.as_ref() {
-                parts.push(PlanPart { plan: faces, fields: &face_fields, devices: held.root_devices, fault: None });
+                parts.push(PlanPart { plan: faces, fields: &face_fields, devices: held.root_devices, fault: None, dst_fields: None });
             }
             exchange_point_plans(&parts, transport, fabric, point, $step, $attempt, deadline, &mut timing.exchange)
                 .map_err(|e| fail(fabric, e.into()))?;
@@ -334,12 +382,12 @@ where
             let point = ExchangePoint::Fine { substep: $sub as u8, point: FinePoint::Stage($stage as u8) };
             let fields = fine_fields!();
             let flux_fields = flux_fields!();
-            let mut parts = vec![PlanPart { plan: &plans.fine, fields: &fields, devices: held.fine_devices, fault: None }];
+            let mut parts = vec![PlanPart { plan: &plans.fine, fields: &fields, devices: held.fine_devices, fault: None, dst_fields: None }];
             if let Some(flux) = plans.flux.as_ref() {
                 let fault = cfg.contribution_fault.and_then(|(at_step, at_sub, at_stage, fault)| {
                     ($attempt == 0 && (at_step, at_sub, at_stage) == ($step, $sub as u8, $stage)).then_some(fault)
                 });
-                parts.push(PlanPart { plan: flux, fields: &flux_fields, devices: held.root_devices, fault });
+                parts.push(PlanPart { plan: flux, fields: &flux_fields, devices: held.root_devices, fault, dst_fields: None });
             }
             exchange_point_plans(&parts, transport, fabric, point, $step, $attempt, deadline, &mut timing.exchange)
                 .map_err(|e| fail(fabric, e.into()))?;
@@ -391,8 +439,8 @@ where
             let prims = root_fields!();
             let cons = seed_fields!();
             let parts = [
-                PlanPart { plan: &plans.root, fields: &prims, devices: held.root_devices, fault: None },
-                PlanPart { plan: &plans.seed, fields: &cons, devices: held.root_devices, fault: None },
+                PlanPart { plan: &plans.root, fields: &prims, devices: held.root_devices, fault: None, dst_fields: None },
+                PlanPart { plan: &plans.seed, fields: &cons, devices: held.root_devices, fault: None, dst_fields: None },
             ];
             exchange_point_plans(&parts, transport, fabric, ExchangePoint::Prime, 0, 0, deadline, &mut timing.exchange)
                 .map_err(|e| fail(fabric, e.into()))?;
@@ -471,6 +519,7 @@ where
                 }
                 with_device(root_dev(k), || {
                     h.snapshot_attempt_entry();
+                    h.snapshot_face_entry();
                     h.level_step_begin(0, dt);
                 });
             }
@@ -513,7 +562,30 @@ where
                     rejected = true;
                     break;
                 }
-                root_point!(ExchangePoint::Stage(ii as u8), iter, attempt);
+                if ii + 1 == nstages && plans.stencil.is_some() {
+                    // the last root stage point also gathers every refined tile's parent face
+                    // stencil at both time levels, the faces final for the fine subcycle
+                    let (old, new) = plans.stencil.as_ref().unwrap();
+                    let prims = root_fields!();
+                    let entry = entry_fields!();
+                    let faces = face_fields!();
+                    let (stencil_old, stencil_new) = stencil_fields!();
+                    let parts = [
+                        PlanPart { plan: &plans.root, fields: &prims, devices: held.root_devices, fault: None, dst_fields: None },
+                        PlanPart { plan: old, fields: &entry, devices: held.root_devices, fault: None, dst_fields: Some(&stencil_old) },
+                        PlanPart { plan: new, fields: &faces, devices: held.root_devices, fault: None, dst_fields: Some(&stencil_new) },
+                    ];
+                    exchange_point_plans(&parts, transport, fabric, ExchangePoint::Stage(ii as u8), iter, attempt, deadline, &mut timing.exchange)
+                        .map_err(|e| fail(fabric, e.into()))?;
+                    for (k, h) in tiles.iter().enumerate() {
+                        with_device(root_dev(k), || {
+                            h.levels[0].kernels.ghost_fill(&h.levels[0].state);
+                            h.mark_face_stencil_filled();
+                        });
+                    }
+                } else {
+                    root_point!(ExchangePoint::Stage(ii as u8), iter, attempt);
+                }
                 if base.audit_every_point {
                     audit!(plans.root, root_fields!(), ExchangePoint::Audit(AuditAt::Stage(ii as u8)), iter, attempt);
                 }
@@ -615,7 +687,7 @@ where
                 }
                 if let Some(corrected) = plans.corrected.as_ref() {
                     let fields = face_fields!();
-                    let part = PlanPart { plan: corrected, fields: &fields, devices: held.root_devices, fault: None };
+                    let part = PlanPart { plan: corrected, fields: &fields, devices: held.root_devices, fault: None, dst_fields: None };
                     exchange_point_plans(&[part], transport, fabric, ExchangePoint::CorrectedFaces, iter, attempt, deadline, &mut timing.exchange)
                         .map_err(|e| fail(fabric, e.into()))?;
                 }
@@ -664,8 +736,8 @@ where
                 let prims = root_fields!();
                 let fine = fine_fields!();
                 let parts = [
-                    PlanPart { plan: &plans.root, fields: &prims, devices: held.root_devices, fault: None },
-                    PlanPart { plan: &plans.fine, fields: &fine, devices: held.fine_devices, fault: None },
+                    PlanPart { plan: &plans.root, fields: &prims, devices: held.root_devices, fault: None, dst_fields: None },
+                    PlanPart { plan: &plans.fine, fields: &fine, devices: held.fine_devices, fault: None, dst_fields: None },
                 ];
                 exchange_point_plans(&parts, transport, fabric, ExchangePoint::Rollback, iter, attempt, deadline, &mut timing.exchange)
                     .map_err(|e| fail(fabric, e.into()))?;
@@ -767,7 +839,7 @@ where
     for (k, h) in tiles.iter().enumerate() {
         lists[ids[k].0 as usize] = plan_fields(&h.levels[level].state);
     }
-    let part = PlanPart { plan, fields: &lists, devices, fault: None };
+    let part = PlanPart { plan, fields: &lists, devices, fault: None, dst_fields: None };
     exchange_point_plans(&[part], transport, fabric, point, step, attempt, deadline, &mut timing.exchange)
         .map_err(|e| fail(fabric, e.into()))?;
     for (k, h) in tiles.iter().enumerate() {
@@ -821,7 +893,7 @@ where
     for (r, &k) in refined.iter().enumerate() {
         lists[fine_ids[r].0 as usize] = plan_fields(&tiles[k].levels[1].state);
     }
-    let part = PlanPart { plan, fields: &lists, devices, fault: None };
+    let part = PlanPart { plan, fields: &lists, devices, fault: None, dst_fields: None };
     exchange_point_plans(&[part], transport, fabric, point, step, attempt, deadline, &mut timing.exchange)
         .map_err(|e| fail(fabric, e.into()))?;
     for (r, &k) in refined.iter().enumerate() {
@@ -851,19 +923,6 @@ where
         return Err(WorkerError::Refused(
             "a flux-register contribution across a cut on a curvilinear chart is outside the launched \
              refinement until its metric-weighted arithmetic is gated"
-                .into(),
-        ));
-    }
-    // the fine face prolongation beyond a real patch face reads parent faces one to two rows
-    // past the face along its own normal axis; the staggered face lattice of a tile ends at
-    // its interior along that axis, so beyond a face on a cut those parent faces live on the
-    // neighbor and the tile beyond both cuts
-    let magnetized = tiles.iter().any(|h| h.levels[0].state.fields.mhd.is_some());
-    let face_on_cut = tiles.iter().any(|h| h.transports_registers() || h.has_flux_register(0) && h.levels.len() == 1);
-    if magnetized && face_on_cut {
-        return Err(WorkerError::Refused(
-            "a magnetized patch face on a cut is outside the launched refinement: the fine face \
-             prolongation beyond it reads parent faces past the tile's face lattice along its normal axis"
                 .into(),
         ));
     }

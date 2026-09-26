@@ -9,11 +9,15 @@
 // primitive and cell-field component of every interior cell on both levels,
 // every cut halo primitive, and every staggered face on both levels, a face
 // on a cut recorded by both of its tiles and required equal; div B is at
-// round-off on every tile from its own faces and on the assembled root. arms:
-// the patch inside the tiles across fine cuts on both axes and on one axis at
-// a time; a rejection in the second fine substep; a patch face on a cut and a
-// patch corner on two cuts refused by name, since the fine face prolongation
-// beyond such a face reads parent faces past the tile's face lattice.
+// round-off on every tile from its own faces and on the assembled root. every
+// refined tile reads its coarse-fine face halo from a parent face stencil
+// gathered from the faces' owners; the stencil at the last step's entry is
+// compared value for value with the single hierarchy's faces there, the
+// values gathered from other tiles included. arms: the patch inside the tiles
+// across fine cuts on both axes and on one axis at a time; a rejection in the
+// second fine substep; a patch face on a cut and a patch corner on two cuts,
+// each with a rejection in the second fine substep; a magnetized run without
+// the stencil refused by name.
 //
 // run: cargo test -p symbi --test worker_refined_mhd_processes
 // =============================================================================
@@ -38,7 +42,7 @@ use symbi_hydro::mhd_state::MhdPrim;
 use symbi_hydro::newtonian_mhd::NewtonianMhd;
 use symbi_hydro::quantity::{Density, Pressure};
 use symbi_hydro::state::Prim;
-use symbi_sim::atlas::{ExchangePlan, Placement, TileId};
+use symbi_sim::atlas::{ExchangePlan, Placement, Span, TileId};
 use symbi_sim::phase_table::PhaseTable;
 use symbi_sim::plan_exchange::{PlanExchange, PlanRole, fabric_for};
 use symbi_sim::substrate_seam::RegimeKind;
@@ -179,8 +183,10 @@ fn tile(partition: &Partition<2>, flat: usize, patch: [(usize, usize); 2], ng: u
     let k = kset(&root);
     if cx[0] < cx[1] && cy[0] < cy[1] {
         let clipped = RefinementRegion { x_lo: [cx[0], cy[0]], x_hi: [cx[1], cy[1]] };
-        return Hier::with_refinement_of_contributing(root, k, &[clipped], &[whole], ProlongOrder::Ppm, kset)
+        let mut h = Hier::with_refinement_of_contributing(root, k, &[clipped], &[whole], ProlongOrder::Ppm, kset)
             .expect("tile hier");
+        h.enable_face_stencil().expect("face stencil");
+        return h;
     }
     let mut faces = [[false; 2]; 2];
     for ax in 0..2 {
@@ -192,7 +198,8 @@ fn tile(partition: &Partition<2>, flat: usize, patch: [(usize, usize); 2], ng: u
         }
     }
     let meets_shell = (0..2).all(|aa| ext[aa].0 < patch[aa].1 + 1 && ext[aa].0 + ext[aa].1 > patch[aa].0.saturating_sub(1));
-    let h = Hier::single(root, k);
+    let mut h = Hier::single(root, k);
+    h.enable_face_stencil().expect("face entry");
     if faces.iter().flatten().any(|&f| f) || meets_shell {
         let patch_local = symbi_algebra::Domain::new(std::array::from_fn(|aa| {
             let origin = ext[aa].0 as isize;
@@ -410,6 +417,22 @@ fn run_worker(arm: &Arm, me: WorkerId, out: PathBuf) -> Result<(), WorkerError> 
     let emf_plan = ExchangePlan::emf_contributions(&partition, &open, arm.patch, ng).expect("emf plan");
     let faces_plan = ExchangePlan::interface_faces(&partition, &open, arm.patch, ng).expect("faces plan");
     let corrected_plan = ExchangePlan::corrected_faces(&partition, &open, arm.patch, ng).expect("corrected plan");
+    // every refined tile's stencil box in whole-grid face indices, from the hierarchy each
+    // tile builds
+    let boxes: Vec<Option<Vec<[Span; 2]>>> = (0..n_root)
+        .map(|f| {
+            let h = tile(&partition, f, arm.patch, arm.ng);
+            let ext = partition.tile_extents(unflatten(f, counts));
+            h.face_stencil().map(|stencil| {
+                stencil
+                    .domains()
+                    .iter()
+                    .map(|d| std::array::from_fn(|a| Span { lo: d.spaces[a].lo + ext[a].0 as isize, hi: d.spaces[a].hi + ext[a].0 as isize }))
+                    .collect()
+            })
+        })
+        .collect();
+    let stencil_plan = ExchangePlan::face_stencil(&partition, &open, &boxes, ng).expect("stencil plan");
     let table = PhaseTable::refined(2, RATIO as u8, 2).expect("table");
     // the plans occupy disjoint fabric id ranges in this order
     let root = PlanExchange::new(&root_plan, &placement, me, table.clone());
@@ -427,9 +450,14 @@ fn run_worker(arm: &Arm, me: WorkerId, out: PathBuf) -> Result<(), WorkerError> 
     offset += faces.as_ref().map_or(0, |p| p.lens().len() as u32);
     let corrected = (corrected_plan.transfers().count() > 0)
         .then(|| PlanExchange::new(&corrected_plan, &placement, me, table.clone()).with_role(PlanRole::CorrectedFace, offset));
+    offset += corrected.as_ref().map_or(0, |p| p.lens().len() as u32);
+    let with_stencil = std::env::var_os("W_NO_STENCIL").is_none();
+    let stencil_old = with_stencil.then(|| PlanExchange::new(&stencil_plan, &placement, me, table.clone()).with_role(PlanRole::FaceStencil, offset));
+    offset += stencil_old.as_ref().map_or(0, |p| p.lens().len() as u32);
+    let stencil_new = with_stencil.then(|| PlanExchange::new(&stencil_plan, &placement, me, table.clone()).with_role(PlanRole::FaceStencil, offset));
     let plan_digest = {
         let mut h = Fnv::new();
-        for d in [root_plan.digest, seed_plan.digest, fine_plan.digest, flux_plan.digest, emf_plan.digest, faces_plan.digest, corrected_plan.digest] {
+        for d in [root_plan.digest, seed_plan.digest, fine_plan.digest, flux_plan.digest, emf_plan.digest, faces_plan.digest, corrected_plan.digest, stencil_plan.digest] {
             h.u32((d.0 >> 32) as u32);
             h.u32(d.0 as u32);
         }
@@ -459,10 +487,13 @@ fn run_worker(arm: &Arm, me: WorkerId, out: PathBuf) -> Result<(), WorkerError> 
     all.extend(emf.as_ref());
     all.extend(faces.as_ref());
     all.extend(corrected.as_ref());
+    all.extend(stencil_old.as_ref());
+    all.extend(stencil_new.as_ref());
     let max_payload = all.iter().flat_map(|p| p.lens()).max().unwrap_or(0) * 8;
     let (link, session) = connect(&r, max_payload.max(64))?;
     let mut fabric = fabric_for(&all, link, session);
-    let plans = RefinedPlans { root, seed, fine, flux, emf, faces, corrected };
+    let stencil = stencil_old.zip(stencil_new);
+    let plans = RefinedPlans { root, seed, fine, flux, emf, faces, corrected, stencil };
     let cfg = RefinedConfig {
         base: WorkerConfig {
             regime: RegimeKind::of::<f64, 2, NewtonianMhd>(),
@@ -493,13 +524,27 @@ fn run_worker(arm: &Arm, me: WorkerId, out: PathBuf) -> Result<(), WorkerError> 
     })?;
     fabric.finish(TRANSFER_DEADLINE)?;
     let mut records = Vec::new();
+    let mut off_tile = 0u64;
     for (&flat, h) in mine.iter().zip(&tiles) {
-        records.extend(dump(h, partition.tile_extents(unflatten(flat, counts)), arm.patch));
+        let ext = partition.tile_extents(unflatten(flat, counts));
+        records.extend(dump(h, ext, arm.patch));
+        // the stencil's old level: the root faces at the last attempt's entry, by whole-grid
+        // face index, kind 5
+        if let Some(stencil) = h.face_stencil() {
+            for (d, field) in stencil.old.iter().enumerate() {
+                let lattice = h.levels[0].state.fields.mhd.as_ref().unwrap().bface[d].domain().clone();
+                for c in field.domain().iter() {
+                    let g = [c[0] + ext[0].0 as isize, c[1] + ext[1].0 as isize];
+                    off_tile += u64::from(!lattice.contains(c));
+                    records.push((Key { kind: 5, level: 0, i: g[0] as usize, j: g[1] as usize, field: d as u8 }, field.view().at(c).to_bits()));
+                }
+            }
+        }
     }
     std::fs::write(&out, encode(&records)).unwrap();
     let div = tiles.iter().map(hierarchy_div).fold(0.0, f64::max);
     println!(
-        "REPORT steps={} rejections={} audits={} div={} contrib={} emf={} corrected={} hw={} dts={} corner=0",
+        "REPORT steps={} rejections={} audits={} div={} contrib={} emf={} corrected={} hw={} dts={} corner=0 off_tile={off_tile} oop=0",
         report.steps,
         report.rejections,
         report.audits,
@@ -517,18 +562,38 @@ fn run_worker(arm: &Arm, me: WorkerId, out: PathBuf) -> Result<(), WorkerError> 
 /// divergence and the EMF register's value at the patch's upper corner node
 fn mono_main(arm: &Arm, out: PathBuf) {
     let mut mono = build_mono(arm.patch, arm.ng);
-    for bits in env_list("W_MONO_DTS") {
-        mono.step_root_with_dt(f64::from_bits(bits));
+    let dts = env_list("W_MONO_DTS");
+    let mut entry: Vec<(Key, u64)> = Vec::new();
+    for (step, bits) in dts.iter().enumerate() {
+        if step + 1 == dts.len() {
+            let mhd = mono.levels[0].state.fields.mhd.as_ref().unwrap();
+            for d in 0..2 {
+                for c in mhd.bface[d].domain().iter() {
+                    if (0..2).all(|a| c[a] >= 0 && c[a] <= N as isize) {
+                        entry.push((Key { kind: 5, level: 0, i: c[0] as usize, j: c[1] as usize, field: d as u8 }, mhd.bface[d].view().at(c).to_bits()));
+                    }
+                }
+            }
+        }
+        mono.step_root_with_dt(f64::from_bits(*bits));
     }
-    std::fs::write(&out, encode(&dump(&mono, [(0, N), (0, N)], arm.patch))).unwrap();
+    let mut records = dump(&mono, [(0, N), (0, N)], arm.patch);
+    records.extend(entry);
+    std::fs::write(&out, encode(&records)).unwrap();
     let corner = mono.emf_registers[0]
         .as_ref()
         .and_then(|reg| reg.slab_of(2, 0, 1).map(|(field, _)| *field.view().at([arm.patch[0].1 as isize, arm.patch[1].1 as isize])))
         .unwrap_or(0.0);
+    // the largest out-of-plane flux mismatch on the patch's hi face along axis 0 at the last step
+    let oop = mono.flux_registers[0]
+        .oop_face(0, 1)
+        .map(|(fields, dom)| dom.iter().map(|c| fields[0].view().at(c).abs()).fold(0.0, f64::max))
+        .unwrap_or(0.0);
     println!(
-        "REPORT steps=0 rejections=0 audits=0 div={} contrib=0 emf=0 corrected=0 hw= dts= corner={}",
+        "REPORT steps=0 rejections=0 audits=0 div={} contrib=0 emf=0 corrected=0 hw= dts= corner={} off_tile=0 oop={}",
         hierarchy_div(&mono).to_bits(),
-        corner.to_bits()
+        corner.to_bits(),
+        oop.to_bits()
     );
 }
 
@@ -587,6 +652,10 @@ struct Report {
     emf: u64,
     corrected: u64,
     corner: f64,
+    /// the single hierarchy's largest out-of-plane flux mismatch on the patch's hi face
+    oop: f64,
+    /// the stencil values the worker gathered from faces past its own tiles' lattices
+    off_tile: u64,
     high_water: Vec<usize>,
     dts: Vec<u64>,
 }
@@ -617,6 +686,8 @@ fn parse_report(stdout: &str) -> Option<Report> {
         emf: field("emf")?.parse().ok()?,
         corrected: field("corrected")?.parse().ok()?,
         corner: bits("corner")?,
+        oop: bits("oop")?,
+        off_tile: field("off_tile")?.parse().ok()?,
         high_water: list("hw")?.into_iter().map(|h| h as usize).collect(),
         dts: list("dts")?,
     })
@@ -683,13 +754,16 @@ fn reference(test: &str, tag: &str, arm: &Arm, dts: &[u64]) -> Reference {
     let mut values = HashMap::new();
     for (k, bits) in o.records {
         assert!(k.kind != 2, "the single hierarchy holds no cut halo");
+        if k.kind == 5 && values.contains_key(&k) {
+            continue;
+        }
         assert!(values.insert(k, bits).is_none(), "the single hierarchy recorded {k:?} twice");
     }
     Reference { values, report: o.report.unwrap() }
 }
 
 fn class(k: &Key) -> String {
-    let kind = ["conserved", "primitive", "halo primitive", "cell field", "face"][k.kind as usize];
+    let kind = ["conserved", "primitive", "halo primitive", "cell field", "face", "stencil face"][k.kind as usize];
     format!("level {} {kind} field {}", k.level, k.field)
 }
 
@@ -700,6 +774,7 @@ fn assert_state_equal(outcomes: &[Outcome], expected: &Reference, label: &str) {
     let mut held: HashMap<Key, u64> = HashMap::new();
     let mut copies: HashMap<Key, Vec<u64>> = HashMap::new();
     let mut halos = 0usize;
+    let mut stencil = 0usize;
     let mut differing: HashMap<String, (usize, [usize; 2], [usize; 2])> = HashMap::new();
     let mut worst: HashMap<String, f64> = HashMap::new();
     let mut note = |k: &Key, got: u64, want: u64| {
@@ -724,6 +799,13 @@ fn assert_state_equal(outcomes: &[Outcome], expected: &Reference, label: &str) {
                     }
                 }
                 4 => copies.entry(k).or_default().push(bits),
+                5 => {
+                    stencil += 1;
+                    let Some(&want) = expected.values.get(&k) else { panic!("{label}: worker {w} gathers a stencil face {k:?} the single hierarchy has no value for") };
+                    if want != bits {
+                        note(&k, bits, want);
+                    }
+                }
                 _ => {
                     assert!(held.insert(k, bits).is_none(), "{label}: {k:?} held by two workers");
                     let Some(&want) = expected.values.get(&k) else { panic!("{label}: worker {w} holds {k:?}, which the single hierarchy has no value for") };
@@ -745,7 +827,7 @@ fn assert_state_equal(outcomes: &[Outcome], expected: &Reference, label: &str) {
             note(k, values[0], want);
         }
     }
-    let interior_expected = expected.values.iter().filter(|(k, _)| k.kind != 4).count();
+    let interior_expected = expected.values.iter().filter(|(k, _)| k.kind < 4).count();
     let faces_expected = expected.values.iter().filter(|(k, _)| k.kind == 4).count();
     assert_eq!(held.len(), interior_expected, "{label}: the workers hold {} interior values, the single hierarchy {interior_expected}", held.len());
     assert_eq!(copies.len(), faces_expected, "{label}: the workers hold {} faces, the single hierarchy {faces_expected}", copies.len());
@@ -757,6 +839,7 @@ fn assert_state_equal(outcomes: &[Outcome], expected: &Reference, label: &str) {
     assert!(differing.is_empty(), "{label}: values differing from the single hierarchy by class:\n{}", report.join("\n"));
     assert!(halos > 0 || outcomes.len() == 1, "{label}: no cut halo was dumped; the freshness comparison is vacuous");
     assert!(shared > 0 || outcomes.len() == 1, "{label}: no face was held by two tiles");
+    assert!(stencil > 0, "{label}: no parent face stencil was gathered");
 }
 
 /// the largest |div B| on the assembled root grid from the workers' faces
@@ -853,55 +936,104 @@ fn a_magnetized_patch_across_one_fine_cut_matches_the_single_hierarchy() {
 }
 
 /// a rejection in the second fine substep of step 3 on the quad layout: every level's cells,
-/// cell field and faces return to the root attempt's entry, and the run equals a clean run
-/// capped to the accepted timestep
+/// cell field and faces return to the root attempt's entry
 #[test]
 fn a_magnetized_rejection_in_the_second_fine_substep_rolls_every_worker_back() {
     if in_worker_role() {
         worker_main();
     }
     let test = "a_magnetized_rejection_in_the_second_fine_substep_rolls_every_worker_back";
-    let arm = ragged_17_13();
-    let rejecting = run_arm(
-        test,
-        "rejecting",
-        &arm,
-        &[("W_REJECT_FINE_WORKER", "1".into()), ("W_REJECT_FINE", "3,1,1".into())],
-    );
-    assert_all_ok(&rejecting, "the rejecting run");
-    let reports: Vec<&Report> = rejecting.iter().map(|o| o.report.as_ref().unwrap()).collect();
-    for (w, r) in reports.iter().enumerate() {
-        assert_eq!(r.rejections, 1, "worker {w} reports {} rejections", r.rejections);
-    }
-    let dts = reports[0].dts.clone();
-    assert_matches_reference(test, "rejecting", &rejecting, &arm, "the rejecting magnetized run");
-    let clean = capped(test, "clean", &arm, 3, dts[3]);
-    assert_matches_reference(test, "clean", &clean, &arm, "the clean control");
-    assert_eq!(clean[0].report.as_ref().unwrap().dts, dts, "the capped clean run took other timesteps than the rejecting one");
-    for (w, (a, b)) in rejecting.iter().zip(&clean).enumerate() {
-        assert!(a.records == b.records, "worker {w} holds other records than in the clean control");
-    }
+    assert_rejection_matches_capped_control(test, &ragged_17_13(), 1, "the quad layout");
 }
 
-/// a magnetized patch face on a cut, and a patch corner on two cuts, are refused by name on
-/// every worker before any step: the fine face prolongation beyond such a face reads parent
-/// faces past the tile's face lattice
+/// the patch's hi face on a cut: the fine faces beyond it prolong from parent faces the tile
+/// gathers from its neighbors, the flux and EMF units cross to the tiles holding the
+/// corrected cells and faces, and a rejection in the second fine substep after the first
+/// substep's units were folded rolls every register back
 #[test]
-fn a_magnetized_patch_face_on_a_cut_is_refused_by_name() {
+fn a_magnetized_patch_face_on_a_cut_refluxes_through_the_neighbor() {
     if in_worker_role() {
         worker_main();
     }
-    let test = "a_magnetized_patch_face_on_a_cut_is_refused_by_name";
-    for (tag, arm) in [("face", patch_face_on_cut()), ("corner", patch_corner_on_two_cuts())] {
-        let outcomes = run_arm(test, tag, &arm, &[]);
-        for (w, o) in outcomes.iter().enumerate() {
-            assert_ne!(o.code, Some(0), "{tag}: worker {w} exited zero");
-            assert!(o.records.is_empty(), "{tag}: worker {w} published its state");
-        }
-        assert!(
-            outcomes.iter().any(|o| o.stderr.contains("magnetized patch face on a cut")),
-            "{tag}: no worker named the refusal:\n{}",
-            outcomes.iter().map(|o| o.stderr.clone()).collect::<Vec<_>>().join("\n---\n")
-        );
+    let test = "a_magnetized_patch_face_on_a_cut_refluxes_through_the_neighbor";
+    let arm = patch_face_on_cut();
+    let outcomes = run_arm(test, "cut_face", &arm, &[]);
+    let expected = assert_matches_reference(test, "cut_face", &outcomes, &arm, "the magnetized patch face on the cut");
+    assert!(expected.report.oop > 0.0, "the out-of-plane flux mismatch on the face on the cut is zero; its transport is untested");
+    let reports: Vec<&Report> = outcomes.iter().map(|o| o.report.as_ref().unwrap()).collect();
+    assert!(reports.iter().any(|r| r.off_tile > 0), "no stencil face came from past a tile's lattice; the gather is untested");
+    for (w, r) in reports.iter().enumerate() {
+        assert_eq!(r.contrib, 2 * N_COMP as u64, "worker {w}: the flux plan holds {} contributions", r.contrib);
+        assert_eq!(r.emf, 2, "worker {w}: the EMF plan holds {} contributions", r.emf);
     }
+    assert_rejection_matches_capped_control(test, &arm, 1, "the magnetized patch face on the cut");
+}
+
+/// the patch's corner on two cuts: the tile beyond both holds copies of a face each
+/// neighbor's received units correct, which reach it at the corrected-faces point before its
+/// recovery; the corner edge's EMF mismatch is nonzero, and a rejection rolls every level back
+#[test]
+fn a_magnetized_patch_corner_on_two_cuts_corrects_every_shared_face() {
+    if in_worker_role() {
+        worker_main();
+    }
+    let test = "a_magnetized_patch_corner_on_two_cuts_corrects_every_shared_face";
+    let arm = patch_corner_on_two_cuts();
+    let outcomes = run_arm(test, "corner", &arm, &[]);
+    let expected = assert_matches_reference(test, "corner", &outcomes, &arm, "the magnetized patch corner on two cuts");
+    assert_ne!(expected.report.corner, 0.0, "the corner edge's EMF mismatch is zero; the gate is vacuous");
+    for (w, o) in outcomes.iter().enumerate() {
+        let r = o.report.as_ref().unwrap();
+        // one slab of every register component per face on a cut, two faces
+        assert_eq!(r.contrib, 2 * N_COMP as u64, "worker {w}: the flux plan holds {} contributions", r.contrib);
+        assert_eq!(r.emf, 2, "worker {w}: the EMF plan holds {} contributions", r.emf);
+        assert_eq!(r.corrected, 2, "worker {w}: the corrected-faces plan holds {} transfers", r.corrected);
+    }
+    // the patch lies on worker 0 alone
+    assert_rejection_matches_capped_control(test, &arm, 0, "the magnetized patch corner on two cuts");
+}
+
+/// `worker`, holding a fine tile, rejects the last stage of the second fine substep of step 3:
+/// every worker rolls back, and the run equals a clean run capped to the accepted timestep in
+/// every record
+fn assert_rejection_matches_capped_control(test: &str, arm: &Arm, worker: u32, label: &str) {
+    let rejecting = run_arm(
+        test,
+        "rejecting",
+        arm,
+        &[("W_REJECT_FINE_WORKER", worker.to_string()), ("W_REJECT_FINE", "3,1,1".into())],
+    );
+    assert_all_ok(&rejecting, label);
+    let reports: Vec<&Report> = rejecting.iter().map(|o| o.report.as_ref().unwrap()).collect();
+    for (w, r) in reports.iter().enumerate() {
+        assert_eq!(r.rejections, 1, "{label}: worker {w} reports {} rejections", r.rejections);
+    }
+    let dts = reports[0].dts.clone();
+    assert_matches_reference(test, "rejecting", &rejecting, arm, &format!("{label}, rejecting"));
+    let clean = capped(test, "clean", arm, 3, dts[3]);
+    assert_matches_reference(test, "clean", &clean, arm, &format!("{label}, the clean control"));
+    assert_eq!(clean[0].report.as_ref().unwrap().dts, dts, "{label}: the capped clean run took other timesteps than the rejecting one");
+    for (w, (a, b)) in rejecting.iter().zip(&clean).enumerate() {
+        assert!(a.records == b.records, "{label}: worker {w} holds other records than in the clean control");
+    }
+}
+
+/// a magnetized refined run without the parent face stencil is refused by name on every
+/// worker before any step, with nothing published
+#[test]
+fn a_magnetized_run_without_the_face_stencil_is_refused_by_name() {
+    if in_worker_role() {
+        worker_main();
+    }
+    let test = "a_magnetized_run_without_the_face_stencil_is_refused_by_name";
+    let outcomes = run_arm(test, "no_stencil", &patch_face_on_cut(), &[("W_NO_STENCIL", "1".into())]);
+    for (w, o) in outcomes.iter().enumerate() {
+        assert_ne!(o.code, Some(0), "worker {w} exited zero");
+        assert!(o.records.is_empty(), "worker {w} published its state");
+    }
+    assert!(
+        outcomes.iter().any(|o| o.stderr.contains("without the parent face stencil")),
+        "no worker named the refusal:\n{}",
+        outcomes.iter().map(|o| o.stderr.clone()).collect::<Vec<_>>().join("\n---\n")
+    );
 }

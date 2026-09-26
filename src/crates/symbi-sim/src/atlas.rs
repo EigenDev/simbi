@@ -993,6 +993,92 @@ impl<const D: usize> ExchangePlan<D> {
         Self::slab_plan(partition, topology, ng, schema, slabs)
     }
 
+    /// the plan gathering each refined tile's parent face stencil from the tiles owning those
+    /// faces: `boxes[tile][component]` is the stencil box in whole-grid face indices. a tile
+    /// owns the faces of component `d` from its first face to its last cell along `d` (its
+    /// closing face too where it ends the grid) and its own cells across; every box face has
+    /// exactly one owner, the tile itself included, and a face no tile owns is an error. the
+    /// sources are the owners' face fields, the destinations the stencil fields, both in each
+    /// tile's own index space; a transfer's field index names the component.
+    pub fn face_stencil(
+        partition: &Partition<D>,
+        topology: &Topology<D>,
+        boxes: &[Option<Vec<[Span; D]>>],
+        ng: usize,
+    ) -> Result<Self, PlanError> {
+        let counts = partition.counts();
+        let n_tiles = partition.n_tiles();
+        assert_eq!(boxes.len(), n_tiles, "one stencil entry per tile");
+        let tiles: Vec<TileLayout<D>> = (0..n_tiles).map(|t| TileLayout::of_partition(partition, TileId(t as u32), ng)).collect();
+        let mut schema = FieldSchema::new();
+        for d in 0..D {
+            schema = schema.face(&format!("stencil{d}"), d as u8);
+        }
+        let exts: Vec<[(usize, usize); D]> = (0..n_tiles).map(|t| partition.tile_extents(unflatten(t, counts))).collect();
+        // each tile's field layout: its face lattice widened to its stencil box
+        let mut fields: Vec<Vec<FieldLayout<D>>> = (0..n_tiles)
+            .map(|t| (0..D).map(|d| FieldLayout::of(&tiles[t], FieldKind::Face(d as u8))).collect())
+            .collect();
+        let local = |g: &[Span; D], ext: &[(usize, usize); D]| -> [Span; D] {
+            std::array::from_fn(|a| Span { lo: g[a].lo - ext[a].0 as isize, hi: g[a].hi - ext[a].0 as isize })
+        };
+        let mut axes: Vec<AxisPhase<D>> = (0..D).map(|ax| AxisPhase { axis: ax as u8, transfers: Vec::new() }).collect();
+        for (dst, entry) in boxes.iter().enumerate() {
+            let Some(entry) = entry else { continue };
+            for (d, gbox) in entry.iter().enumerate() {
+                let lbox = local(gbox, &exts[dst]);
+                let f = &mut fields[dst][d];
+                f.allocated = std::array::from_fn(|a| Span {
+                    lo: f.allocated[a].lo.min(lbox[a].lo),
+                    hi: f.allocated[a].hi.max(lbox[a].hi),
+                });
+                let mut covered = 0usize;
+                for (src, ext) in exts.iter().enumerate() {
+                    let tc = unflatten(src, counts);
+                    let own: [Span; D] = std::array::from_fn(|a| {
+                        let lo = ext[a].0 as isize;
+                        let closes = a == d && tc[a] + 1 == counts[a];
+                        Span { lo, hi: (ext[a].0 + ext[a].1) as isize + isize::from(closes) }
+                    });
+                    let piece: [Span; D] = std::array::from_fn(|a| Span { lo: gbox[a].lo.max(own[a].lo), hi: gbox[a].hi.min(own[a].hi) });
+                    if piece.iter().any(|s| s.hi <= s.lo) {
+                        continue;
+                    }
+                    covered += volume(&piece);
+                    let src_region = local(&piece, ext);
+                    let dst_region = local(&piece, &exts[dst]);
+                    axes[d].transfers.push(Transfer {
+                        id: TransferId(0),
+                        axis: d as u8,
+                        src: TileId(src as u32),
+                        dst: TileId(dst as u32),
+                        field: d as u16,
+                        len: volume(&dst_region),
+                        src_region,
+                        dst_region,
+                        audit: false,
+                    });
+                }
+                if covered != volume(gbox) {
+                    return Err(PlanError::Partition(format!(
+                        "the parent face stencil of tile {dst} reads faces of component {d} no tile owns: {gbox:?}"
+                    )));
+                }
+            }
+        }
+        let mut next = 0u32;
+        for phase in axes.iter_mut() {
+            for t in phase.transfers.iter_mut() {
+                t.id = TransferId(next);
+                next += 1;
+            }
+        }
+        let plan = Self { reach: ng, tiles, fields, schema, axes, seam: None, polar_bands: Vec::new(), digest: Digest(0) };
+        plan.validate()?;
+        let digest = plan.compute_digest(counts, topology);
+        Ok(Self { digest, ..plan })
+    }
+
     /// the plan carrying the staggered faces a tile beside a neighbor's patch corrected on
     /// one of its own cuts: for every real face of `patch` lying on a cut, the tile across
     /// it applies edge slabs whose corrected faces run along the plane over the patch's node

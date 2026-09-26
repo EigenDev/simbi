@@ -248,6 +248,8 @@ pub struct PlanPart<'a, const D: usize, M: MemorySpace> {
     pub devices: &'a [i32],
     /// a fault injected into this worker's sends of the part, for the exactly-once gates
     pub fault: Option<StagingFault>,
+    /// the fields the part writes, where they differ from the fields it reads
+    pub dst_fields: Option<&'a [Vec<&'a Field<f64, D, M>>]>,
 }
 
 /// one exchange point over several plans: every axis phase opens once with the union of
@@ -277,14 +279,15 @@ where
             let mut sends = Vec::new();
             let mut receives = Vec::new();
             for part in parts {
-                let (s, r) = part.plan.stage_axis_faulted(part.fields, part.devices, transport, fabric, epoch, part.fault)?;
+                let dst = part.dst_fields.unwrap_or(part.fields);
+                let (s, r) = part.plan.stage_axis_into(part.fields, dst, part.devices, transport, fabric, epoch, part.fault)?;
                 sends.extend(s);
                 receives.extend(r);
             }
             fabric.open(symbi_fabric::PhaseSpec { epoch, sends: &sends, receives: &receives })?;
             fabric.wait(deadline)?;
             for part in parts {
-                part.plan.unpack_axis_at(part.fields, fabric, axis, point)?;
+                part.plan.unpack_axis_at(part.dst_fields.unwrap_or(part.fields), fabric, axis, point)?;
             }
             fabric.close()?;
         }

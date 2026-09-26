@@ -111,7 +111,7 @@ use super::tracer_interface::{
     InterfaceFace, InterfaceTransfer, interface_faces, interface_faces_with_layout,
     interface_mass_transfers, interface_transport_kernels,
 };
-use super::transfer::{
+use super::transfer::{face_stencil_boxes, 
     ProlongOrder, ProlongSweepScratch, bcell_from_bface_region, bface_cf_halo_slabs,
     cf_ghost_slabs, clip_to_prolongable, copy_field, copy_field_region, prolong_face_field,
     prolong_field,
@@ -159,6 +159,26 @@ pub struct RefinementRegion<const D: usize> {
 
 /// one refinement level: the state, the kernel set that advances it, and the
 /// inter-level metadata (present only where a finer level exists).
+/// the parent faces a fine level's coarse-fine face halo prolongation reads, per component,
+/// at the two time levels of the root step: `old` at the root attempt's entry, `new` after the
+/// root stages. derived state: gathered once per attempt after the root stages, before the
+/// first substep's prolongation, and invalid from the attempt's entry until then
+pub struct FaceStencil<const D: usize, Mem: MemorySpace> {
+    pub old: Vec<Field<f64, D, Mem>>,
+    pub new: Vec<Field<f64, D, Mem>>,
+    filled: std::cell::Cell<bool>,
+}
+
+impl<const D: usize, Mem: MemorySpace> FaceStencil<D, Mem> {
+    pub fn domains(&self) -> Vec<Domain<D>> {
+        self.old.iter().map(|f| f.domain().clone()).collect()
+    }
+
+    pub fn is_filled(&self) -> bool {
+        self.filled.get()
+    }
+}
+
 pub struct LevelData<R, const NDIM: usize, const DOF: usize, M, E, S, Mem, K>
 where
     R: Regime<f64, NDIM>,
@@ -195,6 +215,10 @@ where
     /// patch continues across: the halo beyond it comes from the level's own exchange, so
     /// the prolongation leaves it alone
     pub cut_sides: [[bool; 2]; NDIM],
+    /// the parent faces the coarse-fine face halo prolongation reads, gathered from the tiles
+    /// that own them at both time levels of the root step: a tile's own face lattice ends at
+    /// its interior along each face's normal axis, which a patch face on a cut reaches past
+    pub face_stencil: Option<FaceStencil<NDIM, Mem>>,
     /// per-slab intermediates of the axis-split prolongation into this level,
     /// in `cf_ghost_slabs` order. the refinement slabs are fixed, so
     /// the shapes are too: lazily allocated on the first prolongation, reused
@@ -337,6 +361,13 @@ where
     /// a pending forced rejection at (root step, fine substep, fine stage), consumed when it
     /// fires
     forced_fine_rejection: Option<(u64, u8, usize)>,
+    /// the root's staggered faces at the root attempt's entry, the old time level the parent
+    /// face stencil of a neighbor's fine level gathers; held on every tile of a run whose
+    /// fine levels read that stencil
+    face_entry: Option<Vec<Field<f64, NDIM, Mem>>>,
+    /// set while `prime` builds the initial state: the fine face halo is left to the first
+    /// substep's prolongation, whose parent face stencil is gathered after the root stages
+    priming: bool,
 
     /// whether the coarse-fine ghost transfer prolongs departures from the local hydrostatic
     /// equilibrium; when off it prolongs the raw primitive state. `None` follows the kernel set:
@@ -1078,6 +1109,7 @@ where
                 bface_old: None,
                 attempt_entry: None,
                 cut_sides: [[false; 2]; NDIM],
+                face_stencil: None,
                 coverage: None,
                 flux_eq: None,
                 residual_eq: None,
@@ -1098,6 +1130,8 @@ where
             equilibrium_mask_radius: None,
             prev_dt_cfl: 0.0,
             forced_fine_rejection: None,
+            face_entry: None,
+            priming: false,
             balance_aware_transfer: None,
         }
     }
@@ -1165,10 +1199,10 @@ where
         Ok(self)
     }
 
-    /// apply the received register units of a tile beside a neighbor's patch: the flux
-    /// register to the cells beside the patch, the EMF register to the outside faces this
-    /// tile holds. the recovery of those cells follows once the faces this application wrote
-    /// on the tile's own cuts have reached the tiles across them
+    /// apply the received register units of a tile beside a neighbor's patch in the single
+    /// hierarchy's order: the EMF register to the outside faces this tile holds, cell B and
+    /// the magnetic energy over the shell those faces bound, then the flux register to the
+    /// gas and to the out-of-plane cell field
     pub fn reflux_received(&self) {
         assert_eq!(self.levels.len(), 1, "a tile beside a neighbor's patch holds no fine level");
         let l = &self.levels[0];
@@ -1176,10 +1210,18 @@ where
             let mhd = l.state.fields.mhd.as_ref().expect("an emf register lives on a magnetized level");
             let inv_dx: [f64; NDIM] = std::array::from_fn(|ax| 1.0 / l.state.geom.dx[ax]);
             reg.apply(&mhd.bface, &inv_dx);
+            if reg.has_receiving() {
+                self.reconcile_shell();
+            }
         }
         if let Some(reg) = self.flux_registers.first() {
             if uniform_cartesian(&l.state) {
                 reg.apply_uniform(&l.state.fields.cons, &l.state.geom.dx);
+                if let Some(m) = l.state.fields.mhd.as_ref() {
+                    if DOF > NDIM {
+                        reg.apply_uniform_oop(&m.bcell, &l.state.geom.dx);
+                    }
+                }
             } else {
                 let geo = l.state.geom.block_geometry(l.state.physics.metric);
                 reg.apply(&l.state.fields.cons, &geo);
@@ -1187,19 +1229,26 @@ where
         }
     }
 
-    /// recover the cells of a tile beside a neighbor's patch after every face around them
-    /// is final: cell B and the magnetic energy over the shell the patch's faces bound, the
-    /// primitives, the physical ghosts
+    /// cell B and the magnetic energy over this tile's part of the shell around the patch
+    fn reconcile_shell(&self) {
+        let l = &self.levels[0];
+        let (Some(Some(reg)), Some(mhd)) = (self.emf_registers.first(), l.state.fields.mhd.as_ref()) else { return };
+        let shell = shell_around(reg.coverage(), &l.state.geom.interior);
+        if shell.spaces.iter().all(|s| s.hi > s.lo) {
+            bcell_from_bface_region(mhd, l.state.fields.cons.nrg_field(), &shell);
+        }
+    }
+
+    /// recover the cells of a tile beside a neighbor's patch once every face around them is
+    /// final: a tile that received no EMF unit takes cell B and the magnetic energy over its
+    /// part of the shell here, from the corrected faces the neighbors sent it, then the
+    /// primitives and the physical ghosts
     pub fn recover_beside_patch(&self) {
         assert_eq!(self.levels.len(), 1, "a tile beside a neighbor's patch holds no fine level");
-        let l = &self.levels[0];
-        if let Some(Some(reg)) = self.emf_registers.first() {
-            let mhd = l.state.fields.mhd.as_ref().expect("an emf register lives on a magnetized level");
-            let shell = shell_around(reg.coverage(), &l.state.geom.interior);
-            if shell.spaces.iter().all(|s| s.hi > s.lo) {
-                bcell_from_bface_region(mhd, l.state.fields.cons.nrg_field(), &shell);
-            }
+        if !self.emf_registers.first().and_then(Option::as_ref).is_some_and(|r| r.has_receiving()) {
+            self.reconcile_shell();
         }
+        let l = &self.levels[0];
         prof("c2p", || l.kernels.c2p(&l.state));
         prof("ghost_fill", || l.kernels.ghost_fill(&l.state));
     }
@@ -1260,6 +1309,7 @@ where
             bface_old: None,
             attempt_entry: None,
             cut_sides: [[false; 2]; NDIM],
+            face_stencil: None,
             coverage: None,
             flux_eq: None,
             residual_eq: None,
@@ -1439,6 +1489,7 @@ where
                 bface_old: None,
                 attempt_entry: Some(attempt_entry),
                 cut_sides,
+                face_stencil: None,
                 coverage: None,
                 flux_eq: None,
                 residual_eq: None,
@@ -1521,6 +1572,8 @@ where
             equilibrium_mask_radius: None,
             prev_dt_cfl: 0.0,
             forced_fine_rejection: None,
+            face_entry: None,
+            priming: false,
             balance_aware_transfer: None,
         })
     }
@@ -1916,6 +1969,12 @@ where
     /// is still zeroed and contributes (1-1)*0), then the physical ghost fill,
     /// with the loud c2p check. idempotent.
     fn init_levels(&mut self) {
+        self.priming = true;
+        self.init_levels_body();
+        self.priming = false;
+    }
+
+    fn init_levels_body(&mut self) {
         for ll in (0..self.levels.len().saturating_sub(1)).rev() {
             if self.levels[ll].state.fields.mhd.is_none() {
                 continue;
@@ -2163,7 +2222,88 @@ where
 
     /// restore every finer level to the root attempt's entry after a rejection, the
     /// primitives re-derived and the physical ghosts filled as the root's own restore does
+    /// the boundaries whose coarse-fine face halo a fine level prolongs: the sides on a cut
+    /// the patch continues across take their halo from the fine exchange
+    fn prolonged_face_boundaries(level: &LevelData<R, NDIM, DOF, M, E, S, Mem, K>) -> Boundaries<NDIM> {
+        let mut prolonged = level.state.boundaries.clone();
+        for ax in 0..NDIM {
+            for side in 0..2 {
+                if level.cut_sides[ax][side] {
+                    prolonged.0[ax][side] = BoundaryType::Outflow;
+                }
+            }
+        }
+        prolonged
+    }
+
+    /// the parent faces the fine level's coarse-fine face halo reads, per component, in the
+    /// parent's index space
+    pub fn face_stencil_boxes(&self) -> [Option<Domain<NDIM>>; NDIM] {
+        let fine = &self.levels[1];
+        face_stencil_boxes(&fine.state.geom.interior, &Self::prolonged_face_boundaries(fine))
+    }
+
+    /// read the fine level's coarse-fine face halo from a parent face stencil the driver
+    /// gathers, and keep the root's faces at every attempt's entry as that stencil's old time
+    /// level; a magnetized hierarchy whose fine level reads no parent face holds no stencil
+    pub fn enable_face_stencil(&mut self) -> symbi_xpu::Result<()> {
+        let Some(mhd) = self.levels[0].state.fields.mhd.as_ref() else { return Ok(()) };
+        let mut entry = Vec::with_capacity(NDIM);
+        for d in 0..NDIM {
+            entry.push(Field::zeros(mhd.bface[d].domain())?);
+        }
+        self.face_entry = Some(entry);
+        if self.levels.len() < 2 {
+            return Ok(());
+        }
+        let boxes = self.face_stencil_boxes();
+        if boxes.iter().all(Option::is_none) {
+            return Ok(());
+        }
+        let mut old = Vec::with_capacity(NDIM);
+        let mut new = Vec::with_capacity(NDIM);
+        for b in &boxes {
+            let b = b.as_ref().expect("a face halo reads every component");
+            old.push(Field::zeros(b)?);
+            new.push(Field::zeros(b)?);
+        }
+        self.levels[1].face_stencil = Some(FaceStencil { old, new, filled: std::cell::Cell::new(false) });
+        Ok(())
+    }
+
+    /// the root's faces at the attempt's entry, the old-time source of a neighbor's stencil
+    pub fn face_entry(&self) -> Option<&[Field<f64, NDIM, Mem>]> {
+        self.face_entry.as_deref()
+    }
+
+    /// keep the root's faces at the attempt's entry and invalidate the fine level's stencil
+    /// until the driver gathers it after the root stages
+    pub fn snapshot_face_entry(&self) {
+        if let (Some(entry), Some(mhd)) = (self.face_entry.as_ref(), self.levels[0].state.fields.mhd.as_ref()) {
+            for d in 0..NDIM {
+                copy_field(&mhd.bface[d], &entry[d]);
+            }
+        }
+        if let Some(stencil) = self.levels.get(1).and_then(|l| l.face_stencil.as_ref()) {
+            stencil.filled.set(false);
+        }
+    }
+
+    /// the fine level's stencil holds the gathered parent faces of the current attempt
+    pub fn mark_face_stencil_filled(&self) {
+        if let Some(stencil) = self.levels.get(1).and_then(|l| l.face_stencil.as_ref()) {
+            stencil.filled.set(true);
+        }
+    }
+
+    pub fn face_stencil(&self) -> Option<&FaceStencil<NDIM, Mem>> {
+        self.levels.get(1).and_then(|l| l.face_stencil.as_ref())
+    }
+
     pub fn restore_attempt_entry(&self) {
+        if let Some(stencil) = self.face_stencil() {
+            stencil.filled.set(false);
+        }
         for level in self.levels.iter().skip(1) {
             if let Some(entry) = level.attempt_entry.as_ref() {
                 restore_cons_region(entry, &level.state.fields.cons, &level.state.geom.allocated);
@@ -3815,18 +3955,20 @@ where
             // the sides on a cut the patch continues across take their face halo from the
             // fine level's own exchange: the prolongation's cross slopes would read parent
             // faces beyond the parent's own cut, which its face lattice never holds
-            let mut prolonged = fine.state.boundaries.clone();
-            for ax in 0..NDIM {
-                for side in 0..2 {
-                    if fine.cut_sides[ax][side] {
-                        prolonged.0[ax][side] = BoundaryType::Outflow;
-                    }
-                }
-            }
+            let prolonged = Self::prolonged_face_boundaries(fine);
+            // the parent faces come from the gathered stencil when the fine level reads one:
+            // it holds the faces past the tile's lattice at both time levels. during `prime` the
+            // stencil is ungathered and the halo is left to the first substep's prolongation
+            let (old, new): (&[Field<f64, NDIM, Mem>], &[Field<f64, NDIM, Mem>]) = match fine.face_stencil.as_ref() {
+                Some(stencil) if stencil.filled.get() => (&stencil.old[..], &stencil.new[..]),
+                Some(_) if self.priming => return,
+                Some(_) => panic!("the parent face stencil is read before the root stages gathered it"),
+                None => (&bface_old[..], &pmhd.bface.b[..]),
+            };
             for dd in 0..NDIM {
                 for slab in bface_cf_halo_slabs(&fine.state.geom.interior, &prolonged, dd) {
                     prof("refine_prolong_face", || {
-                        prolong_face_field(dd, &bface_old[..], &pmhd.bface.b[..], &fmhd.bface[dd], &slab, alpha)
+                        prolong_face_field(dd, old, new, &fmhd.bface[dd], &slab, alpha)
                     });
                 }
             }

@@ -487,7 +487,7 @@ fn run_worker(arm: &Arm, me: WorkerId, out: PathBuf) -> Result<(), WorkerError> 
     let max_payload = all.iter().flat_map(|p| p.lens()).max().unwrap_or(0) * 8;
     let (link, session) = connect(&r, max_payload.max(64))?;
     let mut fabric = fabric_for(&all, link, session);
-    let plans = RefinedPlans { root, seed, fine, flux, emf: None, faces: None, corrected: None };
+    let plans = RefinedPlans { root, seed, fine, flux, emf: None, faces: None, corrected: None, stencil: None };
     let cfg = RefinedConfig {
         base: WorkerConfig {
             regime: RegimeKind::of::<f64, 2, Newtonian>(),

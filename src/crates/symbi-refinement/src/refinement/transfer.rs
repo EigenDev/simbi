@@ -1306,6 +1306,66 @@ pub fn prolong_face_field<const D: usize, Mem: MemorySpace>(
     dispatch_fields_each::<f64, Mem, D>(name, region, &inputs, &[dst], &[], &[alpha]);
 }
 
+/// the parent faces `prolong_face_field(axis, .., region, ..)` reads, per face component, in
+/// the parent's index space: the stencil of `refine_prolong_face_gv` at ratio 2. a fine face
+/// `f` of component `axis` reads the normal component at the coarse face pair
+/// `floor(f/2)`, `floor((f+1)/2)` along the normal with the plm cells `parent - 1 ..= parent + 1`
+/// on every transverse axis; the divergence-closing term reads each transverse component `t`
+/// at its faces `parent`, `parent + 1` along `t`, the cells `parent - 1 ..= parent + 1` along the
+/// normal and the parent on the remaining axis. every thread evaluates both terms, so the reads
+/// span the whole region whatever the face parity. the transverse sweep is plm at every
+/// prolongation order of the cells, so the reach is one expression for all of them.
+pub fn face_prolong_reads<const D: usize>(axis: usize, region: &Domain<D>) -> [Option<Domain<D>>; D] {
+    let fdiv = |a: isize| a.div_euclid(2);
+    let first = |ax: usize| fdiv(region.spaces[ax].lo);
+    let last = |ax: usize| fdiv(region.spaces[ax].hi - 1);
+    if region.spaces.iter().any(|s| s.hi <= s.lo) {
+        return std::array::from_fn(|_| None);
+    }
+    std::array::from_fn(|comp| {
+        let spaces: [Space; D] = std::array::from_fn(|ax| {
+            let (lo, hi) = if comp == axis {
+                if ax == axis {
+                    // the face pair: floor(f / 2) ..= floor((f + 1) / 2) over f in the region
+                    (first(ax), fdiv(region.spaces[ax].hi) + 1)
+                } else {
+                    (first(ax) - 1, last(ax) + 2)
+                }
+            } else if ax == comp {
+                (first(ax), last(ax) + 2)
+            } else if ax == axis {
+                (first(ax) - 1, last(ax) + 2)
+            } else {
+                (first(ax), last(ax) + 1)
+            };
+            Space { name: region.spaces[ax].name, lo, hi }
+        });
+        Some(Domain::new(spaces))
+    })
+}
+
+/// the parent faces the coarse-fine face halo of a fine level reads, per component: the union
+/// of `face_prolong_reads` over the halo slabs `bface_cf_halo_slabs` selects on `boundaries`
+pub fn face_stencil_boxes<const D: usize>(interior: &Domain<D>, boundaries: &Boundaries<D>) -> [Option<Domain<D>>; D] {
+    let mut boxes: [Option<Domain<D>>; D] = std::array::from_fn(|_| None);
+    for dd in 0..D {
+        for slab in bface_cf_halo_slabs(interior, boundaries, dd) {
+            for (comp, read) in face_prolong_reads(dd, &slab).into_iter().enumerate() {
+                let Some(read) = read else { continue };
+                boxes[comp] = Some(match boxes[comp].take() {
+                    None => read,
+                    Some(b) => Domain::new(std::array::from_fn(|ax| Space {
+                        name: b.spaces[ax].name,
+                        lo: b.spaces[ax].lo.min(read.spaces[ax].lo),
+                        hi: b.spaces[ax].hi.max(read.spaces[ax].hi),
+                    })),
+                });
+            }
+        }
+    }
+    boxes
+}
+
 /// restrict the staggered face field bface[axis] (area-weighted average of the
 /// `2^(D-1)` coincident fine faces) over the coverage face domain — the
 /// coverage extended by one face index on the normal axis, interface faces
@@ -1333,10 +1393,10 @@ pub fn restrict_bface<const D: usize, Mem: MemorySpace>(
     }
 }
 
-/// re-derive cell-centered B from the (restricted + reflux-corrected) face
-/// field over `region`, applying the 1/2|B|^2 magnetic-energy correction to
-/// cons.nrg in place when the regime carries energy — the same kernel the
-/// single-level CT corrector runs, on an arbitrary exec domain.
+/// re-derive the in-plane cell-centered B from the (restricted + reflux-corrected) face
+/// field over `region` — the same kernel the single-level CT corrector runs, on an arbitrary
+/// exec domain. the energy slot of an adiabatic regime selects the kernel and stays unwritten:
+/// the total energy already carries the magnetic energy through the poynting flux.
 pub fn bcell_from_bface_region<const D: usize, const DOF: usize, Mem: MemorySpace>(
     mhd: &symbi_sim::state::MhdStaggeredFields<D, DOF, Mem>,
     cons_nrg: Option<&symbi_grid::Field<f64, D, Mem>>,

@@ -420,6 +420,12 @@ impl<const D: usize, const DOF: usize, Mem: MemorySpace> FluxRegister<D, DOF, Me
         out
     }
 
+    /// the out-of-plane magnetic components of register face `(ax, side)` for a gate
+    pub fn oop_face(&self, ax: usize, side: usize) -> Option<(&[Field<f64, D, Mem>], &Domain<D>)> {
+        let idx = 2 * ax + side;
+        Some((self.oop[idx].as_deref()?, self.domains[idx].as_ref()?))
+    }
+
     /// the register face `(ax, side)` for a gate: its components in register order
     pub fn face(&self, ax: usize, side: usize) -> Option<(Vec<&Field<f64, D, Mem>>, &Domain<D>)> {
         let idx = 2 * ax + side;

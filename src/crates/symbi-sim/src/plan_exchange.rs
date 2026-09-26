@@ -43,6 +43,9 @@ pub enum PlanRole {
     /// the copies across a tile's own cut of the faces its received units corrected: every
     /// transfer moves at the corrected-faces point
     CorrectedFace,
+    /// a refined tile's parent face stencil gathered from the faces' owners: every transfer
+    /// moves at the last root stage point, after the root stages and before the fine subcycle
+    FaceStencil,
 }
 
 /// a fault injected into one plan's staging at one point, for the gates of the
@@ -127,6 +130,7 @@ impl<'p, const D: usize> PlanExchange<'p, D> {
                 ExchangePoint::Fine { substep, point: FinePoint::PostTail } if substep + 1 == self.table.substeps()
             ),
             PlanRole::CorrectedFace => point == ExchangePoint::CorrectedFaces,
+            PlanRole::FaceStencil => point == ExchangePoint::Stage(self.table.stages() - 1),
         }
     }
 
@@ -387,6 +391,22 @@ impl<'p, const D: usize> PlanExchange<'p, D> {
         epoch: Epoch,
         fault: Option<StagingFault>,
     ) -> Result<(Vec<(TransferId, WorkerId)>, Vec<(TransferId, WorkerId)>), FabricError> {
+        self.stage_axis_into(fields, fields, devices, transport, fabric, epoch, fault)
+    }
+
+    /// `stage_axis_faulted` for a plan reading `fields` and writing `dst_fields`: a transfer
+    /// held within this worker copies from the one list into the other
+    #[allow(clippy::too_many_arguments)]
+    pub fn stage_axis_into<M: MemorySpace, T: HaloTransport, L: Link>(
+        &self,
+        fields: &[Vec<&Field<f64, D, M>>],
+        dst_fields: &[Vec<&Field<f64, D, M>>],
+        devices: &[i32],
+        transport: &T,
+        fabric: &mut Fabric<L>,
+        epoch: Epoch,
+        fault: Option<StagingFault>,
+    ) -> Result<(Vec<(TransferId, WorkerId)>, Vec<(TransferId, WorkerId)>), FabricError> {
         let phase = &self.plan.axes[epoch.axis as usize];
         let point = self
             .table
@@ -401,7 +421,7 @@ impl<'p, const D: usize> PlanExchange<'p, D> {
                 (true, true) => transport.copy_region(
                     fields[src][f],
                     &domain_of(&t.src_region),
-                    fields[dst][f],
+                    dst_fields[dst][f],
                     &domain_of(&t.dst_region),
                     devices[src],
                     devices[dst],
