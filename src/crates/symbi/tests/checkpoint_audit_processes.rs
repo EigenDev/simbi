@@ -183,6 +183,7 @@ fn run_worker(me: WorkerId, ckpt: &Path) -> Result<(), String> {
                 .map(|(s, &offset)| TileView { state: *s, offset })
                 .collect(),
             grid: grid.clone(),
+            header: None,
         };
         let extras = Metadata::new();
         let req = CheckpointRequest {

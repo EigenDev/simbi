@@ -31,7 +31,12 @@ use std::time::{Duration, Instant};
 use symbi::regimes::fofc::{fofc_reset_stats, fofc_stats};
 use symbi::regimes::substrate_newton::AdiabaticSubstrateKernelSet;
 use symbi::sim::decomp::{FinePartition, LocalCopy, Partition, Topology, flatten, plan_cons_schema, plan_schema, unflatten};
-use symbi::sim::refinement::launched::{Held, RefinedConfig, RefinedPlans, evolve_refined_worker};
+use symbi::sim::refinement::launched::{
+    Held, RefinedConfig, RefinedGrids, RefinedPlans, evolve_refined_worker, load_refined_tiles, refined_checkpoint,
+};
+use symbi_io::{Hdf5Backend, IoBackend, Metadata, TreeBuf};
+use symbi_sim::checkpoint::{PhysicsIdentity, write_hierarchy_checkpoint};
+use symbi_sim::distributed_checkpoint::CheckpointRequest;
 use symbi::sim::refinement::{Hierarchy, ProlongOrder, RefinementRegion};
 use symbi::sim::state::*;
 use symbi_algebra::Tensor;
@@ -152,6 +157,11 @@ impl Arm {
             },
             ng: env_u64("W_NG").unwrap() as usize,
         }
+    }
+
+    fn with_steps(mut self, steps: u64) -> Self {
+        self.steps = steps;
+        self
     }
 
     fn with_patch(mut self, patch: [(usize, usize); 2], ng: usize) -> Self {
@@ -485,8 +495,10 @@ fn run_worker(arm: &Arm, me: WorkerId, out: PathBuf) -> Result<(), WorkerError> 
     let mut all: Vec<&PlanExchange<'_, 2>> = vec![&root, &seed, &fine];
     all.extend(flux.as_ref());
     let max_payload = all.iter().flat_map(|p| p.lens()).max().unwrap_or(0) * 8;
-    let (link, session) = connect(&r, max_payload.max(64))?;
-    let mut fabric = fabric_for(&all, link, session);
+    // a checkpoint block travels on the same link: the payload bound covers the agreed credit
+    let (link, session) = connect(&r, max_payload.max(4096))?;
+    // the block credit the handshake agreed, which a checkpoint's blocks are sent under
+    let mut fabric = fabric_for(&all, link, session).with_block_credit(4096);
     let plans = RefinedPlans { root, seed, fine, flux, emf: None, faces: None, corrected: None, stencil: None };
     let cfg = RefinedConfig {
         base: WorkerConfig {
@@ -502,6 +514,7 @@ fn run_worker(arm: &Arm, me: WorkerId, out: PathBuf) -> Result<(), WorkerError> 
         invalid_level_cfl_at: bad_cfl_from_env(me),
         fine_trouble_at: fine_trouble_from_env(),
         contribution_fault: contribution_fault_from_env(me),
+        restart: std::env::var_os("W_RESTART_FROM").is_some(),
     };
     let root_devices = vec![0i32; n_root];
     let fine_devices = vec![0i32; n_fine];
@@ -513,8 +526,30 @@ fn run_worker(arm: &Arm, me: WorkerId, out: PathBuf) -> Result<(), WorkerError> 
         root_devices: &root_devices,
         fine_devices: &fine_devices,
     };
+    let grids = RefinedGrids::of([N, N], [0.0, 0.0], [DX; 2], arm.ng, arm.patch);
+    let mut cfg = cfg;
+    if let Ok(path) = std::env::var("W_RESTART_FROM") {
+        load_refined_tiles(&mut tiles, &held, &plans, &grids, &path)?;
+        cfg.base.start_time = tiles[0].levels[0].state.time;
+    }
+    let checkpoint_after = env_u64("W_CKPT_AFTER");
+    let checkpoint_path = std::env::var("W_CKPT_PATH").unwrap_or_default();
+    let extras = Metadata::new();
     fofc_reset_stats();
-    let report = evolve_refined_worker(&mut tiles, &held, &plans, &LocalCopy, &mut fabric, &cfg, |_, _, _| {
+    let report = evolve_refined_worker(&mut tiles, &held, &plans, &LocalCopy, &mut fabric, &cfg, |accepted, _, tiles, fabric| {
+        if checkpoint_after == Some(accepted) {
+            let req = CheckpointRequest {
+                path: &checkpoint_path,
+                extras: &extras,
+                budget: 256,
+                deadline: TRANSFER_DEADLINE,
+                drop_block: None,
+                duplicate_first_block: false,
+                vote_no: false,
+            };
+            let identity = PhysicsIdentity::of(&tiles[0].levels[0].state);
+            refined_checkpoint(tiles, &held, &plans, &grids, &identity, &req, fabric, accepted)?;
+        }
         Ok(ControlFlow::Continue(()))
     })?;
     fabric.finish(TRANSFER_DEADLINE)?;
@@ -543,8 +578,13 @@ fn run_worker(arm: &Arm, me: WorkerId, out: PathBuf) -> Result<(), WorkerError> 
 fn mono_main(arm: &Arm, out: PathBuf) {
     let mut mono = build_mono(arm.patch, arm.ng);
     fofc_reset_stats();
-    for bits in env_list("W_MONO_DTS") {
+    let write_after = env_u64("W_MONO_CKPT_AFTER");
+    for (step, bits) in env_list("W_MONO_DTS").into_iter().enumerate() {
         mono.step_root_with_dt(f64::from_bits(bits));
+        if write_after == Some(step as u64 + 1) {
+            let path = std::env::var("W_MONO_CKPT_PATH").unwrap();
+            write_hierarchy_checkpoint(&[&mono.levels[0].state, &mono.levels[1].state], &path, &Metadata::new()).unwrap();
+        }
     }
     let (fallbacks, freezes) = fofc_stats();
     std::fs::write(&out, encode(&dump(&mono, [(0, N), (0, N)], arm.patch))).unwrap();
@@ -774,6 +814,12 @@ fn assert_state_equal(outcomes: &[Outcome], expected: &Reference, label: &str) {
 
 /// the launched run agrees with itself across workers and with the single hierarchy
 fn assert_matches_reference(test: &str, tag: &str, outcomes: &[Outcome], arm: &Arm, label: &str) -> Reference {
+    assert_matches_reference_after(test, tag, outcomes, arm, label, &[])
+}
+
+/// `assert_matches_reference` for a run resumed after the steps of `before`: the single
+/// hierarchy runs those steps and then the resumed run's
+fn assert_matches_reference_after(test: &str, tag: &str, outcomes: &[Outcome], arm: &Arm, label: &str, before: &[u64]) -> Reference {
     assert_all_ok(outcomes, label);
     let reports: Vec<&Report> = outcomes.iter().map(|o| o.report.as_ref().expect("report")).collect();
     for (w, r) in reports.iter().enumerate() {
@@ -786,7 +832,8 @@ fn assert_matches_reference(test: &str, tag: &str, outcomes: &[Outcome], arm: &A
         );
         eprintln!("{label}: worker {w} grant high-water {:?}", r.high_water);
     }
-    let expected = reference(test, tag, arm, &reports[0].dts);
+    let dts: Vec<u64> = before.iter().chain(&reports[0].dts).copied().collect();
+    let expected = reference(test, tag, arm, &dts);
     assert_state_equal(outcomes, &expected, label);
     expected
 }
@@ -1058,3 +1105,103 @@ fn a_duplicated_or_missing_contribution_ends_the_run_before_the_reflux() {
     }
 }
 
+
+/// every attribute, dataset and group of two checkpoint trees equal, the datasets bit for bit
+fn assert_trees_equal(a: &TreeBuf, b: &TreeBuf, path: &str) {
+    assert_eq!(a.attrs.len(), b.attrs.len(), "{path}: attribute count");
+    for (x, y) in a.attrs.iter().zip(&b.attrs) {
+        assert_eq!(x.0, y.0, "{path}: attribute name");
+        assert_eq!(format!("{:?}", x.1), format!("{:?}", y.1), "{path}: attribute {}", x.0);
+    }
+    assert_eq!(a.datasets.len(), b.datasets.len(), "{path}: dataset count");
+    for (x, y) in a.datasets.iter().zip(&b.datasets) {
+        assert_eq!(x.name, y.name, "{path}: dataset name");
+        assert_eq!(x.shape, y.shape, "{path}/{}: shape", x.name);
+        match (x.data.as_f64(), y.data.as_f64()) {
+            (Some(p), Some(q)) => {
+                let differing: Vec<usize> = p.iter().zip(q).enumerate().filter(|(_, (u, v))| u.to_bits() != v.to_bits()).map(|(i, _)| i).collect();
+                assert!(
+                    differing.is_empty(),
+                    "{path}/{}: {} of {} values differ, first at {}",
+                    x.name,
+                    differing.len(),
+                    p.len(),
+                    differing[0]
+                );
+            }
+            _ => assert_eq!(format!("{:?}", x.data), format!("{:?}", y.data), "{path}/{}", x.name),
+        }
+    }
+    assert_eq!(
+        a.groups.iter().map(|g| g.name.clone()).collect::<Vec<_>>(),
+        b.groups.iter().map(|g| g.name.clone()).collect::<Vec<_>>(),
+        "{path}: groups"
+    );
+    for (x, y) in a.groups.iter().zip(&b.groups) {
+        assert_trees_equal(x, y, &format!("{path}/{}", x.name));
+    }
+}
+
+/// the checkpoint the quad layout writes after four root steps: every attribute and dataset of
+/// both levels equal to the file the single hierarchy writes after the same four steps
+fn quad_checkpoint(test: &str, dir: &std::path::Path) -> (PathBuf, Vec<u64>) {
+    let ckpt = dir.join("refined.h5");
+    let arm = ragged_17_13().with_steps(4);
+    let written = run_arm(
+        test,
+        "write",
+        &arm,
+        &[("W_CKPT_AFTER", "4".into()), ("W_CKPT_PATH", ckpt.to_str().unwrap().into())],
+    );
+    assert_all_ok(&written, "the checkpointing run");
+    let dts = written[0].report.as_ref().unwrap().dts.clone();
+    assert!(ckpt.exists(), "the checkpoint was not published");
+    let mono_path = dir.join("mono.h5");
+    let mono_dir = run_dir(test, "write_mono");
+    let coord = mono_dir.join("rendezvous");
+    let mono = collect(spawn(
+        test,
+        0,
+        &arm,
+        &coord,
+        &mono_dir,
+        &[
+            ("W_MONO_DTS", dts.iter().map(|d| d.to_string()).collect::<Vec<_>>().join(",")),
+            ("W_MONO_CKPT_AFTER", "4".into()),
+            ("W_MONO_CKPT_PATH", mono_path.to_str().unwrap().into()),
+        ],
+    ));
+    assert_eq!(mono.code, Some(0), "the single hierarchy failed:\n{}", mono.stderr);
+    let got = Hdf5Backend.read(&ckpt).unwrap();
+    let want = Hdf5Backend.read(&mono_path).unwrap();
+    assert_trees_equal(&got, &want, "");
+    (ckpt, dts)
+}
+
+#[test]
+fn a_refined_checkpoint_equals_the_single_hierarchys_file() {
+    if in_worker_role() {
+        worker_main();
+    }
+    let test = "a_refined_checkpoint_equals_the_single_hierarchys_file";
+    let dir = run_dir(test, "files");
+    quad_checkpoint(test, &dir);
+}
+
+/// the quad layout's checkpoint after four steps resumed on another ragged quad and on a line
+/// of three workers of which two hold no fine tile: four more steps equal the single hierarchy
+/// run uninterrupted through eight, in every value on both levels
+#[test]
+fn a_refined_restart_onto_another_partition_continues_bitwise() {
+    if in_worker_role() {
+        worker_main();
+    }
+    let test = "a_refined_restart_onto_another_partition_continues_bitwise";
+    let dir = run_dir(test, "files");
+    let (ckpt, before) = quad_checkpoint(test, &dir);
+    for (tag, arm) in [("18_14", ragged_18_14()), ("no_fine", no_fine_on_two_workers())] {
+        let arm = arm.with_steps(STEPS - 4);
+        let resumed = run_arm(test, tag, &arm, &[("W_RESTART_FROM", ckpt.to_str().unwrap().into())]);
+        assert_matches_reference_after(test, tag, &resumed, &arm, &format!("resumed on {tag}"), &before);
+    }
+}

@@ -5520,6 +5520,7 @@ where
                 .map(|(state, &offset)| TileView { state: *state, offset })
                 .collect(),
             grid: grid.clone(),
+            header: None,
         };
         let t_io = std::time::Instant::now();
         write_partitioned_checkpoint::<R, D, DOF, Mem>(&identity, &[level], path, &checkpoint_metadata(cfg, cp_index))
@@ -5929,6 +5930,7 @@ where
                 .map(|(h, &offset)| TileView { state: &h.levels[0].state.store, offset })
                 .collect(),
             grid: root_grid.clone(),
+            header: None,
         }];
         if let (Some(fg), Some((offsets, grid))) = (fg.as_ref(), fine.as_ref()) {
             levels.push(LevelTiles {
@@ -5939,6 +5941,7 @@ where
                     .map(|(&i, &offset)| TileView { state: &tiles[i].levels[1].state.store, offset })
                     .collect(),
                 grid: grid.clone(),
+                header: None,
             });
         }
         let t_io = std::time::Instant::now();
@@ -10902,6 +10905,7 @@ where
                 .map(|(s, &offset)| TileView { state: *s, offset })
                 .collect(),
             grid: grid.clone(),
+            header: None,
         };
         let extras = extras_of(cp_index);
         let req = CheckpointRequest {

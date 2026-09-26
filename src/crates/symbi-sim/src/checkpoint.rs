@@ -2360,10 +2360,21 @@ pub struct TileView<'a, const D: usize, const DOF: usize, Mem: MemorySpace> {
     pub offset: [isize; D],
 }
 
-/// the tiles of one level and the grid they partition. tile 0 supplies the level's clock.
+/// the level's clock and the store whose field set names its datasets, for a writer that
+/// holds no tile of the level: a fine level carries its parent's field set
+pub struct LevelHeader<'a, const D: usize, const DOF: usize, Mem: MemorySpace> {
+    pub template: &'a FieldStore<D, DOF, Mem, f64>,
+    pub time: f64,
+    pub dt: f64,
+    pub iteration: u64,
+}
+
+/// the tiles of one level and the grid they partition. tile 0 supplies the level's clock and
+/// its dataset set, or the header where one is given.
 pub struct LevelTiles<'a, const D: usize, const DOF: usize, Mem: MemorySpace> {
     pub tiles: Vec<TileView<'a, D, DOF, Mem>>,
     pub grid: GlobalGrid<D>,
+    pub header: Option<LevelHeader<'a, D, DOF, Mem>>,
 }
 
 impl<'a, const D: usize, const DOF: usize, Mem: MemorySpace> LevelTiles<'a, D, DOF, Mem> {
@@ -2376,6 +2387,26 @@ impl<'a, const D: usize, const DOF: usize, Mem: MemorySpace> LevelTiles<'a, D, D
                 offset: grid.interior_lo,
             }],
             grid,
+            header: None,
+        }
+    }
+
+    /// the store whose field set names the level's datasets
+    pub fn template(&self) -> &'a FieldStore<D, DOF, Mem, f64> {
+        match &self.header {
+            Some(h) => h.template,
+            None => self.tiles[0].state,
+        }
+    }
+
+    /// the level's clock: time, dt, iteration
+    pub fn clock(&self) -> (f64, f64, u64) {
+        match &self.header {
+            Some(h) => (h.time, h.dt, h.iteration),
+            None => {
+                let s = self.tiles[0].state;
+                (s.time, s.dt, s.iteration)
+            }
         }
     }
 }
@@ -2663,14 +2694,14 @@ impl CheckpointStream {
         R: Regime<f64, D>,
         Mem: MemorySpace,
     {
-        if levels.is_empty() || levels.iter().any(|l| l.tiles.is_empty()) {
+        if levels.is_empty() || levels.iter().any(|l| l.tiles.is_empty() && l.header.is_none()) {
             return Err(IoError::MissingPath("hierarchy has no levels or a level has no tiles".into()));
         }
         #[cfg(feature = "gpu")]
         if Mem::IS_DEVICE_ACCESSIBLE {
             symbi_xpu::ctx_sync();
         }
-    let authority = levels[0].tiles[0].state;
+    let authority = levels[0].template();
     let facts = mesh_facts(identity.geometry, authority.motion.a, &levels[0].grid);
     let mut root = Tree::new("")
         .with_attr("format_version", "2.0")
@@ -2691,8 +2722,8 @@ impl CheckpointStream {
         .iter()
         .map(|level| {
             let grid = &level.grid;
-            let faces = level.tiles[0]
-                .state
+            let faces = level
+                .template()
                 .fields
                 .mhd
                 .as_ref()
@@ -2718,7 +2749,8 @@ impl CheckpointStream {
         })
         .collect();
     for (idx, (level, small)) in levels.iter().zip(&smalls).enumerate() {
-        let sim = level.tiles[0].state;
+        let sim = level.template();
+        let (time, dt, iteration) = level.clock();
         let grid = &level.grid;
         let geometry_kind = identity.geometry;
         let mut geometry = Tree::new("geometry").with_attr("metric", coord_name(geometry_kind));
@@ -2775,9 +2807,9 @@ impl CheckpointStream {
             Tree::new(format!("level_{idx}"))
                 .with_attr("scale_factor_a", sim.motion.a)
                 .with_attr("scale_factor_adot", sim.motion.a_dot)
-                .with_attr("time", sim.time)
-                .with_attr("dt", sim.dt)
-                .with_attr("iteration", Attr::U64(sim.iteration))
+                .with_attr("time", time)
+                .with_attr("dt", dt)
+                .with_attr("iteration", Attr::U64(iteration))
                 .with_group(mesh)
                 .with_group(partition_0)
                 .with_group(Tree::new("conserved")),
@@ -2787,7 +2819,7 @@ impl CheckpointStream {
     // the continuous tracers, the body series, and, for a level held whole, its censuses.
     let finest_bodies = levels
         .iter()
-        .filter_map(|l| l.tiles[0].state.immersed.as_ref())
+        .filter_map(|l| l.template().immersed.as_ref())
         .last()
         .map(body_state_snap);
     let heat_name = slip_heat_dataset_name(authority.fields.cons.nrg_field().is_some());
@@ -2818,7 +2850,7 @@ impl CheckpointStream {
     }
     if let Some(im) = levels
         .iter()
-        .filter_map(|l| l.tiles[0].state.immersed.as_ref())
+        .filter_map(|l| l.template().immersed.as_ref())
         .find(|im| !im.history.is_empty())
     {
         let (n, nb) = (im.history.len(), im.history.n_bodies());
@@ -2846,13 +2878,13 @@ impl CheckpointStream {
             let grid = &level.grid;
             let level_path = format!("level_{idx}");
             let cell_shape: Vec<usize> = (0..D).rev().map(|ax| grid.cells[ax] + 2 * grid.ng).collect();
-            let names = cell_datasets::<R, D, DOF, Mem>(level.tiles[0].state);
+            let names = cell_datasets::<R, D, DOF, Mem>(level.template());
             for (group, name, _) in &names {
                 let group_path = if group.is_empty() { level_path.clone() } else { format!("{level_path}/{group}") };
                 stream.declare_f64(&group_path, name, &cell_shape)?;
             }
             for d in 0..D {
-                if level.tiles[0].state.fields.mhd.as_ref().is_some_and(|m| m.bface_initialized.load(std::sync::atomic::Ordering::Relaxed)) {
+                if level.template().fields.mhd.as_ref().is_some_and(|m| m.bface_initialized.load(std::sync::atomic::Ordering::Relaxed)) {
                     let face_shape: Vec<usize> = (0..D)
                         .rev()
                         .map(|ax| grid.cells[ax] + if ax == d { 1 } else { 0 })
@@ -3164,6 +3196,7 @@ mod partitioned_tests {
                 TileView { state: &right.store, offset: [3, 0] },
             ],
             grid,
+            header: None,
         };
         // a staging budget of five cells forces every block through several slabs.
         write_partitioned_checkpoint_with_budget::<NewtonianMhd, 2, 3, HostMemory>(&PhysicsIdentity::of(&whole), &[level], tiled_path.to_str().unwrap(), &Metadata::new(), 5).unwrap();
@@ -3378,6 +3411,7 @@ mod partitioned_restart_tests {
                 TileView { state: &source[1].store, offset: [3, 0] },
             ],
             grid: grid.clone(),
+            header: None,
         };
         write_partitioned_checkpoint::<NewtonianMhd, 2, 3, HostMemory>(&PhysicsIdentity::of(&source[0]), &[level], path.to_str().unwrap(), &Metadata::new()).unwrap();
         let path = path.to_str().unwrap();

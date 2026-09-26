@@ -296,6 +296,7 @@ fn run_worker(arm: &Arm, me: WorkerId, out: PathBuf) -> Result<(), WorkerError> 
                     .map(|(s, &offset)| TileView { state: *s, offset })
                     .collect(),
                 grid: grid.clone(),
+                header: None,
             };
             let req = CheckpointRequest {
                 path: &ckpt_path,
@@ -624,6 +625,7 @@ fn two_workers_write_the_reference_checkpoint() {
             })
             .collect(),
         grid: whole_grid(),
+        header: None,
     };
     let ref_path = dir.join("reference.h5");
     write_partitioned_checkpoint_with_budget::<Newtonian, 2, 2, HostMemory>(

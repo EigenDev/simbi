@@ -24,7 +24,11 @@
 use std::ops::ControlFlow;
 use std::time::{Duration, Instant};
 
-use symbi_fabric::{Fabric, Link, OpKind, WorkerId};
+use symbi_fabric::{CHECKPOINT_ATTEMPT, Fabric, Link, OpKind, WorkerId};
+use symbi_sim::checkpoint::{
+    GlobalGrid, LevelHeader, LevelTiles, PhysicsIdentity, TileView, checkpoint_level_count, load_partitioned_level,
+};
+use symbi_sim::distributed_checkpoint::{CheckpointRequest, LevelPlan, distributed_checkpoint_levels};
 use symbi_grid::Field;
 use symbi_hydro::regime::Regime;
 use symbi_sim::atlas::{AuditAt, ExchangePoint, FinePoint, TileId};
@@ -96,10 +100,16 @@ pub struct RefinedConfig {
     /// a fault in this worker's flux contributions at (step, substep, stage) on the first
     /// attempt, for the exactly-once gates
     pub contribution_fault: Option<(u64, u8, usize, StagingFault)>,
+    /// the tiles hold a state loaded from a checkpoint (`load_refined_tiles`): the prime
+    /// exchanges and fills it and keeps the loaded fine level, which a fresh start seeds by
+    /// prolongation from the root
+    pub restart: bool,
 }
 
 /// evolve this worker's hierarchies from the configured start until the final time or
-/// the step bound. `on_step` runs after every accepted step with the fabric.
+/// the step bound. `on_step` runs after every accepted step with the count of accepted steps,
+/// the time, the tiles and the fabric; a checkpoint written there (`refined_checkpoint`) holds
+/// the accepted state.
 #[allow(clippy::too_many_arguments)]
 pub fn evolve_refined_worker<R, const D: usize, const DOF: usize, M, E, S, Mem, K, T, L, F>(
     tiles: &mut [Hierarchy<R, D, DOF, M, E, S, Mem, K>],
@@ -119,7 +129,7 @@ where
     K: KernelSet<D, DOF, Mem, f64>,
     T: HaloTransport,
     L: Link,
-    F: FnMut(u64, f64, &mut Fabric<L>) -> Result<ControlFlow<()>, WorkerError>,
+    F: FnMut(u64, f64, &[Hierarchy<R, D, DOF, M, E, S, Mem, K>], &mut Fabric<L>) -> Result<ControlFlow<()>, WorkerError>,
 {
     let n = tiles.len();
     assert_eq!(n, held.root_ids.len(), "tiles/root ids length mismatch");
@@ -458,12 +468,20 @@ where
                 ));
             }
         }
-        for &k in &refined {
-            with_device(fine_dev(k), || tiles[k].seed_fine_from_coarse())
-                .map_err(|e| fail(fabric, WorkerError::Numerics(format!("fine seed: {e:?}"))))?;
-        }
-        for h in tiles.iter_mut() {
-            h.prime();
+        if cfg.restart {
+            // the loaded fine level stands: its interior, its cut halos from the neighbors'
+            // interiors and its coarse-fine ghosts come from the file; the physical ghosts fill
+            for &k in &refined {
+                with_device(fine_dev(k), || tiles[k].levels[1].kernels.ghost_fill(&tiles[k].levels[1].state));
+            }
+        } else {
+            for &k in &refined {
+                with_device(fine_dev(k), || tiles[k].seed_fine_from_coarse())
+                    .map_err(|e| fail(fabric, WorkerError::Numerics(format!("fine seed: {e:?}"))))?;
+            }
+            for h in tiles.iter_mut() {
+                h.prime();
+            }
         }
     }
 
@@ -759,7 +777,7 @@ where
         report.time = t;
         report.dt_sequence.push(dt);
         let clock = Instant::now();
-        let flow = on_step(iter, t, fabric);
+        let flow = on_step(iter, t, &*tiles, fabric);
         in_callback += clock.elapsed();
         match flow {
             Ok(ControlFlow::Continue(())) => {}
@@ -925,6 +943,166 @@ where
              refinement until its metric-weighted arithmetic is gated"
                 .into(),
         ));
+    }
+    Ok(())
+}
+
+/// the global grids of a refined session's two levels as the checkpoint records them: the
+/// root's, and the fine level's over the patch at twice the resolution, its first interior
+/// cell at twice the patch's lower corner, its halo one deeper than the root's
+#[derive(Clone, Debug)]
+pub struct RefinedGrids<const D: usize> {
+    pub root: GlobalGrid<D>,
+    pub fine: GlobalGrid<D>,
+}
+
+impl<const D: usize> RefinedGrids<D> {
+    /// the grids of a root of `cells` with its first cell at `x_lo`, spacing `dx` and halo `ng`,
+    /// refining `patch` (root cells per axis) at ratio 2
+    pub fn of(cells: [usize; D], x_lo: [f64; D], dx: [f64; D], ng: usize, patch: [(usize, usize); D]) -> Self {
+        Self {
+            root: GlobalGrid { cells, interior_lo: [0; D], ng, x_lo, dx, maps: None },
+            fine: GlobalGrid {
+                cells: std::array::from_fn(|a| (patch[a].1 - patch[a].0) * RATIO),
+                interior_lo: std::array::from_fn(|a| (patch[a].0 * RATIO) as isize),
+                ng: ng + 1,
+                x_lo,
+                dx: std::array::from_fn(|a| dx[a] / RATIO as f64),
+                maps: None,
+            },
+        }
+    }
+}
+
+/// write one checkpoint of both levels across every worker after `accepted` accepted steps:
+/// the root's shared faces are audited at the checkpoint epoch, the fine level's clock is
+/// agreed from the workers holding fine tiles, and every worker streams its owned blocks of
+/// both levels to the coordinator, which publishes the file when every block arrived once
+#[allow(clippy::too_many_arguments)]
+pub fn refined_checkpoint<R, const D: usize, const DOF: usize, M, E, S, Mem, K, L>(
+    tiles: &[Hierarchy<R, D, DOF, M, E, S, Mem, K>],
+    held: &Held<'_>,
+    plans: &RefinedPlans<'_, D>,
+    grids: &RefinedGrids<D>,
+    identity: &PhysicsIdentity,
+    req: &CheckpointRequest<'_>,
+    fabric: &mut Fabric<L>,
+    accepted: u64,
+) -> Result<(), WorkerError>
+where
+    R: Regime<f64, D> + Copy,
+    M: Metric<f64, D> + Copy + Send + Sync,
+    E: symbi_hydro::eos::EosFor<f64, <R as Regime<f64, D>>::Energy> + Copy + Send + Sync,
+    S: ExecutionSpace,
+    Mem: MemorySpace + Sync,
+    K: KernelSet<D, DOF, Mem, f64>,
+    L: Link,
+{
+    let checkpoint_err = |e: String| WorkerError::Checkpoint(e);
+    // the root's shared faces, compared at the checkpoint epoch of the last accepted step
+    if plans.root.has_audits() && accepted > 0 {
+        let mut lists: Vec<Vec<&Field<f64, D, Mem>>> = (0..held.n_root).map(|_| Vec::new()).collect();
+        for (k, h) in tiles.iter().enumerate() {
+            lists[held.root_ids[k].0 as usize] = plan_fields(&h.levels[0].state);
+        }
+        plans
+            .root
+            .audit(&lists, fabric, AuditAt::Checkpoint, accepted - 1, CHECKPOINT_ATTEMPT, req.deadline)
+            .map_err(|e| match e {
+                AuditError::Fabric(e) => WorkerError::Fabric(e),
+                AuditError::Mismatch(m) => WorkerError::Interface(m),
+            })?;
+    }
+    // the fine level's clock from the workers holding fine tiles. the minimum reduces over
+    // positive finite numbers, so each 64-bit word rides as its two 32-bit halves, each sent as
+    // the exact integer one above it; a worker holding no fine tile contributes the largest
+    // finite number, and every holder agrees on the same halves
+    let fine = tiles.iter().find(|h| h.levels.len() > 1).map(|h| &h.levels[1].state);
+    let mut agree = |word: Option<u64>| -> Result<u64, WorkerError> {
+        let mut halves = [0u64; 2];
+        for (i, half) in halves.iter_mut().enumerate() {
+            let mine = word.map(|w| ((w >> (32 * i)) & 0xffff_ffff) as f64 + 1.0).unwrap_or(f64::MAX);
+            let got = f64::from_bits(fabric.collective(OpKind::Min, mine.to_bits(), req.deadline)?);
+            *half = (got - 1.0) as u64;
+        }
+        Ok(halves[0] | halves[1] << 32)
+    };
+    let fine_time = f64::from_bits(agree(fine.map(|s| s.time.to_bits()))?);
+    let fine_dt = f64::from_bits(agree(fine.map(|s| s.dt.to_bits()))?);
+    let fine_iteration = agree(fine.map(|s| s.iteration))?;
+    let root_tiles: Vec<TileView<'_, D, DOF, Mem>> = tiles
+        .iter()
+        .zip(held.root_ids)
+        .map(|(h, id)| TileView { state: &h.levels[0].state, offset: plans.root.plan().tiles[id.0 as usize].offset })
+        .collect();
+    let mut fine_ids = Vec::new();
+    let fine_tiles: Vec<TileView<'_, D, DOF, Mem>> = tiles
+        .iter()
+        .zip(held.fine_ids)
+        .filter_map(|(h, id)| id.map(|id| (h, id)))
+        .map(|(h, id)| {
+            fine_ids.push(id);
+            let layout = &plans.fine.plan().tiles[id.0 as usize];
+            TileView {
+                state: &h.levels[1].state,
+                offset: std::array::from_fn(|a| grids.fine.interior_lo[a] + layout.offset[a]),
+            }
+        })
+        .collect();
+    let levels = [
+        LevelTiles { tiles: root_tiles, grid: grids.root.clone(), header: None },
+        LevelTiles {
+            tiles: fine_tiles,
+            grid: grids.fine.clone(),
+            header: Some(LevelHeader {
+                template: &tiles[0].levels[0].state,
+                time: fine_time,
+                dt: fine_dt,
+                iteration: fine_iteration,
+            }),
+        },
+    ];
+    let level_plans = [
+        LevelPlan { plan: plans.root.plan(), placement: plans.root.placement(), origin: [0; D], tile_ids: held.root_ids },
+        LevelPlan { plan: plans.fine.plan(), placement: plans.fine.placement(), origin: grids.fine.interior_lo, tile_ids: &fine_ids },
+    ];
+    distributed_checkpoint_levels::<R, D, DOF, Mem, L>(fabric, &level_plans, identity, &levels, req)
+        .map_err(|e| checkpoint_err(format!("{e}")))
+}
+
+/// load both levels of every held tile from a checkpoint of a refined session written on any
+/// partition: each tile reads its interior and halo boxes of each level from the whole-grid
+/// datasets, the cut halos from the neighbors' interiors, the clocks from the level groups
+pub fn load_refined_tiles<R, const D: usize, const DOF: usize, M, E, S, Mem, K>(
+    tiles: &mut [Hierarchy<R, D, DOF, M, E, S, Mem, K>],
+    held: &Held<'_>,
+    plans: &RefinedPlans<'_, D>,
+    grids: &RefinedGrids<D>,
+    path: &str,
+) -> Result<(), WorkerError>
+where
+    R: Regime<f64, D> + Copy,
+    M: Metric<f64, D> + Copy + Send + Sync,
+    E: symbi_hydro::eos::EosFor<f64, <R as Regime<f64, D>>::Energy> + Copy + Send + Sync,
+    S: ExecutionSpace,
+    Mem: MemorySpace + Sync,
+    K: KernelSet<D, DOF, Mem, f64>,
+{
+    let err = |e: symbi_sim::checkpoint::IoError| WorkerError::Checkpoint(format!("{path}: {e}"));
+    let stored = checkpoint_level_count(path).map_err(err)?;
+    if stored != 2 {
+        return Err(WorkerError::Refused(format!(
+            "{path} carries {stored} level(s); a refined session restarts from a checkpoint of its two levels"
+        )));
+    }
+    for (k, h) in tiles.iter_mut().enumerate() {
+        let root_offset = plans.root.plan().tiles[held.root_ids[k].0 as usize].offset;
+        load_partitioned_level(&mut h.levels[0].state, path, 0, root_offset, &grids.root).map_err(err)?;
+        if let Some(id) = held.fine_ids[k] {
+            let layout = &plans.fine.plan().tiles[id.0 as usize];
+            let offset: [isize; D] = std::array::from_fn(|a| grids.fine.interior_lo[a] + layout.offset[a]);
+            load_partitioned_level(&mut h.levels[1].state, path, 1, offset, &grids.fine).map_err(err)?;
+        }
     }
     Ok(())
 }

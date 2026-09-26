@@ -181,6 +181,7 @@ fn build_ledger<R, const D: usize, const DOF: usize, Mem>(
     grid: &GlobalGrid<D>,
     authority: &crate::state::FieldStore<D, DOF, Mem, f64>,
     budget: usize,
+    origin: [isize; D],
 ) -> Vec<Vec<Entry>>
 where
     R: Regime<f64, D>,
@@ -195,10 +196,9 @@ where
             let interior = domain_of(&layout.interior);
             let alloc = domain_of(&layout.allocated);
             let size: [usize; D] = std::array::from_fn(|ax| layout.interior[ax].size());
-            let (first, last) = touches_domain_edges(&layout.offset, &size, grid);
-            let shift: [isize; D] = std::array::from_fn(|ax| {
-                layout.offset[ax] - layout.interior[ax].lo - grid.interior_lo[ax]
-            });
+            let offset: [isize; D] = std::array::from_fn(|ax| layout.offset[ax] + origin[ax]);
+            let (first, last) = touches_domain_edges(&offset, &size, grid);
+            let shift: [isize; D] = std::array::from_fn(|ax| offset[ax] - layout.interior[ax].lo - grid.interior_lo[ax]);
             (0..n_datasets)
                 .map(|i| {
                     let (region, file_of): (_, Box<dyn Fn(usize, isize) -> usize>) = if i < n_cell {
@@ -299,6 +299,17 @@ fn admit_block(
     Ok(())
 }
 
+/// one level of a distributed checkpoint: the plan whose tiles partition it, their placement,
+/// and the whole-grid index of the plan's index origin (zero on the root; a fine level's plan
+/// indexes its patch from zero)
+pub struct LevelPlan<'a, const D: usize> {
+    pub plan: &'a ExchangePlan<D>,
+    pub placement: &'a Placement,
+    pub origin: [isize; D],
+    /// the plan's ids of this worker's tiles, parallel to the level's tiles
+    pub tile_ids: &'a [TileId],
+}
+
 /// write one checkpoint across every worker. `level` holds this worker's tiles and the
 /// global grid; `tile_ids` is parallel to `level.tiles`.
 #[allow(clippy::too_many_arguments)]
@@ -316,11 +327,30 @@ where
     Mem: MemorySpace,
     L: Link,
 {
-    assert_eq!(
-        level.tiles.len(),
-        tile_ids.len(),
-        "tiles and ids are parallel"
-    );
+    let plans = [LevelPlan { plan, placement, origin: [0; D], tile_ids }];
+    distributed_checkpoint_levels::<R, D, DOF, Mem, L>(fabric, &plans, identity, std::slice::from_ref(level), req)
+}
+
+/// write one checkpoint of several levels across every worker: `levels[i]` holds this
+/// worker's tiles of level `i` (none on a worker holding no tile of a fine level, whose header
+/// then names the level's clock and field set), `plans[i]` the plan that partitions it. a
+/// block's dataset index counts the datasets of every level in order, so it names its level.
+pub fn distributed_checkpoint_levels<R, const D: usize, const DOF: usize, Mem, L>(
+    fabric: &mut Fabric<L>,
+    plans: &[LevelPlan<'_, D>],
+    identity: &PhysicsIdentity,
+    levels: &[LevelTiles<'_, D, DOF, Mem>],
+    req: &CheckpointRequest<'_>,
+) -> Result<(), CheckpointError>
+where
+    R: Regime<f64, D>,
+    Mem: MemorySpace,
+    L: Link,
+{
+    assert_eq!(plans.len(), levels.len(), "one plan per level");
+    for (p, l) in plans.iter().zip(levels) {
+        assert_eq!(l.tiles.len(), p.tile_ids.len(), "tiles and ids are parallel");
+    }
     let budget = req.budget;
     if block_credit_for(budget, D) > fabric.block_credit() {
         return Err(CheckpointError::Refused(format!(
@@ -329,71 +359,58 @@ where
             fabric.block_credit()
         )));
     }
-    let workers = placement.workers as usize;
-    let authority = level.tiles[0].state;
-    let datasets = dataset_paths::<R, D, DOF, Mem>(0, authority);
+    let workers = plans[0].placement.workers as usize;
+    // every level's datasets, numbered in level order: (level, index within the level, path)
+    let mut datasets: Vec<(usize, usize, String)> = Vec::new();
+    for (li, level) in levels.iter().enumerate() {
+        for (di, path) in dataset_paths::<R, D, DOF, Mem>(li, level.template()).into_iter().enumerate() {
+            datasets.push((li, di, path));
+        }
+    }
+    let global_index = |li: usize, path: &str| -> usize {
+        datasets
+            .iter()
+            .position(|(l, _, p)| *l == li && p == path)
+            .expect("the walker names a declared dataset")
+    };
     if fabric.is_coordinator() {
-        let opened = CheckpointStream::open::<R, D, DOF, Mem>(
-            identity,
-            std::slice::from_ref(level),
-            req.path,
-            req.extras,
-            budget,
-            false,
-        );
-        let ok = fabric.collective(
-            OpKind::CheckpointOpen,
-            u64::from(opened.is_ok()),
-            req.deadline,
-        )?;
+        let opened = CheckpointStream::open::<R, D, DOF, Mem>(identity, levels, req.path, req.extras, budget, false);
+        let ok = fabric.collective(OpKind::CheckpointOpen, u64::from(opened.is_ok()), req.deadline)?;
         let mut stream = opened?;
         if ok == 0 {
-            return Err(CheckpointError::Refused(
-                "a worker could not begin the checkpoint".into(),
-            ));
+            return Err(CheckpointError::Refused("a worker could not begin the checkpoint".into()));
         }
-        let mut ledger = build_ledger::<R, D, DOF, Mem>(plan, &level.grid, authority, budget);
-        // the coordinator's own blocks go through the same admission as a remote block
-        let me = fabric.me();
-        for (tile, view) in tile_ids.iter().zip(&level.tiles) {
-            let mut sink = |path: &str, start: &[usize], count: &[usize], data: &[f64]| {
-                let dataset = datasets
-                    .iter()
-                    .position(|d| d == path)
-                    .expect("the walker names a declared dataset");
-                let mut bytes = Vec::new();
-                encode_block::<D>(dataset as u16, *tile, start, count, data, &mut bytes);
-                let block = decode_block::<D>(&bytes).expect("an encoded block decodes");
-                admit_block(
-                    &mut ledger,
-                    &datasets,
-                    placement,
-                    &mut stream,
-                    me,
-                    &block,
-                    budget,
-                )
-                .map_err(|e| IoError::Backend(e.to_string()))
+        let mut ledgers: Vec<Vec<Vec<Entry>>> = plans
+            .iter()
+            .zip(levels)
+            .map(|(p, l)| build_ledger::<R, D, DOF, Mem>(p.plan, &l.grid, l.template(), budget, p.origin))
+            .collect();
+        let admit = |ledgers: &mut Vec<Vec<Vec<Entry>>>, stream: &mut CheckpointStream, from: WorkerId, block: &Block<'_>| {
+            let Some((li, di, _)) = datasets.get(block.dataset) else {
+                return Err(FabricError::protocol(from, format!("block for unknown dataset {}", block.dataset)));
             };
-            owned_blocks::<R, D, DOF, Mem>(0, view, &level.grid, budget, &mut sink)?;
+            let local = Block { dataset: *di, tile: block.tile, start: block.start.clone(), count: block.count.clone(), data: block.data };
+            let level_paths: Vec<String> = datasets.iter().filter(|(l, _, _)| l == li).map(|(_, _, p)| p.clone()).collect();
+            admit_block(&mut ledgers[*li], &level_paths, plans[*li].placement, stream, from, &local, budget)
+        };
+        let me = fabric.me();
+        for (li, (p, level)) in plans.iter().zip(levels).enumerate() {
+            for (tile, view) in p.tile_ids.iter().zip(&level.tiles) {
+                let mut sink = |path: &str, start: &[usize], count: &[usize], data: &[f64]| {
+                    let mut bytes = Vec::new();
+                    encode_block::<D>(global_index(li, path) as u16, *tile, start, count, data, &mut bytes);
+                    let block = decode_block::<D>(&bytes).expect("an encoded block decodes");
+                    admit(&mut ledgers, &mut stream, me, &block).map_err(|e| IoError::Backend(e.to_string()))
+                };
+                owned_blocks::<R, D, DOF, Mem>(li, view, &level.grid, budget, &mut sink)?;
+            }
         }
-        // remote blocks until every worker has contributed its close vote; a worker's vote
-        // follows its last block on the same ordered stream
         let start = Instant::now();
         while fabric.contributions_to_current() < workers - 1 {
             fabric.service()?;
             if let Some((from, _seq, payload)) = fabric.staged_block() {
-                let block = decode_block::<D>(payload)
-                    .ok_or_else(|| FabricError::protocol(from, "malformed block payload"))?;
-                admit_block(
-                    &mut ledger,
-                    &datasets,
-                    placement,
-                    &mut stream,
-                    from,
-                    &block,
-                    budget,
-                )?;
+                let block = decode_block::<D>(payload).ok_or_else(|| FabricError::protocol(from, "malformed block payload"))?;
+                admit(&mut ledgers, &mut stream, from, &block)?;
                 fabric.release_block()?;
             }
             if start.elapsed() > req.deadline {
@@ -406,11 +423,7 @@ where
             }
             std::thread::sleep(Duration::from_micros(50));
         }
-        // the file takes its name only when every owned box arrived exactly once and every
-        // worker's close vote is affirmative; the coordinator's own vote follows the rename
-        let complete = ledger
-            .iter()
-            .all(|per_tile| per_tile.iter().all(Entry::complete));
+        let complete = ledgers.iter().all(|l| l.iter().all(|per_tile| per_tile.iter().all(Entry::complete)));
         let workers_ok = fabric.current_contributions_all_nonzero();
         let published = complete && workers_ok && stream.publish().is_ok();
         let ok = fabric.collective(OpKind::CheckpointClose, u64::from(published), req.deadline)?;
@@ -427,46 +440,36 @@ where
     } else {
         let ok = fabric.collective(OpKind::CheckpointOpen, 1, req.deadline)?;
         if ok == 0 {
-            return Err(CheckpointError::Refused(
-                "the coordinator could not open the checkpoint".into(),
-            ));
+            return Err(CheckpointError::Refused("the coordinator could not open the checkpoint".into()));
         }
         let mut bytes = Vec::with_capacity(block_credit_for(budget, D) as usize);
         let mut index = 0usize;
         let mut sent_ok = true;
-        for (tile, view) in tile_ids.iter().zip(&level.tiles) {
-            let mut sink = |path: &str, start: &[usize], count: &[usize], data: &[f64]| {
-                let dataset = datasets
-                    .iter()
-                    .position(|d| d == path)
-                    .expect("the walker names a declared dataset");
-                let this = index;
-                index += 1;
-                if req.drop_block == Some(this) {
-                    return Ok(());
-                }
-                encode_block::<D>(dataset as u16, *tile, start, count, data, &mut bytes);
-                let repeats = if this == 0 && req.duplicate_first_block {
-                    2
-                } else {
-                    1
-                };
-                for _ in 0..repeats {
-                    if let Err(e) = fabric.send_block(&bytes, req.deadline) {
-                        sent_ok = false;
-                        return Err(IoError::Backend(format!("fabric: {e}")));
+        for (li, (p, level)) in plans.iter().zip(levels).enumerate() {
+            for (tile, view) in p.tile_ids.iter().zip(&level.tiles) {
+                let mut sink = |path: &str, start: &[usize], count: &[usize], data: &[f64]| {
+                    let this = index;
+                    index += 1;
+                    if req.drop_block == Some(this) {
+                        return Ok(());
                     }
-                }
-                Ok(())
-            };
-            owned_blocks::<R, D, DOF, Mem>(0, view, &level.grid, budget, &mut sink)?;
+                    encode_block::<D>(global_index(li, path) as u16, *tile, start, count, data, &mut bytes);
+                    let repeats = if this == 0 && req.duplicate_first_block { 2 } else { 1 };
+                    for _ in 0..repeats {
+                        if let Err(e) = fabric.send_block(&bytes, req.deadline) {
+                            sent_ok = false;
+                            return Err(IoError::Backend(format!("fabric: {e}")));
+                        }
+                    }
+                    Ok(())
+                };
+                owned_blocks::<R, D, DOF, Mem>(li, view, &level.grid, budget, &mut sink)?;
+            }
         }
         let vote = sent_ok && !req.vote_no;
         let ok = fabric.collective(OpKind::CheckpointClose, u64::from(vote), req.deadline)?;
         if ok == 0 {
-            return Err(CheckpointError::Refused(
-                "the checkpoint was not published".into(),
-            ));
+            return Err(CheckpointError::Refused("the checkpoint was not published".into()));
         }
         Ok(())
     }
