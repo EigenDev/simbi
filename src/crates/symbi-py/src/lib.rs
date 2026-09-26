@@ -10424,12 +10424,13 @@ fn validate_launch_scope(cfg: &Config) -> Result<(), String> {
     Ok(())
 }
 
-/// the refined launch's gated scope: 2D newtonian hydro on a uniform cartesian grid with one
-/// refined patch of ratio two, plm reconstruction, the ideal gas, open boundaries, no non-ideal
-/// transport or excision. every other refined combination is named and refused.
+/// the refined launch's gated scope: 2D newtonian hydro or 2.5D newtonian MHD on a uniform
+/// cartesian grid with one refined patch of ratio two, plm reconstruction, the ideal gas, open
+/// boundaries, no non-ideal transport or excision. every other refined combination is named and
+/// refused.
 fn validate_refined_launch_scope(cfg: &Config) -> Result<(), String> {
     let refused = |what: &str| Err(format!("{what} with mesh refinement is outside the distributed first release"));
-    if cfg.regime != "newtonian" {
+    if !matches!(cfg.regime.as_str(), "newtonian" | "nmhd") {
         return refused(&format!("the {} regime", cfg.regime));
     }
     if cfg.dims != 2 {
@@ -10474,46 +10475,27 @@ fn launch_patch(cfg: &Config) -> Result<[(usize, usize); 2], String> {
     Ok(std::array::from_fn(|ax| (cell(r.x_lo[ax], ax) as usize, cell(r.x_hi[ax], ax) as usize)))
 }
 
-/// evolve this worker's refined hierarchies through the fabric: the root tiles of the launch's
-/// partition, each refining the patch clipped to it with the whole patch beside it (a patch face
-/// on a cut as a contributing register face) or carrying the receiving register of the shell
-/// beside the patch; the fine level partitioned under the root's cuts; the refined transaction
-/// with the checkpoints of both levels at the linear cadence, a final checkpoint, and a restart
-/// onto any partition.
-fn run_refined_worker_process(
-    cfg: &Config,
-    prims: &[Vec<f64>],
-    launch: &WorkerLaunch,
-    fault: LaunchFault,
-    drained: std::time::Duration,
-) -> Result<(), String> {
-    use symbi::sim::decomp::{FinePartition, LocalCopy, flatten, plan_cons_schema, plan_schema, unflatten};
-    use symbi::sim::refinement::launched::{
-        Held, RefinedConfig, RefinedGrids, RefinedPlans, evolve_refined_worker, load_refined_tiles, receiving_faces_of_tile,
-        refined_checkpoint,
-    };
-    use symbi_fabric::rendezvous::{Identity, Rendezvous, connect};
-    use symbi_fabric::{Fnv, WorkerId};
-    use symbi_sim::atlas::{ExchangePlan, Placement, TileId};
-    use symbi_sim::checkpoint::PhysicsIdentity;
-    use symbi_sim::distributed_checkpoint::{CheckpointRequest, block_credit_for};
-    use symbi_sim::phase_table::PhaseTable;
-    use symbi_sim::plan_exchange::{PlanExchange, PlanRole, fabric_for};
-    use symbi_sim::substrate_seam::RegimeKind;
-    use symbi_sim::worker::{WorkerConfig, WorkerError};
+/// the root tiling of a refined launch as this worker sees it: the partition, the owners of its
+/// tiles, the tiles this worker holds, and the refined patch in root cells
+struct RefinedLayout {
+    n: [usize; 2],
+    partition: symbi::sim::decomp::Partition<2>,
+    owner: Vec<symbi_fabric::WorkerId>,
+    placement: symbi_sim::atlas::Placement,
+    me: symbi_fabric::WorkerId,
+    mine: Vec<usize>,
+    patch: [(usize, usize); 2],
+}
 
-    type Sim = SimDefault<Newtonian, 2, Cartesian, EosSelect<f64>>;
-    type Kern = <Sim as symbi::prelude::SimSubstrate<DefaultMemory, f64, 2>>::KernelSet;
-    type Hier = Hierarchy<Newtonian, 2, 2, Cartesian, EosSelect<f64>, DefaultSpace, DefaultMemory, Kern>;
-
-    let build_clock = std::time::Instant::now();
+fn refined_layout(cfg: &Config, launch: &WorkerLaunch, cells: usize) -> Result<RefinedLayout, String> {
+    use symbi_fabric::WorkerId;
+    use symbi_sim::atlas::{Placement, TileId};
     let n: [usize; 2] = std::array::from_fn(|ax| cfg.n_cells[ax]);
     let total: usize = n.iter().product();
-    if prims.len() != total {
-        return Err(format!("prim_gen yielded {} cells, expected {total}", prims.len()));
+    if cells != total {
+        return Err(format!("prim_gen yielded {cells} cells, expected {total}"));
     }
     let partition = tile_partition(n, cfg)?;
-    let counts = partition.counts();
     let n_root = partition.n_tiles();
     if launch.owner.len() != n_root {
         return Err(format!("the owner map names {} tiles; the partition has {n_root}", launch.owner.len()));
@@ -10526,61 +10508,190 @@ fn run_refined_worker_process(
         return Err(format!("worker {} holds no tile", launch.worker));
     }
     let patch = launch_patch(cfg)?;
+    Ok(RefinedLayout { n, partition, owner, placement, me, mine, patch })
+}
+
+/// one held root tile's hierarchy, the tile at its own origin so the levels index the parent's
+/// absolute cells from it: the patch clipped to the tile with the whole patch beside it (a patch
+/// face on a cut as a contributing register face), or the receiving register of the shell beside
+/// the patch; a magnetized tile carries the step-entry faces its neighbors' parent face stencils
+/// gather, and a refined one the stencil itself
+fn refined_tile<R, const DOF: usize, K>(
+    cfg: &Config,
+    layout: &RefinedLayout,
+    flat: usize,
+    origin: [f64; 2],
+    m: [usize; 2],
+    sim: SimDefaultGeneric<R, 2, DOF, Cartesian, EosSelect<f64>>,
+    kernels_of: impl Fn(&SimDefaultGeneric<R, 2, DOF, Cartesian, EosSelect<f64>>) -> K,
+) -> Result<Hierarchy<R, 2, DOF, Cartesian, EosSelect<f64>, DefaultSpace, DefaultMemory, K>, String>
+where
+    R: Regime<f64, 2> + Copy,
+    EosSelect<f64>: symbi_hydro::eos::EosFor<f64, <R as Regime<f64, 2>>::Energy>,
+    K: KernelSet<2, DOF, DefaultMemory, f64>,
+{
+    use symbi::sim::refinement::launched::receiving_faces_of_tile;
+    use symbi_sim::atlas::TileId;
     let regions = refinement_regions_nd::<2>(&cfg.refinement_regions)?;
+    let maps: [symbi_geometry::AxisMap; 2] =
+        std::array::from_fn(|ax| symbi_geometry::AxisMap::Uniform { start: origin[ax], dx: cfg.dx[ax] });
+    let sub = kernels_of(&sim);
+    let clipped = clip_regions_to_tile::<2>(&regions, origin, m, &maps);
+    let mut h = if clipped.is_empty() {
+        let h = Hierarchy::single(sim, sub);
+        match receiving_faces_of_tile(&layout.partition, layout.patch, TileId(flat as u32)) {
+            Some((patch_local, faces)) => h
+                .with_receiving_register(&patch_local, faces)
+                .map_err(|e| format!("tile {flat} receiving register: {e:?}"))?,
+            None => h,
+        }
+    } else {
+        let (clip, whole): (Vec<_>, Vec<_>) = clipped.into_iter().unzip();
+        let prolong = prolong_order_for(&cfg.reconstruction_name);
+        Hierarchy::with_refinement_of_contributing(sim, sub, &clip, &whole, prolong, kernels_of)
+            .map_err(|e| format!("tile {flat} refinement build: {e:?}"))?
+    };
+    h.enable_face_stencil().map_err(|e| format!("tile {flat} face stencil: {e:?}"))?;
+    Ok(h)
+}
+
+/// evolve this worker's refined hierarchies through the fabric, the tiles built per regime:
+/// newtonian hydro, or newtonian MHD on the 2.5D plane with each tile seeded from its slice of
+/// the global staggered faces
+fn run_refined_worker_process(
+    cfg: &Config,
+    prims: &[Vec<f64>],
+    bufs: &[Vec<f64>],
+    launch: &WorkerLaunch,
+    fault: LaunchFault,
+    drained: std::time::Duration,
+) -> Result<(), String> {
+    use symbi::sim::decomp::unflatten;
+    let build_clock = std::time::Instant::now();
+    let layout = refined_layout(cfg, launch, prims.len())?;
+    let n = layout.n;
+    let counts = layout.partition.counts();
     let phys = boundaries_nd::<2>(&cfg.boundaries);
     let theta = build_theta(cfg);
     let solver = cfg.solver;
-    let prolong = prolong_order_for(&cfg.reconstruction_name);
     let dx: [f64; 2] = std::array::from_fn(|ax| cfg.dx[ax]);
-    let kernels_of = |s: &Sim| -> Kern { s.substrate().theta(theta).with_solver(solver).expect("fine kernel set") };
-
-    // the held tiles, each at its own origin: the hierarchy's levels index the parent's absolute
-    // cells from it
-    let mut tiles: Vec<Hier> = Vec::with_capacity(mine.len());
-    for &flat in &mine {
+    let extents = |flat: usize| {
         let tc = unflatten(flat, counts);
-        let ext = partition.tile_extents(tc);
+        let ext = layout.partition.tile_extents(tc);
         let tile_lo: [usize; 2] = std::array::from_fn(|ax| ext[ax].0);
         let m: [usize; 2] = std::array::from_fn(|ax| ext[ax].1);
-        let origin = tile_origin::<2>(cfg, tile_lo);
-        let maps: [symbi_geometry::AxisMap; 2] =
-            std::array::from_fn(|ax| symbi_geometry::AxisMap::Uniform { start: origin[ax], dx: dx[ax] });
-        let sim = Sim::build(Newtonian, host_eos(cfg), Cartesian)
-            .cells(m)
-            .ghosts(ghost_width(cfg))
-            .origin(origin)
-            .spacing(dx)
-            .boundaries(tile_boundaries(&phys, tc, counts))
-            .cfl(cfg.cfl)
-            .timestepping(cfg.timestepping)
-            .allocate()
-            .map_err(|e| format!("tile {flat} allocate: {e:?}"))?
-            .set_initial_indexed(|idx, _x| {
-                let lin = global_lin::<2>(&tile_lo, &idx, &n);
-                let row = &prims[lin];
-                Prim::adiabatic(Density(row[0]), Tensor::new([row[1], row[2]]), Pressure(row[3]))
-            })
-            .build();
-        let sub = kernels_of(&sim);
-        let clipped = clip_regions_to_tile::<2>(&regions, origin, m, &maps);
-        let h = if clipped.is_empty() {
-            let h = Hierarchy::single(sim, sub);
-            match receiving_faces_of_tile(&partition, patch, TileId(flat as u32)) {
-                Some((patch_local, faces)) => h
-                    .with_receiving_register(&patch_local, faces)
-                    .map_err(|e| format!("tile {flat} receiving register: {e:?}"))?,
-                None => h,
+        (tile_lo, tile_origin::<2>(cfg, tile_lo), m, tile_boundaries(&phys, tc, counts))
+    };
+    match cfg.regime.as_str() {
+        "newtonian" => {
+            type Sim = SimDefault<Newtonian, 2, Cartesian, EosSelect<f64>>;
+            let kernels_of = |s: &Sim| s.substrate().theta(theta).with_solver(solver).expect("refined kernel set");
+            let mut tiles = Vec::with_capacity(layout.mine.len());
+            for &flat in &layout.mine {
+                let (tile_lo, origin, m, bnd) = extents(flat);
+                let sim = Sim::build(Newtonian, host_eos(cfg), Cartesian)
+                    .cells(m)
+                    .ghosts(ghost_width(cfg))
+                    .origin(origin)
+                    .spacing(dx)
+                    .boundaries(bnd)
+                    .cfl(cfg.cfl)
+                    .timestepping(cfg.timestepping)
+                    .allocate()
+                    .map_err(|e| format!("tile {flat} allocate: {e:?}"))?
+                    .set_initial_indexed(|idx, _x| {
+                        let row = &prims[global_lin::<2>(&tile_lo, &idx, &n)];
+                        Prim::adiabatic(Density(row[0]), Tensor::new([row[1], row[2]]), Pressure(row[3]))
+                    })
+                    .build();
+                tiles.push(refined_tile(cfg, &layout, flat, origin, m, sim, kernels_of)?);
             }
-        } else {
-            let (clip, whole): (Vec<_>, Vec<_>) = clipped.into_iter().unzip();
-            Hierarchy::with_refinement_of_contributing(sim, sub, &clip, &whole, prolong, kernels_of)
-                .map_err(|e| format!("tile {flat} refinement build: {e:?}"))?
-        };
-        tiles.push(h);
+            refined_session(cfg, launch, fault, drained, build_clock, &layout, tiles)
+        }
+        "nmhd" => {
+            type Sim = SimDefaultGeneric<NewtonianMhd, 2, 3, Cartesian, EosSelect<f64>>;
+            if bufs.len() < 3 {
+                return Err(format!("mhd needs 3 staggered b-field generators, got {}", bufs.len()));
+            }
+            let ct = cfg.ct_method;
+            let kernels_of =
+                |s: &Sim| s.substrate().theta(theta).with_solver(solver).expect("refined kernel set").ct_method(ct);
+            let mut tiles = Vec::with_capacity(layout.mine.len());
+            for &flat in &layout.mine {
+                let (tile_lo, origin, m, bnd) = extents(flat);
+                let tile_faces: Vec<Vec<f64>> = (0..2).map(|d| tile_face_buffer::<2>(&bufs[d], n, m, tile_lo, d)).collect();
+                // the rollback snapshot restores every level's faces when a step is rejected
+                let sim = Sim::build(NewtonianMhd, host_eos(cfg), Cartesian)
+                    .cells(m)
+                    .ghosts(ghost_width(cfg))
+                    .origin(origin)
+                    .spacing(dx)
+                    .boundaries(bnd)
+                    .cfl(cfg.cfl)
+                    .timestepping(cfg.timestepping)
+                    .allocate()
+                    .map_err(|e| format!("tile {flat} allocate: {e:?}"))?
+                    .set_initial_indexed(|idx, _x| {
+                        let lin = global_lin::<2>(&tile_lo, &idx, &n);
+                        let row = &prims[lin];
+                        let gidx: [isize; 2] = std::array::from_fn(|ax| tile_lo[ax] as isize + idx[ax]);
+                        let mag: [f64; 3] = std::array::from_fn(|k| if k < 2 { face_avg_cell_b::<2>(&bufs[k], k, gidx, n) } else { bufs[k][lin] });
+                        MhdPrim::new(Prim::adiabatic(Density(row[0]), Tensor::new([row[1], row[2], row[3]]), Pressure(row[4])), Tensor::new(mag))
+                    })
+                    .seed_faces_indexed(&tile_faces)
+                    .build()
+                    .with_rollback_snapshot()
+                    .map_err(|e| format!("tile {flat} rollback snapshot: {e:?}"))?;
+                tiles.push(refined_tile(cfg, &layout, flat, origin, m, sim, kernels_of)?);
+            }
+            refined_session(cfg, launch, fault, drained, build_clock, &layout, tiles)
+        }
+        other => Err(format!("the {other} regime with mesh refinement is outside the distributed first release")),
     }
+}
+
+/// the refined session over the held tiles: the fine level partitioned under the root's cuts;
+/// the plans of the root state, the root seed, the fine level and the flux contributions, and
+/// for a magnetized run the EMF contributions, the interface faces, the corrected faces and the
+/// two temporal levels of the parent face stencil; the refined transaction with the checkpoints
+/// of both levels at the linear cadence, a final checkpoint, and a restart onto any partition
+fn refined_session<R, const DOF: usize, K>(
+    cfg: &Config,
+    launch: &WorkerLaunch,
+    fault: LaunchFault,
+    drained: std::time::Duration,
+    build_clock: std::time::Instant,
+    layout: &RefinedLayout,
+    mut tiles: Vec<Hierarchy<R, 2, DOF, Cartesian, EosSelect<f64>, DefaultSpace, DefaultMemory, K>>,
+) -> Result<(), String>
+where
+    R: Regime<f64, 2> + Copy,
+    EosSelect<f64>: symbi_hydro::eos::EosFor<f64, <R as Regime<f64, 2>>::Energy>,
+    K: KernelSet<2, DOF, DefaultMemory, f64>,
+{
+    use symbi::sim::decomp::{FinePartition, LocalCopy, flatten, plan_cons_schema, plan_schema, unflatten};
+    use symbi::sim::refinement::launched::{
+        Held, RefinedConfig, RefinedGrids, RefinedPlans, evolve_refined_worker, face_stencil_boxes_of_tile, load_refined_tiles,
+        refined_checkpoint,
+    };
+    use symbi_fabric::rendezvous::{Identity, Rendezvous, connect};
+    use symbi_fabric::{Fnv, WorkerId};
+    use symbi_sim::atlas::{ExchangePlan, Placement, Span, TileId};
+    use symbi_sim::checkpoint::PhysicsIdentity;
+    use symbi_sim::distributed_checkpoint::{CheckpointRequest, block_credit_for};
+    use symbi_sim::phase_table::PhaseTable;
+    use symbi_sim::plan_exchange::{PlanExchange, PlanRole, fabric_for};
+    use symbi_sim::substrate_seam::RegimeKind;
+    use symbi_sim::worker::{WorkerConfig, WorkerError};
+
+    let RefinedLayout { n, partition, owner, placement, me, mine, patch } = layout;
+    let (n, patch, me) = (*n, *patch, *me);
+    let counts = partition.counts();
+    let n_root = partition.n_tiles();
+    let total: usize = n.iter().product();
 
     // the fine level's tiles under the root's cuts, each owned by the worker owning its root tile
-    let fine_partition = FinePartition::of(&partition, patch, 2)?;
+    let fine_partition = FinePartition::of(partition, patch, 2)?;
     let fine_counts = fine_partition.partition.counts();
     let n_fine = fine_partition.partition.n_tiles();
     let fine_owner: Vec<WorkerId> =
@@ -10597,14 +10708,15 @@ fn run_refined_worker_process(
         }
     }
 
-    // the plans of the session: root state, root seed, fine level, flux contributions
+    // the plans of the session in their fabric id order
     let root_store = &*tiles[0].levels[0].state;
     let ng = root_store.geom.ng;
+    let magnetized = root_store.fields.mhd.is_some();
     let schema = plan_schema(root_store);
     let cons_schema = plan_cons_schema(root_store);
     let open = symbi::sim::decomp::Topology::open();
-    let root_plan = ExchangePlan::compile(&partition, &open, &schema, ng).map_err(|e| e.to_string())?;
-    let seed_plan = ExchangePlan::compile(&partition, &open, &cons_schema, ng).map_err(|e| e.to_string())?;
+    let root_plan = ExchangePlan::compile(partition, &open, &schema, ng).map_err(|e| e.to_string())?;
+    let seed_plan = ExchangePlan::compile(partition, &open, &cons_schema, ng).map_err(|e| e.to_string())?;
     let fine_lo = |t: TileId| -> [isize; 2] {
         let tc = unflatten(t.0 as usize, fine_counts);
         let root_ext = partition.tile_extents(fine_partition.root_tile_of(tc));
@@ -10612,21 +10724,76 @@ fn run_refined_worker_process(
     };
     let fine_plan =
         ExchangePlan::compile_shifted(&fine_partition.partition, &open, &schema, ng + 1, &fine_lo).map_err(|e| e.to_string())?;
-    let n_comp = cons_schema.len();
-    let flux_plan = ExchangePlan::flux_contributions(&partition, &open, patch, ng, n_comp).map_err(|e| e.to_string())?;
+    // the register components: the conserved gas fields and, on a magnetized plane, the
+    // out-of-plane cell field
+    let n_comp = cons_schema.len() + if magnetized { DOF - 2 } else { 0 };
+    let flux_plan = ExchangePlan::flux_contributions(partition, &open, patch, ng, n_comp).map_err(|e| e.to_string())?;
+    let mut digests = vec![root_plan.digest, seed_plan.digest, fine_plan.digest, flux_plan.digest];
+    let magnetized_plans = if magnetized {
+        let emf = ExchangePlan::emf_contributions(partition, &open, patch, ng).map_err(|e| e.to_string())?;
+        let faces = ExchangePlan::interface_faces(partition, &open, patch, ng).map_err(|e| e.to_string())?;
+        let corrected = ExchangePlan::corrected_faces(partition, &open, patch, ng).map_err(|e| e.to_string())?;
+        // every refined tile's stencil boxes in whole-grid face indices, derived from the
+        // partition and the patch
+        let mut boxes: Vec<Option<Vec<[Span; 2]>>> = Vec::with_capacity(n_root);
+        for f in 0..n_root {
+            let ext = partition.tile_extents(unflatten(f, counts));
+            let tile = match face_stencil_boxes_of_tile(partition, patch, TileId(f as u32)) {
+                None => None,
+                Some(components) => Some(
+                    components
+                        .iter()
+                        .map(|d| {
+                            let d = d.as_ref().ok_or_else(|| format!("tile {f}: a face component without a stencil box"))?;
+                            Ok(std::array::from_fn(|a| Span { lo: d.spaces[a].lo + ext[a].0 as isize, hi: d.spaces[a].hi + ext[a].0 as isize }))
+                        })
+                        .collect::<Result<Vec<_>, String>>()?,
+                ),
+            };
+            boxes.push(tile);
+        }
+        let stencil = ExchangePlan::face_stencil(partition, &open, &boxes, ng).map_err(|e| e.to_string())?;
+        digests.extend([emf.digest, faces.digest, corrected.digest, stencil.digest]);
+        Some((emf, faces, corrected, stencil))
+    } else {
+        None
+    };
     let stages = cfg.timestepping.stages().len() as u8;
     let table = PhaseTable::refined(stages, 2, stages).map_err(|e| e.to_string())?;
-    let root = PlanExchange::new(&root_plan, &placement, me, table.clone());
+    // each plan takes the fabric ids after the last one's
+    fn placed<'a>(
+        plan: &'a ExchangePlan<2>,
+        placement: &'a Placement,
+        me: WorkerId,
+        table: &PhaseTable,
+        role: PlanRole,
+        offset: &mut u32,
+    ) -> PlanExchange<'a, 2> {
+        let p = PlanExchange::new(plan, placement, me, table.clone()).with_role(role, *offset);
+        *offset += p.lens().len() as u32;
+        p
+    }
+    let root = PlanExchange::new(&root_plan, placement, me, table.clone());
     let mut offset = root.lens().len() as u32;
-    let seed = PlanExchange::new(&seed_plan, &placement, me, table.clone()).with_role(PlanRole::RootSeed, offset);
-    offset += seed.lens().len() as u32;
-    let fine = PlanExchange::new(&fine_plan, &fine_placement, me, table.clone()).with_role(PlanRole::Fine, offset);
-    offset += fine.lens().len() as u32;
-    let flux = (flux_plan.transfers().count() > 0)
-        .then(|| PlanExchange::new(&flux_plan, &placement, me, table.clone()).with_role(PlanRole::FluxContribution, offset));
+    let mut next = |plan, placement, role| placed(plan, placement, me, &table, role, &mut offset);
+    let seed = next(&seed_plan, placement, PlanRole::RootSeed);
+    let fine = next(&fine_plan, &fine_placement, PlanRole::Fine);
+    let transported = flux_plan.transfers().count() > 0;
+    let flux = transported.then(|| next(&flux_plan, placement, PlanRole::FluxContribution));
+    let (emf, faces, corrected, stencil) = match magnetized_plans.as_ref() {
+        Some((emf, faces, corrected, stencil)) => {
+            let emf = transported.then(|| next(emf, placement, PlanRole::EmfContribution));
+            let faces = transported.then(|| next(faces, placement, PlanRole::InterfaceFace));
+            let corrected = (corrected.transfers().count() > 0).then(|| next(corrected, placement, PlanRole::CorrectedFace));
+            let old = next(stencil, placement, PlanRole::FaceStencil);
+            let new = next(stencil, placement, PlanRole::FaceStencil);
+            (emf, faces, corrected, Some((old, new)))
+        }
+        None => (None, None, None, None),
+    };
     let plan_digest = {
         let mut h = Fnv::new();
-        for d in [root_plan.digest, seed_plan.digest, fine_plan.digest, flux_plan.digest] {
+        for d in digests {
             h.u32((d.0 >> 32) as u32);
             h.u32(d.0 as u32);
         }
@@ -10657,6 +10824,12 @@ fn run_refined_worker_process(
     let deadline = std::time::Duration::from_secs(600);
     let mut all: Vec<&PlanExchange<'_, 2>> = vec![&root, &seed, &fine];
     all.extend(flux.as_ref());
+    all.extend(emf.as_ref());
+    all.extend(faces.as_ref());
+    all.extend(corrected.as_ref());
+    if let Some((old, new)) = stencil.as_ref() {
+        all.extend([old, new]);
+    }
     let max_payload = (all.iter().flat_map(|p| p.lens()).max().unwrap_or(0) * 8).max(credit as usize);
     let built = build_clock.elapsed();
     let connect_clock = std::time::Instant::now();
@@ -10674,7 +10847,7 @@ fn run_refined_worker_process(
         let _ = std::io::stderr().write_all(line.as_bytes());
     }
     let mut fabric = fabric_for(&all, link, session).with_block_credit(credit);
-    let plans = RefinedPlans { root, seed, fine, flux, emf: None, faces: None, corrected: None, stencil: None };
+    let plans = RefinedPlans { root, seed, fine, flux, emf, faces, corrected, stencil };
     let root_devices = vec![0i32; n_root];
     let fine_devices = vec![0i32; n_fine];
     let held = Held {
@@ -10694,7 +10867,7 @@ fn run_refined_worker_process(
     let identity = PhysicsIdentity::of(&tiles[0].levels[0].state);
     let refined_cfg = RefinedConfig {
         base: WorkerConfig {
-            regime: RegimeKind::of::<f64, 2, Newtonian>(),
+            regime: RegimeKind::of::<f64, 2, R>(),
             timestepping: cfg.timestepping,
             start_time: cfg.start_time,
             t_final: cfg.t_final,
@@ -10714,7 +10887,7 @@ fn run_refined_worker_process(
     let mut reporter = (me == WorkerId(0)).then(|| DecomposedReporter::new(cfg, total as u64, &counts, &slabs));
     let cp_dt = if cfg.checkpoint_interval > 0.0 { cfg.checkpoint_interval * cfg.time_unit } else { f64::INFINITY };
     let cp_width = checkpoint_time_width(cfg);
-    let write = |tiles: &[Hier], fabric: &mut symbi_fabric::Fabric<_>, path: &str, cp_index: u64, accepted: u64| -> Result<(), WorkerError> {
+    let write = |tiles: &[Hierarchy<R, 2, DOF, Cartesian, EosSelect<f64>, DefaultSpace, DefaultMemory, K>], fabric: &mut symbi_fabric::Fabric<_>, path: &str, cp_index: u64, accepted: u64| -> Result<(), WorkerError> {
         let extras = checkpoint_metadata(cfg, cp_index);
         let req = CheckpointRequest {
             path,
@@ -10818,7 +10991,7 @@ fn run_worker_process(
     validate_launch_scope(cfg)?;
     let fault = LaunchFault::from_env(launch.worker)?;
     if cfg.refinement_enabled {
-        return run_refined_worker_process(cfg, prims, launch, fault, drained);
+        return run_refined_worker_process(cfg, prims, bufs, launch, fault, drained);
     }
     // the tiles are built and evolved at the grid's dimension; every helper below is
     // dimension-generic, so one body serves the plane and the volume
