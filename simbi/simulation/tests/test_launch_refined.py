@@ -9,11 +9,20 @@
 # and a patch face on a cut, whose fine ghosts would read the root halo past
 # its depth. each arm runs the refined blast in newtonian hydro and the
 # magnetized blast in 2.5D newtonian MHD, the latter under the Contact and the
-# UCT edge EMF, its staggered faces on both levels compared with the cells.
+# UCT edge EMF, its staggered faces on both levels compared with the cells; a
+# resumed launch names no scheme flag, so the recorded edge EMF continues. the
+# same fresh run and repartitioned restart with the workers started as a
+# scheduler starts them: rank and size from the environment, every worker
+# bound on all interfaces and advertising an address this host reaches, each
+# exiting zero, the files carrying the single-process run's build, config and
+# numerics, every staggered face present, and no rendezvous or staging file
+# left behind. dispatch and addressing on one host only: cross-node routing,
+# shared-filesystem visibility and node failure need real nodes.
 #
 # run: pytest -m simulation simbi/simulation/tests/test_launch_refined.py
 # =============================================================================
 
+import os
 from pathlib import Path
 import subprocess
 import sys
@@ -27,6 +36,7 @@ from simbi_configs.examples.newtonian.refined_mhd_blast import RefinedMhdBlast
 
 from simbi.simulation.tests.test_launch import (
     EXIT,
+    _lan_address,
     _layout,
     bounded_processes,  # noqa: F401  the autouse process guard
 )
@@ -37,13 +47,21 @@ pytestmark = pytest.mark.simulation
 # the fine box covers root cells 8..24 on both axes of the 32 x 32 root
 RESOLUTION = (32, 32, 1)
 STEPS = 8
+# the checkpoint attributes that record the build, the configuration and the numerics a file
+# was written under; a launched file carries the single-process run's values
+PROVENANCE = (
+    "build_source_id", "config_source", "config_sha256", "regime", "solver", "reconstruction",
+    "eos", "ct_method", "timestepping", "cfl", "plm_theta", "gamma", "boundary_conditions",
+)
 
 
 class Problem:
     """a refined problem, its launch flags and the matching single-process constructor fields"""
 
-    def __init__(self, cls: type, flags: list[str], fields: str) -> None:
+    def __init__(self, cls: type, flags: list[str], fields: str, ct_method: str) -> None:
         self.cls = cls
+        # the edge EMF the checkpoint records, empty for a run without a staggered field
+        self.ct_method = ct_method
         self.script = str(Path(cls.__module__.replace(".", "/") + ".py"))
         self.flags = flags
         self.fields = fields
@@ -52,13 +70,15 @@ class Problem:
         return _script_reference(self.cls.__module__, self.cls.__name__, RESOLUTION, out, steps, self.fields)
 
     def launch(self, out: Path, layout: Path, steps: int, workers: int, checkpoint: Path | None = None) -> Path:
-        return _script_launch(self.script, RESOLUTION, out, layout, steps, workers, checkpoint=checkpoint, flags=self.flags)
+        # a resumed launch names no scheme flag: the checkpoint's recorded numerics continue
+        flags = [] if checkpoint is not None else self.flags
+        return _script_launch(self.script, RESOLUTION, out, layout, steps, workers, checkpoint=checkpoint, flags=flags)
 
 
 PROBLEMS = [
-    pytest.param(Problem(RefinedBlast, [], ""), id="hydro"),
-    pytest.param(Problem(RefinedMhdBlast, [], ""), id="mhd-contact"),
-    pytest.param(Problem(RefinedMhdBlast, ["--ct-method", "uct"], "ct_method='uct'"), id="mhd-uct"),
+    pytest.param(Problem(RefinedBlast, [], "", ""), id="hydro"),
+    pytest.param(Problem(RefinedMhdBlast, [], "", "contact"), id="mhd-contact"),
+    pytest.param(Problem(RefinedMhdBlast, ["--ct-method", "uct"], "ct_method='uct'", "uct"), id="mhd-uct"),
 ]
 
 
@@ -139,6 +159,98 @@ def test_a_refined_launch_resumed_onto_another_partition_matches(tmp_path: Path,
     with h5py.File(resumed, "r") as f:
         assert int(f["level_0"].attrs["iteration"]) == STEPS
     _assert_same_levels(resumed, reference, "resumed on four workers")
+
+
+def _scheduler_launch(
+    problem: Problem, out: Path, workers: int, partition: str, steps: int, checkpoint: Path | None = None
+) -> tuple[Path, list[str]]:
+    """one process per worker started as a scheduler starts them, rank and size in the
+    environment and no launcher parent, bound on every interface; each advertises an address
+    this host reaches, the ranks cycling through the loopback address, a name that resolves to
+    it and, when the host has one, its network address. returns the final checkpoint and each
+    worker's stderr"""
+    layout = out.parent / f"{out.name}.toml"
+    layout.write_text(
+        f'[execution]\nmode = "scheduler"\nworkers = {workers}\nbind = "0.0.0.0"\n\n[partition]\n{partition}\n\n'
+        f'[checkpoint]\nstaging_mb = 1\ndirectory = "{out}"\n'
+    )
+    cmd = [
+        sys.executable, "-m", "simbi.cli", "launch", problem.script, "--layout", str(layout),
+        "--max-steps", str(steps), "--resolution", ",".join(str(r) for r in RESOLUTION),
+        "--data-directory", str(out.parent / f"{out.name}-ignored"), "--checkpoint-interval", "1e9",
+    ]
+    if checkpoint is not None:
+        cmd += ["--checkpoint", str(checkpoint)]
+    else:
+        cmd += problem.flags
+    addresses = ["127.0.0.1", "localhost"] + [a for a in [_lan_address()] if a]
+    procs = []
+    for rank in range(workers):
+        env = dict(os.environ, SLURM_PROCID=str(rank), SLURM_NTASKS=str(workers), SIMBI_ADVERTISE=addresses[rank % len(addresses)])
+        env.pop("SIMBI_LAUNCHED_WORKER", None)
+        procs.append(subprocess.Popen(cmd, env=env, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, text=True))
+    errs = [p.communicate(timeout=600)[1] for p in procs]
+    for rank, (p, err) in enumerate(zip(procs, errs)):
+        assert p.returncode == 0, f"scheduler-started worker {rank} exited {p.returncode}:\n{err[-3000:]}"
+    finals = sorted(out.glob("*final*.h5"))
+    assert len(finals) == 1, f"expected one final checkpoint in {out}, found {finals}"
+    assert not (out.parent / f"{out.name}-ignored").exists(), "the layout's checkpoint directory was not honored"
+    return finals[0], errs
+
+
+def _assert_clean_output(out: Path) -> None:
+    """the session leaves its published checkpoints and its log: the coordinator retired the
+    rendezvous record and no staging or partial file remains"""
+    leftovers = sorted(p.name for p in out.iterdir() if not (p.suffix == ".h5" and ".chkpt." in p.name) and p.name != "simbi.log")
+    assert not leftovers, f"the session left {leftovers} in {out}"
+
+
+def _assert_provenance(launched: Path, reference: Path, ct_method: str, label: str) -> None:
+    with h5py.File(launched, "r") as fl, h5py.File(reference, "r") as fr:
+        recorded = fl["metadata"].attrs.get("ct_method")
+        recorded = recorded.decode() if isinstance(recorded, bytes) else recorded
+        assert recorded == ct_method, f"{label}: the checkpoint records ct_method {recorded!r}, expected {ct_method!r}"
+        for key in PROVENANCE:
+            assert key in fl["metadata"].attrs, f"{label}: the checkpoint records no {key}"
+            assert fl["metadata"].attrs[key] == fr["metadata"].attrs[key], f"{label}: {key} differs from the single-process run"
+
+
+def _assert_complete_faces(path: Path, magnetized: bool) -> None:
+    """a magnetized file holds every interior face of both levels, n + 1 along the face's own
+    axis; a hydro file holds none"""
+    with h5py.File(path, "r") as f:
+        for level_name, cells in (("level_0", 32), ("level_1", 32)):
+            magnetic = f[level_name].get("partition_0/hydro/magnetic")
+            if not magnetized:
+                assert magnetic is None, f"a hydro file carries faces on {level_name}"
+                continue
+            assert magnetic is not None, f"{level_name} carries no staggered faces"
+            # storage order is (x2, x1): B1 lies on the x1 faces
+            assert magnetic["B1/data"].shape == (cells, cells + 1), f"{level_name} B1 {magnetic['B1/data'].shape}"
+            assert magnetic["B2/data"].shape == (cells + 1, cells), f"{level_name} B2 {magnetic['B2/data'].shape}"
+
+
+@pytest.mark.parametrize("problem", PROBLEMS)
+def test_scheduler_started_refined_workers_match_and_resume_onto_another_partition(tmp_path: Path, problem: Problem) -> None:
+    magnetized = problem.cls is RefinedMhdBlast
+    reference = problem.reference(tmp_path / "single", STEPS)
+    fresh, _ = _scheduler_launch(problem, tmp_path / "fresh", 4, "cuts = [[13], [18]]", STEPS)
+    _assert_same_levels(fresh, reference, "scheduler-started, four workers")
+    _assert_provenance(fresh, reference, problem.ct_method, "scheduler-started, four workers")
+    _assert_complete_faces(fresh, magnetized)
+    _assert_clean_output(tmp_path / "fresh")
+
+    first, _ = _scheduler_launch(problem, tmp_path / "first", 2, "shape = [2, 1]", STEPS // 2)
+    with h5py.File(first, "r") as f:
+        written_at = int(f["level_0"].attrs["iteration"])
+    assert 0 < written_at < STEPS
+    resumed, _ = _scheduler_launch(problem, tmp_path / "resumed", 4, "cuts = [[13], [18]]", STEPS - written_at, checkpoint=first)
+    with h5py.File(resumed, "r") as f:
+        assert int(f["level_0"].attrs["iteration"]) == STEPS
+    _assert_same_levels(resumed, reference, "scheduler-started, resumed on four workers")
+    _assert_provenance(resumed, reference, problem.ct_method, "scheduler-started, resumed on four workers")
+    _assert_complete_faces(resumed, magnetized)
+    _assert_clean_output(tmp_path / "resumed")
 
 
 def _refused(tmp_path: Path, script: str, resolution: tuple[int, ...] | None, layout: Path) -> str:
