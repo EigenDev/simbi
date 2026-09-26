@@ -60,6 +60,9 @@ pub struct RefinedPlans<'p, const D: usize> {
     /// the neighbor's copies of the staggered faces on those cuts, at the last substep's
     /// post-tail point after the restriction; absent with `emf`
     pub faces: Option<PlanExchange<'p, D>>,
+    /// the copies across a tile's own cut of the faces its received units corrected, at the
+    /// corrected-faces point; absent with `emf` or when no such face lies on a cut
+    pub corrected: Option<PlanExchange<'p, D>>,
 }
 
 /// the tiles this worker holds: parallel over the held root tiles
@@ -129,6 +132,9 @@ where
     if let Some(faces) = plans.faces.as_ref() {
         assert_eq!(faces.role(), PlanRole::InterfaceFace);
     }
+    if let Some(corrected) = plans.corrected.as_ref() {
+        assert_eq!(corrected.role(), PlanRole::CorrectedFace);
+    }
     assert_eq!(plans.emf.is_some(), plans.faces.is_some(), "the EMF contributions and the interface faces travel together");
     let base = &cfg.base;
     let deadline = base.deadline;
@@ -172,12 +178,6 @@ where
         refuse(base.regime, &fine_stores, &fine_kernels).map_err(|e| fail(fabric, e))?;
         if plans.root.plan().seam.is_some() {
             return Err(fail(fabric, WorkerError::Refused("a polar seam with refinement is outside the launched refinement".into())));
-        }
-        if tiles.iter().any(|h| h.levels[0].state.fields.mhd.is_some()) {
-            return Err(fail(
-                fabric,
-                WorkerError::Refused("a magnetized refined run is outside the launched refinement until its registers move".into()),
-            ));
         }
         refuse_transported_registers(tiles).map_err(|e| fail(fabric, e))?;
         let forced = !base.injection.reject_at.is_empty() || tiles.iter().any(|h| h.forced_fine_rejection_pending());
@@ -606,12 +606,21 @@ where
                 }
             }
             if !rejected {
-                // the reflux on every tile whose registers receive a neighbor's units: the
-                // cells and faces beside that neighbor's patch, with every unit landed
-                for k in 0..n {
-                    if tiles[k].levels.len() == 1 && tiles[k].has_flux_register(0) {
-                        with_device(root_dev(k), || tiles[k].level_restrict_reflux(0, 0.0));
-                    }
+                // the tiles beside a neighbor's patch apply their received units, the faces
+                // that application wrote on their own cuts reach the tiles across them, and
+                // every such tile then recovers its cells beside the patch
+                let beside: Vec<usize> = (0..n).filter(|&k| tiles[k].levels.len() == 1 && tiles[k].has_flux_register(0)).collect();
+                for &k in &beside {
+                    with_device(root_dev(k), || tiles[k].reflux_received());
+                }
+                if let Some(corrected) = plans.corrected.as_ref() {
+                    let fields = face_fields!();
+                    let part = PlanPart { plan: corrected, fields: &fields, devices: held.root_devices, fault: None };
+                    exchange_point_plans(&[part], transport, fabric, ExchangePoint::CorrectedFaces, iter, attempt, deadline, &mut timing.exchange)
+                        .map_err(|e| fail(fabric, e.into()))?;
+                }
+                for &k in &beside {
+                    with_device(root_dev(k), || tiles[k].recover_beside_patch());
                 }
                 root_point!(ExchangePoint::Restrict, iter, attempt);
                 if base.audit_every_point {
@@ -842,6 +851,19 @@ where
         return Err(WorkerError::Refused(
             "a flux-register contribution across a cut on a curvilinear chart is outside the launched \
              refinement until its metric-weighted arithmetic is gated"
+                .into(),
+        ));
+    }
+    // the fine face prolongation beyond a real patch face reads parent faces one to two rows
+    // past the face along its own normal axis; the staggered face lattice of a tile ends at
+    // its interior along that axis, so beyond a face on a cut those parent faces live on the
+    // neighbor and the tile beyond both cuts
+    let magnetized = tiles.iter().any(|h| h.levels[0].state.fields.mhd.is_some());
+    let face_on_cut = tiles.iter().any(|h| h.transports_registers() || h.has_flux_register(0) && h.levels.len() == 1);
+    if magnetized && face_on_cut {
+        return Err(WorkerError::Refused(
+            "a magnetized patch face on a cut is outside the launched refinement: the fine face \
+             prolongation beyond it reads parent faces past the tile's face lattice along its normal axis"
                 .into(),
         ));
     }

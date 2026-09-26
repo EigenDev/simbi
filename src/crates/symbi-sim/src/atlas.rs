@@ -319,6 +319,10 @@ pub enum ExchangePoint {
     /// one point of one fine substep of a refined run: the fine plan moves here, the root
     /// plan carries nothing
     Fine { substep: u8, point: FinePoint },
+    /// after the tiles beside a neighbor's patch applied their received register units: the
+    /// staggered faces those applications wrote on a cut reach the tile across it before any
+    /// tile recovers its cells beside the patch
+    CorrectedFaces,
     /// after the restriction and the reflux into the root: the root halos carry the
     /// restricted covered cells before the next step's prolongation snapshot and the
     /// checkpoint read them
@@ -387,6 +391,7 @@ impl ExchangePoint {
             ExchangePoint::Audit(AuditAt::Restrict) => (8, 0, 0),
             ExchangePoint::Audit(AuditAt::Checkpoint) => (9, 0, 0),
             ExchangePoint::Restrict => (10, 0, 0),
+            ExchangePoint::CorrectedFaces => (17, 0, 0),
             ExchangePoint::Fine { substep, point } => match point {
                 FinePoint::Prolong => (11, substep as u32, 0),
                 FinePoint::Troubled(k) => (12, substep as u32, k as u32),
@@ -988,6 +993,73 @@ impl<const D: usize> ExchangePlan<D> {
         Self::slab_plan(partition, topology, ng, schema, slabs)
     }
 
+    /// the plan carrying the staggered faces a tile beside a neighbor's patch corrected on
+    /// one of its own cuts: for every real face of `patch` lying on a cut, the tile across
+    /// it applies edge slabs whose corrected faces run along the plane over the patch's node
+    /// range; a face at an end node of that range lying on the tile's transverse cut is
+    /// held by the tile across that cut too, which receives the corrected copy. one
+    /// transfer per such node and edge family, the face field normal to the corrected
+    /// faces over the cell beside the plane and the patch's cell range along the edge.
+    pub fn corrected_faces(
+        partition: &Partition<D>,
+        topology: &Topology<D>,
+        patch: [(usize, usize); D],
+        ng: usize,
+    ) -> Result<Self, PlanError> {
+        let counts = partition.counts();
+        let families: Vec<usize> = if D == 3 { vec![0, 1, 2] } else { vec![2] };
+        let mut schema = FieldSchema::new();
+        for ax in 0..D {
+            schema = schema.face(&format!("bface{ax}"), ax as u8);
+        }
+        let mut slabs = Vec::new();
+        for face in Self::cut_faces(partition, patch) {
+            let bb = face.ax;
+            let owner = face.dst;
+            let owner_tc = unflatten(owner.0 as usize, counts);
+            let owner_ext = face.dst_ext;
+            // the cell beside the plane on the owner: at the plane beyond a hi face, below it
+            // beyond a lo face
+            let beside = if face.side == 1 { face.face_pos as isize } else { face.face_pos as isize - 1 };
+            for &tt in &families {
+                if tt == bb {
+                    continue;
+                }
+                let aa = 3 - tt - bb;
+                for (node, upper) in [(patch[aa].0, false), (patch[aa].1, true)] {
+                    let on_cut = if upper {
+                        node == owner_ext[aa].0 + owner_ext[aa].1 && owner_tc[aa] + 1 < counts[aa]
+                    } else {
+                        node == owner_ext[aa].0 && owner_tc[aa] > 0
+                    };
+                    if !on_cut {
+                        continue;
+                    }
+                    let mut across_tc = owner_tc;
+                    across_tc[aa] = if upper { owner_tc[aa] + 1 } else { owner_tc[aa] - 1 };
+                    let across = TileId(flatten(across_tc, counts) as u32);
+                    let across_ext = partition.tile_extents(across_tc);
+                    let region = |ext: [(usize, usize); D]| -> [Span; D] {
+                        std::array::from_fn(|axis| {
+                            let origin = ext[axis].0 as isize;
+                            if axis == bb {
+                                Span { lo: beside - origin, hi: beside - origin + 1 }
+                            } else if axis == aa {
+                                Span { lo: node as isize - origin, hi: node as isize - origin + 1 }
+                            } else {
+                                let lo = patch[axis].0.max(ext[axis].0) as isize - origin;
+                                let hi = patch[axis].1.min(ext[axis].0 + ext[axis].1) as isize - origin;
+                                Span { lo, hi }
+                            }
+                        })
+                    };
+                    slabs.push((aa, owner, region(owner_ext), across, region(across_ext)));
+                }
+            }
+        }
+        Self::slab_plan(partition, topology, ng, schema, slabs)
+    }
+
     /// whether `transfer` moves at `point`: an interface audit at the `Audit` points, a banded
     /// cell field at the `Troubled` points, every other transfer at every other root point;
     /// a root plan moves nothing at a fine point.
@@ -997,7 +1069,7 @@ impl<const D: usize> ExchangePlan<D> {
             FieldKind::CellBand(_)
         );
         match point {
-            ExchangePoint::Fine { .. } => false,
+            ExchangePoint::Fine { .. } | ExchangePoint::CorrectedFaces => false,
             ExchangePoint::Audit(_) => transfer.audit,
             ExchangePoint::Troubled(_) => banded,
             _ => !banded && !transfer.audit,
@@ -1540,6 +1612,26 @@ mod tests {
             );
         }
         assert!(banded > 0, "the plan carries no banded transfer");
+    }
+
+    /// a patch corner on two cuts: each tile beside a face on a cut corrects the face at the
+    /// corner on its own transverse cut, and the tile beyond both cuts receives both copies;
+    /// a patch face on one cut with its corner inside the neighbor's interior sends nothing
+    #[test]
+    fn the_corrected_faces_reach_the_tile_beyond_a_corner_on_two_cuts() {
+        let partition = Partition::explicit([32, 32], [vec![17], vec![13]]).unwrap();
+        let open = Topology::open();
+        let corner = ExchangePlan::corrected_faces(&partition, &open, [(12, 17), (8, 13)], 5).unwrap();
+        let moves: Vec<(u32, u32, u16)> = corner.transfers().map(|t| (t.src.0, t.dst.0, t.field)).collect();
+        // tiles: 0 = (x lo, y lo), 1 = (x lo, y hi), 2 = (x hi, y lo), 3 = (x hi, y hi)
+        assert_eq!(moves.len(), 2, "{moves:?}");
+        assert!(moves.contains(&(2, 3, 1)), "the x-face owner sends its corrected y-face to the diagonal: {moves:?}");
+        assert!(moves.contains(&(1, 3, 0)), "the y-face owner sends its corrected x-face to the diagonal: {moves:?}");
+        for t in corner.transfers() {
+            assert_eq!(t.len, 1, "one face per corner node in 2D");
+        }
+        let face_only = ExchangePlan::corrected_faces(&partition, &open, [(12, 17), (4, 10)], 5).unwrap();
+        assert_eq!(face_only.transfers().count(), 0, "the corner lies inside the neighbor's interior");
     }
 
     /// a root plan moves nothing at a fine point and everything but bands and audits at the

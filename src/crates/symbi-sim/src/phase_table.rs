@@ -103,6 +103,7 @@ impl PhaseTable {
             phases.push(skippable(ExchangePoint::Fine { substep: s, point: FinePoint::AuditTail }));
         }
         if substeps > 0 {
+            phases.push(skippable(ExchangePoint::CorrectedFaces));
             phases.push(mandatory(ExchangePoint::Restrict));
             phases.push(skippable(ExchangePoint::Audit(AuditAt::Restrict)));
         }
@@ -235,11 +236,12 @@ mod tests {
             bytes(ExchangePoint::Fine { substep: 0, point: FinePoint::AuditTail })
                 < bytes(ExchangePoint::Fine { substep: 1, point: FinePoint::Prolong })
         );
-        assert!(bytes(ExchangePoint::Fine { substep: 1, point: FinePoint::PostTail }) < bytes(ExchangePoint::Restrict));
+        assert!(bytes(ExchangePoint::Fine { substep: 1, point: FinePoint::PostTail }) < bytes(ExchangePoint::CorrectedFaces));
+        assert!(bytes(ExchangePoint::CorrectedFaces) < bytes(ExchangePoint::Restrict));
         assert!(bytes(ExchangePoint::Restrict) < bytes(ExchangePoint::PostStep));
         assert!(bytes(ExchangePoint::PostStep) < bytes(ExchangePoint::Rollback));
-        // 2 + 3 * 2 + 2 * (1 + 3 * 2 + 2) + 2 + 4
-        assert_eq!(t.len(), 32);
+        // 2 + 3 * 2 + 2 * (1 + 3 * 2 + 2) + 3 + 4
+        assert_eq!(t.len(), 33);
         let flat = PhaseTable::flat(2).unwrap();
         assert_ne!(flat.digest(), t.digest());
         assert_eq!(PhaseTable::flat(2).unwrap().digest(), flat.digest());

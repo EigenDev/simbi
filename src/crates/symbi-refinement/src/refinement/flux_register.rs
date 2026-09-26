@@ -81,6 +81,8 @@ pub struct FluxRegister<const D: usize, const DOF: usize, Mem: MemorySpace> {
     /// the landing slab of a receiving face: the neighbor's unit arrives here and is folded
     /// into the face
     inboxes: [Option<ConsFieldsGeneric<D, DOF, Mem>>; 6],
+    /// the landing slabs of a receiving face's out-of-plane components
+    oop_inboxes: [Option<Vec<Field<f64, D, Mem>>>; 6],
     /// the out-of-plane magnetic components of a partially gridded chart (the cell-centered
     /// B_z of a 2.5D grid), conserved by their induction-flux divergence and refluxed like the
     /// gas: one register face field per component, `DOF - D` of them, magnetized runs only.
@@ -183,6 +185,7 @@ impl<const D: usize, const DOF: usize, Mem: MemorySpace> FluxRegister<D, DOF, Me
             domains,
             roles: [FaceRole::Local; 6],
             inboxes: std::array::from_fn(|_| None),
+            oop_inboxes: std::array::from_fn(|_| None),
             oop,
             debug_coarse_den: std::cell::Cell::new(0.0),
             debug_fine_den: std::cell::Cell::new(0.0),
@@ -222,6 +225,7 @@ impl<const D: usize, const DOF: usize, Mem: MemorySpace> FluxRegister<D, DOF, Me
         faces: [[bool; 2]; D],
         has_energy: bool,
         has_dye: bool,
+        n_oop: usize,
     ) -> symbi_xpu::Result<Self> {
         for ax in 0..D {
             for side in 0..2 {
@@ -230,14 +234,25 @@ impl<const D: usize, const DOF: usize, Mem: MemorySpace> FluxRegister<D, DOF, Me
                 }
                 let idx = 2 * ax + side;
                 assert!(self.faces[idx].is_none(), "a contributing face replaces no local face");
-                assert!(self.oop[idx].is_none(), "out-of-plane components cross no cut");
                 let domain = Self::face_domain(coverage, ax, side);
                 self.faces[idx] = Some(Self::alloc_face(&domain, has_energy, has_dye)?);
+                self.oop[idx] = Self::alloc_oop(&domain, n_oop)?;
                 self.domains[idx] = Some(domain);
                 self.roles[idx] = FaceRole::Contributing;
             }
         }
         Ok(self)
+    }
+
+    fn alloc_oop(domain: &Domain<D>, n_oop: usize) -> symbi_xpu::Result<Option<Vec<Field<f64, D, Mem>>>> {
+        if n_oop == 0 {
+            return Ok(None);
+        }
+        let mut v = Vec::with_capacity(n_oop);
+        for _ in 0..n_oop {
+            v.push(Field::zeros(domain)?);
+        }
+        Ok(Some(v))
     }
 
     /// a register of receiving faces alone, for a tile whose interior holds the coarse
@@ -249,9 +264,12 @@ impl<const D: usize, const DOF: usize, Mem: MemorySpace> FluxRegister<D, DOF, Me
         slabs: &[(usize, usize, Domain<D>)],
         has_energy: bool,
         has_dye: bool,
+        n_oop: usize,
     ) -> symbi_xpu::Result<Self> {
         let mut faces: [Option<ConsFieldsGeneric<D, DOF, Mem>>; 6] = std::array::from_fn(|_| None);
         let mut inboxes: [Option<ConsFieldsGeneric<D, DOF, Mem>>; 6] = std::array::from_fn(|_| None);
+        let mut oop: [Option<Vec<Field<f64, D, Mem>>>; 6] = std::array::from_fn(|_| None);
+        let mut oop_inboxes: [Option<Vec<Field<f64, D, Mem>>>; 6] = std::array::from_fn(|_| None);
         let mut domains: [Option<Domain<D>>; 6] = std::array::from_fn(|_| None);
         let mut roles = [FaceRole::Local; 6];
         for (ax, side, domain) in slabs {
@@ -259,6 +277,8 @@ impl<const D: usize, const DOF: usize, Mem: MemorySpace> FluxRegister<D, DOF, Me
             assert!(faces[idx].is_none(), "one receiving face per side");
             faces[idx] = Some(Self::alloc_face(domain, has_energy, has_dye)?);
             inboxes[idx] = Some(Self::alloc_face(domain, has_energy, has_dye)?);
+            oop[idx] = Self::alloc_oop(domain, n_oop)?;
+            oop_inboxes[idx] = Self::alloc_oop(domain, n_oop)?;
             domains[idx] = Some(domain.clone());
             roles[idx] = FaceRole::Receiving;
         }
@@ -267,7 +287,8 @@ impl<const D: usize, const DOF: usize, Mem: MemorySpace> FluxRegister<D, DOF, Me
             domains,
             roles,
             inboxes,
-            oop: std::array::from_fn(|_| None),
+            oop_inboxes,
+            oop,
             debug_coarse_den: std::cell::Cell::new(f64::NAN),
             debug_fine_den: std::cell::Cell::new(f64::NAN),
         })
@@ -280,6 +301,7 @@ impl<const D: usize, const DOF: usize, Mem: MemorySpace> FluxRegister<D, DOF, Me
         faces: [[bool; 2]; D],
         has_energy: bool,
         has_dye: bool,
+        n_oop: usize,
     ) -> symbi_xpu::Result<Self> {
         let mut slabs = Vec::new();
         for ax in 0..D {
@@ -289,7 +311,25 @@ impl<const D: usize, const DOF: usize, Mem: MemorySpace> FluxRegister<D, DOF, Me
                 }
             }
         }
-        Self::receiving(&slabs, has_energy, has_dye)
+        Self::receiving(&slabs, has_energy, has_dye, n_oop)
+    }
+
+    /// the register fields of face `idx`: the gas components, then the out-of-plane ones
+    fn all_comps(&self, idx: usize) -> Vec<&Field<f64, D, Mem>> {
+        let mut v = comps(self.faces[idx].as_ref().unwrap());
+        if let Some(oop) = self.oop[idx].as_ref() {
+            v.extend(oop.iter());
+        }
+        v
+    }
+
+    /// the inbox fields of receiving face `idx`, ordered like `all_comps`
+    fn all_inbox(&self, idx: usize) -> Vec<&Field<f64, D, Mem>> {
+        let mut v = comps(self.inboxes[idx].as_ref().unwrap());
+        if let Some(oop) = self.oop_inboxes[idx].as_ref() {
+            v.extend(oop.iter());
+        }
+        v
     }
 
     /// clear the inboxes without folding them: a rejected attempt's landed units are discarded
@@ -302,11 +342,12 @@ impl<const D: usize, const DOF: usize, Mem: MemorySpace> FluxRegister<D, DOF, Me
         }
     }
 
-    /// the contributing faces: `(2 * ax + side, components in register order, slab domain)`
+    /// the contributing faces: `(2 * ax + side, components in register order, slab domain)`,
+    /// the out-of-plane components after the gas ones
     pub fn contributing(&self) -> Vec<(usize, Vec<&Field<f64, D, Mem>>, &Domain<D>)> {
         (0..2 * D)
             .filter(|&idx| self.roles[idx] == FaceRole::Contributing)
-            .map(|idx| (idx, comps(self.faces[idx].as_ref().unwrap()), self.domains[idx].as_ref().unwrap()))
+            .map(|idx| (idx, self.all_comps(idx), self.domains[idx].as_ref().unwrap()))
             .collect()
     }
 
@@ -314,7 +355,7 @@ impl<const D: usize, const DOF: usize, Mem: MemorySpace> FluxRegister<D, DOF, Me
     pub fn inboxes(&self) -> Vec<(usize, Vec<&Field<f64, D, Mem>>, &Domain<D>)> {
         (0..2 * D)
             .filter(|&idx| self.roles[idx] == FaceRole::Receiving)
-            .map(|idx| (idx, comps(self.inboxes[idx].as_ref().unwrap()), self.domains[idx].as_ref().unwrap()))
+            .map(|idx| (idx, self.all_inbox(idx), self.domains[idx].as_ref().unwrap()))
             .collect()
     }
 
@@ -345,7 +386,7 @@ impl<const D: usize, const DOF: usize, Mem: MemorySpace> FluxRegister<D, DOF, Me
         let fill = KernelId::FieldFill { ndim: D as u8 }.name();
         let ints = [0i32; 3];
         for (idx, inbox, dom) in self.inboxes() {
-            let face = comps(self.faces[idx].as_ref().unwrap());
+            let face = self.all_comps(idx);
             for (rf, uf) in face.into_iter().zip(inbox) {
                 dispatch_fields_each::<f64, Mem, D>(axpy, dom, &[uf], &[rf], &ints[..D], &[1.0]);
                 dispatch_fields_each::<f64, Mem, D>(fill, dom, &[], &[uf], &[], &[0.0]);
@@ -353,9 +394,10 @@ impl<const D: usize, const DOF: usize, Mem: MemorySpace> FluxRegister<D, DOF, Me
         }
     }
 
-    /// the component count of a face: den, the momenta, energy and dye when present
+    /// the component count of a face: den, the momenta, energy and dye when present, then
+    /// the out-of-plane magnetic components
     pub fn n_components(&self) -> usize {
-        self.faces.iter().flatten().next().map(|f| comps(f).len()).unwrap_or(0)
+        (0..2 * D).find(|&idx| self.faces[idx].is_some()).map(|idx| self.all_comps(idx).len()).unwrap_or(0)
     }
 
     /// the slabs the contributions plan moves, in `(2 * ax + side) * n_comp + comp` order: a
@@ -366,8 +408,8 @@ impl<const D: usize, const DOF: usize, Mem: MemorySpace> FluxRegister<D, DOF, Me
         let mut out = Vec::with_capacity(2 * D * n_comp);
         for idx in 0..2 * D {
             let slab = match self.roles[idx] {
-                FaceRole::Contributing => self.faces[idx].as_ref().map(comps),
-                FaceRole::Receiving => self.inboxes[idx].as_ref().map(comps),
+                FaceRole::Contributing => Some(self.all_comps(idx)),
+                FaceRole::Receiving => Some(self.all_inbox(idx)),
                 FaceRole::Local => None,
             };
             match slab {
@@ -530,7 +572,7 @@ impl<const D: usize, const DOF: usize, Mem: MemorySpace> FluxRegister<D, DOF, Me
                 }
             }
         }
-        for (fields, dom) in self.oop.iter().zip(self.domains.iter()) {
+        for (fields, dom) in self.oop.iter().chain(self.oop_inboxes.iter()).zip(self.domains.iter().cycle()) {
             if let (Some(fields), Some(dom)) = (fields, dom) {
                 for field in fields {
                     dispatch_fields_each::<f64, Mem, D>(name, dom, &[], &[field], &[], &[0.0]);
@@ -665,6 +707,9 @@ impl<const D: usize, const DOF: usize, Mem: MemorySpace> FluxRegister<D, DOF, Me
         let scalars = [-area * w];
         for side in 0..2usize {
             let idx = 2 * dir + side;
+            if self.roles[idx] == FaceRole::Contributing {
+                continue;
+            }
             if let (Some(reg), Some(dom)) = (&self.oop[idx], &self.domains[idx]) {
                 for (k, rf) in reg.iter().enumerate() {
                     dispatch_fields_each::<f64, Mem, D>(name, dom, &[&bflux[dir].f[D + k]], &[rf], &ints[..D], &scalars);
@@ -691,6 +736,9 @@ impl<const D: usize, const DOF: usize, Mem: MemorySpace> FluxRegister<D, DOF, Me
         let scalars = [area * w];
         for side in 0..2usize {
             let idx = 2 * dir + side;
+            if self.roles[idx] == FaceRole::Receiving {
+                continue;
+            }
             if let (Some(reg), Some(dom)) = (&self.oop[idx], &self.domains[idx]) {
                 for (k, rf) in reg.iter().enumerate() {
                     dispatch_fields_each::<f64, Mem, D>(name, dom, &[&fine_bflux[dir].f[D + k]], &[rf], &[], &scalars);
@@ -708,6 +756,9 @@ impl<const D: usize, const DOF: usize, Mem: MemorySpace> FluxRegister<D, DOF, Me
         for ax in 0..D {
             for side in 0..2usize {
                 let idx = 2 * ax + side;
+                if self.roles[idx] == FaceRole::Contributing {
+                    continue;
+                }
                 if let (Some(reg), Some(dom)) = (&self.oop[idx], &self.domains[idx]) {
                     let (cell_dom, arg, sign) = if side == 0 {
                         let spaces: [Space; D] = std::array::from_fn(|aa| {

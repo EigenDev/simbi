@@ -86,10 +86,10 @@ fn a_contribution_folded_by_its_owner_equals_the_local_accumulation_bit_for_bit(
     let left_root = domain([0, 0], [CUT, N as isize]);
     let sender = Register::new(&coverage, &left_root, true, false, 0)
         .expect("sender register")
-        .with_contributing_faces(&coverage, [[false, true], [false, false]], true, false)
+        .with_contributing_faces(&coverage, [[false, true], [false, false]], true, false, 0)
         .expect("contributing face");
     let owner_slab = domain([0, PATCH[1].0], [1, PATCH[1].1]);
-    let owner = Register::receiving(&[(0, 1, owner_slab)], true, false).expect("owner register");
+    let owner = Register::receiving(&[(0, 1, owner_slab)], true, false, 0).expect("owner register");
 
     let dx = [DX; 2];
     let fdx = [DX / RATIO as f64; 2];

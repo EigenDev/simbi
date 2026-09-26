@@ -176,3 +176,82 @@ fn a_contribution_folded_by_its_owner_equals_the_local_accumulation_and_corrects
     }
     assert_eq!(corrected, (PATCH[1].1 - PATCH[1].0 + 1) as usize, "every outside face was corrected");
 }
+
+/// the same split in 3D, where a coarse edge covers two fine sub-edges of unequal EMF and the
+/// unit is their length average times the fine timestep: every edge family with edges in
+/// the cut plane crosses, and the transported slabs equal the single grid's
+#[test]
+fn a_3d_contribution_averages_unequal_sub_edges_like_the_single_grid() {
+    type Register3 = EmfRegister<3, HostMemory>;
+    const NZ: isize = 8;
+    const PZ: (isize, isize) = (2, 6);
+    let domain3 = |lo: [isize; 3], hi: [isize; 3]| Domain::new(std::array::from_fn(|a| Space { name: axis_name(a), lo: lo[a], hi: hi[a] }));
+    let root = domain3([0, 0, 0], [N, N, NZ]);
+    let coverage = domain3([PATCH[0].0, PATCH[1].0, PZ.0], [PATCH[0].1, PATCH[1].1, PZ.1]);
+    let mono = Register3::new(&coverage, &root).expect("mono register");
+    let left_root = domain3([0, 0, 0], [CUT, N, NZ]);
+    let faces = [[false, true], [false, false], [false, false]];
+    let sender = Register3::new(&coverage, &left_root).expect("sender").with_contributing_planes(&coverage, faces).expect("planes");
+    let owner_patch = domain3([PATCH[0].0 - CUT, PATCH[1].0, PZ.0], [PATCH[0].1 - CUT, PATCH[1].1, PZ.1]);
+    let owner = Register3::receiving(&owner_patch, faces).expect("owner");
+    // an edge EMF field per direction over the level's edge nodes: distinct along every
+    // axis, so the two sub-edges of a coarse edge differ
+    let edge_field = |lo: [isize; 3], hi: [isize; 3], offset: [isize; 3], sample: usize| -> EfieldFields<3, HostMemory> {
+        let e: [Field<f64, 3, HostMemory>; 3] = std::array::from_fn(|d| {
+            let dom = domain3(lo, std::array::from_fn(|a| if a == d { hi[a] } else { hi[a] + 1 }));
+            let f = Field::zeros(&dom).expect("efield");
+            for c in dom.iter() {
+                let (x, y, z) = ((c[0] + offset[0]) as f64, (c[1] + offset[1]) as f64, (c[2] + offset[2]) as f64);
+                f.view_mut().set(c, 0.3 * ((0.19 * x + 0.23 * y + 0.37 * z + 0.5 * d as f64 + 0.7 * sample as f64).sin() + 1.2));
+            }
+            f
+        });
+        EfieldFields { e }
+    };
+    let mono_coarse = edge_field([0, 0, 0], [N, N, NZ], [0, 0, 0], 0);
+    let owner_coarse = edge_field([0, 0, 0], [N - CUT, N, NZ], [CUT, 0, 0], 0);
+    let fine: Vec<EfieldFields<3, HostMemory>> = (1..=2)
+        .map(|s| edge_field([RATIO * PATCH[0].0, RATIO * PATCH[1].0, RATIO * PZ.0], [RATIO * PATCH[0].1, RATIO * PATCH[1].1, RATIO * PZ.1], [0, 0, 0], s))
+        .collect();
+    mono.zero();
+    sender.zero();
+    owner.zero();
+    mono.accumulate_coarse(&mono_coarse, DT);
+    owner.accumulate_coarse(&owner_coarse, DT);
+    let fine_dt = DT / RATIO as f64;
+    for substep in &fine {
+        mono.accumulate_fine(substep, fine_dt);
+        sender.accumulate_fine(substep, fine_dt);
+        let contributing = sender.contributing();
+        let inboxes = owner.inboxes();
+        assert_eq!(contributing.len(), 2, "two edge families have edges in the cut plane");
+        for (slot, field, dom) in &contributing {
+            let (_, inbox, inbox_dom) = inboxes.iter().find(|(s, _, _)| s == slot).expect("the owner's inbox of the slot");
+            let src: [Span; 3] = std::array::from_fn(|a| Span { lo: dom.spaces[a].lo, hi: dom.spaces[a].hi });
+            let dst: [Span; 3] = std::array::from_fn(|a| Span { lo: inbox_dom.spaces[a].lo, hi: inbox_dom.spaces[a].hi });
+            let mut wire = vec![0.0; dom.volume()];
+            gather(field, &src, &mut wire);
+            assert!(wire.iter().any(|v| *v != 0.0), "the unit is zero; the gate is vacuous");
+            scatter(inbox, &dst, &wire);
+        }
+        sender.zero_contributions();
+        owner.fold_inboxes();
+    }
+    // the sub-edges differ: the unit is their average, so it equals neither sub-edge scaled
+    let (ef, _) = (&fine[0].e[1], ());
+    let (a, b) = (*ef.view().at([2 * CUT, 2 * PATCH[1].0 + 1, 2 * PZ.0]), *ef.view().at([2 * CUT, 2 * PATCH[1].0 + 1, 2 * PZ.0 + 1]));
+    assert_ne!(a.to_bits(), b.to_bits(), "the two sub-edges of a coarse edge hold one value; the average is untested");
+    // the owner's slab lies in its own index space: the two slabs are walked in lockstep
+    for tt in [1usize, 2usize] {
+        let (mono_reg, dom) = mono.slab_of(tt, 0, 1).expect("mono slab");
+        let (owner_reg, owner_dom) = owner.slab_of(tt, 0, 1).expect("owner slab");
+        assert_eq!(dom.volume(), owner_dom.volume(), "edge family {tt}: the slabs differ in shape");
+        let differing = dom
+            .iter()
+            .zip(owner_dom.iter())
+            .filter(|(m, o)| mono_reg.view().at(*m).to_bits() != owner_reg.view().at(*o).to_bits())
+            .count();
+        assert_eq!(differing, 0, "edge family {tt}: {differing} register values differ between the owner and the single grid");
+        assert!(dom.iter().any(|c| *mono_reg.view().at(c) != 0.0), "edge family {tt}: the register is zero; the gate is vacuous");
+    }
+}

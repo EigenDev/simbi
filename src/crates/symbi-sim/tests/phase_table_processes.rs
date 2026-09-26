@@ -60,7 +60,7 @@ fn moving(point: ExchangePoint) -> Vec<(TransferId, WorkerId, WorkerId, u8)> {
         ExchangePoint::Audit(AuditAt::Stage(_)) | ExchangePoint::Audit(AuditAt::Checkpoint) => {
             vec![(t(8), A, B, 0)]
         }
-        ExchangePoint::Audit(_) | ExchangePoint::Fine { .. } => vec![],
+        ExchangePoint::Audit(_) | ExchangePoint::Fine { .. } | ExchangePoint::CorrectedFaces => vec![],
     }
 }
 

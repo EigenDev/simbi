@@ -40,6 +40,9 @@ pub enum PlanRole {
     /// the neighbor's copies of the staggered faces on a cut: every transfer moves at the
     /// last substep's post-tail point, after the restriction on the tile holding the fine faces
     InterfaceFace,
+    /// the copies across a tile's own cut of the faces its received units corrected: every
+    /// transfer moves at the corrected-faces point
+    CorrectedFace,
 }
 
 /// a fault injected into one plan's staging at one point, for the gates of the
@@ -123,6 +126,7 @@ impl<'p, const D: usize> PlanExchange<'p, D> {
                 point,
                 ExchangePoint::Fine { substep, point: FinePoint::PostTail } if substep + 1 == self.table.substeps()
             ),
+            PlanRole::CorrectedFace => point == ExchangePoint::CorrectedFaces,
         }
     }
 

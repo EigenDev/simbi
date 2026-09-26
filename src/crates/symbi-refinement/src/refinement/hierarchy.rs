@@ -191,6 +191,10 @@ where
     /// level's own step snapshot is rewritten by every substep, so a rejection after the
     /// first substep restores the attempt's entry from here
     pub attempt_entry: Option<ConsFieldsGeneric<NDIM, DOF, Mem>>,
+    /// per axis and side, whether this level's boundary there is a decomposition cut the
+    /// patch continues across: the halo beyond it comes from the level's own exchange, so
+    /// the prolongation leaves it alone
+    pub cut_sides: [[bool; 2]; NDIM],
     /// per-slab intermediates of the axis-split prolongation into this level,
     /// in `cf_ghost_slabs` order. the refinement slabs are fixed, so
     /// the shapes are too: lazily allocated on the first prolongation, reused
@@ -1073,6 +1077,7 @@ where
                 bcell_old: None,
                 bface_old: None,
                 attempt_entry: None,
+                cut_sides: [[false; 2]; NDIM],
                 coverage: None,
                 flux_eq: None,
                 residual_eq: None,
@@ -1154,9 +1159,49 @@ where
         assert!(self.flux_registers.is_empty());
         let state = &self.levels[0].state;
         let cons = &state.fields.cons;
-        self.flux_registers.push(FluxRegister::receiving_on(patch, faces, cons.has_energy(), cons.chi_field().is_some())?);
+        let n_oop = if state.fields.mhd.is_some() { DOF - NDIM } else { 0 };
+        self.flux_registers.push(FluxRegister::receiving_on(patch, faces, cons.has_energy(), cons.chi_field().is_some(), n_oop)?);
         self.emf_registers.push(if state.fields.mhd.is_some() { Some(EmfRegister::receiving(patch, faces)?) } else { None });
         Ok(self)
+    }
+
+    /// apply the received register units of a tile beside a neighbor's patch: the flux
+    /// register to the cells beside the patch, the EMF register to the outside faces this
+    /// tile holds. the recovery of those cells follows once the faces this application wrote
+    /// on the tile's own cuts have reached the tiles across them
+    pub fn reflux_received(&self) {
+        assert_eq!(self.levels.len(), 1, "a tile beside a neighbor's patch holds no fine level");
+        let l = &self.levels[0];
+        if let Some(Some(reg)) = self.emf_registers.first() {
+            let mhd = l.state.fields.mhd.as_ref().expect("an emf register lives on a magnetized level");
+            let inv_dx: [f64; NDIM] = std::array::from_fn(|ax| 1.0 / l.state.geom.dx[ax]);
+            reg.apply(&mhd.bface, &inv_dx);
+        }
+        if let Some(reg) = self.flux_registers.first() {
+            if uniform_cartesian(&l.state) {
+                reg.apply_uniform(&l.state.fields.cons, &l.state.geom.dx);
+            } else {
+                let geo = l.state.geom.block_geometry(l.state.physics.metric);
+                reg.apply(&l.state.fields.cons, &geo);
+            }
+        }
+    }
+
+    /// recover the cells of a tile beside a neighbor's patch after every face around them
+    /// is final: cell B and the magnetic energy over the shell the patch's faces bound, the
+    /// primitives, the physical ghosts
+    pub fn recover_beside_patch(&self) {
+        assert_eq!(self.levels.len(), 1, "a tile beside a neighbor's patch holds no fine level");
+        let l = &self.levels[0];
+        if let Some(Some(reg)) = self.emf_registers.first() {
+            let mhd = l.state.fields.mhd.as_ref().expect("an emf register lives on a magnetized level");
+            let shell = shell_around(reg.coverage(), &l.state.geom.interior);
+            if shell.spaces.iter().all(|s| s.hi > s.lo) {
+                bcell_from_bface_region(mhd, l.state.fields.cons.nrg_field(), &shell);
+            }
+        }
+        prof("c2p", || l.kernels.c2p(&l.state));
+        prof("ghost_fill", || l.kernels.ghost_fill(&l.state));
     }
 
     /// discard every pending register unit of a rejected attempt: the contributing faces and
@@ -1214,6 +1259,7 @@ where
             bcell_old: None,
             bface_old: None,
             attempt_entry: None,
+            cut_sides: [[false; 2]; NDIM],
             coverage: None,
             flux_eq: None,
             residual_eq: None,
@@ -1290,6 +1336,15 @@ where
             validate_coverage(&coverage, parent, ng, prolong_order, real_on_cut).map_err(|detail| {
                 symbi_xpu::XpuError { operation: "refinement region", code: 0, detail }
             })?;
+            // a side of the fine level lying on a cut the patch continues across
+            let cut_sides: [[bool; 2]; NDIM] = std::array::from_fn(|ax| {
+                let whole = &whole_coverages.last().unwrap().spaces[ax];
+                let (c, p) = (&coverage.spaces[ax], &parent.geom.interior.spaces[ax]);
+                [
+                    c.lo == p.lo && parent.boundaries.lo(ax) == BoundaryType::CoarseFine && whole.lo != c.lo,
+                    c.hi == p.hi && parent.boundaries.hi(ax) == BoundaryType::CoarseFine && whole.hi != c.hi,
+                ]
+            });
 
             let n_cells: [usize; NDIM] =
                 std::array::from_fn(|ax| coverage.spaces[ax].size() * RATIO);
@@ -1330,6 +1385,13 @@ where
             // hold the concentration a fine level's own cells advect.
             let fine = if parent.fields.cons.chi_field().is_some() {
                 fine.with_passive_scalar()?
+            } else {
+                fine
+            };
+            // a magnetized parent carrying the rollback snapshot hands the same to its fine
+            // level, so a rejection restores every level's faces
+            let fine = if parent.fields.mhd.as_ref().is_some_and(|m| m.step_snapshot.is_some()) {
+                fine.with_rollback_snapshot()?
             } else {
                 fine
             };
@@ -1376,6 +1438,7 @@ where
                 bcell_old: None,
                 bface_old: None,
                 attempt_entry: Some(attempt_entry),
+                cut_sides,
                 coverage: None,
                 flux_eq: None,
                 residual_eq: None,
@@ -1420,8 +1483,7 @@ where
             let mut register =
                 FluxRegister::new(coverage, &levels[ll].state.geom.interior, has_energy, has_dye, oop_components)?;
             if ll == 0 && contributing.iter().flatten().any(|&c| c) {
-                assert_eq!(oop_components, 0, "a contributing face carries the gas components");
-                register = register.with_contributing_faces(coverage, contributing, has_energy, has_dye)?;
+                register = register.with_contributing_faces(coverage, contributing, has_energy, has_dye, oop_components)?;
             }
             flux_registers.push(register);
             emf_registers.push(if levels[ll].state.fields.mhd.is_some() {
@@ -2989,12 +3051,16 @@ where
                             copy_field_region(&bcell_old[comp], &mhd.bcell[comp], inactive);
                         }
                     }
-                    if let (Some(mhd), Some(bface_old)) =
-                        (l.state.fields.mhd.as_ref(), l.bface_old.as_ref())
-                    {
-                        for dir in 0..NDIM {
-                            let face_core = inactive.extend(dir, 0, 1);
-                            copy_field_region(&bface_old[dir], &mhd.bface[dir], &face_core);
+                }
+                // the core's staggered faces, restored on every tile holding a copy of them:
+                // a tile without a core cell still holds the face on a cut bounding the
+                // neighbor's core
+                if let (Some(mhd), Some(bface_old)) =
+                    (l.state.fields.mhd.as_ref(), l.bface_old.as_ref())
+                {
+                    for dir in 0..NDIM {
+                        if let Some(face_core) = l.state.composite_ownership.inactive_faces[dir].as_ref() {
+                            copy_field_region(&bface_old[dir], &mhd.bface[dir], face_core);
                         }
                     }
                 }
@@ -3486,18 +3552,6 @@ where
             }
         });
         }
-        // a receiving EMF register beside a neighbor's patch: the outside faces this tile
-        // holds, then cell B and the magnetic energy over the shell those faces bound
-        if !has_finer {
-            if let Some(Some(reg)) = self.emf_registers.get(level) {
-                let l = &self.levels[level];
-                let mhd = l.state.fields.mhd.as_ref().expect("an emf register lives on a magnetized level");
-                let inv_dx: [f64; NDIM] = std::array::from_fn(|ax| 1.0 / l.state.geom.dx[ax]);
-                reg.apply(&mhd.bface, &inv_dx);
-                let shell = shell_around(reg.coverage(), &l.state.geom.interior);
-                bcell_from_bface_region(mhd, l.state.fields.cons.nrg_field(), &shell);
-            }
-        }
         if self.has_flux_register(level) {
         prof("refine_reflux_apply", || {
             let l = &self.levels[level];
@@ -3758,10 +3812,19 @@ where
             (fine.state.fields.mhd.as_ref(), parent.bface_old.as_ref())
         {
             let pmhd = parent.state.fields.mhd.as_ref().unwrap();
+            // the sides on a cut the patch continues across take their face halo from the
+            // fine level's own exchange: the prolongation's cross slopes would read parent
+            // faces beyond the parent's own cut, which its face lattice never holds
+            let mut prolonged = fine.state.boundaries.clone();
+            for ax in 0..NDIM {
+                for side in 0..2 {
+                    if fine.cut_sides[ax][side] {
+                        prolonged.0[ax][side] = BoundaryType::Outflow;
+                    }
+                }
+            }
             for dd in 0..NDIM {
-                for slab in
-                    bface_cf_halo_slabs(&fine.state.geom.interior, &fine.state.boundaries, dd)
-                {
+                for slab in bface_cf_halo_slabs(&fine.state.geom.interior, &prolonged, dd) {
                     prof("refine_prolong_face", || {
                         prolong_face_field(dd, &bface_old[..], &pmhd.bface.b[..], &fmhd.bface[dd], &slab, alpha)
                     });

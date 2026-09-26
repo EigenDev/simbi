@@ -2142,6 +2142,11 @@ where
 pub struct CompositeOwnership<const D: usize> {
     pub coverage: Option<Domain<D>>,
     pub inactive: Option<Domain<D>>,
+    /// per axis, the staggered faces of the inactive core this tile holds: the faces bounding
+    /// the patch's core cells along that axis, clipped to the tile's covered faces. a face on
+    /// a cut bounding a core cell of the neighbor belongs to it, so both copies of that face
+    /// are restored with the core
+    pub inactive_faces: [Option<Domain<D>>; D],
 }
 
 impl<const D: usize> Default for CompositeOwnership<D> {
@@ -2149,6 +2154,7 @@ impl<const D: usize> Default for CompositeOwnership<D> {
         Self {
             coverage: None,
             inactive: None,
+            inactive_faces: std::array::from_fn(|_| None),
         }
     }
 }
@@ -2159,7 +2165,7 @@ impl<const D: usize> CompositeOwnership<D> {
     pub fn new(coverage: Option<Domain<D>>, interior: &Domain<D>, donor_width: usize) -> Self {
         match coverage {
             Some(covered) => Self::clipped(covered.clone(), &covered, interior, donor_width, [[false; 2]; D]),
-            None => Self { coverage: None, inactive: None },
+            None => Self::default(),
         }
     }
 
@@ -2179,21 +2185,36 @@ impl<const D: usize> CompositeOwnership<D> {
         cut: [[bool; 2]; D],
     ) -> Self {
         let width = donor_width as isize;
-        let spaces = std::array::from_fn(|axis| {
+        // the patch's core in this tile's index space, wherever it lies
+        let core: [Space; D] = std::array::from_fn(|axis| {
             let local = &coverage.spaces[axis];
             let whole = &global.spaces[axis];
             let tile = &interior.spaces[axis];
             let physical_lo = whole.lo == local.lo && local.lo == tile.lo && !cut[axis][0];
             let physical_hi = whole.hi == local.hi && local.hi == tile.hi && !cut[axis][1];
-            let lo = if physical_lo { local.lo } else { local.lo.max(whole.lo + width) };
-            let hi = if physical_hi { local.hi } else { local.hi.min(whole.hi - width) };
+            let lo = if physical_lo { whole.lo } else { whole.lo + width };
+            let hi = if physical_hi { whole.hi } else { whole.hi - width };
             Space { name: local.name, lo, hi }
         });
-        let inactive = spaces
-            .iter()
-            .all(|space| space.hi > space.lo)
-            .then(|| Domain::new(spaces));
-        Self { coverage: Some(coverage), inactive }
+        let core_holds = core.iter().all(|space| space.hi > space.lo);
+        let spaces: [Space; D] = std::array::from_fn(|axis| {
+            let local = &coverage.spaces[axis];
+            Space { name: local.name, lo: local.lo.max(core[axis].lo), hi: local.hi.min(core[axis].hi) }
+        });
+        let inactive = (core_holds && spaces.iter().all(|space| space.hi > space.lo)).then(|| Domain::new(spaces));
+        let inactive_faces: [Option<Domain<D>>; D] = std::array::from_fn(|dir| {
+            let faces: [Space; D] = std::array::from_fn(|axis| {
+                let local = &coverage.spaces[axis];
+                let one = isize::from(axis == dir);
+                Space {
+                    name: local.name,
+                    lo: local.lo.max(core[axis].lo),
+                    hi: (local.hi + one).min(core[axis].hi + one),
+                }
+            });
+            (core_holds && faces.iter().all(|space| space.hi > space.lo)).then(|| Domain::new(faces))
+        });
+        Self { coverage: Some(coverage), inactive, inactive_faces }
     }
 
     /// True precisely where this level contributes the physical composite solution.
@@ -3014,6 +3035,30 @@ where
     pub fn with_bodies(mut self, bodies: symbi_ib::BodyCollection<f64, D>) -> Self {
         self.attach_bodies(bodies);
         self
+    }
+
+    /// allocate the step-entry rollback snapshot of a magnetized state: the conserved gas,
+    /// cell B and face B a rejected step restores. a curved background allocates it with the
+    /// fields, since its constraint-preserving redo can halve the timestep; on a flat
+    /// background it is a run-level opt-in, which a driver that rejects a step by decree
+    /// (a forced rejection gate) or by a fine level's recovery needs
+    pub fn with_rollback_snapshot(mut self) -> symbi_xpu::Result<Self> {
+        let allocated = self.geom.allocated.clone();
+        let has_energy = self.fields.cons.has_energy();
+        if let Some(mhd) = self.fields.mhd.as_mut() {
+            if mhd.step_snapshot.is_none() {
+                let mut faces: Vec<Field<Sc, D, Mem>> = Vec::with_capacity(D);
+                for dd in 0..D {
+                    faces.push(Field::zeros(mhd.bface.b[dd].domain())?);
+                }
+                mhd.step_snapshot = Some(MhdStepSnapshot {
+                    cons: ConsFieldsGeneric::zeros_with_energy(&allocated, has_energy)?,
+                    bcell: BcellFields { b: array_field_zeros::<D, DOF, Mem, Cell, Sc>(&allocated)? },
+                    bface: BfaceFields { b: faces.try_into().unwrap_or_else(|_| unreachable!()) },
+                });
+            }
+        }
+        Ok(self)
     }
 
     /// allocate the passive-scalar (dye) slots: conserved `D_chi = rho chi`, the
@@ -3953,6 +3998,23 @@ mod tests {
         assert_eq!(bounds(&global), bounds(&on_cut), "the real face on a cut contracts like the single hierarchy's");
         let at_edge = CompositeOwnership::clipped(domain(8, 32), &domain(8, 32), &domain(0, 32), 2, [[false, false]]);
         assert_eq!(at_edge.inactive.unwrap().spaces[0].hi, 32, "a real face on a physical boundary keeps its core");
+    }
+
+    // a fine cut where the patch's core ends: the tile beyond it holds no core cell, yet the
+    // staggered face on the cut bounds the neighbor's last core cell, so both copies of that
+    // face are restored with the core; the single hierarchy restores it once
+    #[test]
+    fn the_face_core_reaches_the_cut_bounding_the_neighbors_core() {
+        let domain = |lo, hi| Domain::new([Space { name: "x", lo, hi }]);
+        let whole = domain(12, 20);
+        let global = CompositeOwnership::new(Some(whole.clone()), &domain(0, 32), 3);
+        let left = CompositeOwnership::clipped(domain(12, 17), &whole, &domain(0, 17), 3, [[false, true]]);
+        let right = CompositeOwnership::clipped(domain(17, 20), &whole, &domain(17, 32), 3, [[true, false]]);
+        let faces = |o: &CompositeOwnership<1>| o.inactive_faces[0].as_ref().map(|d| (d.spaces[0].lo, d.spaces[0].hi));
+        assert_eq!(faces(&global), Some((15, 18)), "the single hierarchy's core faces");
+        assert_eq!(faces(&left), Some((15, 18)), "the left tile holds the core and its faces up to the cut");
+        assert!(right.inactive.is_none(), "the right tile holds no core cell");
+        assert_eq!(faces(&right), Some((17, 18)), "the right tile holds the core face on the cut");
     }
 
     // the atlas invariant: the decomposition transport set is derived from the store's

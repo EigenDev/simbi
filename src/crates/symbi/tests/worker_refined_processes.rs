@@ -205,8 +205,11 @@ fn tile(partition: &Partition<2>, flat: usize, patch: [(usize, usize); 2], ng: u
             faces[ax][side] = beside && across;
         }
     }
+    // a tile whose interior meets the one-cell shell around the patch recovers its cells
+    // beside the patch at the restriction point, faces or none
+    let meets_shell = (0..2).all(|aa| ext[aa].0 < patch[aa].1 + 1 && ext[aa].0 + ext[aa].1 > patch[aa].0.saturating_sub(1));
     let h = Hier::single(root, k);
-    if faces.iter().flatten().any(|&f| f) {
+    if faces.iter().flatten().any(|&f| f) || meets_shell {
         // the patch box in this tile's index space, clipped to its transverse extent
         let patch_local = symbi_algebra::Domain::new(std::array::from_fn(|aa| {
             let origin = ext[aa].0 as isize;
@@ -484,7 +487,7 @@ fn run_worker(arm: &Arm, me: WorkerId, out: PathBuf) -> Result<(), WorkerError> 
     let max_payload = all.iter().flat_map(|p| p.lens()).max().unwrap_or(0) * 8;
     let (link, session) = connect(&r, max_payload.max(64))?;
     let mut fabric = fabric_for(&all, link, session);
-    let plans = RefinedPlans { root, seed, fine, flux, emf: None, faces: None };
+    let plans = RefinedPlans { root, seed, fine, flux, emf: None, faces: None, corrected: None };
     let cfg = RefinedConfig {
         base: WorkerConfig {
             regime: RegimeKind::of::<f64, 2, Newtonian>(),

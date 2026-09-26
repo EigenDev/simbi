@@ -50,7 +50,7 @@ fn moving(point: ExchangePoint) -> Vec<(TransferId, WorkerId, WorkerId)> {
         ExchangePoint::Fine { point: FinePoint::Prolong | FinePoint::Stage(_) | FinePoint::PostTail, .. } => {
             vec![(t(4), A, B), (t(5), B, A)]
         }
-        ExchangePoint::Audit(_) | ExchangePoint::Fine { .. } => vec![],
+        ExchangePoint::Audit(_) | ExchangePoint::Fine { .. } | ExchangePoint::CorrectedFaces => vec![],
     }
 }
 
