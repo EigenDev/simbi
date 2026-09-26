@@ -168,16 +168,23 @@ SESSION_DEADLINE = 600.0
 TERMINATE_GRACE = 5.0
 
 
-def _run_ranks(cmd: list[str], envs: list[dict[str, str]], logs: list[Path], deadline: float, started: list[subprocess.Popen]) -> list[int]:
-    """start one process per environment, each writing its stderr to its own log file, and wait
-    for every exit under one deadline; a spawn failure or the deadline raises. on every exit path
-    each started process is terminated, killed after the grace, and reaped. `started` receives
-    the processes as they start"""
+def _run_ranks(
+    cmd: list[str],
+    envs: list[dict[str, str]],
+    logs: list[Path],
+    deadline: float,
+    started: list[subprocess.Popen],
+    spawn=subprocess.Popen,
+) -> list[int]:
+    """start one process per environment through `spawn`, each writing its stderr to its own
+    log file, and wait for every exit under one deadline; a spawn failure or the deadline raises.
+    on every exit path each started process is terminated, killed after the grace, and reaped.
+    `started` receives the processes as they start"""
     end = time.monotonic() + deadline
     try:
         for env, log in zip(envs, logs):
             with open(log, "w") as sink:
-                started.append(subprocess.Popen(cmd, env=env, stdout=subprocess.DEVNULL, stderr=sink))
+                started.append(spawn(cmd, env=env, stdout=subprocess.DEVNULL, stderr=sink))
         while any(p.poll() is None for p in started):
             if time.monotonic() > end:
                 held = [int(env["SLURM_PROCID"]) for env, p in zip(envs, started) if p.poll() is None]
@@ -265,22 +272,21 @@ def test_a_held_scheduler_worker_is_ended_and_reaped_at_the_deadline(tmp_path: P
     _assert_reaped(started)
 
 
-def test_a_failed_spawn_ends_and_reaps_the_workers_already_started(tmp_path: Path, monkeypatch) -> None:
+def test_a_failed_spawn_ends_and_reaps_the_workers_already_started(tmp_path: Path) -> None:
     # the second spawn fails after the first worker is running and waiting for its peer
     cmd, envs, logs = _scheduler_session(PROBLEMS[0].values[0], tmp_path / "spawn", 2, "shape = [2, 1]", 1)
-    real = subprocess.Popen
     calls = []
 
+    # the injection reaches the worker spawns alone; every other process start is untouched
     def failing(*args, **kwargs):
         calls.append(1)
         if len(calls) == 2:
             raise OSError("spawn refused")
-        return real(*args, **kwargs)
+        return subprocess.Popen(*args, **kwargs)
 
-    monkeypatch.setattr(subprocess, "Popen", failing)
     started: list[subprocess.Popen] = []
     with pytest.raises(OSError, match="spawn refused"):
-        _run_ranks(cmd, envs, logs, SESSION_DEADLINE, started)
+        _run_ranks(cmd, envs, logs, SESSION_DEADLINE, started, spawn=failing)
     assert len(started) == 1 and started[0].returncode is not None and started[0].returncode < 0, (
         "the first worker was not running when the spawn failed; the cleanup gate is vacuous"
     )
