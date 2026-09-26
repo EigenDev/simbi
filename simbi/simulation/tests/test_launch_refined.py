@@ -26,6 +26,7 @@ import os
 from pathlib import Path
 import subprocess
 import sys
+import time
 
 import h5py
 import numpy as np
@@ -161,14 +162,49 @@ def test_a_refined_launch_resumed_onto_another_partition_matches(tmp_path: Path,
     _assert_same_levels(resumed, reference, "resumed on four workers")
 
 
-def _scheduler_launch(
+# one overall deadline for a scheduler-started session, from the first spawn to the last exit
+SESSION_DEADLINE = 600.0
+# the time a terminated worker has to exit before it is killed
+TERMINATE_GRACE = 5.0
+
+
+def _run_ranks(cmd: list[str], envs: list[dict[str, str]], logs: list[Path], deadline: float, started: list[subprocess.Popen]) -> list[int]:
+    """start one process per environment, each writing its stderr to its own log file, and wait
+    for every exit under one deadline; a spawn failure or the deadline raises. on every exit path
+    each started process is terminated, killed after the grace, and reaped. `started` receives
+    the processes as they start"""
+    end = time.monotonic() + deadline
+    try:
+        for env, log in zip(envs, logs):
+            with open(log, "w") as sink:
+                started.append(subprocess.Popen(cmd, env=env, stdout=subprocess.DEVNULL, stderr=sink))
+        while any(p.poll() is None for p in started):
+            if time.monotonic() > end:
+                held = [int(env["SLURM_PROCID"]) for env, p in zip(envs, started) if p.poll() is None]
+                raise TimeoutError(f"workers {held} still running after {deadline} s")
+            time.sleep(0.05)
+        return [p.returncode for p in started]
+    finally:
+        for p in started:
+            if p.poll() is None:
+                p.terminate()
+        grace = time.monotonic() + TERMINATE_GRACE
+        for p in started:
+            while p.poll() is None and time.monotonic() < grace:
+                time.sleep(0.02)
+            if p.poll() is None:
+                p.kill()
+            p.wait()
+
+
+def _scheduler_session(
     problem: Problem, out: Path, workers: int, partition: str, steps: int, checkpoint: Path | None = None
-) -> tuple[Path, list[str]]:
-    """one process per worker started as a scheduler starts them, rank and size in the
-    environment and no launcher parent, bound on every interface; each advertises an address
-    this host reaches, the ranks cycling through the loopback address, a name that resolves to
-    it and, when the host has one, its network address. returns the final checkpoint and each
-    worker's stderr"""
+) -> tuple[list[str], list[dict[str, str]], list[Path]]:
+    """the command, the per-rank environments and the per-rank log files of one process per
+    worker started as a scheduler starts them: rank and size in the environment, no launcher
+    parent, every worker bound on all interfaces and advertising an address this host reaches,
+    the ranks cycling through the loopback address, a name that resolves to it and, when the
+    host has one, its network address. the logs sit beside the output directory"""
     layout = out.parent / f"{out.name}.toml"
     layout.write_text(
         f'[execution]\nmode = "scheduler"\nworkers = {workers}\nbind = "0.0.0.0"\n\n[partition]\n{partition}\n\n'
@@ -184,18 +220,71 @@ def _scheduler_launch(
     else:
         cmd += problem.flags
     addresses = ["127.0.0.1", "localhost"] + [a for a in [_lan_address()] if a]
-    procs = []
+    envs = []
     for rank in range(workers):
         env = dict(os.environ, SLURM_PROCID=str(rank), SLURM_NTASKS=str(workers), SIMBI_ADVERTISE=addresses[rank % len(addresses)])
         env.pop("SIMBI_LAUNCHED_WORKER", None)
-        procs.append(subprocess.Popen(cmd, env=env, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, text=True))
-    errs = [p.communicate(timeout=600)[1] for p in procs]
-    for rank, (p, err) in enumerate(zip(procs, errs)):
-        assert p.returncode == 0, f"scheduler-started worker {rank} exited {p.returncode}:\n{err[-3000:]}"
+        envs.append(env)
+    logs = [out.parent / f"{out.name}-worker{rank}.log" for rank in range(workers)]
+    return cmd, envs, logs
+
+
+def _scheduler_launch(
+    problem: Problem, out: Path, workers: int, partition: str, steps: int, checkpoint: Path | None = None
+) -> Path:
+    """a scheduler-started session run to completion: every worker exits zero and one final
+    checkpoint lands in the layout's directory. returns the final checkpoint"""
+    cmd, envs, logs = _scheduler_session(problem, out, workers, partition, steps, checkpoint)
+    codes = _run_ranks(cmd, envs, logs, SESSION_DEADLINE, [])
+    for rank, (code, log) in enumerate(zip(codes, logs)):
+        assert code == 0, f"scheduler-started worker {rank} exited {code}:\n{log.read_text()[-3000:]}"
     finals = sorted(out.glob("*final*.h5"))
     assert len(finals) == 1, f"expected one final checkpoint in {out}, found {finals}"
     assert not (out.parent / f"{out.name}-ignored").exists(), "the layout's checkpoint directory was not honored"
-    return finals[0], errs
+    return finals[0]
+
+
+def _assert_reaped(started: list[subprocess.Popen]) -> None:
+    for rank, p in enumerate(started):
+        assert p.returncode is not None, f"worker {rank} was left running"
+        try:
+            os.kill(p.pid, 0)
+        except ProcessLookupError:
+            continue
+        raise AssertionError(f"worker {rank} (pid {p.pid}) survives its session")
+
+
+def test_a_held_scheduler_worker_is_ended_and_reaped_at_the_deadline(tmp_path: Path) -> None:
+    # rank 1 of two, started alone: it waits for a coordinator that never writes the rendezvous
+    # record, so it is running when the deadline passes
+    cmd, envs, logs = _scheduler_session(PROBLEMS[0].values[0], tmp_path / "held", 2, "shape = [2, 1]", 1)
+    started: list[subprocess.Popen] = []
+    with pytest.raises(TimeoutError, match=r"workers \[1\] still running"):
+        _run_ranks(cmd, envs[1:], logs[1:], 3.0, started)
+    assert len(started) == 1, "the held worker was never started; the deadline gate is vacuous"
+    _assert_reaped(started)
+
+
+def test_a_failed_spawn_ends_and_reaps_the_workers_already_started(tmp_path: Path, monkeypatch) -> None:
+    # the second spawn fails after the first worker is running and waiting for its peer
+    cmd, envs, logs = _scheduler_session(PROBLEMS[0].values[0], tmp_path / "spawn", 2, "shape = [2, 1]", 1)
+    real = subprocess.Popen
+    calls = []
+
+    def failing(*args, **kwargs):
+        calls.append(1)
+        if len(calls) == 2:
+            raise OSError("spawn refused")
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(subprocess, "Popen", failing)
+    started: list[subprocess.Popen] = []
+    with pytest.raises(OSError, match="spawn refused"):
+        _run_ranks(cmd, envs, logs, SESSION_DEADLINE, started)
+    assert len(started) == 1 and started[0].returncode is not None and started[0].returncode < 0, (
+        "the first worker was not running when the spawn failed; the cleanup gate is vacuous"
+    )
+    _assert_reaped(started)
 
 
 def _assert_clean_output(out: Path) -> None:
@@ -234,17 +323,17 @@ def _assert_complete_faces(path: Path, magnetized: bool) -> None:
 def test_scheduler_started_refined_workers_match_and_resume_onto_another_partition(tmp_path: Path, problem: Problem) -> None:
     magnetized = problem.cls is RefinedMhdBlast
     reference = problem.reference(tmp_path / "single", STEPS)
-    fresh, _ = _scheduler_launch(problem, tmp_path / "fresh", 4, "cuts = [[13], [18]]", STEPS)
+    fresh = _scheduler_launch(problem, tmp_path / "fresh", 4, "cuts = [[13], [18]]", STEPS)
     _assert_same_levels(fresh, reference, "scheduler-started, four workers")
     _assert_provenance(fresh, reference, problem.ct_method, "scheduler-started, four workers")
     _assert_complete_faces(fresh, magnetized)
     _assert_clean_output(tmp_path / "fresh")
 
-    first, _ = _scheduler_launch(problem, tmp_path / "first", 2, "shape = [2, 1]", STEPS // 2)
+    first = _scheduler_launch(problem, tmp_path / "first", 2, "shape = [2, 1]", STEPS // 2)
     with h5py.File(first, "r") as f:
         written_at = int(f["level_0"].attrs["iteration"])
     assert 0 < written_at < STEPS
-    resumed, _ = _scheduler_launch(problem, tmp_path / "resumed", 4, "cuts = [[13], [18]]", STEPS - written_at, checkpoint=first)
+    resumed = _scheduler_launch(problem, tmp_path / "resumed", 4, "cuts = [[13], [18]]", STEPS - written_at, checkpoint=first)
     with h5py.File(resumed, "r") as f:
         assert int(f["level_0"].attrs["iteration"]) == STEPS
     _assert_same_levels(resumed, reference, "scheduler-started, resumed on four workers")
