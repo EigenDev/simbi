@@ -70,7 +70,9 @@ pub use gv_excise::{
     excise_fill_3d_gv, excise_fill_dof3_gv, excise_fill_gv, excise_fill_sph_1d_gv,
     excise_fill_sph_2d_gv, excise_p2c_3d_gv, excise_p2c_gv, excise_p2c_mhd_3d_gv,
     excise_p2c_mhd_gv, excise_p2c_sph_ks_1d_gv, excise_p2c_sph_ks_2d_gv, excise_writeback_3d_gv,
-    excise_writeback_dof1_gv, excise_writeback_dof3_gv, excise_writeback_gv, shell_flux_map_gv,
+    excise_writeback_dof1_gv, excise_writeback_dof3_gv, excise_writeback_gv, fofc_flag_unexcised_2d_gv,
+    fofc_flag_unexcised_3d_gv, fofc_flag_unexcised_sph_1d_gv, fofc_flag_unexcised_sph_2d_gv,
+    shell_flux_map_gv,
 };
 pub use gv_immersed::{
     body_evolved_probe_gv, body_feedback_drain_gv, body_feedback_grav_gv, body_feedback_gv,

@@ -518,6 +518,7 @@ where
             sim,
             Self::kernel_prefix(),
             "", // MHD momentum is always a 3-vector; no DOF-lift tag
+            self.excision_radius,
             self.has_additive_source(),
             &self.freeze_streak,
             |dir| {
@@ -807,7 +808,7 @@ where
     }
 
     fn fofc_mark(&self, sim: &FieldStore<D, 3, Mem, Sc>) -> u64 {
-        crate::regimes::fofc::fofc_mark(sim)
+        crate::regimes::fofc::fofc_mark(sim, self.excision_radius)
     }
 
     fn fofc_flags_in(&self, sim: &FieldStore<D, 3, Mem, Sc>, region: &symbi_algebra::Domain<D>) -> u64 {

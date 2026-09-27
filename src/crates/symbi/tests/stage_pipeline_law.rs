@@ -256,6 +256,9 @@ fn both_drivers_issue_the_identical_per_step_sequence_with_bodies() {
         assert!(count("viscous") > 0, "the viscous gate is on but no viscous transport was issued");
         assert!(count("excise_finalize") > 0, "the excision gate is on but no excision was issued");
         assert_eq!(count("excise_sweep"), EXCISE_PASSES * count("excise_finalize"), "an excision ran short of its passes");
+        // the excision closes every stage and the step: two stages and the post-step fold per
+        // rk2 step, the per-step snapshot marking each step
+        assert_eq!(count("excise_finalize"), 3 * count("snapshot"), "an excision is missing from a stage end or the step end");
         match tag {
             "none" => assert!(!uni.contains(&"penalize".to_string())),
             "one-way-grav" => {
@@ -282,8 +285,8 @@ fn both_drivers_issue_the_identical_per_step_sequence_with_bodies() {
 //   - no stage-input elision: snapshot_stage runs at every gated stage,
 //     including stage 0 of a multi-stage scheme (the uni-grid driver elides
 //     that copy into the per-step snapshot);
-//   - a second ghost_fill per stage, after the halo exchange (cut-corner
-//     consistency);
+//   - one more ghost_fill closing every run of ghost_fills: the physical
+//     refill after the halo exchange (cut-corner consistency);
 //   - the excise protocol is sweep-based with its own equivalence oracle
 //     (decomp_excise_equivalence), so excise-family calls are normalized out
 //     of both logs here, with the halo refresh the decomposed driver issues
@@ -301,20 +304,15 @@ fn decomposed_driver_matches_the_canonical_sequence_modulo_documented_deltas() {
             let uni = rec_a.take();
 
             // transform the canonical log by the documented deltas: drop the
-            // excise family, duplicate each ghost_fill, and materialize the
-            // elided stage-0 snapshot_stage (it directly follows the per-step
-            // snapshot in the canonical order).
+            // excise family, close every ghost_fill run with the refill after the
+            // exchange, and materialize the elided stage-0 snapshot_stage (it
+            // directly follows the per-step snapshot in the canonical order).
             let gated = additive || fofc;
             let mut expected: Vec<String> = Vec::new();
-            for ph in &uni {
-                if ph.starts_with("excise") {
-                    continue;
-                }
-                expected.push(ph.clone());
-                if ph == "ghost_fill" {
-                    expected.push("ghost_fill".to_string());
-                }
-                if ph == "snapshot" && gated {
+            for ph in with_exchange_refills(&uni) {
+                let snapshot = ph == "snapshot";
+                expected.push(ph);
+                if snapshot && gated {
                     expected.push("snapshot_stage".to_string());
                 }
             }
@@ -378,18 +376,13 @@ fn decomposed_per_step_extras_match_the_canonical_order() {
     let mut sim_a = tiny_sim(false).with_bodies(bodies());
     evolve(&mut sim_a, &rec_a, T).expect("uni-grid body drive");
     let mut expected: Vec<String> = Vec::new();
-    for ph in rec_a.take() {
-        if ph.starts_with("excise") {
-            continue;
-        }
-        expected.push(ph.clone());
-        if ph == "ghost_fill" {
-            expected.push("ghost_fill".to_string());
-        }
+    for ph in with_exchange_refills(&rec_a.take()) {
+        let snapshot = ph == "snapshot";
+        expected.push(ph);
         // this sim carries bodies, and the immersed-body pass evaluates its contribution at
         // the stage input, so the snapshot is gated on. the decomposed driver does not elide
         // the stage-0 copy, so it materializes right after the per-step snapshot.
-        if ph == "snapshot" {
+        if snapshot {
             expected.push("snapshot_stage".to_string());
         }
     }
@@ -537,4 +530,19 @@ fn both_drivers_issue_the_identical_stage_sequence() {
             }
         }
     }
+}
+
+/// a canonical log with the excise family dropped and every run of consecutive ghost_fills
+/// closed by one more: the physical refill the decomposed driver runs after each halo exchange
+fn with_exchange_refills(log: &[String]) -> Vec<String> {
+    let kept: Vec<&String> = log.iter().filter(|p| !p.starts_with("excise")).collect();
+    let mut out = Vec::with_capacity(kept.len() * 2);
+    for (ii, p) in kept.iter().enumerate() {
+        out.push((*p).clone());
+        let run_ends = kept.get(ii + 1).is_none_or(|next| *next != "ghost_fill");
+        if *p == "ghost_fill" && run_ends {
+            out.push("ghost_fill".to_string());
+        }
+    }
+    out
 }

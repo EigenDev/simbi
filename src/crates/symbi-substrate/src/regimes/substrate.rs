@@ -683,7 +683,7 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize> Kerne
     }
 
     fn fofc_mark(&self, sim: &FieldStore<D, D, Mem, Sc>) -> u64 {
-        crate::regimes::fofc::fofc_mark(sim)
+        crate::regimes::fofc::fofc_mark(sim, 0.0)
     }
 
     fn fofc_flags_in(&self, sim: &FieldStore<D, D, Mem, Sc>, region: &symbi_algebra::Domain<D>) -> u64 {
@@ -705,6 +705,7 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize> Kerne
             sim,
             "iso",
             "", // iso is DOF == D (no swirl lift)
+            0.0, // no excision on an isothermal background
             self.has_additive_source(),
             &self.freeze_streak,
             |dir| {

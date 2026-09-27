@@ -684,6 +684,35 @@ where
     fold_post_step_with(POST_STEP_PIPELINE, stores, kernels, dt, cx, select)
 }
 
+/// the excision at the end of an accepted stage: the post-step recipe's excision phase, the
+/// same sweeps, rebuild and mask, folded through the driver's context so a tiled driver refreshes
+/// its cut halos after every sweep and after the rebuild, then every tile's physical ghosts
+/// refilled from the filled interior. the recovery writes its candidate primitives on a rejected
+/// cell, so without this fill an excised cell rejected in this stage would carry that candidate
+/// into the next stage's flux sweep; with it, every flux sweep and the first-order redo's stage
+/// input read the vacuum floor across the excised region. the fill writes the live conserved and
+/// primitive fields alone: the step-entry and stage-input snapshots keep their meaning, and the
+/// staggered faces stay with the constrained transport. a no-op on every tile without an excision
+/// region, so an unexcised run issues no call.
+pub fn fold_stage_excision<const D: usize, const DOF: usize, Mem, K>(
+    stores: &[&FieldStore<D, DOF, Mem, f64>],
+    kernels: &[&K],
+    cx: &mut impl StepContext<D, DOF, Mem>,
+) -> Result<(), PostStepError>
+where
+    Mem: MemorySpace,
+    K: KernelSet<D, DOF, Mem, f64> + ?Sized,
+{
+    if !(0..stores.len()).any(|k| kernels[k].excise_pass_count(stores[k]) > 0) {
+        return Ok(());
+    }
+    fold_post_step(stores, kernels, 0.0, cx, |op| op == StepOp::Excise)?;
+    for k in 0..stores.len() {
+        cx.on_tile(k, &mut || prof("ghost_fill", || kernels[k].ghost_fill(stores[k])));
+    }
+    Ok(())
+}
+
 /// fold a post-step table over `stores`. a phase that acts on a tile runs its operation on
 /// every tile, then, as the table declares, recovers every tile's interior primitives from
 /// the conserved state and fills its physical ghosts, then refreshes the cut halos through

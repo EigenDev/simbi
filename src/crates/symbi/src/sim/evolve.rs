@@ -512,6 +512,8 @@ where
             sim.motion = motion_n;
             return true;
         }
+        symbi_sim::stage::fold_stage_excision(&[&*sim], &[k], &mut symbi_sim::stage::SingleGridStep)
+            .unwrap_or_else(|e| panic!("{e}"));
         if sim.has_tracers() {
             crate::regimes::substrate_gpu::device_sync::<Mem>();
             if sim.continuous_tracers.is_some() {

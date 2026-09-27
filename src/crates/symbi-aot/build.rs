@@ -3070,6 +3070,16 @@ fn main() {
         emit_gv(&out_dir, "excise_writeback_sph_2d", 2, &program);
         let program = symbi_discretize::excise_p2c_sph_ks_2d_gv();
         emit_gv(&out_dir, "excise_p2c_sph_ks_2d", 2, &program);
+        // the troubled-cell decode with the excised region dropped, on the fill's own mask: an
+        // excised cell is overwritten by the fill and starts no first-order correction.
+        let program = symbi_discretize::fofc_flag_unexcised_2d_gv();
+        emit_gv(&out_dir, "fofc_flag_unexcised_2d", 2, &program);
+        let program = symbi_discretize::fofc_flag_unexcised_3d_gv();
+        emit_gv(&out_dir, "fofc_flag_unexcised_3d", 3, &program);
+        let program = symbi_discretize::fofc_flag_unexcised_sph_1d_gv();
+        emit_gv(&out_dir, "fofc_flag_unexcised_sph_1d", 1, &program);
+        let program = symbi_discretize::fofc_flag_unexcised_sph_2d_gv();
+        emit_gv(&out_dir, "fofc_flag_unexcised_sph_2d", 2, &program);
         // the horizon shell-flux accretion diagnostic: the per-cell outward boundary flux of
         // Omega = { r_ks < diagnostic_radius }, reduced (field_reduce Add) per quantity into the
         // accretion ledger. cartesian kerr-schild (a = 0); the mass + covariant-energy fluxes.

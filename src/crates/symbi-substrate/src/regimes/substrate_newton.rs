@@ -796,7 +796,7 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize, const
         if DOF != D {
             return 0;
         }
-        crate::regimes::fofc::fofc_mark(sim)
+        crate::regimes::fofc::fofc_mark(sim, 0.0)
     }
 
     fn fofc_flags_in(&self, sim: &FieldStore<D, DOF, Mem, Sc>, region: &symbi_algebra::Domain<D>) -> u64 {
@@ -828,6 +828,7 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize, const
             sim,
             "adiabatic",
             "", // the DOF != D early-return means this path is always DOF == D
+            0.0, // no excision on a newtonian background
             <Self as KernelSet<D, DOF, Mem, Sc>>::has_additive_source(self),
             &self.freeze_streak,
             |dir| {

@@ -105,6 +105,59 @@ fn excised_mask_3d<'t>(cx: TraceCx<'t>, x: &[Gv<'t>; 3]) -> <Gv<'t> as Scalar>::
     ks_excised(x, cx.scalar("kerr_spin"), cx.scalar("excision_radius"))
 }
 
+/// the troubled-cell decode of the recovery status restricted to the cells the excision leaves
+/// live: 1 where the recovery rejected a live cell, 0 on an accepted cell and on every cell of the
+/// excised region, which the excision fill overwrites and which therefore starts no first-order
+/// correction. the region is the fill's own `r_ks(x; a) < r_exc` at the fill's own centroid, so the
+/// two agree cell for cell. reads the status channel and leaves it untouched.
+fn fofc_flag_unexcised_cart_gv(ndim: usize) -> KernelProgram {
+    trace_kernel(|cx| {
+        let status = cx.field("status", "status");
+        let c = centroid(cx, ndim);
+        let excised = match ndim {
+            2 => excised_mask_2d(cx, &[c[0], c[1]]),
+            3 => excised_mask_3d(cx, &[c[0], c[1], c[2]]),
+            _ => panic!("the cartesian excision is baked for 2d and 3d grids, not {ndim}d"),
+        };
+        let troubled = Gv::select(status.cmp_eq(Gv::ZERO), Gv::ZERO, Gv::ONE);
+        let flag = Gv::select(excised, Gv::ZERO, troubled);
+        vec![KernelWrite::new("flag", "flag", flag.node())]
+    })
+}
+
+/// the 2d cartesian kerr-schild troubled-cell decode with the excised region dropped
+pub fn fofc_flag_unexcised_2d_gv() -> KernelProgram {
+    fofc_flag_unexcised_cart_gv(2)
+}
+
+/// the 3d cartesian kerr-schild troubled-cell decode with the excised region dropped
+pub fn fofc_flag_unexcised_3d_gv() -> KernelProgram {
+    fofc_flag_unexcised_cart_gv(3)
+}
+
+/// the spherical kerr-schild troubled-cell decode with the excised slab dropped: the fill's own
+/// `r < r_exc` at the fill's own sampling point
+fn fofc_flag_unexcised_sph_gv(ndim: usize) -> KernelProgram {
+    trace_kernel(|cx| {
+        let status = cx.field("status", "status");
+        let x = sample_position_sph::<3>(cx, ndim);
+        let excised = excised_mask_sph(cx, x[0]);
+        let troubled = Gv::select(status.cmp_eq(Gv::ZERO), Gv::ZERO, Gv::ONE);
+        let flag = Gv::select(excised, Gv::ZERO, troubled);
+        vec![KernelWrite::new("flag", "flag", flag.node())]
+    })
+}
+
+/// the 1d spherical kerr-schild troubled-cell decode with the excised slab dropped
+pub fn fofc_flag_unexcised_sph_1d_gv() -> KernelProgram {
+    fofc_flag_unexcised_sph_gv(1)
+}
+
+/// the 2d spherical kerr-schild troubled-cell decode with the excised slab dropped
+pub fn fofc_flag_unexcised_sph_2d_gv() -> KernelProgram {
+    fofc_flag_unexcised_sph_gv(2)
+}
+
 /// one 2d fill pass over `1 + dof + 1` gas primitives: every excised cell is
 /// frozen at the cold vacuum floor; live cells copy their own state. writes the
 /// filled state to the exc_0.. scratch (the commit is `excise_writeback`, so the

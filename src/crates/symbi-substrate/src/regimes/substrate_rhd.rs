@@ -654,7 +654,7 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize, const
     }
 
     fn fofc_mark(&self, sim: &FieldStore<D, DOF, Mem, Sc>) -> u64 {
-        crate::regimes::fofc::fofc_mark(sim)
+        crate::regimes::fofc::fofc_mark(sim, self.excision_radius)
     }
 
     fn fofc_flags_in(&self, sim: &FieldStore<D, DOF, Mem, Sc>, region: &symbi_algebra::Domain<D>) -> u64 {
@@ -684,6 +684,7 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize, const
             sim,
             "rhd",
             dof_sfx,
+            self.excision_radius,
             <Self as KernelSet<D, DOF, Mem, Sc>>::has_additive_source(self),
             &self.freeze_streak,
             |dir| {

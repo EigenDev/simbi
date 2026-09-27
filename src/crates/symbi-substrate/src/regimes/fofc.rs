@@ -453,16 +453,23 @@ pub(crate) fn fofc_splice<const D: usize, const DOF: usize, Mem, Sc>(
 
 /// decode the recovery status into the troubled-cell flag over the interior and count it:
 /// the first half of a correction pass, which a decomposed driver runs on every tile before
-/// the flags cross the cuts.
+/// the flags cross the cuts. with an excision radius `r_exc > 0` the cells of the excised region
+/// are dropped from the flag before the count, so they neither start a correction nor cross a
+/// cut; the fill overwrites them. `r_exc = 0` decodes every interior cell.
 pub(crate) fn fofc_mark<const D: usize, const DOF: usize, Mem, Sc>(
     sim: &FieldStore<D, DOF, Mem, Sc>,
+    r_exc: f64,
 ) -> u64
 where
     Mem: MemorySpace + Sync,
     Sc: Scalar + OrderedNumeric,
 {
     let flag = &sim.workspace.fofc_flag;
-    troubled_from_status(sim, flag);
+    if r_exc > 0.0 {
+        crate::regimes::substrate_kernels::dispatch_fofc_flag_unexcised(sim, r_exc, flag);
+    } else {
+        troubled_from_status(sim, flag);
+    }
     fofc_flag_count(sim, flag)
 }
 
@@ -609,6 +616,9 @@ pub(crate) fn fofc_orchestrate<const D: usize, const DOF: usize, Mem, Sc>(
     // the DOF-lift tag distinguishing the spherical-swirl (DOF > D) fofc kernels from the DOF == D
     // ones (both share the `_{D}d` grid tag); "" for DOF == D and for the always-3-vector MHD.
     dof_sfx: &str,
+    // the configured excision radius; 0 on a run without excision. the excised cells start no
+    // correction (see `fofc_mark`).
+    r_exc: f64,
     has_additive: bool,
     freeze_streak: &AtomicU32,
     first_order_flux: impl Fn(usize),
@@ -662,7 +672,7 @@ where
     let troubled = if ws.fofc_marked.swap(false, Ordering::Relaxed) {
         fofc_flag_count(sim, flag)
     } else {
-        fofc_mark(sim)
+        fofc_mark(sim, r_exc)
     };
     // a neighboring tile's troubled cell in this tile's first ghost layer puts a face the two
     // tiles share on the first-order flux; this tile then runs the pass with a clean interior

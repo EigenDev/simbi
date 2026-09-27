@@ -2954,6 +2954,11 @@ where
         if outcome == symbi_sim::stage::StageOutcome::RetryStep {
             return true;
         }
+        {
+            let l = &self.levels[level];
+            symbi_sim::stage::fold_stage_excision(&[&l.state], &[&l.kernels], &mut symbi_sim::stage::SingleGridStep)
+                .unwrap_or_else(|e| panic!("level {level}: {e}"));
+        }
         if level == 1 {
             let substep = (alpha0 * RATIO as f64).round() as u8;
             let here = (self.levels[0].state.iteration, substep, ii);

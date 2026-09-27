@@ -2687,6 +2687,13 @@ where
                 if retry {
                     break;
                 }
+                // the stage-end excision, every sweep and the rebuild followed by the exchange
+                // that publishes the excised state into the neighbors' halos
+                drain_devices::<M>(devices);
+                {
+                    let mut step = ScheduledStep { schedule: &schedule, devices, transport, kernels };
+                    crate::stage::fold_stage_excision(&sh, kernels, &mut step).unwrap_or_else(|e| panic!("{e}"));
+                }
                 // refresh the cut halos from each neighbor's stage-updated interior.
                 drain_devices::<M>(devices);
                 exchange_grid(&sh, &schedule, devices, transport);

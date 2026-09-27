@@ -1125,6 +1125,45 @@ where
     1
 }
 
+/// the troubled-cell flag over the interior from the recovery status, with every cell of the
+/// excised region `r_ks < r_exc` dropped: the excision fill overwrites those cells, so they start
+/// no first-order correction. the mask is the fill's own, on the same charts the fill is baked for;
+/// the status channel is read and left untouched.
+pub fn dispatch_fofc_flag_unexcised<const D: usize, const DOF: usize, Mem, Sc>(
+    sim: &FieldStore<D, DOF, Mem, Sc>,
+    r_exc: f64,
+    flag: &Field<Sc, D, Mem>,
+) where
+    Mem: MemorySpace + Sync,
+    Sc: Scalar + OrderedNumeric,
+{
+    let geom = &sim.geom;
+    let name = match geom.coords {
+        symbi_geometry::Geometry::Cartesian if D == 2 || D == 3 => format!("fofc_flag_unexcised_{D}d"),
+        symbi_geometry::Geometry::Spherical if D == 1 || D == 2 => format!("fofc_flag_unexcised_sph_{D}d"),
+        other => panic!("excision is baked for the 2d/3d cartesian and 1d/2d spherical kerr-schild charts, not {other:?} at {D}d"),
+    };
+    let spin = geom
+        .spacetime_scalars
+        .iter()
+        .find(|(n, _)| n == "kerr_spin")
+        .map(|(_, v)| *v)
+        .unwrap_or(0.0);
+    let (x_lo_k, dx_k) = kernel_geom(&geom.x_lo, &geom.dx, &geom.maps, geom.coords, sim.motion.a);
+    let resolve = |bind: &ScalarBind| -> Sc {
+        Sc::from_f64(match bind {
+            ScalarBind::Ref(ScalarRef::KerrSpin) => spin,
+            ScalarBind::Spec(s) if &**s == "excision_radius" => r_exc,
+            ScalarBind::Spec(s) if &**s == "kerr_spin" => spin,
+            ScalarBind::Ref(sref) => geom_scalar(&x_lo_k, &dx_k, &geom.maps, &geom.index_offset, *sref)
+                .unwrap_or_else(|| panic!("fofc_flag_unexcised: unexpected scalar {sref:?}")),
+            other => panic!("fofc_flag_unexcised: unexpected scalar {other:?}"),
+        })
+    };
+    let scalars = scalars_for(&name, &resolve);
+    super::dispatch_fields_each::<Sc, Mem, D>(&name, &geom.interior, &[&sim.fields.c2p_error], &[flag], &[], &scalars);
+}
+
 #[derive(Clone, Copy, PartialEq)]
 enum ExcisePhase {
     Sweep,
