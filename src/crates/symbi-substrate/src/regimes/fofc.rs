@@ -23,7 +23,7 @@ use symbi_algebra::OrderedNumeric;
 use symbi_carrier::Scalar;
 use symbi_grid::Field;
 use symbi_sim::state::{ConsFieldsGeneric, FieldStore, PrimFieldsGeneric};
-use symbi_sim::substrate_seam::{FofcDecision, FofcReport, SourceReplayOutcome};
+use symbi_sim::substrate_seam::{FofcDecision, FofcReport, RetryExclusion, SourceReplayOutcome};
 use symbi_xpu::MemorySpace;
 
 use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
@@ -78,10 +78,11 @@ pub fn fofc_horizon_stats() -> (u64, u64) {
     )
 }
 
-/// configure the horizon radius for the FOFC region split: events at euclidean cell-center
-/// radius |x| < r_h book into the horizon subtotals. cartesian charts only (the euclidean
-/// center radius is meaningless on an angular grid); 0 disables the split. host-memory runs
-/// only — a device run keeps global counts (the masked count would force a device round-trip).
+/// configure the horizon radius for the FOFC reporting split: events at euclidean cell-center
+/// radius |x| < r_h book into the horizon subtotals of the census and the guard receipts.
+/// cartesian charts only (the euclidean center radius is meaningless on an angular grid); 0
+/// disables the split. host-memory runs only — a device run keeps global counts. the split is an
+/// observation: step rejection and the freeze-streak halt read the store's own retry exclusion.
 pub fn fofc_set_horizon_radius(r_h: f64) {
     FOFC_HORIZON_RADIUS_BITS.store(r_h.to_bits(), Ordering::Relaxed);
 }
@@ -159,10 +160,9 @@ where
     count
 }
 
-/// the per-substage count of set mask cells inside the configured horizon radius, when the
-/// split is active: a configured radius, a cartesian chart, and host-resident memory. returns
-/// 0 when no split applies, so the caller derives the exterior count as `total - returned` and
-/// a run with no configured horizon treats every event as exterior.
+/// the per-substage count of set mask cells inside the configured reporting horizon radius, when
+/// the split is active: a configured radius, a cartesian chart, and host-resident memory; 0 when
+/// no split applies. feeds the census and guard subtotals alone.
 fn horizon_split_count<const D: usize, const DOF: usize, Mem, Sc>(
     sim: &FieldStore<D, DOF, Mem, Sc>,
     mask: &Field<Sc, D, Mem>,
@@ -179,6 +179,31 @@ where
         return 0;
     }
     horizon_flagged_count(mask, &sim.geom.interior, &sim.geom.x_lo, &sim.geom.dx, r_h)
+}
+
+/// the freeze acts on the interior that count as evidence for rejecting the step or halting the
+/// run under the store's retry exclusion, out of `frozen` acts. the legacy euclidean sphere is
+/// evaluated by a kernel and a reduction, on a host store and a device store alike.
+fn decision_freezes<const D: usize, const DOF: usize, Mem, Sc>(
+    sim: &FieldStore<D, DOF, Mem, Sc>,
+    freeze: &Field<Sc, D, Mem>,
+    frozen: u64,
+) -> u64
+where
+    Mem: MemorySpace + Sync,
+    Sc: Scalar + OrderedNumeric,
+{
+    match sim.retry_exclusion {
+        RetryExclusion::None => frozen,
+        RetryExclusion::LegacyEuclideanSphere { radius } => {
+            if sim.geom.coords != symbi_geometry::Geometry::Cartesian {
+                return frozen;
+            }
+            let evidence = &sim.workspace.fofc_evidence;
+            crate::regimes::substrate_kernels::dispatch_fofc_evidence_outside_sphere(sim, radius, freeze, evidence);
+            fofc_flag_count(sim, evidence)
+        }
+    }
 }
 
 /// the census counters observe the report: the running totals and their horizon
@@ -775,22 +800,20 @@ where
     // poisoned source / initial datum that FOFC cannot fix freezes every stage. track the
     // consecutive streak and halt loudly once it persists.
     let frozen = fofc_flag_count(sim, freeze);
-    // the freeze-streak halt gates on the exterior (r > r_+) freeze count only. a cell inside the
-    // event horizon is causally disconnected from the exterior — no numerical signal crosses r_+
-    // outward faster than the light cone the CFL bounds — so a persistent freeze there is expected
-    // and harmless: the near-vacuum supersonic infall between the excision surface and the horizon
-    // is the stiffest gas in the domain, and the acceptance criterion for a black-hole run is
-    // exterior events == 0 (the small residual interior->exterior leak is separately bounded by the
-    // excision-leakage gate). the panic exists to catch a poison spreading across the physical
-    // domain; charging it for causally-disconnected interior fiction halts a healthy run. a run with
-    // no configured horizon (flat, angular chart, device) books zero interior events, so exterior ==
-    // total and the halt is bit-unchanged.
+    // the freeze acts that count as decision evidence — for the freeze-streak halt below and the
+    // step retry — are the store's own, under its retry exclusion: every act unless the run names
+    // one. the reporting split inside the configured horizon radius is a separate observation for
+    // the census and the guard receipts and takes no part in either decision.
     let frozen_interior = if frozen > 0 {
         horizon_split_count(sim, freeze)
     } else {
         0
     };
-    let exterior_froze = frozen.saturating_sub(frozen_interior);
+    let exterior_froze = if frozen > 0 {
+        decision_freezes(sim, freeze, frozen)
+    } else {
+        0
+    };
     let streak = advance_freeze_streak(freeze_streak, exterior_froze);
     // the halt above fires on a sixteen-substage streak, so the freezes that
     // precede it are recovered silently; the first few carry the location where

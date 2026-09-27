@@ -50,6 +50,22 @@ pub enum FofcDecision {
     RetryStep,
 }
 
+/// which freeze acts of the first-order correction count as evidence for rejecting a step or
+/// halting a run. a property of one simulation, carried on its store: the decision reads it and
+/// nothing process-wide, so a reporting setting or another simulation in the same process leaves
+/// acceptance unchanged, on the host and on a device alike.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub enum RetryExclusion {
+    /// every freeze act on the interior is evidence
+    #[default]
+    None,
+    /// the python runner's decision before the policy was made explicit, kept as a compatibility
+    /// choice: a freeze act whose cell center lies inside the euclidean sphere `|x| < radius`
+    /// about the chart origin is not evidence, on a cartesian chart; every freeze act is evidence
+    /// on any other chart. the runner passes the outer horizon radius
+    LegacyEuclideanSphere { radius: f64 },
+}
+
 /// the fallback ladder's per-substage report — four orthogonal facts. counts
 /// are named reductions of the channel masks: `troubled` from the
 /// `TroubledCell` decode of the recovery status, `frozen` from the

@@ -1445,6 +1445,9 @@ where
             } else {
                 fine
             };
+            // the retry exclusion is the run's, so every level decides a step's rejection alike
+            let mut fine = fine;
+            fine.retry_exclusion = parent.retry_exclusion;
 
             let kernels = make_kernels(&fine);
             let last = levels.last_mut().unwrap();

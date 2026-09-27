@@ -1123,6 +1123,9 @@ pub struct RkWorkspaceGeneric<
     /// freeze observations are named reductions of this mask; classification elsewhere predicts,
     /// only the actor reports.
     pub freeze_applied: Field<Sc, NDIM, M>,
+    /// the freeze acts that count as decision evidence under the store's retry exclusion, written
+    /// by the exclusion kernel over the interior and reduced into the decision count
+    pub fofc_evidence: Field<Sc, NDIM, M>,
     /// body-feedback reduction scratch, allocated on the first feedback dispatch, so a body-free
     /// sim pays neither the memory nor a per-call allocation. the feedback kernels assign-write
     /// every cell of their dispatch region before the reduction reads it, so a reused buffer
@@ -2286,6 +2289,10 @@ pub struct FieldStore<
     /// Single-grid stores carry the default (both `None`).
     pub composite_ownership: CompositeOwnership<NDIM>,
 
+    /// which freeze acts of the first-order correction count as evidence for rejecting a step or
+    /// halting the run; every one unless the run names an exclusion
+    pub retry_exclusion: crate::substrate_seam::RetryExclusion,
+
     /// discrete mass-transport tracers. position is derived output state;
     /// material ownership is authoritative.
     pub tracers: Option<crate::tracers::TracerSet<NDIM>>,
@@ -2987,6 +2994,7 @@ where
             flux_ho: array_cons_zeros_with_energy(&allocated, has_energy)?,
             fofc_flag: Field::zeros(&allocated)?,
             freeze_applied: Field::zeros(&allocated)?,
+            fofc_evidence: Field::zeros(&allocated)?,
             body_scratch: std::sync::OnceLock::new(),
             #[cfg(debug_assertions)]
             stage_writes: std::sync::Mutex::new(None),
@@ -3002,6 +3010,7 @@ where
                 geom,
                 boundaries,
                 composite_ownership: CompositeOwnership::default(),
+                retry_exclusion: crate::substrate_seam::RetryExclusion::None,
                 // seeding writes the conserved state; the primitives stay meaningless
                 // until the recovery has run.
                 primitives_recovered: std::sync::atomic::AtomicBool::new(false),

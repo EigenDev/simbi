@@ -2432,25 +2432,32 @@ where
     // totals so the benchmark cadence can post the per-window delta (a limiter that fired always
     // shows). cumulative totals also close out the run summary.
     symbi::regimes::fofc::fofc_reset_stats();
-    // on a cartesian black-hole run, split the FOFC counters at the outer horizon
-    // r_+ = M + sqrt(M^2 - a^2): everything inside is causally disconnected (and the
-    // near-horizon infall band fires steadily by design), so the exterior signal is the
-    // acceptance criterion for a production run (exterior events == 0). the split is
-    // load-bearing — the freeze-streak halt gates on the exterior count — so it uses the
-    // true spin-dependent r_+, not the Schwarzschild 2M: cells in (r_+, 2M) at nonzero spin
-    // sit outside the horizon, where a poison must still halt the run.
-    symbi::regimes::fofc::fofc_set_horizon_radius(
-        if cfg.spacetime != "minkowski"
-            && cfg.coord_system == "cartesian"
-            && cfg.schwarzschild_mass > 0.0
-        {
-            let m = cfg.schwarzschild_mass;
-            let a = cfg.kerr_spin.abs().min(m); // |a| <= M; clamp guards the sqrt
-            m + (m * m - a * a).sqrt()
-        } else {
-            0.0
-        },
-    );
+    // on a cartesian black-hole run, the FOFC counters are reported split at the outer horizon
+    // r_+ = M + sqrt(M^2 - a^2), the true spin-dependent radius (cells in (r_+, 2M) at nonzero
+    // spin sit outside the horizon): the exterior subtotal is the production signal.
+    let horizon_radius = if cfg.spacetime != "minkowski"
+        && cfg.coord_system == "cartesian"
+        && cfg.schwarzschild_mass > 0.0
+    {
+        let m = cfg.schwarzschild_mass;
+        let a = cfg.kerr_spin.abs().min(m); // |a| <= M; clamp guards the sqrt
+        m + (m * m - a * a).sqrt()
+    } else {
+        0.0
+    };
+    symbi::regimes::fofc::fofc_set_horizon_radius(horizon_radius);
+    // the retry exclusion of this run, on every level: the freeze acts inside the euclidean sphere
+    // of the outer horizon radius do not reject a step or count toward the freeze-streak halt. a
+    // compatibility choice that reproduces this runner's decision from before the policy was a
+    // property of the simulation; it is not a statement of which cells the scheme may exclude.
+    let retry_exclusion = if horizon_radius > 0.0 {
+        symbi_sim::substrate_seam::RetryExclusion::LegacyEuclideanSphere { radius: horizon_radius }
+    } else {
+        symbi_sim::substrate_seam::RetryExclusion::None
+    };
+    for level in hier.levels.iter_mut() {
+        level.state.retry_exclusion = retry_exclusion;
+    }
     let mut last_fofc: (u64, u64) = (0, 0);
     let mut last_fofc_h: (u64, u64) = (0, 0);
     let mut horizon_note_posted = false;

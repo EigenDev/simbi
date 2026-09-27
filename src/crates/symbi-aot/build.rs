@@ -2888,6 +2888,14 @@ fn main() {
             ndim,
             &program,
         );
+        // the freeze acts outside a legacy euclidean-sphere retry exclusion (cartesian)
+        let program = symbi_discretize::fofc_evidence_outside_sphere_gv(ndim as usize);
+        emit_gv(
+            &out_dir,
+            &format!("fofc_evidence_outside_sphere_{ndim}d"),
+            ndim,
+            &program,
+        );
     }
     // amr field transfer: the refinement-lattice
     // pullbacks at ratio 2, every dimension.

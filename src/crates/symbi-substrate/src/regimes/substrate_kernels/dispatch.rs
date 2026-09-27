@@ -1125,6 +1125,37 @@ where
     1
 }
 
+/// the freeze acts outside the euclidean sphere `|x| < radius` about the chart origin, by cell
+/// center, over the interior of a uniform cartesian grid: the decision evidence of a legacy
+/// euclidean-sphere retry exclusion
+pub fn dispatch_fofc_evidence_outside_sphere<const D: usize, const DOF: usize, Mem, Sc>(
+    sim: &FieldStore<D, DOF, Mem, Sc>,
+    radius: f64,
+    freeze: &Field<Sc, D, Mem>,
+    evidence: &Field<Sc, D, Mem>,
+) where
+    Mem: MemorySpace + Sync,
+    Sc: Scalar + OrderedNumeric,
+{
+    let geom = &sim.geom;
+    assert!(
+        geom.coords == symbi_geometry::Geometry::Cartesian && geom.maps.is_none(),
+        "the euclidean-sphere retry exclusion is defined on a uniform cartesian grid"
+    );
+    let name = format!("fofc_evidence_outside_sphere_{D}d");
+    let (x_lo_k, dx_k) = kernel_geom(&geom.x_lo, &geom.dx, &geom.maps, geom.coords, sim.motion.a);
+    let resolve = |bind: &ScalarBind| -> Sc {
+        Sc::from_f64(match bind {
+            ScalarBind::Spec(s) if &**s == "retry_exclusion_radius" => radius,
+            ScalarBind::Ref(sref) => geom_scalar(&x_lo_k, &dx_k, &geom.maps, &geom.index_offset, *sref)
+                .unwrap_or_else(|| panic!("fofc_evidence_outside_sphere: unexpected scalar {sref:?}")),
+            other => panic!("fofc_evidence_outside_sphere: unexpected scalar {other:?}"),
+        })
+    };
+    let scalars = scalars_for(&name, &resolve);
+    super::dispatch_fields_each::<Sc, Mem, D>(&name, &geom.interior, &[freeze], &[evidence], &[], &scalars);
+}
+
 /// the troubled-cell flag over the interior from the recovery status, with every cell of the
 /// excised region `r_ks < r_exc` dropped: the excision fill overwrites those cells, so they start
 /// no first-order correction. the mask is the fill's own, on the same charts the fill is baked for;

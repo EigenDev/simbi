@@ -125,6 +125,26 @@ pub fn fofc_exterior_flag_gv(
     })
 }
 
+/// the freeze acts that count as decision evidence under a legacy euclidean-sphere retry
+/// exclusion: the mask where the cell center lies at or outside `|x| = retry_exclusion_radius`,
+/// zero inside, on a uniform cartesian grid. the same cell-center radius test the runner's
+/// horizon split applies, traced so a device run makes the decision the host run makes.
+pub fn fofc_evidence_outside_sphere_gv(ndim: usize) -> KernelProgram {
+    trace_kernel(|cx| {
+        let spacing = vec![Spacing::Uniform; ndim];
+        let axes: Vec<usize> = (0..ndim).collect();
+        let centroid = cell_geometry_gv(cx, Coords::Cartesian, &spacing, &axes, ndim).centroid;
+        let mut r2 = Gv::ZERO;
+        for x in &centroid {
+            r2 = r2 + *x * *x;
+        }
+        let radius = cx.scalar("retry_exclusion_radius");
+        let freeze = cx.field("freeze", "freeze");
+        let evidence = Gv::select(r2.cmp_lt(radius * radius), Gv::ZERO, freeze);
+        vec![KernelWrite::new("evidence", "evidence", evidence.node())]
+    })
+}
+
 /// ghost-band fail-loud probe: write 1 where the density is non-finite (NaN or +-inf via
 /// `(rho - rho) != 0`), else 0. run over the allocated domain (interior + ghosts): first-order flux
 /// correction keeps the interior finite and acts on the interior alone, so a poisoned boundary
