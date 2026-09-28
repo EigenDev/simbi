@@ -1521,8 +1521,26 @@ pub(crate) fn post_godunov<const D: usize, const DOF: usize, Mem, Sc>(
 {
     let mhd = sim.fields.mhd.as_ref().expect("MHD requires mhd fields");
 
-    // RK2: the predictor saves its edge EMF and the corrector time-averages its own with it.
+    // each stage's complete edge EMF: the ideal EMF of its sweep plus the ohmic `eta * J` and the
+    // body-localized `eta * chi * J`, the current taken from the live faces, which hold the stage
+    // input here (B^n in the predictor and the forward-Euler stage, B* in the corrector). `eta * J`
+    // carries the resistive diffusion `eta * lap(B)` through the same curl, div-B-clean; chart
+    // routing (cartesian 2.5D/3D, cyl r-z/r-phi, sph r-theta, 3D sph/cyl) lives in
+    // apply_resistive_emf, which refuses any chart without an adjoint-verified resistive curl. ohmic
+    // heating is automatic and energy-conserving: nrg is the total energy, and `bcell_from_bface`
+    // reconciles it with the resistively-decayed B, so the dissipated 1/2 B^2 becomes internal energy
+    // to machine precision.
+    let add_resistive_emf = || {
+        if eta > 0.0 {
+            apply_resistive_emf::<D, DOF, Mem, Sc>(sim, eta);
+        }
+        body_resistive_emf::<D, DOF, Mem, Sc>(sim);
+    };
+
+    // RK2: the predictor saves its complete edge EMF and the corrector time-averages its own
+    // complete EMF with it.
     if stage == 1 {
+        add_resistive_emf();
         save_predictor_emf(sim);
         // the RK2 predictor CT update: save the pre-curl anchor B^n (also the FOFC anchor), then curl
         // E^n to advance bface to the predictor B* = B^n - dt curl(E^n) and interpolate the predictor
@@ -1538,6 +1556,7 @@ pub(crate) fn post_godunov<const D: usize, const DOF: usize, Mem, Sc>(
         return;
     }
     if stage == 2 {
+        add_resistive_emf();
         average_with_predictor_emf(sim);
         // the corrector restores the pre-curl anchor B^n the predictor saved into bface_n (bface holds
         // the predictor B*), then curls the averaged EMF once from B^n. bface_n stays the FOFC redo
@@ -1546,30 +1565,13 @@ pub(crate) fn post_godunov<const D: usize, const DOF: usize, Mem, Sc>(
             (0..D).map(|d| (&mhd.bface_n[d], &mhd.bface[d])).collect();
         fofc_copy_fields(&pairs);
     } else {
-        // the forward-Euler single stage: capture the pre-curl anchor B^n as the FOFC redo anchor, then
-        // curl its current field directly.
+        // the forward-Euler single stage: capture the pre-curl anchor B^n as the FOFC redo anchor,
+        // complete its EMF from B^n, then curl its current field directly.
         let pairs: Vec<(&Field<Sc, D, Mem>, &Field<Sc, D, Mem>)> =
             (0..D).map(|d| (&mhd.bface[d], &mhd.bface_n[d])).collect();
         fofc_copy_fields(&pairs);
+        add_resistive_emf();
     }
-
-    // ohmic resistivity: add `eta * J` to the edge EMF so the curl carries the resistive
-    // diffusion `eta * lap(B)`, div-B-clean via the same curl. `eta = 0` (ideal MHD) skips it;
-    // chart routing (cartesian 2.5D/3D, cyl r-z/r-phi, sph r-theta, 3D sph/cyl) lives in
-    // apply_resistive_emf, which refuses any chart without an adjoint-verified resistive curl.
-    if eta > 0.0 {
-        // ohmic heating is automatic + energy-conserving here: nrg is the total energy (conserved by
-        // the godunov flux), and `bcell_from_bface` reconciles it with the resistively-decayed B, so
-        // the dissipated magnetic energy 1/2 B^2 becomes gas internal energy exactly, to machine
-        // precision. no separate Joule-source term is needed.
-        apply_resistive_emf::<D, DOF, Mem, Sc>(sim, eta);
-    }
-
-    // body-localized Ohmic resistivity: each immersed body running `MagneticSpec::Resistive` adds its
-    // masked `eta*chi*J` to the same edge EMF before the curl. no-op with no immersed body / no
-    // resistive body. rides the same curl, so it is div-B-clean and dissipation-only exactly like the
-    // uniform resistivity above.
-    body_resistive_emf::<D, DOF, Mem, Sc>(sim);
 
     // the curl bface update: `bface -= dt*curl(efield)` per in-plane face axis.
     ct_curl::<D, DOF, Mem, Sc>(sim, dt);
@@ -1593,24 +1595,39 @@ pub fn apply_resistive_emf<const D: usize, const DOF: usize, Mem, Sc>(
     Mem: MemorySpace + Sync,
     Sc: Scalar + OrderedNumeric,
 {
+    let mhd = sim.fields.mhd.as_ref().expect("MHD requires mhd fields");
+    let live: Vec<&Field<Sc, D, Mem>> = mhd.bface.b.iter().collect();
+    apply_resistive_emf_on::<D, DOF, Mem, Sc>(sim, eta, &live);
+}
+
+/// `apply_resistive_emf` with the current read from `faces`, one field per face axis: the live
+/// faces, or the stage-entry faces a first-order redo recomputes the stage EMF from
+pub fn apply_resistive_emf_on<const D: usize, const DOF: usize, Mem, Sc>(
+    sim: &FieldStore<D, DOF, Mem, Sc>,
+    eta: f64,
+    faces: &[&Field<Sc, D, Mem>],
+) where
+    Mem: MemorySpace + Sync,
+    Sc: Scalar + OrderedNumeric,
+{
     use symbi_geometry::Geometry::{Cartesian, Cylindrical, Spherical};
     let sfx = mhd_geom_suffix(sim.geom.coords, &sim.geom.axes);
     match (sim.geom.coords, D) {
-        (Cartesian, 2) => resistive_emf_2d::<D, DOF, Mem, Sc>(sim, eta),
+        (Cartesian, 2) => resistive_emf_2d::<D, DOF, Mem, Sc>(sim, eta, faces),
         // the resistive J is metric-free for every orthogonal chart (the metric lives in the induction
         // curl + the physical energy weights), so the plain difference curl is the adjoint in 3D
         // cartesian and 3D curvilinear (identity axes -> the cyclic curl is right-handed for all of
         // cartesian / spherical / cylindrical); a geometry-agnostic reference verifies each.
         (Cartesian, 3) | (Spherical, 3) | (Cylindrical, 3) => {
-            resistive_emf_3d::<D, DOF, Mem, Sc>(sim, eta)
+            resistive_emf_3d::<D, DOF, Mem, Sc>(sim, eta, faces)
         }
         // 2.5D: cyl r-z is metric-free in-plane and left-handed (its own kernel); the ortho kernel
         // serves the right-handed cyl r-phi and spherical r-theta.
-        (Cylindrical, 2) if sfx == "_cyl_rz" => resistive_emf_cyl_rz::<D, DOF, Mem, Sc>(sim, eta),
+        (Cylindrical, 2) if sfx == "_cyl_rz" => resistive_emf_cyl_rz::<D, DOF, Mem, Sc>(sim, eta, faces),
         (Cylindrical, 2) if sfx == "_cyl_rphi" => {
-            resistive_emf_ortho::<D, DOF, Mem, Sc>(sim, eta, "_cyl_rphi")
+            resistive_emf_ortho::<D, DOF, Mem, Sc>(sim, eta, "_cyl_rphi", faces)
         }
-        (Spherical, 2) if sfx == "_sph" => resistive_emf_ortho::<D, DOF, Mem, Sc>(sim, eta, "_sph"),
+        (Spherical, 2) if sfx == "_sph" => resistive_emf_ortho::<D, DOF, Mem, Sc>(sim, eta, "_sph", faces),
         (coords, d) => panic!(
             "resistive MHD (resistivity > 0) has an adjoint-verified resistive curl for the cartesian \
              2.5D/3D, cylindrical r-z/r-phi, spherical r-theta, and 3D spherical/cylindrical charts \
@@ -1627,6 +1644,7 @@ fn resistive_emf_ortho<const D: usize, const DOF: usize, Mem, Sc>(
     sim: &FieldStore<D, DOF, Mem, Sc>,
     eta: f64,
     sfx: &str,
+    faces: &[&Field<Sc, D, Mem>],
 ) where
     Mem: MemorySpace + Sync,
     Sc: Scalar + OrderedNumeric,
@@ -1654,8 +1672,8 @@ fn resistive_emf_ortho<const D: usize, const DOF: usize, Mem, Sc>(
     let slot = |b: &FieldBind| -> &Field<Sc, D, Mem> {
         match ct_role(b) {
             Some(CtScratch::Edge(CtEdgeCt::Emf)) => &mhd.efield[edge.slot],
-            Some(CtScratch::Face(CtFaceCt::BFace(Transverse::A))) => &mhd.bface[g1],
-            Some(CtScratch::Face(CtFaceCt::BFace(Transverse::B))) => &mhd.bface[g2],
+            Some(CtScratch::Face(CtFaceCt::BFace(Transverse::A))) => faces[g1],
+            Some(CtScratch::Face(CtFaceCt::BFace(Transverse::B))) => faces[g2],
             _ => panic!("resistive_emf_ortho: unknown manifest slot '{}'", b.name()),
         }
     };
@@ -1679,6 +1697,20 @@ fn resistive_emf_ortho<const D: usize, const DOF: usize, Mem, Sc>(
 /// chart/dimension panics; silently ignoring the coupling would drop the body term.
 pub fn body_resistive_emf<const D: usize, const DOF: usize, Mem, Sc>(
     sim: &FieldStore<D, DOF, Mem, Sc>,
+) where
+    Mem: MemorySpace + Sync,
+    Sc: Scalar + OrderedNumeric,
+{
+    let mhd = sim.fields.mhd.as_ref().expect("MHD requires mhd fields");
+    let live: Vec<&Field<Sc, D, Mem>> = mhd.bface.b.iter().collect();
+    body_resistive_emf_on::<D, DOF, Mem, Sc>(sim, &live);
+}
+
+/// `body_resistive_emf` with the current read from `faces`, one field per face axis: the live
+/// faces, or the stage-entry faces a first-order redo recomputes the stage EMF from
+pub fn body_resistive_emf_on<const D: usize, const DOF: usize, Mem, Sc>(
+    sim: &FieldStore<D, DOF, Mem, Sc>,
+    faces: &[&Field<Sc, D, Mem>],
 ) where
     Mem: MemorySpace + Sync,
     Sc: Scalar + OrderedNumeric,
@@ -1751,8 +1783,8 @@ pub fn body_resistive_emf<const D: usize, const DOF: usize, Mem, Sc>(
             let slot = |b: &FieldBind| -> &Field<Sc, D, Mem> {
                 match ct_role(b) {
                     Some(CtScratch::Edge(CtEdgeCt::Emf)) => &mhd.efield[eslot],
-                    Some(CtScratch::Face(CtFaceCt::BFace(Transverse::A))) => &mhd.bface[g1],
-                    Some(CtScratch::Face(CtFaceCt::BFace(Transverse::B))) => &mhd.bface[g2],
+                    Some(CtScratch::Face(CtFaceCt::BFace(Transverse::A))) => faces[g1],
+                    Some(CtScratch::Face(CtFaceCt::BFace(Transverse::B))) => faces[g2],
                     _ => panic!("body_resistive_emf: unknown manifest slot '{}'", b.name()),
                 }
             };
@@ -2877,6 +2909,7 @@ pub fn magnetic_slip_commit<const D: usize, const DOF: usize, Mem, Sc>(
 fn resistive_emf_2d<const D: usize, const DOF: usize, Mem, Sc>(
     sim: &FieldStore<D, DOF, Mem, Sc>,
     eta: f64,
+    faces: &[&Field<Sc, D, Mem>],
 ) where
     Mem: MemorySpace + Sync,
     Sc: Scalar + OrderedNumeric,
@@ -2899,8 +2932,8 @@ fn resistive_emf_2d<const D: usize, const DOF: usize, Mem, Sc>(
     let slot = |b: &FieldBind| -> &Field<Sc, D, Mem> {
         match ct_role(b) {
             Some(CtScratch::Edge(CtEdgeCt::Emf)) => &mhd.efield[edge.slot],
-            Some(CtScratch::Face(CtFaceCt::BFace(Transverse::A))) => &mhd.bface[g1],
-            Some(CtScratch::Face(CtFaceCt::BFace(Transverse::B))) => &mhd.bface[g2],
+            Some(CtScratch::Face(CtFaceCt::BFace(Transverse::A))) => faces[g1],
+            Some(CtScratch::Face(CtFaceCt::BFace(Transverse::B))) => faces[g2],
             _ => panic!("resistive_emf_2d: unknown manifest slot '{}'", b.name()),
         }
     };
@@ -2921,6 +2954,7 @@ fn resistive_emf_2d<const D: usize, const DOF: usize, Mem, Sc>(
 fn resistive_emf_3d<const D: usize, const DOF: usize, Mem, Sc>(
     sim: &FieldStore<D, DOF, Mem, Sc>,
     eta: f64,
+    faces: &[&Field<Sc, D, Mem>],
 ) where
     Mem: MemorySpace + Sync,
     Sc: Scalar + OrderedNumeric,
@@ -2942,8 +2976,8 @@ fn resistive_emf_3d<const D: usize, const DOF: usize, Mem, Sc>(
         let slot = |b: &FieldBind| -> &Field<Sc, D, Mem> {
             match ct_role(b) {
                 Some(CtScratch::Edge(CtEdgeCt::Emf)) => &mhd.efield[edge.slot],
-                Some(CtScratch::Face(CtFaceCt::BFace(Transverse::A))) => &mhd.bface[g1],
-                Some(CtScratch::Face(CtFaceCt::BFace(Transverse::B))) => &mhd.bface[g2],
+                Some(CtScratch::Face(CtFaceCt::BFace(Transverse::A))) => faces[g1],
+                Some(CtScratch::Face(CtFaceCt::BFace(Transverse::B))) => faces[g2],
                 _ => panic!("resistive_emf_3d: unknown manifest slot '{}'", b.name()),
             }
         };
@@ -2968,6 +3002,7 @@ fn resistive_emf_3d<const D: usize, const DOF: usize, Mem, Sc>(
 fn resistive_emf_cyl_rz<const D: usize, const DOF: usize, Mem, Sc>(
     sim: &FieldStore<D, DOF, Mem, Sc>,
     eta: f64,
+    faces: &[&Field<Sc, D, Mem>],
 ) where
     Mem: MemorySpace + Sync,
     Sc: Scalar + OrderedNumeric,
@@ -2995,8 +3030,8 @@ fn resistive_emf_cyl_rz<const D: usize, const DOF: usize, Mem, Sc>(
     let slot = |b: &FieldBind| -> &Field<Sc, D, Mem> {
         match ct_role(b) {
             Some(CtScratch::Edge(CtEdgeCt::Emf)) => &mhd.efield[edge.slot],
-            Some(CtScratch::Face(CtFaceCt::BFace(Transverse::A))) => &mhd.bface[g1],
-            Some(CtScratch::Face(CtFaceCt::BFace(Transverse::B))) => &mhd.bface[g2],
+            Some(CtScratch::Face(CtFaceCt::BFace(Transverse::A))) => faces[g1],
+            Some(CtScratch::Face(CtFaceCt::BFace(Transverse::B))) => faces[g2],
             _ => panic!("resistive_emf_cyl_rz: unknown manifest slot '{}'", b.name()),
         }
     };

@@ -503,6 +503,17 @@ where
                 self.eos_param.value(),
                 0.0,
             );
+            // the complete first-order stage EMF: the resistive current of the stage-entry faces
+            // (B^n in the predictor, B* in the corrector), the same input the saved high-order EMF
+            // took its current from, so a flagged edge carries resistivity once
+            {
+                let mhd = sim.fields.mhd.as_ref().expect("the MHD redo requires magnetic fields");
+                let stage_faces: Vec<&Field<Sc, D, Mem>> = mhd.bface_stage.b.iter().collect();
+                if self.resistivity > 0.0 {
+                    ct::apply_resistive_emf_on(sim, self.resistivity, &stage_faces);
+                }
+                ct::body_resistive_emf_on(sim, &stage_faces);
+            }
             if stage == 2 {
                 ct::average_with_predictor_emf(sim);
             }
