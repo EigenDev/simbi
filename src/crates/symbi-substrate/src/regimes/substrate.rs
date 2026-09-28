@@ -696,7 +696,7 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize> Kerne
         dt: f64,
         a0: f64,
         ac: f64,
-        _stage: u8,
+        stage: u8,
     ) -> symbi_sim::substrate_seam::FofcReport {
         // isothermal is HLLE-only by physics; the first-order redo is the same fan at theta = 0
         // (PCM) — the positivity-preserving Einfeldt fan. the substrate-owned pressure (cs^2*rho)
@@ -706,6 +706,7 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize> Kerne
             "iso",
             "", // iso is DOF == D (no swirl lift)
             0.0, // no excision on an isothermal background
+            stage,
             self.has_additive_source(),
             &self.freeze_streak,
             |dir| {

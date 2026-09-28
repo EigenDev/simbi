@@ -55,6 +55,12 @@ pub struct Injection {
     /// on whichever worker holds it; the first `D` entries index the cell. the cell's state
     /// stays physical, so the correction it triggers is the conservative first-order redo.
     pub trouble_at: Option<(u64, usize, [isize; 3])>,
+    /// hold this worker between its retry-guard decision and the guard's collective: the
+    /// worker holding the rejecting evidence arriving last there
+    pub hold_before_guard: Option<Duration>,
+    /// end this worker's process at its retry-guard decision without a word to its peers: a
+    /// peer lost while the guard's collective waits for it
+    pub vanish_before_guard: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -472,6 +478,78 @@ pub fn fail<L: Link>(fabric: &mut Fabric<L>, err: WorkerError) -> WorkerError {
     err
 }
 
+/// end the run on a retry-guard failure: the guard's decision follows from the agreed timestep and
+/// the agreed rejections, so every worker reaches it at the same point, and a collective there lets
+/// each worker report its own evidence before any peer's abort ends its session
+///
+/// every worker enters the collective, whether or not it holds rejecting cells; it returns at the
+/// deadline or on a lost peer, and the failure stands either way
+pub fn guard_failure<L: Link>(
+    fabric: &mut Fabric<L>,
+    failure: crate::retry_guard::RetryGuardFailure,
+    injection: &Injection,
+    deadline: Duration,
+) -> WorkerError {
+    if let Some(hold) = injection.hold_before_guard {
+        std::thread::sleep(hold);
+    }
+    if injection.vanish_before_guard {
+        std::process::exit(3);
+    }
+    let _ = fabric.collective(OpKind::Any, 1, deadline);
+    fail(fabric, WorkerError::Numerics(failure.detail))
+}
+
+/// the retry guard state every worker of the session holds: the same consecutive severely reduced
+/// root steps and the same thresholds, on every store of every worker. each word is reduced to its
+/// minimum over the workers as its two 32-bit halves sent as the exact integers one above them
+/// (the minimum reduces over positive finite numbers); a worker whose own words differ from the
+/// minimum, or whose stores disagree among themselves, votes, and one vote refuses the session
+pub fn agree_retry_guard<const D: usize, const DOF: usize, M: MemorySpace, L: Link>(
+    stores: &[&FieldStore<D, DOF, M, f64>],
+    fabric: &mut Fabric<L>,
+    deadline: Duration,
+) -> Result<(), WorkerError> {
+    let words = |s: &FieldStore<D, DOF, M, f64>| -> [u64; 4] {
+        [
+            u64::from(s.severe_streak),
+            u64::from(s.retry_guard.max_rejections),
+            s.retry_guard.severe_ratio.to_bits(),
+            u64::from(s.retry_guard.sustained_steps),
+        ]
+    };
+    let mine = words(stores[0]);
+    let locally_agreed = stores.iter().all(|s| words(s) == mine);
+    let mut agreed = [0u64; 4];
+    for (w, word) in agreed.iter_mut().enumerate() {
+        let mut halves = [0u64; 2];
+        for (i, half) in halves.iter_mut().enumerate() {
+            let own = ((mine[w] >> (32 * i)) & 0xffff_ffff) as f64 + 1.0;
+            *half = (f64::from_bits(fabric.collective(OpKind::Min, own.to_bits(), deadline)?) - 1.0) as u64;
+        }
+        *word = halves[0] | halves[1] << 32;
+    }
+    let differs = !locally_agreed || mine != agreed;
+    if fabric.collective(OpKind::Any, u64::from(differs), deadline)? != 0 {
+        let show = |w: [u64; 4]| {
+            format!(
+                "streak {} max_rejections {} severe_ratio {} sustained_steps {}",
+                w[0],
+                w[1],
+                f64::from_bits(w[2]),
+                w[3]
+            )
+        };
+        return Err(WorkerError::Numerics(format!(
+            "the retry guard differs across the workers (this worker's stores agree: {locally_agreed}; here {}, \
+             the minimum over the workers {}); the session does not start",
+            show(mine),
+            show(agreed)
+        )));
+    }
+    Ok(())
+}
+
 /// evolve this worker's tiles from `cfg.start_time` until `cfg.t_final` or
 /// `cfg.max_steps`. `tiles`, `stores`, `kernels` are parallel over the held
 /// tiles; `devices` is indexed by tile id over the whole plan. `on_step` runs
@@ -604,6 +682,12 @@ where
     }
 
     let guard_scope = crate::guard_ledger::open_scope();
+    // every worker resumes the same retry guard: the streak a checkpoint recorded and the
+    // configured thresholds
+    {
+        let sh = shared!();
+        agree_retry_guard(&sh, fabric, cfg.deadline).map_err(|e| fail(fabric, e))?;
+    }
     let mut t = cfg.start_time;
     let mut iter: u64 = 0;
     while t < cfg.t_final && (cfg.max_steps == 0 || iter < cfg.max_steps) {
@@ -643,6 +727,9 @@ where
                 dt = dt.min(f64::from_bits(bits));
             }
         }
+        // the root step's candidate: the agreed timestep after its final-time clamp and caps
+        let guard = stores[0].retry_guard;
+        let mut ledger = crate::retry_guard::RetryLedger::new(dt);
         let mut attempt: u16 = 0;
         loop {
             {
@@ -798,6 +885,18 @@ where
             }
             crate::guard_ledger::step_discard();
             report.rejections += 1;
+            // every worker books the agreed rejection with the evidence its own tiles hold, so
+            // every worker reaches the guard's decision at the same attempt
+            {
+                let mut evidence = Vec::new();
+                for (k, store) in stores.iter().enumerate() {
+                    let site = format!("worker {}, tile {}, level 0", fabric.me().0, tiles[k].0);
+                    evidence.extend(crate::retry_guard::take_evidence(&**store, &site, ledger.rejections()));
+                }
+                if let Err(failure) = ledger.reject(&guard, dt, evidence) {
+                    return Err(guard_failure(fabric, failure, &cfg.injection, deadline));
+                }
+            }
             {
                 let sh = shared!();
                 for k in 0..n {
@@ -845,6 +944,18 @@ where
             dt =
                 retry_timestep(dt, t).map_err(|e| fail(fabric, WorkerError::Numerics(e.detail)))?;
             attempt += 1;
+        }
+        // the sustained-reduction guard, once per accepted root step, before the post-step
+        // recipe and any checkpoint publish it; the agreed timesteps give every worker the same
+        // decision
+        {
+            let mut streak = stores[0].severe_streak;
+            if let Err(failure) = crate::retry_guard::accept(&guard, &mut streak, &ledger, dt) {
+                return Err(guard_failure(fabric, failure, &cfg.injection, deadline));
+            }
+            for store in stores.iter_mut() {
+                store.severe_streak = streak;
+            }
         }
         {
             // the post-step recipe on the accepted step: an operation that writes the conserved

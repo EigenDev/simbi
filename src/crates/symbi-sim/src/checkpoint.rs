@@ -249,6 +249,12 @@ fn build_metadata_group<'a, const D: usize, const DOF: usize, Mem: MemorySpace>(
     if let Some(plane) = identity.cyl_plane {
         builtins.push(("cyl_plane", Attr::Str(plane.into())));
     }
+    // the retry guard's thresholds and the consecutive severely reduced root steps, so a resumed
+    // run continues the streak instead of restarting it
+    builtins.push(("retry_max_rejections", Attr::U64(store.retry_guard.max_rejections as u64)));
+    builtins.push(("retry_severe_ratio", Attr::F64(store.retry_guard.severe_ratio)));
+    builtins.push(("retry_sustained_steps", Attr::U64(store.retry_guard.sustained_steps as u64)));
+    builtins.push(("retry_severe_streak", Attr::U64(store.severe_streak as u64)));
     let mut meta = Tree::new("metadata");
     // explicit user extras win. start with them, then fill in any built-in
     // the user didn't override.
@@ -1045,6 +1051,9 @@ where
     sim.time = meta.time;
     sim.dt = meta.dt;
     sim.iteration = meta.iteration;
+    if let Some(group) = tree.find_group("metadata") {
+        restore_retry_guard(&mut sim.store, |name| group.find_attr(name).cloned())?;
+    }
 
     let level_name = format!("level_{level_index}");
     let level_0 = tree
@@ -3271,6 +3280,28 @@ fn read_region<const D: usize, Mem: MemorySpace>(
     Ok(())
 }
 
+/// the retry guard state a checkpoint recorded: the consecutive severely reduced root steps onto
+/// the store, and the thresholds as the recorded ones the opening report compares with the
+/// configured ones. a file written before the guard existed records neither: the streak starts at 0
+fn restore_retry_guard<const D: usize, const DOF: usize, Mem: MemorySpace>(
+    store: &mut FieldStore<D, DOF, Mem, f64>,
+    get: impl Fn(&str) -> Option<Attr>,
+) -> Result<()> {
+    if let Some(a) = get("retry_severe_streak") {
+        store.severe_streak = a.as_u64("metadata/retry_severe_streak")? as u32;
+    }
+    if let (Some(max), Some(ratio), Some(steps)) =
+        (get("retry_max_rejections"), get("retry_severe_ratio"), get("retry_sustained_steps"))
+    {
+        store.retry_guard_recorded = Some(crate::retry_guard::RetryGuard {
+            max_rejections: max.as_u64("metadata/retry_max_rejections")? as u32,
+            severe_ratio: ratio.as_f64("metadata/retry_severe_ratio")?,
+            sustained_steps: steps.as_u64("metadata/retry_sustained_steps")? as u32,
+        });
+    }
+    Ok(())
+}
+
 fn attr_of<'a>(attrs: &'a [(String, Attr)], name: &str) -> Option<&'a Attr> {
     attrs.iter().find(|(k, _)| k == name).map(|(_, v)| v)
 }
@@ -3314,6 +3345,7 @@ where
             regime_name(&sim.physics.regime)
         )));
     }
+    restore_retry_guard(&mut sim.store, |name| attr_of(&meta, name).cloned())?;
     let level_path = format!("level_{level_index}");
     let level_attrs = read_attrs(file, &level_path)?;
     if let Some(a) = attr_of(&level_attrs, "time") {

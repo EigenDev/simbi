@@ -2584,6 +2584,8 @@ where
         // lives at the step tail. static meshes assign a_n back to itself — no change.
         let motion_n: Vec<_> = stores.iter().map(|s| s.motion).collect();
         let a_n: Vec<f64> = motion_n.iter().map(|motion| motion.a).collect();
+        let guard = stores[0].retry_guard;
+        let mut ledger = crate::retry_guard::RetryLedger::new(dt);
         let injection_ledgers = 'attempt: loop {
             let mut injection_ledgers = vec![std::collections::BTreeMap::new(); n];
             {
@@ -2771,6 +2773,12 @@ where
                 crate::guard_ledger::step_commit();
                 break 'attempt injection_ledgers;
             }
+            // the rejection counts once against this step, whichever tile raised it
+            let mut evidence = Vec::new();
+            for (ii, store) in stores.iter().enumerate() {
+                evidence.extend(crate::retry_guard::take_evidence(&**store, &format!("tile {ii}"), ledger.rejections()));
+            }
+            ledger.reject(&guard, dt, evidence).unwrap_or_else(|failure| panic!("{failure}"));
             // the guard ledger's rejection boundary: the pending acts describe
             // states this per-tile rollback discards.
             crate::guard_ledger::step_discard();
@@ -2801,6 +2809,13 @@ where
             dt =
                 crate::driver::retry_timestep(dt, t).unwrap_or_else(|err| panic!("{}", err.detail));
         };
+        // the sustained-reduction guard, once per accepted step, before anything publishes it;
+        // every tile carries the streak its checkpoint records
+        let mut streak = stores[0].severe_streak;
+        crate::retry_guard::accept(&guard, &mut streak, &ledger, dt).unwrap_or_else(|failure| panic!("{failure}"));
+        for store in stores.iter_mut() {
+            store.severe_streak = streak;
+        }
         if has_discrete_tracers {
             spawn_decomposed_injection(stores, &schedule, injection_ledgers.clone());
         }

@@ -519,6 +519,7 @@ where
             Self::kernel_prefix(),
             "", // MHD momentum is always a 3-vector; no DOF-lift tag
             self.excision_radius,
+            stage,
             self.has_additive_source(),
             &self.freeze_streak,
             |dir| {

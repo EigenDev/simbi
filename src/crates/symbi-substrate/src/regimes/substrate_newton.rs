@@ -809,7 +809,7 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize, const
         dt: f64,
         a0: f64,
         ac: f64,
-        _stage: u8,
+        stage: u8,
     ) -> symbi_sim::substrate_seam::FofcReport {
         // FOFC covers the DOF == D charts only (the fofc kernels are baked at ncomp = D). `fofc` is
         // called unconditionally by the driver, so
@@ -829,6 +829,7 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize, const
             "adiabatic",
             "", // the DOF != D early-return means this path is always DOF == D
             0.0, // no excision on a newtonian background
+            stage,
             <Self as KernelSet<D, DOF, Mem, Sc>>::has_additive_source(self),
             &self.freeze_streak,
             |dir| {

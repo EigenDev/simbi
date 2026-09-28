@@ -68,11 +68,17 @@ pub fn step_once<R, const D: usize, const DOF: usize, M, E, S, Mem>(
     // the per-step driver opens no projection-ledger scope; its callers advance
     // the clock and own the step boundary, so a projection here books nothing.
     sim.dt = dt;
+    let guard = sim.retry_guard;
+    let mut ledger = symbi_sim::retry_guard::RetryLedger::new(dt);
     while step(sim, kernels) {
+        let evidence = symbi_sim::retry_guard::take_evidence(sim, "grid", ledger.rejections());
+        ledger.reject(&guard, sim.dt, evidence).unwrap_or_else(|failure| panic!("{failure}"));
         kernels.restore_step(sim);
         symbi_sim::tracers::restore_transport_state(&mut sim.store);
         sim.dt = retry_timestep(sim.dt, sim.time).unwrap_or_else(|err| panic!("{}", err.detail));
     }
+    let accepted = sim.dt;
+    symbi_sim::retry_guard::accept(&guard, &mut sim.severe_streak, &ledger, accepted).unwrap_or_else(|failure| panic!("{failure}"));
 }
 
 pub fn evolve_with_callback<R, const D: usize, const DOF: usize, M, E, S, Mem>(
@@ -202,8 +208,17 @@ where
             }
         };
         sim.dt = dt;
+        let guard = sim.retry_guard;
+        let mut ledger = symbi_sim::retry_guard::RetryLedger::new(dt);
+        let guard_failure = |failure: symbi_sim::retry_guard::RetryGuardFailure| symbi_xpu::XpuError {
+            operation: "evolve",
+            code: -1,
+            detail: failure.detail,
+        };
         loop {
             if step(sim, kernels) {
+                let evidence = symbi_sim::retry_guard::take_evidence(sim, "grid", ledger.rejections());
+                ledger.reject(&guard, sim.dt, evidence).map_err(guard_failure)?;
                 kernels.restore_step(sim);
                 symbi_sim::tracers::restore_transport_state(&mut sim.store);
                 sim.dt = retry_timestep(sim.dt, sim.time)?;
@@ -211,6 +226,9 @@ where
             }
             break;
         }
+        // the sustained-reduction guard before the step is published to the callback
+        let accepted = sim.dt;
+        symbi_sim::retry_guard::accept(&guard, &mut sim.severe_streak, &ledger, accepted).map_err(guard_failure)?;
         // no per-step host-side scans: the `if !dt.is_finite()` check
         // above catches NaN/Inf cascades on the very next iteration
         // (NaN cons -> NaN wave speeds -> NaN dt -> panic). a per-cell host

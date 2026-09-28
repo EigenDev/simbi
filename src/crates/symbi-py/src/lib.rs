@@ -92,6 +92,10 @@ struct Config {
     schwarzschild_mass: f64,
     kerr_spin: f64,
     max_dt: f64,
+    // the retry guard's thresholds; the built-in values when the problem names none
+    retry_max_rejections: u32,
+    retry_severe_ratio: f64,
+    retry_sustained_steps: u32,
     cyl_plane: CylPlane,
     dims: usize,
     n_cells: [usize; 3],
@@ -1226,6 +1230,9 @@ fn parse_config(dict: &Bound<'_, PyDict>) -> PyResult<Config> {
         schwarzschild_mass: get_f64_or(dict, "schwarzschild_mass", 0.0),
         kerr_spin: get_f64_or(dict, "kerr_spin", 0.0),
         max_dt: get_f64_or(dict, "max_dt", 0.0),
+        retry_max_rejections: get_f64_or(dict, "retry_max_rejections", symbi_sim::retry_guard::RetryGuard::default().max_rejections as f64) as u32,
+        retry_severe_ratio: get_f64_or(dict, "retry_severe_ratio", symbi_sim::retry_guard::RetryGuard::default().severe_ratio),
+        retry_sustained_steps: get_f64_or(dict, "retry_sustained_steps", symbi_sim::retry_guard::RetryGuard::default().sustained_steps as f64) as u32,
         cyl_plane,
         dims,
         n_cells,
@@ -2272,6 +2279,10 @@ where
     K: KernelSet<D, DOF, Mem, f64>,
 {
     let data_dir = &cfg.data_dir;
+    let guard = retry_guard_of(cfg);
+    for level in hier.levels.iter_mut() {
+        level.state.retry_guard = guard;
+    }
     if let Some(path) = cfg.restart_path.as_deref() {
         // a restart may run deeper than the file it resumes from — the bootstrap ladder, where a
         // rung converges at its own resolution and the next resumes it with one more level. the
@@ -2294,6 +2305,7 @@ where
             .into());
         }
     }
+    announce_retry_guard(&hier.levels[0].state);
     // the checkpoint cadence is in natural units: `checkpoint_interval * time_unit`
     // is the code-unit spacing, so `checkpoint_interval = 0.1` with a binary's
     // orbital `time_unit` means "every 0.1 orbits". default time_unit = 1.0 keeps
@@ -3576,6 +3588,23 @@ fn build_eos(cfg: &Config) -> symbi::EosArm {
 /// at different moments on the same run. seeding through a gamma law and recovering through
 /// taub-mathews leaves D = rho W intact and misplaces the rho/W split, which corrupts t = 0 on
 /// every synge run. both arms derive from `cfg.eos_name` and sit adjacent so they cannot drift.
+/// the run's retry safeguards: the built-in thresholds unless the problem overrides them
+fn retry_guard_of(cfg: &Config) -> symbi_sim::retry_guard::RetryGuard {
+    symbi_sim::retry_guard::RetryGuard {
+        max_rejections: cfg.retry_max_rejections,
+        severe_ratio: cfg.retry_severe_ratio,
+        sustained_steps: cfg.retry_sustained_steps,
+    }
+}
+
+/// the retry guard's opening report for a run whose root store is `store`, on stderr
+fn announce_retry_guard<const D: usize, const DOF: usize, Mem: symbi::symbi_xpu::MemorySpace>(store: &symbi_sim::state::FieldStore<D, DOF, Mem, f64>) {
+    eprintln!(
+        "SIMBI {}",
+        symbi_sim::retry_guard::opening_report(&store.retry_guard, store.retry_guard_recorded.as_ref(), store.severe_streak)
+    );
+}
+
 fn host_eos(cfg: &Config) -> EosSelect<f64> {
     if cfg.eos_name == "synge" {
         EosSelect::Tm(TaubMathews)
@@ -5671,6 +5700,11 @@ where
                 format!(" + {} antipodal legs", schedule.polar_legs().len())
             }
         ));
+        let guard = retry_guard_of(cfg);
+        for store in stores.iter_mut() {
+            store.retry_guard = guard;
+        }
+        announce_retry_guard(&*stores[0]);
         evolve_scheduled(
             &mut stores,
             &kernels,
@@ -5974,6 +6008,13 @@ where
     let mut next_cp = cfg.start_time + cp_dt;
     let mut cp_index = cfg.checkpoint_index + 1;
     let cp_error: std::cell::RefCell<Option<String>> = std::cell::RefCell::new(None);
+    let guard = retry_guard_of(cfg);
+    for tile in tiles.iter_mut() {
+        for level in tile.levels.iter_mut() {
+            level.state.retry_guard = guard;
+        }
+    }
+    announce_retry_guard(&tiles[0].levels[0].state);
     reporter.milestone("priming the hierarchy levels, their halos and the first exchange");
     let diagnostics = evolve_hierarchy_decomposed(
         &mut tiles,
@@ -10925,6 +10966,15 @@ where
     let mut next_cp = cfg.start_time + cp_dt;
     let mut cp_index = cfg.checkpoint_index + 1;
     let write_initial = !restart && (cfg.checkpoint_index == 0 || cfg.start_time == 0.0);
+    let guard = retry_guard_of(cfg);
+    for tile in tiles.iter_mut() {
+        for level in tile.levels.iter_mut() {
+            level.state.retry_guard = guard;
+        }
+    }
+    if me == WorkerId(0) {
+        announce_retry_guard(&tiles[0].levels[0].state);
+    }
     let outcome = evolve_refined_worker(&mut tiles, &held, &plans, &LocalCopy, &mut fabric, &refined_cfg, |accepted, time, tiles, fabric| {
         if accepted == 0 {
             if write_initial {
@@ -11534,6 +11584,13 @@ where
             // point; the default audits them after the prime exchange
             audit_every_point: std::env::var("SIMBI_FABRIC_AUDIT").is_ok_and(|v| v == "all"),
         };
+        let guard = retry_guard_of(cfg);
+        for store in stores.iter_mut() {
+            store.retry_guard = guard;
+        }
+        if launch.worker == 0 {
+            announce_retry_guard(&*stores[0]);
+        }
         let report = evolve_worker(
             &tile_ids,
             &mut stores,

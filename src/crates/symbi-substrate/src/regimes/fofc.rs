@@ -206,6 +206,43 @@ where
     }
 }
 
+/// the cells whose freeze acts counted as decision evidence in this pass, written to the store's
+/// rejection evidence for the driver that books the rejection: under no exclusion the freeze mask,
+/// under the legacy sphere the evidence mask the decision reduced, each with the stage tag. at most
+/// eight cells are named, with the count of the rest
+fn record_rejection_evidence<const D: usize, const DOF: usize, Mem, Sc>(
+    sim: &FieldStore<D, DOF, Mem, Sc>,
+    freeze: &Field<Sc, D, Mem>,
+    stage: u8,
+) where
+    Mem: MemorySpace,
+    Sc: Scalar + OrderedNumeric,
+{
+    const NAMED: usize = 8;
+    let mask = match sim.retry_exclusion {
+        RetryExclusion::LegacyEuclideanSphere { .. } if sim.geom.coords == symbi_geometry::Geometry::Cartesian => {
+            &sim.workspace.fofc_evidence
+        }
+        _ => freeze,
+    };
+    let mut lines = Vec::new();
+    if Mem::IS_DEVICE_ACCESSIBLE {
+        let count = fofc_flag_count(sim, mask);
+        lines.push(format!("stage tag {stage}: {count} eligible freeze acts, held in device memory"));
+    } else {
+        let view = mask.view();
+        let cells: Vec<[isize; D]> = sim.geom.interior.iter().filter(|&c| (*view.at(c)).to_f64() > 0.0).collect();
+        for c in cells.iter().take(NAMED) {
+            let x = sim.geom.centroid(*c);
+            lines.push(format!("stage tag {stage}: frozen cell {c:?} at {x:?}"));
+        }
+        if cells.len() > NAMED {
+            lines.push(format!("stage tag {stage}: {} more frozen cells", cells.len() - NAMED));
+        }
+    }
+    sim.workspace.rejection_evidence.lock().expect("rejection evidence").extend(lines);
+}
+
 /// the census counters observe the report: the running totals and their horizon
 /// subtotals book from the report's counts and the horizon splits measured on
 /// the channel masks — a second source of truth does not exist.
@@ -644,6 +681,9 @@ pub(crate) fn fofc_orchestrate<const D: usize, const DOF: usize, Mem, Sc>(
     // the configured excision radius; 0 on a run without excision. the excised cells start no
     // correction (see `fofc_mark`).
     r_exc: f64,
+    // the stage tag the correction runs under (1 the first stage), named in the evidence of a
+    // retry request
+    stage: u8,
     has_additive: bool,
     freeze_streak: &AtomicU32,
     first_order_flux: impl Fn(usize),
@@ -854,6 +894,9 @@ where
     } else {
         FofcDecision::Accept
     };
+    if decision == FofcDecision::RetryStep {
+        record_rejection_evidence(sim, freeze, stage);
+    }
     // the horizon subtotals split on the channel masks: the troubled subset from
     // the flag, the frozen subset from the freeze-applied mask.
     let troubled_interior = horizon_split_count(sim, flag);

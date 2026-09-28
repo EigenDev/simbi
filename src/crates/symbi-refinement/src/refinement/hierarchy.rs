@@ -2510,6 +2510,8 @@ where
     /// while the uni-grid path arrives through `step_root`'s watchdog.
     pub fn step_root_with_dt(&mut self, mut dt: f64) {
         let time = self.levels[0].state.time;
+        let guard = self.levels[0].state.retry_guard;
+        let mut ledger = symbi_sim::retry_guard::RetryLedger::new(dt);
         // A rejection can originate in the second (or deeper) fine substep after an earlier
         // substep has spawned/migrated tracers or booked a horizon receipt.  Field snapshots alone
         // cannot invert those host-side commits, so the root attempt owns a complete transaction
@@ -2534,6 +2536,12 @@ where
             if !failed {
                 break;
             }
+            // the rejection counts against this root attempt, a fine substep's included
+            let mut evidence = Vec::new();
+            for (ll, level) in self.levels.iter().enumerate() {
+                evidence.extend(symbi_sim::retry_guard::take_evidence(&level.state, &format!("level {ll}"), ledger.rejections()));
+            }
+            ledger.reject(&guard, dt, evidence).unwrap_or_else(|failure| panic!("{failure}"));
             // the projection and guard ledgers' rejection boundary: the
             // pending-step evidence describes states this rollback discards.
             if symbi_sim::projection_ledger::scope_is_open() {
@@ -2552,6 +2560,9 @@ where
             dt = symbi_sim::driver::retry_timestep(dt, time)
                 .unwrap_or_else(|err| panic!("{}", err.detail));
         }
+        // the sustained-reduction guard, once per accepted root step, before anything publishes it
+        symbi_sim::retry_guard::accept(&guard, &mut self.levels[0].state.severe_streak, &ledger, dt)
+            .unwrap_or_else(|failure| panic!("{failure}"));
         if self
             .levels
             .iter()
@@ -5458,6 +5469,8 @@ where
     T: HaloTransport,
 {
     let n = tiles.len();
+    let guard = tiles[0].levels[0].state.retry_guard;
+    let mut ledger = symbi_sim::retry_guard::RetryLedger::new(gdt);
         'attempt: loop {
             for i in 0..n {
                 for level in &tiles[i].levels {
@@ -5622,6 +5635,19 @@ where
                 }
                 break 'attempt;
             }
+            // the rejection counts once against this root attempt, whichever tile, level or
+            // substep raised it
+            let mut evidence = Vec::new();
+            for (i, tile) in tiles.iter().enumerate() {
+                for (ll, level) in tile.levels.iter().enumerate() {
+                    evidence.extend(symbi_sim::retry_guard::take_evidence(
+                        &level.state,
+                        &format!("tile {i}, level {ll}"),
+                        ledger.rejections(),
+                    ));
+                }
+            }
+            ledger.reject(&guard, gdt, evidence).unwrap_or_else(|failure| panic!("{failure}"));
             // the guard ledger's rejection boundary: the pending acts describe
             // states this collective rollback discards.
             if symbi_sim::guard_ledger::scope_is_open() {
@@ -5649,6 +5675,13 @@ where
             gdt = symbi_sim::driver::retry_timestep(gdt, t)
                 .unwrap_or_else(|err| panic!("{}", err.detail));
         }
+    // the sustained-reduction guard, once per accepted root step, before anything publishes it;
+    // every tile's root carries the streak its checkpoint records
+    let mut streak = tiles[0].levels[0].state.severe_streak;
+    symbi_sim::retry_guard::accept(&guard, &mut streak, &ledger, gdt).unwrap_or_else(|failure| panic!("{failure}"));
+    for tile in tiles.iter_mut() {
+        tile.levels[0].state.severe_streak = streak;
+    }
     gdt
 }
 

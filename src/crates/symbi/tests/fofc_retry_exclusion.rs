@@ -73,8 +73,9 @@ fn primed(exclusion: RetryExclusion) -> (Sim, Kern) {
 }
 
 /// one rk2 predictor stage whose stage input is unrecoverable at the cell: the outcome, the
-/// freeze act there, and the conserved state it leaves
-fn frozen_stage(exclusion: RetryExclusion) -> (StageOutcome, f64, Vec<u64>) {
+/// freeze act there, the conserved state it leaves, the rejection evidence the correction
+/// recorded, and every frozen cell as that evidence names one
+fn frozen_stage(exclusion: RetryExclusion) -> (StageOutcome, f64, Vec<u64>, Vec<String>, Vec<String>) {
     let (sim, k) = primed(exclusion);
     let cell: [isize; 3] = std::array::from_fn(|a| sim.geom.interior.spaces[a].lo + CELL[a] as isize);
     k.snapshot_retry(&sim);
@@ -104,33 +105,53 @@ fn frozen_stage(exclusion: RetryExclusion) -> (StageOutcome, f64, Vec<u64>) {
     for f in [&cons.den, &cons.mom[0], &cons.mom[1], &cons.mom[2], cons.nrg_field().unwrap()] {
         state.extend(sim.geom.interior.iter().map(|c| f.view().at(c).to_bits()));
     }
-    (outcome, frozen, state)
+    let evidence = std::mem::take(&mut *sim.workspace.rejection_evidence.lock().unwrap());
+    let freeze = sim.workspace.freeze_applied.view();
+    let frozen_cells = sim
+        .geom
+        .interior
+        .iter()
+        .filter(|&c| *freeze.at(c) > 0.0)
+        .map(|c| format!("stage tag 1: frozen cell {c:?} at {:?}", sim.geom.centroid(c)))
+        .collect();
+    (outcome, frozen, state, evidence, frozen_cells)
 }
 
 #[test]
 fn the_retry_exclusion_decides_and_the_reporting_radius_does_not() {
     let legacy = RetryExclusion::LegacyEuclideanSphere { radius: COVERING };
     let cases = [(RetryExclusion::None, 0.0), (RetryExclusion::None, 3.0), (legacy, 0.0), (legacy, 3.0)];
-    let run = |order: &[usize]| -> Vec<(StageOutcome, f64, Vec<u64>, u64)> {
+    type Case = (StageOutcome, f64, Vec<u64>, u64, (Vec<String>, Vec<String>));
+    let run = |order: &[usize]| -> Vec<Case> {
         let mut out = vec![None; cases.len()];
         for &ii in order {
             let (exclusion, reporting) = cases[ii];
             fofc_set_horizon_radius(reporting);
             fofc_reset_stats();
-            let (outcome, frozen, state) = frozen_stage(exclusion);
-            out[ii] = Some((outcome, frozen, state, fofc_horizon_stats().1));
+            let (outcome, frozen, state, evidence, frozen_cells) = frozen_stage(exclusion);
+            out[ii] = Some((outcome, frozen, state, fofc_horizon_stats().1, (evidence, frozen_cells)));
         }
         fofc_set_horizon_radius(0.0);
         out.into_iter().map(|o| o.unwrap()).collect()
     };
     let forward = run(&[0, 1, 2, 3]);
     let reverse = run(&[3, 2, 1, 0]);
-    for (ii, ((exclusion, reporting), (outcome, frozen, _, horizon_frozen))) in cases.iter().zip(&forward).enumerate() {
+    let cell_index = format!("{:?}", std::array::from_fn::<isize, 3, _>(|a| CELL[a] as isize));
+    for (ii, ((exclusion, reporting), (outcome, frozen, _, horizon_frozen, (evidence, frozen_cells)))) in cases.iter().zip(&forward).enumerate() {
         assert_eq!(*frozen, 1.0, "case {ii}: the select did not freeze the poisoned cell; the gate is vacuous");
         let expected = if *exclusion == RetryExclusion::None { StageOutcome::RetryStep } else { StageOutcome::Accepted };
         assert!(*outcome == expected, "case {ii} ({exclusion:?}, reporting radius {reporting}): the stage was not {expected:?}");
         // the reporting split books the freeze inside the reporting radius and nowhere else
         assert_eq!(*horizon_frozen > 0, *reporting > 0.0, "case {ii}: the reporting split ignores the reporting radius");
+        // a retry request names every eligible frozen cell with its stage tag, the poisoned one
+        // among them (all of them with no exclusion); an accepted stage records nothing
+        if expected == StageOutcome::RetryStep {
+            assert!(frozen_cells.len() <= 8, "case {ii}: more frozen cells than the evidence names");
+            assert_eq!(evidence, frozen_cells, "case {ii}: the evidence is not the eligible frozen cells");
+            assert!(evidence.iter().any(|e| e.contains(&format!("frozen cell {cell_index}"))), "case {ii}: {evidence:?}");
+        } else {
+            assert!(evidence.is_empty(), "case {ii}: an accepted stage recorded rejection evidence: {evidence:?}");
+        }
     }
     for (a, b) in [(0, 1), (2, 3)] {
         assert!(forward[a].0 == forward[b].0, "cases {a} and {b}: the reporting radius changed the decision");

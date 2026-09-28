@@ -547,6 +547,12 @@ where
     }
 
     let guard_scope = symbi_sim::guard_ledger::open_scope();
+    // every worker resumes the same retry guard: the streak a checkpoint recorded and the
+    // configured thresholds, on every held tile's root
+    {
+        let roots: Vec<_> = tiles.iter().map(|h| &*h.levels[0].state).collect();
+        symbi_sim::worker::agree_retry_guard(&roots, fabric, deadline).map_err(|e| fail(fabric, e))?;
+    }
     let mut t = base.start_time;
     let mut iter: u64 = 0;
     // the primed state, before the first step: the callback sees zero accepted steps, where an
@@ -593,6 +599,9 @@ where
                 dt = dt.min(f64::from_bits(bits));
             }
         }
+        // the root step's candidate: the agreed timestep after its final-time clamp and caps
+        let guard = tiles[0].levels[0].state.retry_guard;
+        let mut ledger = symbi_sim::retry_guard::RetryLedger::new(dt);
         let mut attempt: u16 = 0;
         'attempt: loop {
             // the root-attempt snapshot of every level and its sidecars
@@ -798,6 +807,21 @@ where
             // replays at a halved timestep
             symbi_sim::guard_ledger::step_discard();
             report.rejections += 1;
+            // every worker books the agreed rejection with the evidence its own tiles hold, a fine
+            // substep's included, so every worker reaches the guard's decision at the same attempt
+            {
+                let mut evidence = Vec::new();
+                for (k, h) in tiles.iter().enumerate() {
+                    for (ll, level) in h.levels.iter().enumerate() {
+                        let tile = if ll == 0 { held.root_ids[k].0 } else { held.fine_ids[k].map_or(u32::MAX, |t| t.0) };
+                        let site = format!("worker {}, tile {tile}, level {ll}", fabric.me().0);
+                        evidence.extend(symbi_sim::retry_guard::take_evidence(&level.state, &site, ledger.rejections()));
+                    }
+                }
+                if let Err(failure) = ledger.reject(&guard, dt, evidence) {
+                    return Err(symbi_sim::worker::guard_failure(fabric, failure, &base.injection, deadline));
+                }
+            }
             for (k, h) in tiles.iter_mut().enumerate() {
                 for level in &h.levels {
                     if !level.kernels.rollback_snapshot_is_complete(&level.state) {
@@ -839,6 +863,17 @@ where
             }
             dt = retry_timestep(dt, t).map_err(|e| fail(fabric, WorkerError::Numerics(e.detail)))?;
             attempt += 1;
+        }
+        // the sustained-reduction guard, once per accepted root step, before any checkpoint
+        // publishes it; the agreed timesteps give every worker the same decision
+        {
+            let mut streak = tiles[0].levels[0].state.severe_streak;
+            if let Err(failure) = symbi_sim::retry_guard::accept(&guard, &mut streak, &ledger, dt) {
+                return Err(symbi_sim::worker::guard_failure(fabric, failure, &base.injection, deadline));
+            }
+            for h in tiles.iter_mut() {
+                h.levels[0].state.severe_streak = streak;
+            }
         }
         (t, iter) = advance_clock(t, iter, dt);
         report.steps = iter;

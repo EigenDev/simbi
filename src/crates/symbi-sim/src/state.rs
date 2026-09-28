@@ -1126,6 +1126,10 @@ pub struct RkWorkspaceGeneric<
     /// the freeze acts that count as decision evidence under the store's retry exclusion, written
     /// by the exclusion kernel over the interior and reduced into the decision count
     pub fofc_evidence: Field<Sc, NDIM, M>,
+    /// the cells whose freeze acts counted toward the last retry request of the first-order
+    /// correction, one line each with the stage, written by the correction and taken by the
+    /// driver that books the rejection
+    pub rejection_evidence: std::sync::Mutex<Vec<String>>,
     /// body-feedback reduction scratch, allocated on the first feedback dispatch, so a body-free
     /// sim pays neither the memory nor a per-call allocation. the feedback kernels assign-write
     /// every cell of their dispatch region before the reduction reads it, so a reused buffer
@@ -2293,6 +2297,14 @@ pub struct FieldStore<
     /// halting the run; every one unless the run names an exclusion
     pub retry_exclusion: crate::substrate_seam::RetryExclusion,
 
+    /// the run's retry safeguards and the count of consecutive severely reduced root steps they
+    /// hold, both carried through a checkpoint; the root level's store governs
+    pub retry_guard: crate::retry_guard::RetryGuard,
+    pub severe_streak: u32,
+    /// the thresholds the checkpoint this run resumed from recorded; the configured `retry_guard`
+    /// applies and the recorded streak carries over, and the opening report names any change
+    pub retry_guard_recorded: Option<crate::retry_guard::RetryGuard>,
+
     /// discrete mass-transport tracers. position is derived output state;
     /// material ownership is authoritative.
     pub tracers: Option<crate::tracers::TracerSet<NDIM>>,
@@ -2995,6 +3007,7 @@ where
             fofc_flag: Field::zeros(&allocated)?,
             freeze_applied: Field::zeros(&allocated)?,
             fofc_evidence: Field::zeros(&allocated)?,
+            rejection_evidence: std::sync::Mutex::new(Vec::new()),
             body_scratch: std::sync::OnceLock::new(),
             #[cfg(debug_assertions)]
             stage_writes: std::sync::Mutex::new(None),
@@ -3011,6 +3024,9 @@ where
                 boundaries,
                 composite_ownership: CompositeOwnership::default(),
                 retry_exclusion: crate::substrate_seam::RetryExclusion::None,
+                retry_guard: crate::retry_guard::RetryGuard::default(),
+                severe_streak: 0,
+                retry_guard_recorded: None,
                 // seeding writes the conserved state; the primitives stay meaningless
                 // until the recovery has run.
                 primitives_recovered: std::sync::atomic::AtomicBool::new(false),

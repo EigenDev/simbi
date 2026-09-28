@@ -107,8 +107,8 @@ impl FofcReport {
     }
 
     /// the report of an active pass, from the orchestrator's measured facts.
-    /// `frozen_exterior` is the decision evidence — the freeze acts outside
-    /// any configured horizon — validated here and folded into the decision's
+    /// `frozen_exterior` is the decision evidence — the freeze acts the store's
+    /// retry exclusion leaves eligible — validated here and folded into the decision's
     /// coherence rather than stored (the four report fields stay orthogonal).
     /// cross-field laws: an untroubled pass carries no acts, no replay claim,
     /// and accepts; a conservative replay requires a troubled pass; a retry

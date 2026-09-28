@@ -32,6 +32,7 @@ pub mod hydro_ops;
 pub mod mass_transport;
 pub mod phase_table;
 pub mod plan_exchange;
+pub mod retry_guard;
 pub mod stage;
 pub mod state;
 pub mod substrate_seam;

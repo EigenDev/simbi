@@ -252,6 +252,41 @@ class SimbiProblem(BaseModel):
             "0 disables. pins the dt sequence across runs whose CFL estimators differ",
         ),
     ]
+    # the retry guard: provisional operational limits on the step-retry loop, not physically
+    # validated stability thresholds. a run that crosses one ends with a report naming the
+    # rejecting cells; no step is ever accepted in place of the failure.
+    retry_max_rejections: Annotated[
+        int,
+        ProblemParam(
+            20,
+            ge=0,
+            cli=True,
+            checkpoint_safe=True,
+            description="rejections one root step may take before the run ends",
+        ),
+    ]
+    retry_severe_ratio: Annotated[
+        float,
+        ProblemParam(
+            1.0 / 16.0,
+            gt=0.0,
+            le=1.0,
+            cli=True,
+            checkpoint_safe=True,
+            description="a root step accepted at or below this fraction of its candidate timestep "
+            "is severely reduced",
+        ),
+    ]
+    retry_sustained_steps: Annotated[
+        int,
+        ProblemParam(
+            8,
+            ge=1,
+            cli=True,
+            checkpoint_safe=True,
+            description="consecutive severely reduced root steps that end the run",
+        ),
+    ]
     regime: Annotated[Regime, ProblemParam(..., description="physics regime")]
     bounds: Annotated[
         Sequence[Sequence[float]],
