@@ -3258,4 +3258,24 @@ mod tests {
         assert_eq!(m.g1.index(), 0);
         assert_eq!(m.g2.index(), 1);
     }
+
+    /// the edge EMF binds through the cyclic map: the r-z plane's single edge is E_phi with
+    /// (p1, p2) = (z, r) on grid axes (g1, g2) = (1, 0), the x-y plane's is E_z with (x, y) on
+    /// (0, 1). the baked corner stencils `rmhd_edge_emf_2d_1` and `rmhd_edge_emf_2d_2` walk these
+    /// same grid axes.
+    #[test]
+    fn the_cyclic_edge_map_carries_each_plane_component_on_its_own_grid_axis() {
+        let rz = super::ct_edges::<2>(&[0, 2]);
+        assert_eq!(rz.len(), 1);
+        let e = &rz[0];
+        assert_eq!((e.slot, e.name_k.index()), (0, 1));
+        assert_eq!((e.p1.index(), e.p2.index()), (2, 0));
+        assert_eq!((e.g1.index(), e.g2.index()), (1, 0));
+        let xy = super::ct_edges::<2>(&[0, 1]);
+        assert_eq!(xy.len(), 1);
+        let e = &xy[0];
+        assert_eq!((e.slot, e.name_k.index()), (0, 2));
+        assert_eq!((e.p1.index(), e.p2.index()), (0, 1));
+        assert_eq!((e.g1.index(), e.g2.index()), (0, 1));
+    }
 }

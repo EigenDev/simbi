@@ -3844,9 +3844,11 @@ fn main() {
     // =========================================================================
     {
         let cyl = Geom::cyl_rz(); // Cylindrical, ncomp=3, axes=[0,2] -> suffix "_cyl_rz"
-        // shared regime-agnostic CT: the corner E_phi (name_k=1, grid offset axes 0,1) + the
-        // metric in-plane curl + the cell-B flux predictor (area-weighted divergence, axes=[0,2]).
-        gen_rmhd_edge_emf(&out_dir, 1, 2, 0, 1);
+        // shared regime-agnostic CT: the corner E_phi + the metric in-plane curl + the cell-B flux
+        // predictor (area-weighted divergence, axes=[0,2]). E_phi's cyclic plane is (p1, p2) =
+        // (z, r), carried by grid axes (g1, g2) = (1, 0): the runtime edge map binds the z-face
+        // mass and B_r fluxes as the `a` family, and the stencil pairs them across r.
+        gen_rmhd_edge_emf(&out_dir, 1, 2, 1, 0);
         for dir in 0..2 {
             gen_rmhd_ct_curl_cyl_rz(&out_dir, dir, &cyl);
         }
