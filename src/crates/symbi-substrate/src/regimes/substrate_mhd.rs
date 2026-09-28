@@ -768,6 +768,12 @@ where
     Mem: MemorySpace + Sync,
     Sc: Scalar + OrderedNumeric,
 {
+    /// viscous with a constant nu or an alpha prescription: the post-step recipe runs the
+    /// transport below exactly then
+    fn is_viscous(&self) -> bool {
+        self.viscosity > 0.0 || self.alpha > 0.0
+    }
+
     fn viscous(&self, sim: &FieldStore<D, 3, Mem, Sc>, dt: f64) {
         // alpha (local-cs shakura-sunyaev) takes precedence over the constant nu;
         // the 2.5D DOF-aware kernel diffuses the toroidal momentum too.

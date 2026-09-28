@@ -784,6 +784,12 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize> Kerne
         crate::regimes::substrate_kernels::dispatch_penalize(sim, dt, self.cs, self.c_drain);
     }
 
+    /// viscous with a constant nu or an alpha prescription: the post-step recipe runs the
+    /// transport below exactly then
+    fn is_viscous(&self) -> bool {
+        self.viscosity > 0.0 || self.alpha > 0.0
+    }
+
     fn viscous(&self, sim: &FieldStore<D, D, Mem, Sc>, dt: f64) {
         // the Navier-Stokes shear; inert when inviscid. baked
         // for 2D and 3D cartesian — fail loud otherwise (a silent drop would discard
