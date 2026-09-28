@@ -8775,13 +8775,20 @@ fn dispatch_and_run(
     // config-time refusal — a worse failure than the loud startup rejection every other capability
     // gets. the accepted sets below mirror `gen_viscous` / `gen_resistive` in symbi-aot/build.rs.
     // scoped to the regimes whose kernel sets actually dispatch a viscous operator. the
-    // relativistic regimes accept the coefficient and ignore it, and `alpha` is a bare config key
-    // that other problems legitimately use for their own meaning (a wave amplitude, say), so
-    // keying the refusal on the value alone would reject configs that never asked for viscosity.
+    // relativistic regimes carry none, so a viscosity or `viscosity_alpha` configured on one is
+    // refused by name; a bare `alpha` there is a problem's own quantity (a wave amplitude, say)
+    // and is left alone.
     let viscous_regime = matches!(
         cfg.regime.as_str(),
         "newtonian" | "isothermal" | "nmhd" | "imhd"
     );
+    if !viscous_regime && (cfg.viscosity != 0.0 || cfg.alpha != 0.0) {
+        return Err(format!(
+            "viscous transport is not built for the {} regime: the configured viscosity = {} and \
+             viscosity_alpha = {} would have no effect; set both to 0",
+            cfg.regime, cfg.viscosity, cfg.alpha
+        ));
+    }
     alpha_key_verdict(&cfg.regime, cfg.bare_alpha_key, cfg.alpha)?;
     if viscous_regime && (cfg.viscosity > 0.0 || cfg.alpha > 0.0) {
         // the shear operator is a face-centered stencil over at least two grid axes; there is no

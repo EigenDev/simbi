@@ -47,10 +47,18 @@ use symbi_sim::substrate_seam::{KernelSet, WithExcision, WithViscosity};
 use symbi_source_compile::{AdmittedSources, BoundaryPrescription};
 
 /// a D-generic RHD `KernelSet`, every method substrate-generated.
-// viscosity is isothermal-only; RHD uses the no-op default.
+// the RHD set carries no viscous transport: a configured viscosity or alpha is refused by name
 impl<Mem: MemorySpace, Sc: Scalar + OrderedNumeric, const D: usize> WithViscosity
     for RhdSubstrateKernelSet<Mem, Sc, D>
 {
+    fn with_viscosity(self, nu: f64) -> Self {
+        crate::regimes::refuse_viscosity("rhd", "viscosity", nu);
+        self
+    }
+    fn with_alpha(self, alpha: f64) -> Self {
+        crate::regimes::refuse_viscosity("rhd", "alpha", alpha);
+        self
+    }
 }
 
 // non-ideal resistivity is a Newtonian-MHD operation; the RHD set ignores it (no-op default).

@@ -729,10 +729,17 @@ where
     Sc: Scalar + OrderedNumeric,
 {
     fn with_viscosity(mut self, nu: f64) -> Self {
+        // the viscous transport is newtonian; a relativistic regime refuses a configured one
+        if R::SPEC.is_relativistic {
+            crate::regimes::refuse_viscosity(R::SPEC.name, "viscosity", nu);
+        }
         self.viscosity = nu;
         self
     }
     fn with_alpha(mut self, alpha: f64) -> Self {
+        if R::SPEC.is_relativistic {
+            crate::regimes::refuse_viscosity(R::SPEC.name, "alpha", alpha);
+        }
         // nu = alpha (gamma p/rho)/Omega_K with the local sound speed — energy
         // regimes only (iso MHD has no pressure field to read cs^2 from).
         assert!(

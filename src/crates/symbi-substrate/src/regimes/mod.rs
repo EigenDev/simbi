@@ -22,3 +22,13 @@ pub mod substrate_newton;
 pub mod substrate_newtonian_mhd;
 pub mod substrate_rhd;
 pub mod substrate_rmhd;
+
+/// refuse a nonzero viscous coefficient on a kernel set that carries no viscous transport: the
+/// run would otherwise evolve as if the viscosity it configured were zero
+pub(crate) fn refuse_viscosity(regime: &str, name: &str, value: f64) {
+    assert!(
+        value == 0.0,
+        "viscous transport is not built for the {regime} regime: the configured {name} = {value} would \
+         have no effect; set it to 0"
+    );
+}

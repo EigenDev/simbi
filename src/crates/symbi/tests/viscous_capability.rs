@@ -8,7 +8,9 @@
 //   and viscous with a constant nu or an alpha prescription;
 // - an isothermal shear layer v_x = V sin(k y) loses far more kinetic energy
 //   with a constant nu than the inviscid scheme's own numerical floor, through
-//   the uni-grid driver the recipe runs in.
+//   the uni-grid driver the recipe runs in;
+// - the relativistic sets carry no viscous transport and refuse a nonzero
+//   viscosity or alpha by name when it is configured, before any evolution.
 //
 // run: cargo test -p symbi --test viscous_capability
 // =============================================================================
@@ -16,6 +18,8 @@
 use symbi::regimes::substrate::IsoSubstrateKernelSet;
 use symbi::regimes::substrate_newton::AdiabaticSubstrateKernelSet;
 use symbi::regimes::substrate_newtonian_mhd::NewtonianMhdSubstrateKernelSet;
+use symbi::regimes::substrate_rhd::RhdSubstrateKernelSet;
+use symbi::regimes::substrate_rmhd::RmhdSubstrateKernelSet;
 use symbi::sim::evolve::{KernelSet, evolve_with_callback};
 use symbi::sim::state::*;
 use symbi::sim::substrate_seam::WithViscosity;
@@ -106,4 +110,36 @@ fn isothermal_viscosity_dissipates_far_more_than_the_numerical_floor() {
         viscous > 5.0 * ideal,
         "isothermal viscosity did not act: kinetic energy loss {viscous:.3e} viscous vs {ideal:.3e} inviscid"
     );
+}
+
+/// the panic message of `f`, or none when it returns
+fn refusal(f: impl FnOnce() + std::panic::UnwindSafe) -> Option<String> {
+    std::panic::catch_unwind(f).err().map(|p| {
+        p.downcast_ref::<String>().cloned().or_else(|| p.downcast_ref::<&str>().map(|s| s.to_string())).unwrap_or_default()
+    })
+}
+
+#[test]
+fn the_relativistic_sets_refuse_a_configured_viscosity_by_name() {
+    let d = domain();
+    for (label, nu, alpha) in [("nu", 0.02, 0.0), ("alpha", 0.0, 0.1)] {
+        let rhd = refusal(|| {
+            let _ = RhdSubstrateKernelSet::<HostMemory, f64, 2>::new(4.0 / 3.0, 0.3, &d).with_viscosity(nu).with_alpha(alpha);
+        });
+        assert!(
+            rhd.as_deref().is_some_and(|m| m.contains("viscous transport is not built for the rhd regime")),
+            "RHD accepted {label}: {rhd:?}"
+        );
+        let rmhd = refusal(|| {
+            let _ = RmhdSubstrateKernelSet::<HostMemory, f64, 2>::new(4.0 / 3.0, 0.3, 1.0, &d).with_viscosity(nu).with_alpha(alpha);
+        });
+        assert!(
+            rmhd.as_deref().is_some_and(|m| m.contains("viscous transport is not built for the rmhd regime")),
+            "RMHD accepted {label}: {rmhd:?}"
+        );
+    }
+    // an inviscid configuration builds
+    let rhd = RhdSubstrateKernelSet::<HostMemory, f64, 2>::new(4.0 / 3.0, 0.3, &d).with_viscosity(0.0).with_alpha(0.0);
+    let rmhd = RmhdSubstrateKernelSet::<HostMemory, f64, 2>::new(4.0 / 3.0, 0.3, 1.0, &d).with_viscosity(0.0);
+    assert!(!KernelSet::<2, 2, HostMemory, f64>::is_viscous(&rhd) && !KernelSet::<2, 3, HostMemory, f64>::is_viscous(&rmhd));
 }
