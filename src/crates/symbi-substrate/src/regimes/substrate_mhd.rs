@@ -1062,7 +1062,10 @@ where
         if !materialize {
             return;
         }
-        let wsname = format!("{}_wave_speeds_cell_{D}d", Self::kernel_prefix());
+        // the fan of slot d follows the component grid axis d carries; the r-z chart lifts its
+        // second axis onto z and takes its own kernel, named like its face fluxes
+        let fsfx = symbi_discretize::kernel_slug::mhd_flux_suffix(sim.geom.coords, &sim.geom.axes);
+        let wsname = format!("{}_wave_speeds_cell{fsfx}_{D}d", Self::kernel_prefix());
         let scalars = scalars_for(&wsname, |bind| match bind {
             ScalarBind::Ref(sref @ (ScalarRef::Gamma | ScalarRef::Cs)) => {
                 crate::regimes::substrate_kernels::eos_scalar(self.eos_param, *sref, "c2p")

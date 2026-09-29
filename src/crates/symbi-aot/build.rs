@@ -1814,35 +1814,35 @@ fn gen_rmhd_gr_gas_family(out_dir: &str, ndim: u8, geom: &Geom) {
     gen_rmhd_bcell_godunov_rk2(out_dir, geom.clone(), ndim);
 }
 
-// the per-cell exact-quartic wave speeds: prim -> wave_speed_l[d]/wave_speed_r[d] for d=0..2.
-// geometry-free (the quartic depends only on the state), so a single 3D kernel.
-fn gen_rmhd_wave_speeds_cell(out_dir: &str, ndim: u8) {
-    let program = rmhd_wave_speeds_cell_gv(ndim as usize);
+// the per-cell exact-quartic wave speeds: prim -> wave_speed_l[d]/wave_speed_r[d] along the
+// component each grid axis carries (`axes`); `sfx` names a chart whose axes lift off the identity.
+fn gen_rmhd_wave_speeds_cell(out_dir: &str, ndim: u8, sfx: &str, axes: &[usize]) {
+    let program = rmhd_wave_speeds_cell_gv(ndim as usize, axes);
     emit_gv(
         out_dir,
-        &format!("rmhd_wave_speeds_cell_{ndim}d"),
+        &format!("rmhd_wave_speeds_cell{sfx}_{ndim}d"),
         ndim,
         &program,
     );
 }
 
 // classical (NMHD) per-cell wave speeds -> wave_speed_l/r, so UCT works for NMHD. geometry-free.
-fn gen_nmhd_wave_speeds_cell(out_dir: &str, ndim: u8) {
-    let program = nmhd_wave_speeds_cell_gv(ndim as usize);
+fn gen_nmhd_wave_speeds_cell(out_dir: &str, ndim: u8, sfx: &str, axes: &[usize]) {
+    let program = nmhd_wave_speeds_cell_gv(ndim as usize, axes);
     emit_gv(
         out_dir,
-        &format!("nmhd_wave_speeds_cell_{ndim}d"),
+        &format!("nmhd_wave_speeds_cell{sfx}_{ndim}d"),
         ndim,
         &program,
     );
 }
 
 // isothermal (IMHD) per-cell wave speeds -> wave_speed_l/r, so UCT works for IMHD. geometry-free.
-fn gen_imhd_wave_speeds_cell(out_dir: &str, ndim: u8) {
-    let program = imhd_wave_speeds_cell_gv(ndim as usize);
+fn gen_imhd_wave_speeds_cell(out_dir: &str, ndim: u8, sfx: &str, axes: &[usize]) {
+    let program = imhd_wave_speeds_cell_gv(ndim as usize, axes);
     emit_gv(
         out_dir,
-        &format!("imhd_wave_speeds_cell_{ndim}d"),
+        &format!("imhd_wave_speeds_cell{sfx}_{ndim}d"),
         ndim,
         &program,
     );
@@ -3631,10 +3631,10 @@ fn main() {
     gen_rmhd_wave_speed_map(&out_dir, 3, Geom::cart(3));
     gen_rmhd_wave_speed_map(&out_dir, 3, Geom::sph(3));
     gen_rmhd_wave_speed_map(&out_dir, 3, Geom::cyl_3d());
-    gen_rmhd_wave_speeds_cell(&out_dir, 3); // per-cell exact quartic -> wave_speed_l/r (geom-free)
+    gen_rmhd_wave_speeds_cell(&out_dir, 3, "", &[0, 1, 2]); // per-cell exact quartic -> wave_speed_l/r (geom-free)
     // the classical / isothermal per-cell fan speeds the 3D UCT corner EMFs read.
-    gen_nmhd_wave_speeds_cell(&out_dir, 3);
-    gen_imhd_wave_speeds_cell(&out_dir, 3);
+    gen_nmhd_wave_speeds_cell(&out_dir, 3, "", &[0, 1, 2]);
+    gen_imhd_wave_speeds_cell(&out_dir, 3, "", &[0, 1, 2]);
     for dir in 0..3 {
         gen_rmhd_ct_curl_3d_dir(&out_dir, dir, Geom::cart(3));
         gen_rmhd_ct_curl_3d_dir(&out_dir, dir, Geom::sph(3));
@@ -3783,14 +3783,14 @@ fn main() {
             gen_rmhd_hllc_face_flux(&out_dir, 2, dir);
             gen_rmhd_hlld_face_flux(&out_dir, 2, dir);
         }
-        gen_rmhd_wave_speeds_cell(&out_dir, 2);
+        gen_rmhd_wave_speeds_cell(&out_dir, 2, "", &[0, 1]);
         gen_rmhd_wave_speed_map(&out_dir, 2, g2.clone());
         gen_godunov_stage(&out_dir, 2, "rmhd", true, g2.clone(), None);
         gen_snapshot(&out_dir, 2, "rmhd", true, g2.clone());
         // NMHD regime physics (algebraic c2p + closed-form magnetosonic HLLE/HLLC/HLLD).
         gen_nmhd_c2p(&out_dir, 2);
         // classical per-cell wave speeds (geometry-free) so NMHD UCT can read wave_speed_l/r.
-        gen_nmhd_wave_speeds_cell(&out_dir, 2);
+        gen_nmhd_wave_speeds_cell(&out_dir, 2, "", &[0, 1]);
         for dir in 0..2 {
             let program = symbi_discretize::gv::nmhd_flux_gv(2, dir, dir as usize);
             emit_gv(&out_dir, &format!("nmhd_face_flux_2d_{dir}"), 2, &program);
@@ -3815,7 +3815,7 @@ fn main() {
         // IMHD regime physics (no-energy c2p + HLLE/HLLD flux).
         gen_imhd_c2p(&out_dir, 2);
         // isothermal per-cell wave speeds (geometry-free) so IMHD UCT can read wave_speed_l/r.
-        gen_imhd_wave_speeds_cell(&out_dir, 2);
+        gen_imhd_wave_speeds_cell(&out_dir, 2, "", &[0, 1]);
         for dir in 0..2 {
             let program = symbi_discretize::gv::imhd_flux_gv(2, dir, dir as usize);
             emit_gv(&out_dir, &format!("imhd_face_flux_2d_{dir}"), 2, &program);
@@ -3839,7 +3839,7 @@ fn main() {
     // is out of plane. the single CT edge is E_phi (name_k=1); the in-plane curl carries the
     // cylindrical metric -(1/r) d_r(r E_phi) on the z-face (dir=1), flat on the r-face (dir=0).
     // only the geometry-dependent kernels are emitted here — c2p / snapshot / ghost /
-    // bcell_from_bface / save+avg-efield / wave_speeds_cell are geometry-free and reused from
+    // bcell_from_bface / save+avg-efield are geometry-free and reused from
     // the cartesian 2.5D block above (DOF=3 already, same field shapes). all three regimes.
     // =========================================================================
     {
@@ -3849,6 +3849,11 @@ fn main() {
         // (z, r), carried by grid axes (g1, g2) = (1, 0): the runtime edge map binds the z-face
         // mass and B_r fluxes as the `a` family, and the stencil pairs them across r.
         gen_rmhd_edge_emf(&out_dir, 1, 2, 1, 0);
+        // the per-cell fans along the grid's components (r, z): slot 1 is the z fan the z-face
+        // fluxes and the UCT edge EMF read.
+        gen_rmhd_wave_speeds_cell(&out_dir, 2, "_cyl_rz", &[0, 2]);
+        gen_nmhd_wave_speeds_cell(&out_dir, 2, "_cyl_rz", &[0, 2]);
+        gen_imhd_wave_speeds_cell(&out_dir, 2, "_cyl_rz", &[0, 2]);
         for dir in 0..2 {
             gen_rmhd_ct_curl_cyl_rz(&out_dir, dir, &cyl);
         }
@@ -3856,7 +3861,7 @@ fn main() {
         gen_rmhd_bcell_godunov_euler(&out_dir, cyl.clone(), 2);
         gen_rmhd_bcell_godunov_rk2(&out_dir, cyl.clone(), 2);
         // RMHD regime physics: HLLE quartic flux (normal coord_n = axes[dir]) + CFL map +
-        // gas godunov (cyl geo source). c2p / wave_speeds_cell / snapshot reused from above.
+        // gas godunov (cyl geo source). c2p / snapshot reused from above.
         gen_rmhd_wave_speed_map(&out_dir, 2, cyl.clone());
         gen_godunov_stage(&out_dir, 2, "rmhd", true, cyl.clone(), None);
         for dir in 0u8..2 {
@@ -4033,7 +4038,7 @@ fn main() {
         }
         // RMHD regime physics (c2p already emitted; HLLE flux reads the materialized speeds).
         emit_rmhd_flux_gv(&out_dir, "rmhd_face_flux_1d_0", 1, 0);
-        gen_rmhd_wave_speeds_cell(&out_dir, 1);
+        gen_rmhd_wave_speeds_cell(&out_dir, 1, "", &[0]);
         gen_rmhd_wave_speed_map(&out_dir, 1, g1.clone());
         gen_godunov_stage(&out_dir, 1, "rmhd", true, g1.clone(), None);
         gen_snapshot(&out_dir, 1, "rmhd", true, g1.clone());

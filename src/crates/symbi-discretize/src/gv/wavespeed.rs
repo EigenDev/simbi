@@ -1281,7 +1281,10 @@ pub fn rhd_source_cfl_gr_gv(
 }
 
 /// RMHD is fixed 3D. reads the full 3-velocity + 3-magnetic-field prim + gamma.
-pub fn rmhd_wave_speeds_cell_gv(ndim: usize) -> KernelProgram {
+/// slot `d` holds the fan along the physical component grid axis `d` carries, `axes[d]`: the
+/// identity on cartesian, spherical and the r-phi disk, components (0, 2) on the cylindrical (r, z)
+/// chart, whose z faces read slot 1.
+pub fn rmhd_wave_speeds_cell_gv(ndim: usize, axes: &[usize]) -> KernelProgram {
     trace_kernel(|cx| {
         let rho = cx.field("prim_rho", FieldRef::PrimRho);
         let vel: [Gv; 3] =
@@ -1299,7 +1302,7 @@ pub fn rmhd_wave_speeds_cell_gv(ndim: usize) -> KernelProgram {
         // a 3-vector but the grid varies along ndim axes only.
         let mut writes = Vec::with_capacity(2 * ndim);
         for d in 0..ndim {
-            let nhat = Normalized::axis(d);
+            let nhat = Normalized::axis(axes[d]);
             // raw quartic min/max as the solver returns them; the flux clamps the fan, and the
             // zero-clamped form lives there as `extremal_speeds`.
             let (lmin, lmax) = Rmhd.wave_speeds(&eos, &prim, &nhat);
@@ -1911,7 +1914,10 @@ pub fn fofc_project_gr_gv(
 /// reads them for the edge-EMF coefficients) works for NMHD — the classical regimes otherwise
 /// compute speeds inline in the flux and leave those buffers empty. mirror of
 /// `rmhd_wave_speeds_cell_gv`.
-pub fn nmhd_wave_speeds_cell_gv(ndim: usize) -> KernelProgram {
+/// slot `d` holds the fan along the physical component grid axis `d` carries, `axes[d]`: the
+/// identity on cartesian, spherical and the r-phi disk, components (0, 2) on the cylindrical (r, z)
+/// chart, whose z faces read slot 1.
+pub fn nmhd_wave_speeds_cell_gv(ndim: usize, axes: &[usize]) -> KernelProgram {
     trace_kernel(|cx| {
         let rho = cx.field("prim_rho", FieldRef::PrimRho);
         let vel: [Gv; 3] =
@@ -1927,7 +1933,7 @@ pub fn nmhd_wave_speeds_cell_gv(ndim: usize) -> KernelProgram {
         );
         let mut writes = Vec::with_capacity(2 * ndim);
         for d in 0..ndim {
-            let nhat = Normalized::axis(d);
+            let nhat = Normalized::axis(axes[d]);
             let (lmin, lmax) = NewtonianMhd.wave_speeds(&eos, &prim, &nhat);
             writes.push(KernelWrite::new(
                 format!("ws_l_{d}"),
@@ -1949,7 +1955,10 @@ pub fn nmhd_wave_speeds_cell_gv(ndim: usize) -> KernelProgram {
 /// a^2 = cs^2, pressure-free). lets isothermal MHD run UCT (the regime-generic HLL edge-EMF reads
 /// these speeds); materializing them is what holds `--ct-method uct` on UCT, which silently falls
 /// back to Contact when those buffers are empty.
-pub fn imhd_wave_speeds_cell_gv(ndim: usize) -> KernelProgram {
+/// slot `d` holds the fan along the physical component grid axis `d` carries, `axes[d]`: the
+/// identity on cartesian, spherical and the r-phi disk, components (0, 2) on the cylindrical (r, z)
+/// chart, whose z faces read slot 1.
+pub fn imhd_wave_speeds_cell_gv(ndim: usize, axes: &[usize]) -> KernelProgram {
     trace_kernel(|cx| {
         let rho = cx.field("prim_rho", FieldRef::PrimRho);
         let vel: [Gv; 3] =
@@ -1964,7 +1973,7 @@ pub fn imhd_wave_speeds_cell_gv(ndim: usize) -> KernelProgram {
         );
         let mut writes = Vec::with_capacity(2 * ndim);
         for d in 0..ndim {
-            let nhat = Normalized::axis(d);
+            let nhat = Normalized::axis(axes[d]);
             let (lmin, lmax) = IsothermalMhd.wave_speeds(&eos, &prim, &nhat);
             writes.push(KernelWrite::new(
                 format!("ws_l_{d}"),

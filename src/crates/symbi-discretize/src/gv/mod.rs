@@ -1895,7 +1895,7 @@ mod tests {
         // (lambda_min, lambda_max) pair per direction -> wave_speed_l[d] / wave_speed_r[d].
         // proves it reads the full prim + gamma, writes 6, and carries the resolvent-cubic
         // transcendentals, being the exact quartic — the cost lifted off the flux.
-        let program = rmhd_wave_speeds_cell_gv(3);
+        let program = rmhd_wave_speeds_cell_gv(3, &[0, 1, 2]);
         let k = program.kernel();
         let writes = program.writes();
         assert_eq!(writes.len(), 6, "lambda_min/max per 3 directions");
