@@ -13,9 +13,10 @@
 # - restart     `many` to half the steps, resumed onto a different layout
 # - correction  a troubled cell against a cut, on one worker and on many
 # - reject      a stage rejection reported by one worker, against one worker
-#               driven through the same rejection (gas regimes); a magnetized
-#               kernel set carries no complete rollback snapshot, so there the
-#               forced rejection is refused by name and the arm records that
+#               driven through the same rejection (gas regimes and refined
+#               magnetized cases); an unrefined magnetized kernel set carries no
+#               complete rollback snapshot, so there the forced rejection is
+#               refused by name and the arm records that
 # - bad_cfl     an invalid timestep candidate: every worker exits nonzero and
 #               no final checkpoint appears
 # - lost        one worker ends as a lost node would: the survivors exit
@@ -62,9 +63,10 @@ import numpy as np
 ROOT = Path(__file__).resolve().parents[1]
 PROVENANCE = re.compile(r"backend=([0-9a-f]{40}(?:-dirty)?) config=")
 EXIT = re.compile(r"launch: worker (\d+) exit (-?\d+)")
+# a refined launch reports its counts and `refined=1` in place of the timing breakdown
 SUMMARY = re.compile(
-    r"SIMBI launch: worker=(\d+)/(\d+) steps=(\d+) rejections=(\d+) compute=([\d.]+)s "
-    r"collectives=([\d.]+)s exchange=([\d.]+)s final_checkpoint=([\d.]+)s"
+    r"SIMBI launch: worker=(\d+)/(\d+) steps=(\d+) rejections=(\d+) (?:compute=([\d.]+)s "
+    r"collectives=([\d.]+)s exchange=([\d.]+)s final_checkpoint=([\d.]+)s|refined=1)"
 )
 AUDIT_ALL = (("SIMBI_FABRIC_AUDIT", "all"),)
 
@@ -92,6 +94,9 @@ class Case:
     # a troubled cell against a cut, as SIMBI_FABRIC_INJECT spells it
     trouble: str | None = None
     faults: tuple[str, ...] = ("reject",)
+    # a refined case: the refined worker rolls a magnetized step back with its faces, so its
+    # rejection arm compares against one worker in place of expecting a refusal
+    refined: bool = False
 
     @property
     def script(self) -> str:
@@ -143,6 +148,17 @@ CASES: tuple[Case, ...] = (
          cuts=((), (8,), (8,)), restart_cuts=((), (), (6, 10)), trouble="trouble:3:0:5:0:7"),
     Case("ram44", "simbi_configs.examples.srhd.ram44", "Ram44", (32, 32), 8, ("full",),
          cuts=((16,), ()), restart_cuts=((10, 21), ())),
+    # one refined box (root cells 8..24 at ratio 2) that the cuts cross; the correction arm flags
+    # a root cell against the x = 13 cut just below the box
+    Case("refined_blast", f"{N}.refined_blast", "RefinedBlast", (32, 32, 1), 8, ("full",),
+         cuts=((13,), (18,)), restart_cuts=((16,), ()), trouble="trouble:3:0:12:7",
+         faults=("reject", "bad_cfl", "lost"), refined=True),
+    Case("refined_mhd_blast", f"{N}.refined_mhd_blast", "RefinedMhdBlast", (32, 32, 1), 8, ("full",),
+         cuts=((13,), (18,)), restart_cuts=((16,), ()), trouble="trouble:7:0:12:7", magnetized=True,
+         faults=("reject", "bad_cfl", "lost"), refined=True),
+    Case("refined_mhd_blast_uct", f"{N}.refined_mhd_blast", "RefinedMhdBlast", (32, 32, 1), 8, ("full",),
+         cuts=((13,), (18,)), restart_cuts=((16,), ()), flags=("--ct-method", "uct"), fields="ct_method='uct'",
+         trouble="trouble:7:0:12:7", magnetized=True, faults=("reject", "bad_cfl", "lost"), refined=True),
 )
 
 
@@ -275,13 +291,17 @@ def _quote(s: str) -> str:
     return "'" + s.replace("'", "'\\''") + "'"
 
 
+def _seconds(group: str | None) -> float | None:
+    return None if group is None else float(group)
+
+
 def _summaries(stderr: str) -> dict[int, dict]:
     out = {}
     for m in SUMMARY.finditer(stderr):
         out[int(m.group(1))] = {
             "workers": int(m.group(2)), "steps": int(m.group(3)), "rejections": int(m.group(4)),
-            "compute_s": float(m.group(5)), "collectives_s": float(m.group(6)), "exchange_s": float(m.group(7)),
-            "final_checkpoint_s": float(m.group(8)),
+            "compute_s": _seconds(m.group(5)), "collectives_s": _seconds(m.group(6)), "exchange_s": _seconds(m.group(7)),
+            "final_checkpoint_s": _seconds(m.group(8)),
         }
     return out
 
@@ -302,31 +322,34 @@ def initial_of(data: Path) -> Path | None:
 
 
 def interior(path: Path) -> tuple[dict[str, np.ndarray], dict[str, float]]:
-    """every level-0 cell dataset trimmed to the interior (a face field over its interior
-    faces), and the level attributes"""
+    """every cell dataset of every level trimmed to its level's interior (a face field over
+    its interior faces), keyed by level, and the root level's attributes"""
     with h5py.File(path, "r") as f:
-        level = f["level_0"]
-        ng = int(level["mesh"].attrs["halo_width"])
-        names: list[str] = []
-        level.visit(lambda n: names.append(n) if isinstance(level[n], h5py.Dataset) else None)
         fields = {}
-        for n in names:
-            if n.startswith("mesh/") or n.startswith("partition_0/owned") or "/domain/" in n:
-                continue
-            data = level[n][()]
-            if "/magnetic/" in n:
-                fields[n] = data
-            elif data.ndim >= 2:
-                fields[n] = data[tuple(slice(ng, -ng) for _ in range(data.ndim))]
-        attrs = {k: float(level.attrs[k]) for k in ("time", "iteration")}
+        levels = sorted(k for k in f.keys() if k.startswith("level_"))
+        for level_name in levels:
+            level = f[level_name]
+            ng = int(level["mesh"].attrs["halo_width"])
+            names: list[str] = []
+            level.visit(lambda n, names=names, level=level: names.append(n) if isinstance(level[n], h5py.Dataset) else None)
+            for n in names:
+                if n.startswith("mesh/") or n.startswith("partition_0/owned") or "/domain/" in n:
+                    continue
+                data = level[n][()]
+                if "/magnetic/" in n:
+                    fields[f"{level_name}/{n}"] = data
+                elif data.ndim >= 2:
+                    fields[f"{level_name}/{n}"] = data[tuple(slice(ng, -ng) for _ in range(data.ndim))]
+        attrs = {k: float(f["level_0"].attrs[k]) for k in ("time", "iteration")}
     return fields, attrs
 
 
 def totals(path: Path) -> dict[str, tuple[float, float]]:
     """the sum and the absolute sum of every conserved dataset over the interior"""
     fields, _ = interior(path)
+    # the root level alone: a refined level's cells cover root cells the restriction already holds
     return {n: (float(np.sum(x, dtype=np.float64)), float(np.sum(np.abs(x), dtype=np.float64)))
-            for n, x in fields.items() if "cons" in n}
+            for n, x in fields.items() if "cons" in n and n.startswith("level_0/")}
 
 
 def max_div_b(path: Path) -> float:
@@ -439,7 +462,7 @@ def run_case(driver: Driver, case: Case) -> dict:
         if checks["flagged_one"] is None and checks["flagged_many"] is None:
             checks["flagged_many == flagged_one"] = same_state(final_of(arms["flagged_many"].data), final_of(arms["flagged_one"].data))
     # failure handling
-    if "reject" in case.faults and case.magnetized:
+    if "reject" in case.faults and case.magnetized and not case.refined:
         arms["reject_refused"] = driver.launch(case, "reject_refused", where / "reject_refused", case.cuts, case.steps,
                                                env={"SIMBI_FABRIC_INJECT": "reject:1:3:1"})
         checks["reject refused by name"] = failed(
