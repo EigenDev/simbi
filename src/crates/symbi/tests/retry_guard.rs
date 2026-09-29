@@ -551,7 +551,7 @@ fn workers_resuming_different_guard_states_refuse_the_session() {
     let pair = run_pair(test, "disagree", &[], &[("W_STREAK_1", "5")]);
     for (w, o) in pair.iter().enumerate() {
         assert_eq!(o.code, Some(2), "worker {w} did not refuse the session:\n{}", o.stderr);
-        assert!(o.stderr.contains("the retry guard differs across the workers"), "worker {w}:\n{}", o.stderr);
+        assert!(o.stderr.contains("the retry guard or retry exclusion differs across the workers"), "worker {w}:\n{}", o.stderr);
         assert!(!o.stdout.contains("PUBLISHED 1"), "worker {w} took a step before refusing");
     }
     assert!(pair[1].stderr.contains("here streak 5") && pair[1].stderr.contains("the minimum over the workers streak 0"), "{}", pair[1].stderr);

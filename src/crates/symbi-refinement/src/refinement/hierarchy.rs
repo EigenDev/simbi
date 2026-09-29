@@ -1902,6 +1902,7 @@ where
         prepare_initial_state: bool,
         mut callback: impl FnMut(&Self) -> std::ops::ControlFlow<()>,
     ) -> symbi_xpu::Result<symbi_sim::run_diagnostics::RunDiagnostics> {
+        symbi_sim::retry_guard::assert_one_retry_exclusion(self.levels.iter().map(|l| &l.state.retry_exclusion));
         // homologous mesh motion applies on a single grid: the hierarchy's flux
         // registers and transfer operators are written for a fixed mesh. a
         // 1-level hierarchy runs without registers or transfer, so motion is
@@ -5791,6 +5792,7 @@ where
     T: HaloTransport,
     F: FnMut(u64, f64, &[Hierarchy<R, NDIM, DOF, M, E, S, Mem, K>]) -> ControlFlow<()>,
 {
+    symbi_sim::retry_guard::assert_one_retry_exclusion(tiles.iter().flat_map(|h| h.levels.iter().map(|l| &l.state.retry_exclusion)));
     let n = tiles.len();
     // the finest-level tail owns the IBM surface physics, and the refined-
     // decomposed step drives the fine tail alone, so a refined run needs at

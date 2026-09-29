@@ -230,3 +230,18 @@ mod tests {
         assert_eq!(streak, 7);
     }
 }
+
+/// refuse a run whose stores carry different retry exclusions: the decision of every tile and level
+/// reads its own store, so stores that disagree would accept and reject different steps of one run
+pub fn assert_one_retry_exclusion<'a>(exclusions: impl IntoIterator<Item = &'a crate::substrate_seam::RetryExclusion>) {
+    let mut exclusions = exclusions.into_iter();
+    let Some(first) = exclusions.next() else { return };
+    for (ii, other) in exclusions.enumerate() {
+        assert!(
+            other == first,
+            "the stores of one run carry different retry exclusions: store 0 {first}, store {} {other}; \
+             set the run's policy on every tile and level",
+            ii + 1
+        );
+    }
+}

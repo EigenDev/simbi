@@ -66,6 +66,36 @@ pub enum RetryExclusion {
     LegacyEuclideanSphere { radius: f64 },
 }
 
+impl RetryExclusion {
+    /// the policy as two words, (kind, radius bits): what the workers of a run agree on
+    pub fn words(&self) -> [u64; 2] {
+        match *self {
+            RetryExclusion::None => [0, 0],
+            RetryExclusion::LegacyEuclideanSphere { radius } => [1, radius.to_bits()],
+        }
+    }
+
+    /// the policy the words name
+    pub fn from_words(words: [u64; 2]) -> Option<Self> {
+        match words {
+            [0, 0] => Some(RetryExclusion::None),
+            [1, bits] => Some(RetryExclusion::LegacyEuclideanSphere { radius: f64::from_bits(bits) }),
+            _ => None,
+        }
+    }
+}
+
+impl std::fmt::Display for RetryExclusion {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            RetryExclusion::None => write!(f, "none (every freeze act is evidence)"),
+            RetryExclusion::LegacyEuclideanSphere { radius } => {
+                write!(f, "legacy euclidean sphere |x| < {radius} (freeze acts inside it are not evidence)")
+            }
+        }
+    }
+}
+
 /// the fallback ladder's per-substage report — four orthogonal facts. counts
 /// are named reductions of the channel masks: `troubled` from the
 /// `TroubledCell` decode of the recovery status, `frozen` from the

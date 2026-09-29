@@ -2459,6 +2459,7 @@ where
     F: FnMut(u64, f64, &[&FieldStore<D, DOF, M, f64>]) -> ControlFlow<()>,
     symbi_geometry::Cartesian: symbi_geometry::Metric<f64, D>,
 {
+    crate::retry_guard::assert_one_retry_exclusion(stores.iter().map(|s| &s.retry_exclusion));
     let counts = schedule.counts();
     let stages = ts.stages();
     let multistage = crate::driver::needs_step_snapshot(stages);

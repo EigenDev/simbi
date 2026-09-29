@@ -33,7 +33,7 @@ use crate::driver::{
 use crate::plan_exchange::{AuditCost, AuditError, PlanExchange, StagingFault};
 use crate::stage::{StageArgs, StageOutcome, fold_stage_from_correction, fold_stage_through_mark};
 use crate::state::{FieldStore, Timestepping};
-use crate::substrate_seam::{KernelSet, RegimeKind};
+use crate::substrate_seam::{KernelSet, RegimeKind, RetryExclusion};
 use std::ops::ControlFlow;
 use std::time::{Duration, Instant};
 use symbi_fabric::{Fabric, FabricError, Link, OpKind, WorkerId};
@@ -501,7 +501,8 @@ pub fn guard_failure<L: Link>(
 }
 
 /// the retry guard state every worker of the session holds: the same consecutive severely reduced
-/// root steps and the same thresholds, on every store of every worker. each word is reduced to its
+/// root steps, the same thresholds and the same retry exclusion, on every store of every worker.
+/// each word is reduced to its
 /// minimum over the workers as its two 32-bit halves sent as the exact integers one above them
 /// (the minimum reduces over positive finite numbers); a worker whose own words differ from the
 /// minimum, or whose stores disagree among themselves, votes, and one vote refuses the session
@@ -510,17 +511,20 @@ pub fn agree_retry_guard<const D: usize, const DOF: usize, M: MemorySpace, L: Li
     fabric: &mut Fabric<L>,
     deadline: Duration,
 ) -> Result<(), WorkerError> {
-    let words = |s: &FieldStore<D, DOF, M, f64>| -> [u64; 4] {
+    let words = |s: &FieldStore<D, DOF, M, f64>| -> [u64; 6] {
+        let [kind, radius] = s.retry_exclusion.words();
         [
             u64::from(s.severe_streak),
             u64::from(s.retry_guard.max_rejections),
             s.retry_guard.severe_ratio.to_bits(),
             u64::from(s.retry_guard.sustained_steps),
+            kind,
+            radius,
         ]
     };
     let mine = words(stores[0]);
     let locally_agreed = stores.iter().all(|s| words(s) == mine);
-    let mut agreed = [0u64; 4];
+    let mut agreed = [0u64; 6];
     for (w, word) in agreed.iter_mut().enumerate() {
         let mut halves = [0u64; 2];
         for (i, half) in halves.iter_mut().enumerate() {
@@ -531,9 +535,11 @@ pub fn agree_retry_guard<const D: usize, const DOF: usize, M: MemorySpace, L: Li
     }
     let differs = !locally_agreed || mine != agreed;
     if fabric.collective(OpKind::Any, u64::from(differs), deadline)? != 0 {
-        let show = |w: [u64; 4]| {
+        let show = |w: [u64; 6]| {
+            let exclusion = RetryExclusion::from_words([w[4], w[5]])
+                .map_or_else(|| format!("unrecognized ({}, {})", w[4], w[5]), |e| e.to_string());
             format!(
-                "streak {} max_rejections {} severe_ratio {} sustained_steps {}",
+                "streak {} max_rejections {} severe_ratio {} sustained_steps {} retry exclusion {exclusion}",
                 w[0],
                 w[1],
                 f64::from_bits(w[2]),
@@ -541,8 +547,8 @@ pub fn agree_retry_guard<const D: usize, const DOF: usize, M: MemorySpace, L: Li
             )
         };
         return Err(WorkerError::Numerics(format!(
-            "the retry guard differs across the workers (this worker's stores agree: {locally_agreed}; here {}, \
-             the minimum over the workers {}); the session does not start",
+            "the retry guard or retry exclusion differs across the workers (this worker's stores agree: \
+             {locally_agreed}; here {}, the minimum over the workers {}); the session does not start",
             show(mine),
             show(agreed)
         )));

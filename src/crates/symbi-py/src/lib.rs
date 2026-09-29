@@ -2280,8 +2280,10 @@ where
 {
     let data_dir = &cfg.data_dir;
     let guard = retry_guard_of(cfg);
+    let exclusion = retry_exclusion_of(cfg);
     for level in hier.levels.iter_mut() {
         level.state.retry_guard = guard;
+        level.state.retry_exclusion = exclusion;
     }
     if let Some(path) = cfg.restart_path.as_deref() {
         // a restart may run deeper than the file it resumes from — the bootstrap ladder, where a
@@ -2447,29 +2449,7 @@ where
     // on a cartesian black-hole run, the FOFC counters are reported split at the outer horizon
     // r_+ = M + sqrt(M^2 - a^2), the true spin-dependent radius (cells in (r_+, 2M) at nonzero
     // spin sit outside the horizon): the exterior subtotal is the production signal.
-    let horizon_radius = if cfg.spacetime != "minkowski"
-        && cfg.coord_system == "cartesian"
-        && cfg.schwarzschild_mass > 0.0
-    {
-        let m = cfg.schwarzschild_mass;
-        let a = cfg.kerr_spin.abs().min(m); // |a| <= M; clamp guards the sqrt
-        m + (m * m - a * a).sqrt()
-    } else {
-        0.0
-    };
-    symbi::regimes::fofc::fofc_set_horizon_radius(horizon_radius);
-    // the retry exclusion of this run, on every level: the freeze acts inside the euclidean sphere
-    // of the outer horizon radius do not reject a step or count toward the freeze-streak halt. a
-    // compatibility choice that reproduces this runner's decision from before the policy was a
-    // property of the simulation; it is not a statement of which cells the scheme may exclude.
-    let retry_exclusion = if horizon_radius > 0.0 {
-        symbi_sim::substrate_seam::RetryExclusion::LegacyEuclideanSphere { radius: horizon_radius }
-    } else {
-        symbi_sim::substrate_seam::RetryExclusion::None
-    };
-    for level in hier.levels.iter_mut() {
-        level.state.retry_exclusion = retry_exclusion;
-    }
+    symbi::regimes::fofc::fofc_set_horizon_radius(outer_horizon_radius(cfg));
     let mut last_fofc: (u64, u64) = (0, 0);
     let mut last_fofc_h: (u64, u64) = (0, 0);
     let mut horizon_note_posted = false;
@@ -3589,6 +3569,31 @@ fn build_eos(cfg: &Config) -> symbi::EosArm {
 /// taub-mathews leaves D = rho W intact and misplaces the rho/W split, which corrupts t = 0 on
 /// every synge run. both arms derive from `cfg.eos_name` and sit adjacent so they cannot drift.
 /// the run's retry safeguards: the built-in thresholds unless the problem overrides them
+/// the outer horizon radius r_+ = M + sqrt(M^2 - a^2) of a cartesian black-hole run, 0 on any
+/// other: the radius the FOFC census splits its report at
+fn outer_horizon_radius(cfg: &Config) -> f64 {
+    if cfg.spacetime != "minkowski" && cfg.coord_system == "cartesian" && cfg.schwarzschild_mass > 0.0 {
+        let m = cfg.schwarzschild_mass;
+        let a = cfg.kerr_spin.abs().min(m); // |a| <= M; clamp guards the sqrt
+        m + (m * m - a * a).sqrt()
+    } else {
+        0.0
+    }
+}
+
+/// the retry exclusion this runner configures for a run, applied to every tile and level of every
+/// run shape: on a cartesian black-hole run the freeze acts inside the euclidean sphere of the outer
+/// horizon radius do not reject a step or count toward the freeze-streak halt, and on every other
+/// run each freeze act is evidence. a compatibility choice that reproduces this runner's decision
+/// from before the policy was a property of the simulation; it states nothing about which cells
+/// the scheme may exclude.
+fn retry_exclusion_of(cfg: &Config) -> symbi_sim::substrate_seam::RetryExclusion {
+    match outer_horizon_radius(cfg) {
+        radius if radius > 0.0 => symbi_sim::substrate_seam::RetryExclusion::LegacyEuclideanSphere { radius },
+        _ => symbi_sim::substrate_seam::RetryExclusion::None,
+    }
+}
+
 fn retry_guard_of(cfg: &Config) -> symbi_sim::retry_guard::RetryGuard {
     symbi_sim::retry_guard::RetryGuard {
         max_rejections: cfg.retry_max_rejections,
@@ -3603,6 +3608,7 @@ fn announce_retry_guard<const D: usize, const DOF: usize, Mem: symbi::symbi_xpu:
         "SIMBI {}",
         symbi_sim::retry_guard::opening_report(&store.retry_guard, store.retry_guard_recorded.as_ref(), store.severe_streak)
     );
+    eprintln!("SIMBI retry exclusion: {}", store.retry_exclusion);
 }
 
 fn host_eos(cfg: &Config) -> EosSelect<f64> {
@@ -5701,8 +5707,10 @@ where
             }
         ));
         let guard = retry_guard_of(cfg);
+        let exclusion = retry_exclusion_of(cfg);
         for store in stores.iter_mut() {
             store.retry_guard = guard;
+            store.retry_exclusion = exclusion;
         }
         announce_retry_guard(&*stores[0]);
         evolve_scheduled(
@@ -6009,9 +6017,11 @@ where
     let mut cp_index = cfg.checkpoint_index + 1;
     let cp_error: std::cell::RefCell<Option<String>> = std::cell::RefCell::new(None);
     let guard = retry_guard_of(cfg);
+    let exclusion = retry_exclusion_of(cfg);
     for tile in tiles.iter_mut() {
         for level in tile.levels.iter_mut() {
             level.state.retry_guard = guard;
+            level.state.retry_exclusion = exclusion;
         }
     }
     announce_retry_guard(&tiles[0].levels[0].state);
@@ -10990,9 +11000,11 @@ where
     let mut cp_index = cfg.checkpoint_index + 1;
     let write_initial = !restart && (cfg.checkpoint_index == 0 || cfg.start_time == 0.0);
     let guard = retry_guard_of(cfg);
+    let exclusion = retry_exclusion_of(cfg);
     for tile in tiles.iter_mut() {
         for level in tile.levels.iter_mut() {
             level.state.retry_guard = guard;
+            level.state.retry_exclusion = exclusion;
         }
     }
     if me == WorkerId(0) {
@@ -11608,8 +11620,10 @@ where
             audit_every_point: std::env::var("SIMBI_FABRIC_AUDIT").is_ok_and(|v| v == "all"),
         };
         let guard = retry_guard_of(cfg);
+        let exclusion = retry_exclusion_of(cfg);
         for store in stores.iter_mut() {
             store.retry_guard = guard;
+            store.retry_exclusion = exclusion;
         }
         if launch.worker == 0 {
             announce_retry_guard(&*stores[0]);
