@@ -1243,6 +1243,81 @@ fn ct_face_curl<const D: usize>(
         .collect();
     (incident, id_axes)
 }
+/// the AOT name of the corner edge-EMF kernel `efield` dispatches for edge `name_k`: the
+/// constrained-transport method, the gas Riemann solver (the UCT coefficient family), the regime
+/// prefix, the spacetime slug `st` and the chart suffix `sfx` all ride the name.
+fn edge_emf_kernel_name<const D: usize>(
+    ct_method: CtMethod,
+    solver: Solver,
+    prefix: &str,
+    st: &str,
+    sfx: &str,
+    name_k: usize,
+) -> String {
+    match ct_method {
+        // GR-UCT: the densitized master-form corner EMF. HLLD gas -> the orthonormal-frame
+        // MUB09 wave-sum EMF (the sharp Alfven-resolving one, telescopes to the coordinate B_t
+        // flux); everything else -> the regime-generic HLL corner EMF.
+        CtMethod::Uct if !st.is_empty() && matches!(solver, Solver::Hlld) => {
+            format!(
+                "rmhd_edge_emf_uct_hlld{sfx}{st}_{D}d_{}",
+                name_k
+            )
+        }
+        CtMethod::Uct if !st.is_empty() => {
+            format!("rmhd_edge_emf_uct{sfx}{st}_{D}d_{}", name_k)
+        }
+        CtMethod::Contact if !st.is_empty() => {
+            format!("rmhd_edge_emf{sfx}{st}_{D}d_{}", name_k)
+        }
+        CtMethod::Contact => format!("rmhd_edge_emf_{D}d_{}", name_k),
+        // UCT EMF family follows the gas solver: HLLD gas -> the five-wave HLLD EMF (the genuine
+        // less-diffusive one, classical NMHD only); everything else -> the regime-generic HLL
+        // EMF (which is the EMF's HLLC for B_x != 0 — the contact doesn't resolve B_t, p.11).
+        CtMethod::Uct => match (solver, prefix) {
+            (Solver::Hlld, "nmhd") => {
+                format!("nmhd_edge_emf_uct_hlld_{D}d_{}", name_k)
+            }
+            // isothermal HLLD: M&DZ Appendix A (no contact mode; chi~ from the HLL central state).
+            (Solver::Hlld, "imhd") => {
+                format!("imhd_edge_emf_uct_hlld_{D}d_{}", name_k)
+            }
+            // relativistic HLLD: the MUB09 five-wave fan (the genuine less-diffusive RMHD EMF).
+            (Solver::Hlld, "rmhd") => {
+                format!("rmhd_edge_emf_uct_hlld_{D}d_{}", name_k)
+            }
+            _ => format!("rmhd_edge_emf_uct_{D}d_{}", name_k),
+        },
+    }
+}
+
+/// refuse a constrained-transport method with an edge of this chart whose EMF kernel was never
+/// emitted, naming the method, the chart and the missing kernel. the kernel set checks at its
+/// first CFL, before any stage runs.
+pub(crate) fn refuse_unbuilt_edge_emf<const D: usize, const DOF: usize, Mem, Sc>(
+    sim: &FieldStore<D, DOF, Mem, Sc>,
+    ct_method: CtMethod,
+    solver: Solver,
+    prefix: &str,
+) where
+    Mem: MemorySpace + Sync,
+    Sc: Scalar + OrderedNumeric,
+{
+    let st = spacetime_slug(sim.geom.spacetime);
+    let sfx = mhd_geom_suffix(sim.geom.coords, &sim.geom.axes);
+    for edge in ct_edges::<D>(&sim.geom.axes) {
+        let name = edge_emf_kernel_name::<D>(ct_method, solver, prefix, &st, sfx, edge.name_k.index());
+        assert!(
+            symbi_aot::kernel_by_name::<Sc>(&name).is_some(),
+            "{ct_method:?} constrained transport is not built for the {:?} chart on grid axes {:?}: \
+             its edge {} has no EMF kernel '{name}'; select CtMethod::Contact",
+            sim.geom.coords,
+            sim.geom.axes,
+            edge.name_k.index()
+        );
+    }
+}
+
 
 /// the CT edge EMF over each edge of the staggered complex. one code path for every
 /// D: loop the `StaggerComplex` edges (3 in 3D, 1 in 2.5D, none in 1.5D). each edge's
@@ -1316,41 +1391,7 @@ pub(crate) fn efield<const D: usize, const DOF: usize, Mem, Sc>(
         // coefficient family follows the gas Riemann solver. HLL is regime-generic; HLLC needs the
         // classical ideal-gas lambda* kernel (NMHD only). the kernel manifest declares the
         // slots it reads (bface_a/b, wsr/wsl, + rho/pre/bcell for HLLC), bound below.
-        let name = match ct_method {
-            // GR-UCT: the densitized master-form corner EMF. HLLD gas -> the orthonormal-frame
-            // MUB09 wave-sum EMF (the sharp Alfven-resolving one, telescopes to the coordinate B_t
-            // flux); everything else -> the regime-generic HLL corner EMF.
-            CtMethod::Uct if !st.is_empty() && matches!(solver, Solver::Hlld) => {
-                format!(
-                    "rmhd_edge_emf_uct_hlld{sfx}{st}_{D}d_{}",
-                    edge.name_k.index()
-                )
-            }
-            CtMethod::Uct if !st.is_empty() => {
-                format!("rmhd_edge_emf_uct{sfx}{st}_{D}d_{}", edge.name_k.index())
-            }
-            CtMethod::Contact if !st.is_empty() => {
-                format!("rmhd_edge_emf{sfx}{st}_{D}d_{}", edge.name_k.index())
-            }
-            CtMethod::Contact => format!("rmhd_edge_emf_{D}d_{}", edge.name_k.index()),
-            // UCT EMF family follows the gas solver: HLLD gas -> the five-wave HLLD EMF (the genuine
-            // less-diffusive one, classical NMHD only); everything else -> the regime-generic HLL
-            // EMF (which is the EMF's HLLC for B_x != 0 — the contact doesn't resolve B_t, p.11).
-            CtMethod::Uct => match (solver, prefix) {
-                (Solver::Hlld, "nmhd") => {
-                    format!("nmhd_edge_emf_uct_hlld_{D}d_{}", edge.name_k.index())
-                }
-                // isothermal HLLD: M&DZ Appendix A (no contact mode; chi~ from the HLL central state).
-                (Solver::Hlld, "imhd") => {
-                    format!("imhd_edge_emf_uct_hlld_{D}d_{}", edge.name_k.index())
-                }
-                // relativistic HLLD: the MUB09 five-wave fan (the genuine less-diffusive RMHD EMF).
-                (Solver::Hlld, "rmhd") => {
-                    format!("rmhd_edge_emf_uct_hlld_{D}d_{}", edge.name_k.index())
-                }
-                _ => format!("rmhd_edge_emf_uct_{D}d_{}", edge.name_k.index()),
-            },
-        };
+        let name = edge_emf_kernel_name::<D>(ct_method, solver, prefix, &st, sfx, edge.name_k.index());
         // bind by manifest: the kernel declares component-agnostic generic slots (`vel_p1`,
         // `bflux_a`, `emf`, ...); map each to this edge's actual field, then order inputs/outputs
         // by the recorded manifest so the bind cannot drift from the producer's slot sequence (a

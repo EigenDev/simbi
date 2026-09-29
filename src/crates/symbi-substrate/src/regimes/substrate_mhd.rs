@@ -333,6 +333,19 @@ where
         self
     }
 
+    /// the edge-EMF scheme the corner kernels run: UCT needs the per-cell Riemann wave speeds, so a
+    /// regime that materializes them (RMHD, and the nmhd/imhd UCT path) runs the configured method
+    /// and any other runs Contact.
+    fn edge_ct_method(&self) -> CtMethod {
+        let materialized = R::SPEC.materializes_wave_speeds
+            || (self.ct_method == CtMethod::Uct && matches!(Self::kernel_prefix(), "nmhd" | "imhd"));
+        if self.ct_method == CtMethod::Uct && !materialized {
+            CtMethod::Contact
+        } else {
+            self.ct_method
+        }
+    }
+
     /// select the constrained-transport edge-EMF scheme (Contact / Uct). fluent.
     pub fn ct_method(mut self, m: CtMethod) -> Self {
         self.ct_method = m;
@@ -1108,6 +1121,12 @@ where
     }
 
     fn cfl(&self, sim: &FieldStore<D, 3, Mem, Sc>) -> f64 {
+        crate::regimes::mhd_substrate::refuse_unbuilt_edge_emf(
+            sim,
+            self.edge_ct_method(),
+            self.solver,
+            Self::kernel_prefix(),
+        );
         let geom = &sim.geom;
         let st = spacetime_slug(geom.spacetime);
         // the geometry / spacing / spacetime slugs all ride the name: a log-radial grid selects the
@@ -1389,19 +1408,9 @@ where
         crate::regimes::mhd_substrate::snapshot(sim, R::SPEC.has_energy);
     }
     fn efield(&self, sim: &FieldStore<D, 3, Mem, Sc>) {
-        // UCT needs the per-cell Riemann wave speeds; only regimes that materialize them (RMHD)
-        // can use it today, so fall back to Contact otherwise (nmhd/imhd).
-        let materialized = R::SPEC.materializes_wave_speeds
-            || (self.ct_method == CtMethod::Uct
-                && matches!(Self::kernel_prefix(), "nmhd" | "imhd"));
-        let method = if self.ct_method == CtMethod::Uct && !materialized {
-            CtMethod::Contact
-        } else {
-            self.ct_method
-        };
         crate::regimes::mhd_substrate::efield(
             sim,
-            method,
+            self.edge_ct_method(),
             self.solver,
             Self::kernel_prefix(),
             self.eos_param.value(),

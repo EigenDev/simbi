@@ -8789,6 +8789,22 @@ fn dispatch_and_run(
             cfg.regime, cfg.viscosity, cfg.alpha
         ));
     }
+    // the flat 2.5D cylindrical r-z plane builds the Contact corner EMF alone: its single edge is
+    // E_phi, and the flat UCT family is emitted for the out-of-plane E_z edge of the x-y, r-theta
+    // and r-phi planes. the kernel set refuses the same combination at its first CFL.
+    if matches!(cfg.regime.as_str(), "nmhd" | "imhd" | "rmhd")
+        && cfg.ct_method == CtMethod::Uct
+        && cfg.dims == 2
+        && cfg.coord_system == "cylindrical"
+        && matches!(cfg.cyl_plane, CylPlane::Rz)
+        && cfg.spacetime == "minkowski"
+    {
+        return Err(format!(
+            "UCT constrained transport is not built for the flat cylindrical r-z plane of the {} \
+             regime: its E_phi edge has no UCT EMF kernel; set ct_method to 'contact'",
+            cfg.regime
+        ));
+    }
     alpha_key_verdict(&cfg.regime, cfg.bare_alpha_key, cfg.alpha)?;
     if viscous_regime && (cfg.viscosity > 0.0 || cfg.alpha > 0.0) {
         // the shear operator is a face-centered stencil over at least two grid axes; there is no
