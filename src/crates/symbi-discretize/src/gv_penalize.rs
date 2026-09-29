@@ -795,7 +795,7 @@ fn slip_dyad_coefficient_gv<'t>(
 /// z-edge currents from backward differences of the staggered faces `bf_c`.
 fn mixed_current_2d_gv<'t>(cx: TraceCx<'t>, inv_dx: &[Gv<'t>]) -> [Gv<'t>; 3] {
     let half = Gv::from_f64(0.5);
-    let bz = |off: &[i32]| crate::gv::gv_field_at(cx, "slip_bz", CtCellCt::SlipOperandBz, 2, off);
+    let bz = |off: &[i32]| crate::gv::gv_field_at(cx, &CtWireName::SlipBz.render(), CtCellCt::SlipOperandBz, 2, off);
     let bface = |c: usize, off: &[i32]| {
         crate::gv::gv_field_at(cx, &format!("bf_{c}"), CtFaceCt::BFaceComp(PhysComp::new(c)), 2, off)
     };
@@ -910,7 +910,13 @@ pub fn body_slip_emf_2d_gv() -> KernelProgram {
     let (kernel, writes) = trace(|cx| {
         let emf = crate::gv::ct_field(cx, CtEdgeCt::Emf);
         let fq = |off: &[i32]| {
-            crate::gv::gv_field_at(cx, "fq_2", CtCellCt::SlipQuadrature(PhysComp::new(2)), 2, off)
+            crate::gv::gv_field_at(
+                cx,
+                &CtWireName::Fq(PhysComp::new(2)).render(),
+                CtCellCt::SlipQuadrature(PhysComp::new(2)),
+                2,
+                off,
+            )
         };
         let scattered = (fq(&[0, 0]) + fq(&[-1, 0]) + fq(&[0, -1]) + fq(&[-1, -1])) * Gv::from_f64(0.25);
         let emf_new = emf + scattered;
