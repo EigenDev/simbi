@@ -1130,6 +1130,18 @@ pub struct RkWorkspaceGeneric<
     /// correction, one line each with the stage, written by the correction and taken by the
     /// driver that books the rejection
     pub rejection_evidence: std::sync::Mutex<Vec<String>>,
+    /// a test hook: one store-local cell made unrecoverable once, at (iteration, stage, cell,
+    /// fired). the stage pipeline writes a negative energy into the stage input after the fluxes,
+    /// at the cell wherever the store holds it (a halo copy included), and into the stage output
+    /// on the interior before the recovery, so the first-order redo cannot land the cell and the
+    /// correcting select freezes it through the production correction and retry decision.
+    /// the write happens once and marks the slot fired, so a replayed step runs clean; every span
+    /// of the named stage, a replay's included, takes its own stage-input snapshot.
+    pub unrecoverable_once: std::sync::Mutex<Option<(u64, usize, [isize; NDIM], bool)>>,
+    /// a test hook: one store-local interior cell whose troubled flag the mark of (iteration,
+    /// stage) raises once, its state left physical, so the correction it drives is the
+    /// conservative first-order redo on consistent inputs across every tile sharing the cell.
+    pub troubled_once: std::sync::Mutex<Option<(u64, usize, [isize; NDIM], bool)>>,
     /// body-feedback reduction scratch, allocated on the first feedback dispatch, so a body-free
     /// sim pays neither the memory nor a per-call allocation. the feedback kernels assign-write
     /// every cell of their dispatch region before the reduction reads it, so a reused buffer
@@ -3008,6 +3020,8 @@ where
             freeze_applied: Field::zeros(&allocated)?,
             fofc_evidence: Field::zeros(&allocated)?,
             rejection_evidence: std::sync::Mutex::new(Vec::new()),
+            unrecoverable_once: std::sync::Mutex::new(None),
+            troubled_once: std::sync::Mutex::new(None),
             body_scratch: std::sync::OnceLock::new(),
             #[cfg(debug_assertions)]
             stage_writes: std::sync::Mutex::new(None),

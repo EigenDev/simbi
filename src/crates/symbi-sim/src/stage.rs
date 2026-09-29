@@ -359,6 +359,59 @@ where
     outcome
 }
 
+/// the store's one-shot troubled cell: at the mark of the stage it names, on the interior, the
+/// cell's troubled flag is raised while its state stays physical, so the correction it drives is
+/// the conservative first-order redo. the slot is marked fired; returns the cells it raised.
+fn raise_troubled<const D: usize, const DOF: usize, Mem, Sc>(sim: &FieldStore<D, DOF, Mem, Sc>, stage: usize) -> u64
+where
+    Mem: MemorySpace,
+    Sc: Scalar + OrderedNumeric,
+{
+    let mut slot = sim.workspace.troubled_once.lock().expect("the troubled-cell slot");
+    let Some((iteration, at_stage, cell, fired)) = *slot else { return 0 };
+    if fired || (iteration, at_stage) != (sim.iteration, stage) {
+        return 0;
+    }
+    *slot = Some((iteration, at_stage, cell, true));
+    if !sim.geom.interior.contains(cell) || *sim.workspace.fofc_flag.view().at(cell) > Sc::from_f64(0.0) {
+        return 0;
+    }
+    *sim.workspace.fofc_flag.view_mut().at_mut(cell) = Sc::from_f64(1.0);
+    1
+}
+
+/// the store's one-shot unrecoverable cell, applied at `point` of the stage it names: a negative
+/// energy into the stage input after the fluxes, at the cell wherever the store holds it, halo
+/// included, so every tile sharing the cell restarts its redo from the same input; and into the
+/// stage output before the recovery, on the interior, where the slot is marked fired. a regime
+/// without an energy field carries no such cell.
+fn apply_unrecoverable<const D: usize, const DOF: usize, Mem, Sc>(sim: &FieldStore<D, DOF, Mem, Sc>, stage: usize, point: HookPoint)
+where
+    Mem: MemorySpace,
+    Sc: Scalar + OrderedNumeric,
+{
+    let mut slot = sim.workspace.unrecoverable_once.lock().expect("the unrecoverable-cell slot");
+    let Some((iteration, at_stage, cell, fired)) = *slot else { return };
+    if fired || (iteration, at_stage) != (sim.iteration, stage) {
+        return;
+    }
+    let field = match point {
+        HookPoint::AfterFlux => sim.stage_input().nrg_field(),
+        HookPoint::BeforeC2p => {
+            *slot = Some((iteration, at_stage, cell, true));
+            // the stage output carries state on the interior alone
+            if !sim.geom.interior.contains(cell) {
+                return;
+            }
+            sim.fields.cons.nrg_field()
+        }
+        HookPoint::BeforeGhostFill => return,
+    };
+    if let Some(nrg) = field {
+        *nrg.view_mut().at_mut(cell) = Sc::from_f64(-1.0);
+    }
+}
+
 fn fold_span<const D: usize, const DOF: usize, Mem, Sc, K>(
     sim: &FieldStore<D, DOF, Mem, Sc>,
     kernels: &K,
@@ -381,9 +434,18 @@ where
     // the stage input: flag it and skip the copy — `stage_input()` binds u_n
     // for this stage. forward-Euler takes no per-step snapshot, so the copy
     // stands there.
+    // a stage the one-shot unrecoverable cell arms takes its own snapshot, so the negative energy
+    // lands in the redo's input alone and leaves the step snapshot u_n whole, on every driver
+    let unrecoverable_armed = sim
+        .workspace
+        .unrecoverable_once
+        .lock()
+        .expect("the unrecoverable-cell slot")
+        .is_some_and(|(iteration, stage, _, _)| (iteration, stage) == (sim.iteration, args.stage));
     let stage_input_is_un = args.stage == 0
         && args.n_stages > 1
         && args.allow_elision
+        && !unrecoverable_armed
         && sim
             .workspace
             .elide_stage_snapshot
@@ -429,7 +491,7 @@ where
         if ph.kind == PhaseKind::Fofc {
             reached_correction = true;
             if span == StageSpan::ThroughMark {
-                let troubled = if fofc { kernels.fofc_mark(sim) } else { 0 };
+                let troubled = if fofc { kernels.fofc_mark(sim) + raise_troubled(sim, args.stage) } else { 0 };
                 sim.workspace
                     .fofc_marked
                     .store(fofc, std::sync::atomic::Ordering::Relaxed);
@@ -471,6 +533,7 @@ where
                 // flux written later would be sampled one phase stale and reflux the wrong
                 // mismatch.
                 prof("chi_flux", || kernels.chi_flux(sim));
+                apply_unrecoverable(sim, args.stage, HookPoint::AfterFlux);
                 hook(HookPoint::AfterFlux);
             }
             PhaseKind::Efield => prof("efield", || kernels.efield(sim)),
@@ -487,6 +550,7 @@ where
                 kernels.body_source(sim, args.ac * args.dt)
             }),
             PhaseKind::C2p => {
+                apply_unrecoverable(sim, args.stage, HookPoint::BeforeC2p);
                 hook(HookPoint::BeforeC2p);
                 prof("c2p", || kernels.c2p(sim));
             }
