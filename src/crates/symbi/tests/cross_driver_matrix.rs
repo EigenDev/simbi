@@ -648,3 +648,136 @@ mod grmhd {
     matrix_tests!();
     rollback_test!();
 }
+
+/// GRMHD source clipping at a cut: a cold, strongly magnetized kerr-schild box (mass 1, no
+/// excision, UCT, HLLE, pressure 0.01, B0 = 0.5, cfl 0.8) whose central cells, root indices 7
+/// and 8 on every axis, leave the admissible set under the full geometric source by their own
+/// physics in the first two steps. their conservative source replay clips the source to a
+/// fraction below one, a state-changing correction with no hook involved. a cut at x = 8
+/// splits the clipped block between two tiles; a cut at x = 9 holds it on one side, its x = 8
+/// layer against the cut and the neighbor clean. each run matches the single grid bit for bit
+/// with both copies of every shared face agreeing, and each asserts that a replay clipped.
+mod grmhd_clipping {
+    use super::*;
+    use symbi::regimes::substrate_kernels::Solver;
+    use symbi::regimes::substrate_rmhd::RmhdSubstrateKernelSet3D;
+    use symbi_hydro::rmhd::Rmhd;
+    type Sim = SimState<Rmhd, 3, SchwarzschildKSCartesian<f64>, IdealGas<f64>, CpuSpace, HostMemory>;
+    type Kern = RmhdSubstrateKernelSet3D<HostMemory, f64>;
+    const N: usize = 16;
+    const L: f64 = 5.0;
+    const H: f64 = 2.0 * L / N as f64;
+    const CFL: f64 = 0.8;
+    const STEPS: usize = 2;
+
+    fn build(ext: [(usize, usize); 3], bnd: Boundaries<3>) -> Sim {
+        let m = SchwarzschildKSCartesian { mass: 1.0 };
+        let bz = move |x: [f64; 3]| 0.5 / m.sqrt_det_gamma(Tensor::new(x));
+        let mut s = Sim::build(Rmhd, IdealGas { gamma: 4.0 / 3.0 }, m)
+            .cells([ext[0].1, ext[1].1, ext[2].1])
+            .spacing([H; 3])
+            .origin([-L; 3])
+            .index_offset([ext[0].0 as isize, ext[1].0 as isize, ext[2].0 as isize])
+            .boundaries(bnd)
+            .cfl(CFL)
+            .timestepping(Timestepping::Rk2)
+            .allocate()
+            .expect("sim")
+            .set_initial(|x| MhdPrim::new(Prim::adiabatic(Density(1.0), Tensor::new([0.0; 3]), Pressure(0.01)), Tensor::new([0.0, 0.0, bz(x)])))
+            .seed_faces(|axis, x| if axis == 2 { bz(x) } else { 0.0 })
+            .build()
+            .with_rollback_snapshot()
+            .expect("rollback snapshot");
+        // the clipping sits inside the horizon; the legacy sphere keeps a freeze there accepted
+        s.retry_exclusion = RetryExclusion::LegacyEuclideanSphere { radius: 2.0 };
+        s
+    }
+
+    fn kernels(s: &Sim) -> Kern {
+        Kern::new(4.0 / 3.0, CFL, 1.5, &s.geom.allocated)
+            .with_solver(Solver::Hlle)
+            .expect("solver")
+            .ct_method(CtMethod::Uct)
+    }
+
+    fn fraction(k: &Kern) -> f64 {
+        f64::from_bits(k.min_source_fraction.load(std::sync::atomic::Ordering::Relaxed))
+    }
+
+    fn single() -> (Run, f64) {
+        let whole = [(0usize, N); 3];
+        let sim = build(whole, Boundaries::uniform(BoundaryType::Outflow));
+        let k = kernels(&sim);
+        let mut hier = Hierarchy::single(sim, k);
+        let mut times = Vec::new();
+        let d = hier
+            .evolve_with_callback(100.0, 1, |h| {
+                times.push(h.levels[0].state.time.to_bits());
+                if times.len() >= STEPS { ControlFlow::Break(()) } else { ControlFlow::Continue(()) }
+            })
+            .expect("single-grid run");
+        let (mut state, mut copies) = (State::new(), Copies::new());
+        record(&mut state, &mut copies, &hier.levels[0].state, [0; 3], [N; 3]);
+        let run = Run { times, troubled: d.guards.troubled_cells.total, frozen: d.guards.frozen_cells.total, state, copies };
+        (run, fraction(&hier.levels[0].kernels))
+    }
+
+    fn decomposed(cut: usize) -> (Run, f64) {
+        let partition = Partition::explicit([N; 3], [vec![cut], Vec::new(), Vec::new()]).expect("cut inside the grid");
+        let counts = partition.counts();
+        let extents: Vec<[(usize, usize); 3]> =
+            (0..partition.n_tiles()).map(|f| partition.tile_extents(unflatten(f, counts))).collect();
+        let mut sims: Vec<Sim> = extents
+            .iter()
+            .enumerate()
+            .map(|(f, ext)| {
+                let tc = unflatten(f, counts);
+                let bnd = Boundaries(std::array::from_fn(|a| {
+                    if counts[a] == 1 {
+                        [BoundaryType::Outflow; 2]
+                    } else {
+                        [
+                            if tc[a] == 0 { BoundaryType::Outflow } else { BoundaryType::CoarseFine },
+                            if tc[a] == counts[a] - 1 { BoundaryType::Outflow } else { BoundaryType::CoarseFine },
+                        ]
+                    }
+                }));
+                build(*ext, bnd)
+            })
+            .collect();
+        let ks: Vec<Kern> = sims.iter().map(kernels).collect();
+        let (times, d) = {
+            let mut stores: Vec<&mut FieldStore<3, 3, HostMemory, f64>> = sims.iter_mut().map(|s| &mut **s).collect();
+            scheduled(&mut stores, &ks, counts, &Topology::wrapping([false; 3]), STEPS)
+        };
+        let (mut state, mut copies) = (State::new(), Copies::new());
+        for (s, ext) in sims.iter().zip(&extents) {
+            record(&mut state, &mut copies, s, std::array::from_fn(|a| ext[a].0), std::array::from_fn(|a| ext[a].1));
+        }
+        let run = Run { times, troubled: d.guards.troubled_cells.total, frozen: d.guards.frozen_cells.total, state, copies };
+        (run, ks.iter().map(fraction).fold(1.0, f64::min))
+    }
+
+    fn assert_clipping_at(cut: usize) {
+        let (one, clipped_one) = single();
+        assert!(clipped_one < 1.0, "the single-grid run clipped no source; the gate is vacuous");
+        let (many, clipped_many) = decomposed(cut);
+        assert!(clipped_many < 1.0, "cut {cut}: the decomposed run clipped no source");
+        assert_eq!(many.times, one.times, "cut {cut}: the decomposed run accepted different times");
+        assert_eq!((many.troubled, many.frozen), (one.troubled, one.frozen), "cut {cut}: the guard census differs");
+        let differing: Vec<_> = one.state.iter().filter(|(k, v)| many.state.get(k) != Some(v)).map(|(k, _)| k.clone()).collect();
+        assert!(differing.is_empty(), "cut {cut}: {} values differ from the single grid, first {:?}", differing.len(), differing.first());
+        let split: Vec<_> = many.copies.iter().filter(|(_, v)| v.iter().any(|b| *b != v[0])).map(|(k, _)| k.clone()).collect();
+        assert!(split.is_empty(), "cut {cut}: {} shared faces disagree, first {:?}", split.len(), split.first());
+    }
+
+    #[test]
+    fn a_clipping_replay_split_by_a_cut() {
+        assert_clipping_at(8);
+    }
+
+    #[test]
+    fn a_clipping_replay_against_a_cut_from_one_side() {
+        assert_clipping_at(9);
+    }
+}

@@ -200,6 +200,9 @@ pub struct MhdSubstrateKernelSet<R, Mem: MemorySpace, Sc: Scalar + OrderedNumeri
     /// consecutive substages on which the FOFC last-resort freeze tier fired; a genuine unrecoverable
     /// poison freezes every stage, while the rare correct parachute is isolated (see fofc.rs).
     pub freeze_streak: std::sync::atomic::AtomicU32,
+    /// the smallest geometric-source fraction a conservative source replay applied to any
+    /// interior cell over the kernel set's life, as f64 bits: 1 while no replay clipped a source.
+    pub min_source_fraction: std::sync::atomic::AtomicU64,
     /// the Ohmic resistivity `eta` (the induction diffusivity `dB/dt += eta * lap(B)`, added as a
     /// resistive edge EMF before the CT curl). 0 = ideal MHD (bit-identical). the resistive CFL
     /// `dt <= 1/2 dx^2 / eta` folds into the wave-speed reduction.
@@ -272,6 +275,7 @@ where
             runtime_source: None,
             boundary_dags: Vec::new(),
             freeze_streak: std::sync::atomic::AtomicU32::new(0),
+            min_source_fraction: std::sync::atomic::AtomicU64::new(1.0f64.to_bits()),
             resistivity: 0.0,
             viscosity: 0.0,
             excision_radius: 0.0,
@@ -717,6 +721,17 @@ where
                     source_weight,
                 );
 
+                // the smallest fraction this replay applies, kept as the run's observation
+                let applied = crate::regimes::substrate_gpu::field_reduce(
+                    source_weight,
+                    &sim.geom.interior,
+                    symbi_ir::emit::ReductionOp::Min,
+                );
+                let _ = self.min_source_fraction.fetch_update(
+                    std::sync::atomic::Ordering::Relaxed,
+                    std::sync::atomic::Ordering::Relaxed,
+                    |bits| (applied < f64::from_bits(bits)).then(|| applied.to_bits()),
+                );
                 // replay once more with only the local metric source scaled by theta. the flux
                 // divergence and the CT curl are re-run bit-identically, so every face still
                 // carries one flux and div(B) is untouched — only the pointwise, non-conservative
