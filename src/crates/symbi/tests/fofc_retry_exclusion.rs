@@ -183,7 +183,7 @@ fn the_traced_exclusion_keeps_the_legacy_host_test_s_freeze_acts() {
         for radius in [0.0, 1.0, 2.0, 2.2, 3.7, 9.0] {
             let evidence = &sim.workspace.fofc_evidence;
             dispatch_fofc_evidence_outside_sphere(&sim, radius, freeze, evidence);
-            let inside = horizon_flagged_count(freeze, &sim.geom.interior, &sim.geom.x_lo, &sim.geom.dx, radius);
+            let inside = horizon_flagged_count(freeze, &sim.geom.interior, &sim.geom.x_lo, &sim.geom.dx, &sim.geom.index_offset, radius);
             let mut kept = 0u64;
             for c in sim.geom.interior.iter() {
                 let x: [f64; 3] = std::array::from_fn(|a| sim.geom.x_lo[a] + (c[a] as f64 + 0.5) * sim.geom.dx[a]);

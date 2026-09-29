@@ -116,8 +116,9 @@ fn post_first_fallback<const D: usize, const DOF: usize, Mem, Sc>(
         if (*fv.at(c)).to_f64() <= 0.0 {
             continue;
         }
-        let x: [f64; D] =
-            std::array::from_fn(|aa| sim.geom.x_lo[aa] + (c[aa] as f64 + 0.5) * sim.geom.dx[aa]);
+        let x: [f64; D] = std::array::from_fn(|aa| {
+            sim.geom.x_lo[aa] + ((c[aa] + sim.geom.index_offset[aa]) as f64 + 0.5) * sim.geom.dx[aa]
+        });
         let radius = x.iter().map(|xx| xx * xx).sum::<f64>().sqrt();
         let pressure = pre.as_ref().map(|view| (*view.at(c)).to_f64());
         eprintln!(
@@ -130,7 +131,8 @@ fn post_first_fallback<const D: usize, const DOF: usize, Mem, Sc>(
 }
 
 /// count the set cells (value > 0 on an exact 0/1 mask) whose cell center |x| lies inside `r_h`, on a
-/// uniform cartesian grid with origin `x_lo` and spacing `dx`. the boundary test is a
+/// uniform cartesian grid with origin `x_lo` and spacing `dx`, cell c at whole-grid index
+/// c + `index_offset`. the boundary test is a
 /// diagnostic split with no physics dependence — half-cell classification error at the
 /// horizon is irrelevant (the interior fire sits deep inside, the exterior gate cares
 /// about cells well outside).
@@ -139,6 +141,7 @@ pub fn horizon_flagged_count<const D: usize, Mem, Sc>(
     interior: &symbi_algebra::Domain<D>,
     x_lo: &[f64; D],
     dx: &[f64; D],
+    index_offset: &[isize; D],
     r_h: f64,
 ) -> u64
 where
@@ -150,7 +153,7 @@ where
     for c in interior.iter() {
         let mut r2 = 0.0f64;
         for a in 0..D {
-            let x = x_lo[a] + (c[a] as f64 + 0.5) * dx[a];
+            let x = x_lo[a] + ((c[a] + index_offset[a]) as f64 + 0.5) * dx[a];
             r2 += x * x;
         }
         if r2 < r_h * r_h && (*view.at(c)).to_f64() > 0.0 {
@@ -178,7 +181,7 @@ where
     {
         return 0;
     }
-    horizon_flagged_count(mask, &sim.geom.interior, &sim.geom.x_lo, &sim.geom.dx, r_h)
+    horizon_flagged_count(mask, &sim.geom.interior, &sim.geom.x_lo, &sim.geom.dx, &sim.geom.index_offset, r_h)
 }
 
 /// the freeze acts on the interior that count as evidence for rejecting the step or halting the

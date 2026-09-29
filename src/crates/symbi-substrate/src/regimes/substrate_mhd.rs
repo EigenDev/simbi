@@ -90,8 +90,8 @@ pub(crate) fn max_inv_physical_width<const D: usize>(
         let mut pos = [0.0f64; 3];
         for d in 0..D {
             let c = match &geom.maps {
-                Some(m) => m[d].center(coord[d]),
-                None => geom.x_lo[d] + (coord[d] as f64 + 0.5) * geom.dx[d],
+                Some(m) => m[d].center(coord[d] + geom.index_offset[d]),
+                None => geom.x_lo[d] + ((coord[d] + geom.index_offset[d]) as f64 + 0.5) * geom.dx[d],
             };
             pos[geom.axes[d]] = c;
         }
@@ -140,8 +140,8 @@ where
                 let mut pos = [0.0f64; 3];
                 for d in 0..D {
                     let c = match &geom.maps {
-                        Some(m) => m[d].center(coord[d]),
-                        None => geom.x_lo[d] + (coord[d] as f64 + 0.5) * geom.dx[d],
+                        Some(m) => m[d].center(coord[d] + geom.index_offset[d]),
+                        None => geom.x_lo[d] + ((coord[d] + geom.index_offset[d]) as f64 + 0.5) * geom.dx[d],
                     };
                     pos[geom.axes[d]] = c;
                 }
@@ -1277,7 +1277,7 @@ where
                     }
                     best.map(|(c, rate)| {
                         let x: [f64; D] = std::array::from_fn(|aa| {
-                            geom.x_lo[aa] + (c[aa] as f64 + 0.5) * geom.dx[aa]
+                            geom.x_lo[aa] + ((c[aa] + geom.index_offset[aa]) as f64 + 0.5) * geom.dx[aa]
                         });
                         let radius = x.iter().map(|xx| xx * xx).sum::<f64>().sqrt();
                         let pressure = pre.as_ref().map(|view| (*view.at(c)).to_f64());

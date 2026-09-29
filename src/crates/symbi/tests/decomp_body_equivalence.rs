@@ -85,6 +85,23 @@ fn two_accretors() -> BodyCollection<f64, 2> {
         ))
 }
 
+// a compact accretor wholly inside the +x tile of a two-tile x cut, at (0.55, 0.1): its sink
+// support ball spans whole-grid x cells 21..28 and no cell of the -x tile, so the dispatch box of
+// the +x tile (whole-grid index = local index + 16) is reached only through the tile's offset.
+fn offset_accretor() -> BodyCollection<f64, 2> {
+    BodyCollection::new().add(Body::black_hole(
+        0,
+        Tensor::new([0.55, 0.1]),
+        Tensor::zeros(),
+        0.1,  // gravitating mass
+        0.05, // radius
+        0.1,  // softening
+        20.0, // sink_rate
+        0.05, // sink_delta
+        0.15, // accretion_radius
+    ))
+}
+
 // a moving binary: two gravitating bodies orbiting the origin (prescribed Keplerian motion via
 // advance_binary). this exercises the decomposed body bookkeeping's prescribed-orbit advance: each
 // tile must advance the orbit identically so all tiles' body positions stay in lockstep and the
@@ -118,7 +135,7 @@ fn binary() -> BodyCollection<f64, 2> {
 // body state at the same global position.
 fn make(
     cells: [usize; 2],
-    origin: [f64; 2],
+    offset: [isize; 2],
     bnd: Boundaries<2>,
     ts: Timestepping,
     bodies: fn() -> BodyCollection<f64, 2>,
@@ -126,7 +143,8 @@ fn make(
     let sim = Sim::build(Newtonian, IdealGas { gamma: GAMMA }, Cartesian)
         .cells(cells)
         .spacing([DX; 2])
-        .origin(origin)
+        .origin([-L; 2])
+        .index_offset(offset)
         .boundaries(bnd)
         .cfl(CFL)
         .timestepping(ts)
@@ -139,8 +157,9 @@ fn make(
     (sim, k)
 }
 
-// build the tile grid: each tile an equal slice with its own global origin (so the body's global
-// position maps to the right local cells), CoarseFine on internal faces, Outflow on the boundary.
+// build the tile grid: each tile an equal slice carrying the whole grid's origin and its first
+// cell's whole-grid index (so the body's global position maps to the right local cells), CoarseFine
+// on internal faces, Outflow on the boundary.
 fn grid_tiles(
     counts: [usize; 2],
     ts: Timestepping,
@@ -154,7 +173,7 @@ fn grid_tiles(
     (0..total)
         .map(|flat| {
             let tc = unflatten(flat, counts);
-            let origin = std::array::from_fn(|a| -L + tc[a] as f64 * m[a] as f64 * DX);
+            let offset = std::array::from_fn(|a| (tc[a] * m[a]) as isize);
             let bnd = Boundaries(std::array::from_fn(|a| {
                 let lo = if tc[a] == 0 {
                     BoundaryType::Outflow
@@ -168,7 +187,7 @@ fn grid_tiles(
                 };
                 [lo, hi]
             }));
-            make(m, origin, bnd, ts, bodies)
+            make(m, offset, bnd, ts, bodies)
         })
         .collect()
 }
@@ -321,12 +340,18 @@ fn assert_body_matches(
 
     // the production gather path (the python checkpoint output).
     let bnd = Boundaries(std::array::from_fn(|_| [BoundaryType::Outflow; 2]));
-    let global = make([N, N], [-L, -L], bnd, ts, bodies);
+    let global = make([N, N], [0, 0], bnd, ts, bodies);
     let stores: Vec<_> = dec.iter().map(|(s, _)| &**s).collect();
     gather_interiors(&*global.0, &stores, counts);
     let gathered = global_field(std::slice::from_ref(&global), [1, 1], den);
     let ge = max_err(&gathered, &dec_den);
     assert!(ge < 1e-12, "{counts:?} {ts:?} gather density err {ge:e}");
+}
+
+#[test]
+fn compact_accretor_on_the_offset_tile() {
+    assert_body_matches([2, 1], Timestepping::Rk2, offset_accretor, true);
+    assert_body_matches([2, 2], Timestepping::Rk2, offset_accretor, true);
 }
 
 #[test]

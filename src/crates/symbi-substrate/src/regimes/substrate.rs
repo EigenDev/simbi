@@ -166,7 +166,7 @@ impl<Mem: MemorySpace, Sc: Scalar + OrderedNumeric, const D: usize>
         // not enter Omega_k) — matching the kernel's nu(x, y) exactly.
         let r_max = if geom.coords == Geometry::Cylindrical || geom.coords == Geometry::Spherical {
             let sp = &geom.interior.spaces[0];
-            geom.x_lo[0] + geom.dx[0] * (sp.hi as f64)
+            geom.x_lo[0] + geom.dx[0] * ((sp.hi + geom.index_offset[0]) as f64)
         } else {
             let plane = D.min(2);
             let mut r_max = 0.0_f64;
@@ -175,7 +175,7 @@ impl<Mem: MemorySpace, Sc: Scalar + OrderedNumeric, const D: usize>
                 for a in 0..plane {
                     let sp = &geom.interior.spaces[a];
                     let idx = if corner & (1 << a) != 0 { sp.hi } else { sp.lo };
-                    let x = geom.x_lo[a] + geom.dx[a] * (idx as f64);
+                    let x = geom.x_lo[a] + geom.dx[a] * ((idx + geom.index_offset[a]) as f64);
                     let d = x - b.position[a];
                     d2 += d * d;
                 }
@@ -446,7 +446,8 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize> Kerne
                 // h2 = the radial coordinate on both curvilinear charts, so the x2
                 // physical width is r*dx2, smallest at the inner edge.
                 let dr = sim.geom.dx[0];
-                let r_min = sim.geom.x_lo[0] + 0.5 * dr; // innermost cell centroid
+                // the innermost cell centroid, at whole-grid index index_offset
+                let r_min = sim.geom.x_lo[0] + (sim.geom.index_offset[0] as f64 + 0.5) * dr;
                 dr.min((r_min * sim.geom.dx[1]).abs())
             } else {
                 sim.geom.dx.iter().copied().fold(f64::INFINITY, f64::min)

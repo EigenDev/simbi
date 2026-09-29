@@ -1254,8 +1254,12 @@ fn dispatch_excise_inner<const D: usize, const DOF: usize, Mem, Sc>(
     // a cartesian chart's region is a sphere (a = 0) or an oblate spheroid staircased across the
     // lattice: the polar (z) semi-axis is r_exc and the equatorial axes carry the spin widening
     // sqrt(r_exc^2 + a^2), a 2d grid being the equatorial slice.
+    //
+    // positions live on the whole grid: a tile's cell i sits at whole-grid index i + index_offset,
+    // so the region's whole-grid bounds shift back by the offset onto the tile's interior.
     let spaces: [symbi_algebra::Space; D] = std::array::from_fn(|a| {
         let s = &geom.interior.spaces[a];
+        let off = geom.index_offset[a];
         if spherical {
             if a > 0 {
                 return s.clone();
@@ -1264,8 +1268,8 @@ fn dispatch_excise_inner<const D: usize, const DOF: usize, Mem, Sc>(
             // affine face otherwise. inverting `x_lo + i dx` would read an index coordinate as a
             // radius on a log grid.
             let face = |i: isize| match &geom.maps {
-                Some(m) => m[0].face(i),
-                None => geom.x_lo[0] + i as f64 * geom.dx[0],
+                Some(m) => m[0].face(i + off),
+                None => geom.x_lo[0] + (i + off) as f64 * geom.dx[0],
             };
             let mut hi = s.lo;
             while hi < s.hi && face(hi) < r_exc {
@@ -1280,8 +1284,8 @@ fn dispatch_excise_inner<const D: usize, const DOF: usize, Mem, Sc>(
         let ext = if D == 3 && a == 2 { r_exc } else { semi_xy };
         let lo_x = (-ext - geom.x_lo[a]) / geom.dx[a];
         let hi_x = (ext - geom.x_lo[a]) / geom.dx[a];
-        let lo = (lo_x.floor() as isize - 1).clamp(s.lo, s.hi);
-        let hi = (hi_x.ceil() as isize + 2).clamp(s.lo, s.hi);
+        let lo = (lo_x.floor() as isize - 1 - off).clamp(s.lo, s.hi);
+        let hi = (hi_x.ceil() as isize + 2 - off).clamp(s.lo, s.hi);
         symbi_algebra::Space {
             name: s.name,
             lo,
@@ -1579,7 +1583,7 @@ where
         for a in 0..plane {
             let sp = &geom.interior.spaces[a];
             let idx = if corner & (1 << a) != 0 { sp.hi } else { sp.lo };
-            let x = geom.x_lo[a] + geom.dx[a] * (idx as f64);
+            let x = geom.x_lo[a] + geom.dx[a] * ((idx + geom.index_offset[a]) as f64);
             let d = x - b.position[a];
             d2 += d * d;
         }
@@ -1941,12 +1945,13 @@ fn dispatch_body_feedback_split<const D: usize, const DOF: usize, Mem, Sc>(
             assert_eq!(center.len(), D, "support ball rank != grid dim");
             let spaces: [symbi_algebra::Space; D] = std::array::from_fn(|a| {
                 let s = &geom.interior.spaces[a];
-                // index anchor: `x = x_lo + i*dx` with absolute index i
-                // (stagger_coord), no interior offset in the map.
+                // index anchor: `x = x_lo + i*dx` with i the whole-grid index (stagger_coord),
+                // a tile's cell i sitting at whole-grid index i + index_offset.
+                let off = geom.index_offset[a];
                 let lo_x = (center[a] - r_cut - geom.x_lo[a]) / geom.dx[a];
                 let hi_x = (center[a] + r_cut - geom.x_lo[a]) / geom.dx[a];
-                let lo = (lo_x.floor() as isize).clamp(s.lo, s.hi);
-                let hi = (hi_x.ceil() as isize + 1).clamp(s.lo, s.hi);
+                let lo = (lo_x.floor() as isize - off).clamp(s.lo, s.hi);
+                let hi = (hi_x.ceil() as isize + 1 - off).clamp(s.lo, s.hi);
                 symbi_algebra::Space {
                     name: s.name,
                     lo,
@@ -2280,12 +2285,14 @@ fn dispatch_penalize_shaped_body<const D: usize, const DOF: usize, Mem, Sc>(
         let spaces: [symbi_algebra::Space; D] = std::array::from_fn(|a| {
             let s = &sim.geom.interior.spaces[a];
             let center = if spin { pos[a] } else { pos[a] + lc[a] };
+            // whole-grid bounds, shifted onto the tile by its offset
+            let off = sim.geom.index_offset[a];
             let lo_x = (center - r_cut - sim.geom.x_lo[a]) / sim.geom.dx[a];
             let hi_x = (center + r_cut - sim.geom.x_lo[a]) / sim.geom.dx[a];
             symbi_algebra::Space {
                 name: s.name,
-                lo: (lo_x.floor() as isize).clamp(s.lo, s.hi),
-                hi: ((hi_x.ceil() as isize) + 1).clamp(s.lo, s.hi),
+                lo: (lo_x.floor() as isize - off).clamp(s.lo, s.hi),
+                hi: ((hi_x.ceil() as isize) + 1 - off).clamp(s.lo, s.hi),
             }
         });
         if spaces.iter().any(|sp| sp.lo >= sp.hi) {
@@ -2670,10 +2677,12 @@ fn dispatch_penalize_inner<const D: usize, const DOF: usize, Mem, Sc>(
                 .and_then(|(center, r_cut)| {
                     let spaces: [symbi_algebra::Space; D] = std::array::from_fn(|a| {
                         let s = &geom.interior.spaces[a];
+                        // whole-grid bounds, shifted onto the tile by its offset
+                        let off = geom.index_offset[a];
                         let lo_x = (center[a] - r_cut - geom.x_lo[a]) / geom.dx[a];
                         let hi_x = (center[a] + r_cut - geom.x_lo[a]) / geom.dx[a];
-                        let lo = (lo_x.floor() as isize).clamp(s.lo, s.hi);
-                        let hi = (hi_x.ceil() as isize + 1).clamp(s.lo, s.hi);
+                        let lo = (lo_x.floor() as isize - off).clamp(s.lo, s.hi);
+                        let hi = (hi_x.ceil() as isize + 1 - off).clamp(s.lo, s.hi);
                         symbi_algebra::Space {
                             name: s.name,
                             lo,
