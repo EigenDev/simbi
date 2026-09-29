@@ -3307,14 +3307,17 @@ fn main() {
     // the frame dragging in the swirl of l, alpha sqrt(gamma) = 1 (null l preserves the
     // determinant). the gas runs the fast-magnetosonic HLLE fan + the tetrad-frame MUB09
     // HLLD (the Gram-Schmidt triad is metric-generic); the CT runs the densitized contact
-    // corner EMF, whose curl telescopes for any face weight. contact CT only (the UCT
-    // families fail loud via the unbaked name).
+    // corner EMF, whose curl telescopes for any face weight; the 2d plane also bakes the UCT-HLL
+    // and UCT-HLLD corner EMFs.
     for (geom, ndim) in [(Geom::cart(2).kerr(), 2u8), (Geom::cart(3).kerr(), 3u8)] {
         gen_rmhd_gr_gas_family(&out_dir, ndim, &geom);
         if ndim == 2 {
             gen_rmhd_ct_gr(&out_dir, &geom);
             // the 2d spinning-kerr UCT-HLL corner EMF (the sharp non-checkerboard CT).
             gen_rmhd_gr_uct(&out_dir, &geom);
+            // the sharp UCT-HLLD wave-sum edge EMF through the tetrad states fan, as on the
+            // kerr-schild x-y plane and the spinning-kerr r-theta plane.
+            gen_rmhd_gr_uct_hlld(&out_dir, &geom);
         } else {
             gen_rmhd_ct_gr_3d(&out_dir, &geom);
             gen_rmhd_gr_uct_3d(&out_dir, &geom);
@@ -3347,8 +3350,7 @@ fn main() {
     // GRMHD on the spinning-kerr 2D swirl row (sph_swirl -> DOF = 3 momentum for the frame
     // dragging). the flux runs the tetrad HLLD (non-diagonal gamma_{r phi}) + the moving-interface
     // shift; the covariant EM-stress source, the c2p, and the contact / UCT-HLL edge EMF are all
-    // kerr-wired. the sharp UCT-HLLD edge EMF is schwarzschild-only, so kerr runs the contact
-    // or UCT-HLL CT.
+    // kerr-wired.
     {
         let geom = Geom::sph_swirl().kerr();
         gen_rmhd_gr_gas_family(&out_dir, 2, &geom);
@@ -3854,6 +3856,18 @@ fn main() {
         gen_rmhd_wave_speeds_cell(&out_dir, 2, "_cyl_rz", &[0, 2]);
         gen_nmhd_wave_speeds_cell(&out_dir, 2, "_cyl_rz", &[0, 2]);
         gen_imhd_wave_speeds_cell(&out_dir, 2, "_cyl_rz", &[0, 2]);
+        // the UCT twins of E_phi on the same cyclic plane (p1, p2) = (z, r), grid axes (g1, g2) =
+        // (1, 0): every family reads its velocities, face fields and fans through the edge map by
+        // plane role, so the r-z corner is the cartesian corner under (r, phi, z) -> (y, z, x).
+        for (stem, builder) in [
+            ("rmhd_edge_emf_uct", rmhd_edge_emf_uct_gv as EdgeEmfBuilder),
+            ("nmhd_edge_emf_uct_hllc", nmhd_edge_emf_uct_hllc_gv),
+            ("nmhd_edge_emf_uct_hlld", nmhd_edge_emf_uct_hlld_gv),
+            ("imhd_edge_emf_uct_hlld", imhd_edge_emf_uct_hlld_gv),
+            ("rmhd_edge_emf_uct_hlld", rmhd_edge_emf_uct_hlld_gv),
+        ] {
+            gen_edge_emf_variant(&out_dir, stem, builder, 1, 2, 1, 0);
+        }
         for dir in 0..2 {
             gen_rmhd_ct_curl_cyl_rz(&out_dir, dir, &cyl);
         }

@@ -1,16 +1,22 @@
 // =============================================================================
-// uct_chart_refusal.rs
+// ct_chart_admission.rs
 //
 // a constrained-transport method is admitted on a chart only where every edge
-// of the chart has an emitted EMF kernel. the flat cylindrical r-z plane has
-// the single edge E_phi, built for Contact alone, so UCT there is refused by
-// name at the kernel set's first CFL: the evolve panics naming the method and
-// the chart, completes no step, and leaves the conserved state and the face
-// field bitwise as seeded. the neighbors run: Contact on the r-z plane, UCT on
-// the cartesian x-y and the cylindrical r-phi planes, whose single edge is the
-// out-of-plane E_z.
+// of the chart has an emitted EMF kernel; the kernel set asks the kernel
+// registry at its first CFL, before any stage runs, and panics with the
+// refusal otherwise. gates:
+// - the refusal names the method, the chart and the missing kernel: with the
+//   registry withholding the r-z E_phi UCT kernel, UCT on the flat cylindrical
+//   r-z plane is refused for newtonian and relativistic MHD, and Contact there
+//   is admitted;
+// - under the production registry every flat 2.5D chart (x-y, r-phi, r-z,
+//   r-theta) admits both methods for every magnetized regime and solver
+//   family, and every curved 2.5D chart that bakes GRMHD constrained transport
+//   admits both for relativistic MHD;
+// - UCT and Contact evolve on the r-z plane, and UCT on the x-y and r-phi
+//   planes, completing steps.
 //
-// run: cargo test -p symbi --test uct_chart_refusal
+// run: cargo test -p symbi --test ct_chart_admission
 // =============================================================================
 
 use std::panic::AssertUnwindSafe;
@@ -107,54 +113,97 @@ macro_rules! attempt {
     }};
 }
 
-const REFUSAL: &str =
-    "Uct constrained transport is not built for the Cylindrical chart on grid axes [0, 2]";
+use symbi::regimes::mhd_substrate::unbuilt_edge_emf;
+use symbi::sim::substrate_seam::Solver;
+use symbi_geometry::Geometry;
+
+/// the production registry: whether the kernel of this name was emitted
+fn registry(name: &str) -> bool {
+    symbi_aot::kernel_by_name::<f64>(name).is_some()
+}
 
 #[test]
-fn uct_on_the_flat_cylindrical_rz_plane_is_refused_before_any_step() {
-    let s = sim!(NewtonianMhd, Cylindrical, false);
-    let k = NewtonianMhdSubstrateKernelSet::<HostMemory, f64, 2>::new(
-        4.0 / 3.0,
-        0.3,
-        1.5,
-        &s.geom.allocated,
-    )
-    .ct_method(CtMethod::Uct);
-    let (message, steps, kept) = attempt!(s, k);
-    assert!(
-        message.as_deref().is_some_and(|m| m.contains(REFUSAL)),
-        "newtonian MHD: {message:?}"
-    );
-    assert_eq!(
-        steps, 0,
-        "newtonian MHD completed {steps} steps before the refusal"
-    );
-    assert!(
-        kept,
-        "newtonian MHD: the refused run changed the conserved state or the face field"
-    );
+fn a_chart_with_an_unbuilt_edge_is_refused_by_name() {
+    let withheld = "rmhd_edge_emf_uct_2d_1";
+    let without = |name: &str| name != withheld && registry(name);
+    for prefix in ["nmhd", "rmhd"] {
+        let refusal = unbuilt_edge_emf::<2>(Geometry::Cylindrical, &[0, 2], "", CtMethod::Uct, Solver::Hlle, prefix, without)
+            .unwrap_or_else(|| panic!("{prefix}: UCT admitted on r-z with its E_phi kernel withheld"));
+        assert!(
+            refusal.contains("Uct constrained transport is not built for the Cylindrical chart on grid axes [0, 2]")
+                && refusal.contains(withheld),
+            "{prefix}: {refusal}"
+        );
+        assert_eq!(
+            unbuilt_edge_emf::<2>(Geometry::Cylindrical, &[0, 2], "", CtMethod::Contact, Solver::Hlle, prefix, without),
+            None,
+            "{prefix}: Contact refused on r-z"
+        );
+    }
+}
 
-    let s = sim!(Rmhd, Cylindrical, false);
-    let k =
-        RmhdSubstrateKernelSet::<HostMemory, f64, 2>::new(4.0 / 3.0, 0.3, 1.5, &s.geom.allocated)
-            .ct_method(CtMethod::Uct);
-    let (message, steps, kept) = attempt!(s, k);
-    assert!(
-        message.as_deref().is_some_and(|m| m.contains(REFUSAL)),
-        "relativistic MHD: {message:?}"
-    );
-    assert_eq!(
-        steps, 0,
-        "relativistic MHD completed {steps} steps before the refusal"
-    );
-    assert!(
-        kept,
-        "relativistic MHD: the refused run changed the conserved state or the face field"
-    );
+#[test]
+fn every_flat_chart_admits_both_methods_for_every_regime_and_solver() {
+    let charts = [
+        (Geometry::Cartesian, [0usize, 1]),
+        (Geometry::Cylindrical, [0, 1]),
+        (Geometry::Cylindrical, [0, 2]),
+        (Geometry::Spherical, [0, 1]),
+    ];
+    for (coords, axes) in charts {
+        for prefix in ["nmhd", "imhd", "rmhd"] {
+            for ct in [CtMethod::Contact, CtMethod::Uct] {
+                for solver in [Solver::Hlle, Solver::Hlld] {
+                    assert_eq!(
+                        unbuilt_edge_emf::<2>(coords, &axes, "", ct, solver, prefix, registry),
+                        None,
+                        "{prefix} {ct:?} {solver:?} on {coords:?} {axes:?}"
+                    );
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn every_curved_chart_admits_both_methods_for_every_solver() {
+    // the curved 2.5D charts that bake GRMHD constrained transport: the kerr-schild x-y plane, the
+    // spinning-kerr x-y plane, the kerr-schild r-phi disk and r-z plane, and the spinning-kerr
+    // r-theta plane
+    let charts = [
+        (Geometry::Cartesian, [0usize, 1], "_ks"),
+        (Geometry::Cartesian, [0, 1], "_kerr"),
+        (Geometry::Cylindrical, [0, 1], "_ks"),
+        (Geometry::Cylindrical, [0, 2], "_ks"),
+        (Geometry::Spherical, [0, 1], "_kerr"),
+    ];
+    for (coords, axes, st) in charts {
+        for ct in [CtMethod::Contact, CtMethod::Uct] {
+            for solver in [Solver::Hlle, Solver::Hlld] {
+                assert_eq!(
+                    unbuilt_edge_emf::<2>(coords, &axes, st, ct, solver, "rmhd", registry),
+                    None,
+                    "{ct:?} {solver:?} on {coords:?} {axes:?} {st}"
+                );
+            }
+        }
+    }
 }
 
 #[test]
 fn the_charts_whose_edges_are_built_run() {
+    let s = sim!(NewtonianMhd, Cylindrical, false);
+    let k = NewtonianMhdSubstrateKernelSet::<HostMemory, f64, 2>::new(4.0 / 3.0, 0.3, 1.5, &s.geom.allocated)
+        .ct_method(CtMethod::Uct);
+    let (message, steps, _) = attempt!(s, k);
+    assert!(message.is_none() && steps > 0, "newtonian UCT on r-z: {message:?} after {steps} steps");
+
+    let s = sim!(Rmhd, Cylindrical, false);
+    let k = RmhdSubstrateKernelSet::<HostMemory, f64, 2>::new(4.0 / 3.0, 0.3, 1.5, &s.geom.allocated)
+        .ct_method(CtMethod::Uct);
+    let (message, steps, _) = attempt!(s, k);
+    assert!(message.is_none() && steps > 0, "relativistic UCT on r-z: {message:?} after {steps} steps");
+
     let s = sim!(NewtonianMhd, Cylindrical, false);
     let k = NewtonianMhdSubstrateKernelSet::<HostMemory, f64, 2>::new(
         4.0 / 3.0,

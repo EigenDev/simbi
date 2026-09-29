@@ -1291,6 +1291,32 @@ fn edge_emf_kernel_name<const D: usize>(
     }
 }
 
+/// the refusal of a constrained-transport method on a chart: the message naming the method, the
+/// chart and the first edge whose EMF kernel `built` does not hold, or `None` when every edge of
+/// the chart has one. `built` answers whether a kernel of the given name was emitted; production
+/// asks the kernel registry.
+pub fn unbuilt_edge_emf<const D: usize>(
+    coords: symbi_geometry::Geometry,
+    axes: &[usize],
+    spacetime: &str,
+    ct_method: CtMethod,
+    solver: Solver,
+    prefix: &str,
+    built: impl Fn(&str) -> bool,
+) -> Option<String> {
+    let sfx = mhd_geom_suffix(coords, axes);
+    ct_edges::<D>(axes).into_iter().find_map(|edge| {
+        let name = edge_emf_kernel_name::<D>(ct_method, solver, prefix, spacetime, sfx, edge.name_k.index());
+        (!built(&name)).then(|| {
+            format!(
+                "{ct_method:?} constrained transport is not built for the {coords:?} chart on grid \
+                 axes {axes:?}: its edge {} has no EMF kernel '{name}'; select CtMethod::Contact",
+                edge.name_k.index()
+            )
+        })
+    })
+}
+
 /// refuse a constrained-transport method with an edge of this chart whose EMF kernel was never
 /// emitted, naming the method, the chart and the missing kernel. the kernel set checks at its
 /// first CFL, before any stage runs.
@@ -1304,17 +1330,11 @@ pub(crate) fn refuse_unbuilt_edge_emf<const D: usize, const DOF: usize, Mem, Sc>
     Sc: Scalar + OrderedNumeric,
 {
     let st = spacetime_slug(sim.geom.spacetime);
-    let sfx = mhd_geom_suffix(sim.geom.coords, &sim.geom.axes);
-    for edge in ct_edges::<D>(&sim.geom.axes) {
-        let name = edge_emf_kernel_name::<D>(ct_method, solver, prefix, &st, sfx, edge.name_k.index());
-        assert!(
-            symbi_aot::kernel_by_name::<Sc>(&name).is_some(),
-            "{ct_method:?} constrained transport is not built for the {:?} chart on grid axes {:?}: \
-             its edge {} has no EMF kernel '{name}'; select CtMethod::Contact",
-            sim.geom.coords,
-            sim.geom.axes,
-            edge.name_k.index()
-        );
+    let refusal = unbuilt_edge_emf::<D>(sim.geom.coords, &sim.geom.axes, &st, ct_method, solver, prefix, |name| {
+        symbi_aot::kernel_by_name::<Sc>(name).is_some()
+    });
+    if let Some(message) = refusal {
+        panic!("{message}");
     }
 }
 

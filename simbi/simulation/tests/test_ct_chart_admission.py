@@ -1,13 +1,13 @@
 # =============================================================================
-# test_uct_chart_refusal.py
+# test_ct_chart_admission.py
 #
-# the flat cylindrical r-z plane builds the Contact corner EMF alone, so a run
-# that selects UCT constrained transport there is refused by name before any
-# evolution: the runner raises, naming the chart and the method, and no
-# checkpoint is written. the same problem runs under Contact, and UCT runs on
-# the cylindrical r-phi plane, whose single out-of-plane edge UCT covers.
+# both constrained-transport methods run on the flat cylindrical planes through
+# the python runner: the rotor's swirling core on the axisymmetric (r, z) plane
+# completes its step under UCT and under Contact, each writing its final
+# checkpoint, and UCT runs on the (r, phi) disk. the chart admission itself is
+# the kernel set's, decided from the emitted kernels at its first step.
 #
-# run: pytest -m simulation simbi/simulation/tests/test_uct_chart_refusal.py
+# run: pytest -m simulation simbi/simulation/tests/test_ct_chart_admission.py
 # =============================================================================
 import glob
 import os
@@ -38,18 +38,11 @@ def _rz(ct: CtMethod, d: str) -> NewtonianRotorCyl:
 
 
 @needs_backend
-def test_uct_on_the_cylindrical_rz_plane_is_refused_before_evolution() -> None:
+@pytest.mark.parametrize("ct", [CtMethod.UCT, CtMethod.CONTACT])
+def test_both_methods_run_on_the_cylindrical_rz_plane(ct: CtMethod) -> None:
     d = tempfile.mkdtemp() + "/"
-    with pytest.raises(Exception, match="UCT constrained transport is not built for the flat cylindrical r-z plane"):
-        runner.run(_rz(CtMethod.UCT, d), compute_mode="cpu", max_steps=1)
-    assert not glob.glob(os.path.join(d, "*.h5")), "a refused run wrote a checkpoint"
-
-
-@needs_backend
-def test_contact_on_the_cylindrical_rz_plane_runs() -> None:
-    d = tempfile.mkdtemp() + "/"
-    runner.run(_rz(CtMethod.CONTACT, d), compute_mode="cpu", max_steps=1)
-    assert glob.glob(os.path.join(d, "*final*.h5")), "the Contact run did not complete its step"
+    runner.run(_rz(ct, d), compute_mode="cpu", max_steps=1)
+    assert glob.glob(os.path.join(d, "*final*.h5")), f"the {ct} run did not complete its step"
 
 
 @needs_backend

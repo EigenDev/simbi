@@ -15,7 +15,8 @@
 // one physical cell against a cut at a named step and stage, on whichever
 // worker holds it. arms: a cut along z, a cut along r, and a two-by-two
 // layout with the cell in a tile corner, each with the flag in the RK2
-// predictor and in the corrector. every arm compares its assembled cells and
+// predictor and in the corrector, under the Contact and under the UCT corner
+// EMF. every arm compares its assembled cells and
 // faces bit for bit with the one-worker run under the same flag, asserts that
 // the two copies of every shared face agree, that div B in the chart's
 // r-weighted form is at round-off per tile and on the assembled grid, that no
@@ -269,11 +270,13 @@ fn run_worker(arm: &Arm, me: WorkerId, out: PathBuf) -> Result<(), WorkerError> 
         .filter(|&f| placement.owner_of(TileId(f as u32)) == me)
         .collect();
     let mut built: Vec<Sim> = mine.iter().map(|&f| tile(arm, f)).collect();
-    // the Contact corner EMF, the one constrained transport the r-z plane builds
-    let kernels: Vec<_> = built
-        .iter()
-        .map(|s| s.substrate().ct_method(CtMethod::Contact))
-        .collect();
+    // the corner EMF the arm names: Contact or UCT, both built for the r-z plane's E_phi
+    let ct = match std::env::var("W_CT").as_deref() {
+        Ok("uct") => CtMethod::Uct,
+        Ok("contact") => CtMethod::Contact,
+        other => panic!("W_CT names no constrained transport: {other:?}"),
+    };
+    let kernels: Vec<_> = built.iter().map(|s| s.substrate().ct_method(ct)).collect();
     let tiles: Vec<TileId> = mine.iter().map(|&f| TileId(f as u32)).collect();
     let schema = plan_schema(&*built[0]);
     let plan = ExchangePlan::compile(
@@ -724,7 +727,7 @@ fn four_workers() -> Arm {
 }
 
 macro_rules! cut_arm {
-    ($name:ident, $arm:expr, $cell:expr, $neighbors:expr, $stage:expr) => {
+    ($name:ident, $arm:expr, $cell:expr, $neighbors:expr, $stage:expr, $ct:expr) => {
         #[test]
         fn $name() {
             if in_worker_role() {
@@ -736,7 +739,7 @@ macro_rules! cut_arm {
                 $cell,
                 $neighbors,
                 $stage,
-                "contact",
+                $ct,
                 &[],
             );
         }
@@ -748,40 +751,94 @@ cut_arm!(
     z_cut_two_workers(),
     (10, 15),
     &[1],
-    0
+    0,
+    "contact"
+);
+cut_arm!(
+    uct_trouble_against_a_z_cut_in_the_predictor,
+    z_cut_two_workers(),
+    (10, 15),
+    &[1],
+    0,
+    "uct"
 );
 cut_arm!(
     trouble_against_a_z_cut_in_the_corrector,
     z_cut_two_workers(),
     (10, 15),
     &[1],
-    1
+    1,
+    "contact"
+);
+cut_arm!(
+    uct_trouble_against_a_z_cut_in_the_corrector,
+    z_cut_two_workers(),
+    (10, 15),
+    &[1],
+    1,
+    "uct"
 );
 cut_arm!(
     trouble_against_an_r_cut_in_the_predictor,
     r_cut_two_workers(),
     (15, 10),
     &[1],
-    0
+    0,
+    "contact"
+);
+cut_arm!(
+    uct_trouble_against_an_r_cut_in_the_predictor,
+    r_cut_two_workers(),
+    (15, 10),
+    &[1],
+    0,
+    "uct"
 );
 cut_arm!(
     trouble_against_an_r_cut_in_the_corrector,
     r_cut_two_workers(),
     (15, 10),
     &[1],
-    1
+    1,
+    "contact"
+);
+cut_arm!(
+    uct_trouble_against_an_r_cut_in_the_corrector,
+    r_cut_two_workers(),
+    (15, 10),
+    &[1],
+    1,
+    "uct"
 );
 cut_arm!(
     trouble_in_a_tile_corner_in_the_predictor,
     four_workers(),
     (15, 15),
     &[1, 2, 3],
-    0
+    0,
+    "contact"
+);
+cut_arm!(
+    uct_trouble_in_a_tile_corner_in_the_predictor,
+    four_workers(),
+    (15, 15),
+    &[1, 2, 3],
+    0,
+    "uct"
 );
 cut_arm!(
     trouble_in_a_tile_corner_in_the_corrector,
     four_workers(),
     (15, 15),
     &[1, 2, 3],
-    1
+    1,
+    "contact"
+);
+cut_arm!(
+    uct_trouble_in_a_tile_corner_in_the_corrector,
+    four_workers(),
+    (15, 15),
+    &[1, 2, 3],
+    1,
+    "uct"
 );
