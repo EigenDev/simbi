@@ -282,6 +282,12 @@ fn injection_from_env(me: WorkerId) -> Injection {
             injection.reject_at = vec![(step, stage)];
         }
     }
+    // a root cell raised troubled at (step, stage) on whichever worker holds it:
+    // `W_ROOT_TROUBLE` = step, stage, i, j on the root grid
+    let root = env_list("W_ROOT_TROUBLE");
+    if root.len() == 4 {
+        injection.trouble_at = Some((root[0], root[1] as usize, [root[2] as isize, root[3] as isize, 0]));
+    }
     if let Some(worker) = env_u64("W_CAP_WORKER") {
         if worker == u64::from(me.0) || worker == u64::MAX {
             let step = env_u64("W_CAP_STEP").unwrap();
@@ -1072,6 +1078,69 @@ fn trouble_on_one_side_of_a_fine_cut_is_corrected_on_both() {
     assert_eq!(neighbors, vec![3], "the workers correcting a clean fine tile from the flag");
     assert_eq!(reports[3].fine_neighbor, 1);
     assert_state_equal(&outcomes, &expected, "the cut flagged run");
+}
+
+/// the run under `flag` on the (17, 13) layout equals one worker holding the whole grid under
+/// the same flag, bit for bit, with the same timesteps and the freeze tier silent; the flag
+/// changes the one-worker run
+fn assert_flag_matches_uncut(test: &str, flag: (&'static str, String)) {
+    let uncut_clean = run_arm(test, "uncut_clean", &uncut(), &[]);
+    let uncut_flagged = run_arm(test, "uncut_flagged", &uncut(), &[flag.clone()]);
+    let clean = Reference::of(&uncut_clean, "the uncut clean run");
+    let expected = Reference::of(&uncut_flagged, "the uncut flagged run");
+    assert!(clean.values != expected.values, "{test}: the flag left the uncut run unchanged; the gate is vacuous");
+    assert_eq!(expected.fofc.1, 0, "{test}: the freeze tier acted in the uncut run");
+    let outcomes = run_arm(test, "cut", &ragged_17_13(), &[flag]);
+    assert_all_ok(&outcomes, "the cut flagged run");
+    let reports: Vec<&Report> = outcomes.iter().map(|o| o.report.as_ref().unwrap()).collect();
+    let uncut_report = uncut_flagged[0].report.as_ref().unwrap();
+    for (w, r) in reports.iter().enumerate() {
+        assert_eq!(r.dts, uncut_report.dts, "{test}: worker {w} took other timesteps than the uncut run");
+        assert_eq!(r.fofc.1, 0, "{test}: worker {w} froze {} cells", r.fofc.1);
+    }
+    assert_state_equal(&outcomes, &expected, "the cut flagged run");
+}
+
+/// the fine cell of the fine-cut arm above, flagged in the corrector of the second fine substep
+#[test]
+fn trouble_on_one_side_of_a_fine_cut_in_the_corrector_is_corrected_on_both() {
+    if in_worker_role() {
+        worker_main();
+    }
+    assert_flag_matches_uncut(
+        "trouble_on_one_side_of_a_fine_cut_in_the_corrector_is_corrected_on_both",
+        ("W_FINE_TROUBLE", "3,1,1,9,7".to_string()),
+    );
+}
+
+/// a fine cell in the corner of the fine cuts (fine column 10, fine row 2), flagged in the
+/// predictor and in the corrector: the flags cross both cuts and the diagonal neighbor
+#[test]
+fn trouble_in_a_fine_tile_corner_is_corrected_on_every_side() {
+    if in_worker_role() {
+        worker_main();
+    }
+    for stage in [0, 1] {
+        assert_flag_matches_uncut(
+            "trouble_in_a_fine_tile_corner_is_corrected_on_every_side",
+            ("W_FINE_TROUBLE", format!("3,1,{stage},9,1")),
+        );
+    }
+}
+
+/// a root cell against the root cut at 17, outside the refined patch, flagged in the predictor
+/// and in the corrector of a root step
+#[test]
+fn trouble_against_a_root_cut_outside_the_patch_is_corrected_on_both() {
+    if in_worker_role() {
+        worker_main();
+    }
+    for stage in [0, 1] {
+        assert_flag_matches_uncut(
+            "trouble_against_a_root_cut_outside_the_patch_is_corrected_on_both",
+            ("W_ROOT_TROUBLE", format!("3,{stage},16,4")),
+        );
+    }
 }
 
 /// the patch's hi face lies on a cut: the fine faces' units cross to the neighbor holding
