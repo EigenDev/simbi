@@ -34,7 +34,7 @@ use symbi_ir::proof::{LinFormR, Poly, RatFun};
 // the curl reads exactly these edge-emf fields plus the in-place b; the scalars
 // are dt and the geometry grid scalars (x_lo_N / dx_N, in coordinate order).
 const FIELDS: &[&str] = &["e_p1", "e_p2", "b"];
-const SCALARS: &[&str] = &["dt", "x_lo_0", "dx_0", "x_lo_1", "dx_1", "x_lo_2", "dx_2"];
+const SCALARS: &[&str] = &["dt", "x_lo_0", "dx_0", "x_lo_1", "dx_1", "x_lo_2", "dx_2", "idx_off_0", "idx_off_1", "idx_off_2"];
 
 // strip the old-field `b` leaf: it reproduces div(B_old), which the update leaves
 // invariant; the proof concerns the increment the update adds.
@@ -58,22 +58,22 @@ fn physical_rename(dir: usize) -> HashMap<String, String> {
 
 // ---- symbolic geometry primitives (rational functions in the grid vars) ----
 
-// r at face offset `off` from the cell: x_lo_0 + (c_0 + off) dx_0.
+// r at face offset `off` from the cell: x_lo_0 + (c_0 + idx_off_0 + off) dx_0.
 fn r_at(off: i64) -> Poly {
     let mut p = Poly::var("x_lo_0");
-    p = p.plus(&Poly::var("c_0").times(&Poly::var("dx_0")));
+    p = p.plus(&Poly::var("c_0").plus(&Poly::var("idx_off_0")).times(&Poly::var("dx_0")));
     if off != 0 {
         p = p.plus(&Poly::constant(off).times(&Poly::var("dx_0")));
     }
     p
 }
 
-// r_c, the cell-center radius x_lo_0 + (c_0 + 1/2) dx_0, as a RatFun (denominator 2).
+// r_c, the cell-center radius x_lo_0 + (c_0 + idx_off_0 + 1/2) dx_0, as a RatFun (denominator 2).
 fn r_center() -> RatFun {
     // 2 r_c = 2 x_lo_0 + (2 c_0 + 1) dx_0.
     let mut num = Poly::var("x_lo_0").times(&Poly::constant(2));
     num = num.plus(
-        &Poly::var("c_0")
+        &Poly::var("c_0").plus(&Poly::var("idx_off_0"))
             .times(&Poly::var("dx_0"))
             .times(&Poly::constant(2)),
     );

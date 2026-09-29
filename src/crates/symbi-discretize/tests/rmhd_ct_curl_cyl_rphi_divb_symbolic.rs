@@ -20,7 +20,7 @@ use symbi_ir::SweepAxis;
 use symbi_ir::proof::{LinFormR, Poly, RatFun};
 
 const FIELDS: &[&str] = &["ez", "b"];
-const SCALARS: &[&str] = &["dt", "x_lo_0", "dx_0", "x_lo_1", "dx_1"];
+const SCALARS: &[&str] = &["dt", "x_lo_0", "dx_0", "x_lo_1", "dx_1", "idx_off_0", "idx_off_1"];
 
 fn curl_only(mut lf: LinFormR) -> LinFormR {
     lf.terms.retain(|(key, _), _| key != "b");
@@ -28,7 +28,7 @@ fn curl_only(mut lf: LinFormR) -> LinFormR {
 }
 
 fn r_at(off: i64) -> Poly {
-    let mut p = Poly::var("x_lo_0").plus(&Poly::var("c_0").times(&Poly::var("dx_0")));
+    let mut p = Poly::var("x_lo_0").plus(&Poly::var("c_0").plus(&Poly::var("idx_off_0")).times(&Poly::var("dx_0")));
     if off != 0 {
         p = p.plus(&Poly::constant(off).times(&Poly::var("dx_0")));
     }
@@ -40,7 +40,7 @@ fn two_rc() -> Poly {
     Poly::var("x_lo_0")
         .times(&Poly::constant(2))
         .plus(
-            &Poly::var("c_0")
+            &Poly::var("c_0").plus(&Poly::var("idx_off_0"))
                 .times(&Poly::var("dx_0"))
                 .times(&Poly::constant(2)),
         )

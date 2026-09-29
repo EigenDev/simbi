@@ -27,7 +27,7 @@ use symbi_ir::proof::{LinFormR, Poly, RatFun};
 const NDIM: usize = 2;
 // the per-direction mass-flux reads + the in-place conserved density `rho`.
 const FIELDS: &[&str] = &["mass_flux_0", "mass_flux_1", "rho"];
-const SCALARS: &[&str] = &["dt", "dx_0", "dx_1"];
+const SCALARS: &[&str] = &["dt", "dx_0", "dx_1", "idx_off_0", "idx_off_1"];
 
 // strip the old conserved `rho` leaf: it reproduces the unchanged conserved field,
 // not part of the "the flux update telescopes" property.

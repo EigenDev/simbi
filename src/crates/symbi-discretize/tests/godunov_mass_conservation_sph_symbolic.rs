@@ -29,7 +29,7 @@ use symbi_ir::proof::{RatFun, extract_scalar};
 const NDIM: usize = 3;
 // the geometry factors are field-free; the symbols are the grid scalars (coordinate
 // order 0=r, 1=theta, 2=phi) plus the opaque cos_th@<2m> the extractor synthesizes.
-const SCALARS: &[&str] = &["x_lo_0", "dx_0", "x_lo_1", "dx_1", "x_lo_2", "dx_2"];
+const SCALARS: &[&str] = &["x_lo_0", "dx_0", "x_lo_1", "dx_1", "x_lo_2", "dx_2", "idx_off_0", "idx_off_1", "idx_off_2"];
 
 // the r-direction unit cell shift e_r.
 const E_R: [i64; NDIM] = [1, 0, 0];

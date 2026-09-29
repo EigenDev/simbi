@@ -122,8 +122,28 @@ fn eval_rat(graph: &Graph, id: NodeId, fields: &[&str], scalars: &[&str]) -> RVa
         // evaluate the predicate at the same position and so take the same arm, making
         // div(curl) = 0 structural in either. extract the true arm — the exterior, where the
         // kerr-schild null condition holds and the DAG is the canonical unit-l instantiation.
-        Op::Select(_cond, then_id, _else_id) => eval_rat(graph, *then_id, fields, scalars),
+        //
+        // a select with a literal-zero arm is the zero-area face guard of a curvilinear curl: a face
+        // on the coordinate axis (h_phi = 0) takes a zero update in place of dividing by the vanishing
+        // scale factor. that face enters the area-weighted divergence with zero area, so either arm
+        // leaves the telescoping intact; extract the regular (nonzero) arm.
+        Op::Select(_cond, then_id, else_id) => {
+            if is_zero_literal(graph, *then_id) {
+                eval_rat(graph, *else_id, fields, scalars)
+            } else {
+                eval_rat(graph, *then_id, fields, scalars)
+            }
+        }
         other => panic!("proof(rat): unsupported op in curvilinear curl DAG: {other:?}"),
+    }
+}
+
+/// true when `id` is the constant 0 (either scalar kind).
+fn is_zero_literal(graph: &Graph, id: NodeId) -> bool {
+    match &graph.node(id).op {
+        Op::Const(ConstValue::F64(v)) => *v == 0.0,
+        Op::Const(ConstValue::I32(v)) => *v == 0,
+        _ => false,
     }
 }
 

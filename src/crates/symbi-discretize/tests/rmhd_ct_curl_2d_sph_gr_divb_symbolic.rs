@@ -34,6 +34,8 @@ const SCALARS: &[&str] = &[
     "x_lo_1",
     "dx_1",
     "schwarzschild_mass",
+    "idx_off_0",
+    "idx_off_1",
 ];
 
 fn curl_only(mut lf: LinFormR) -> LinFormR {
@@ -41,20 +43,20 @@ fn curl_only(mut lf: LinFormR) -> LinFormR {
     lf
 }
 
-// r at r-face offset `off`: x_lo_0 + (c_0 + off) dx_0.
+// r at r-face offset `off`: x_lo_0 + (c_0 + idx_off_0 + off) dx_0.
 fn r_at(off: i64) -> Poly {
-    let mut p = Poly::var("x_lo_0").plus(&Poly::var("c_0").times(&Poly::var("dx_0")));
+    let mut p = Poly::var("x_lo_0").plus(&Poly::var("c_0").plus(&Poly::var("idx_off_0")).times(&Poly::var("dx_0")));
     if off != 0 {
         p = p.plus(&Poly::constant(off).times(&Poly::var("dx_0")));
     }
     p
 }
 
-// r_c, the cell-center radius x_lo_0 + (c_0 + 1/2) dx_0, as a RatFun (denominator 2).
+// r_c, the cell-center radius x_lo_0 + (c_0 + idx_off_0 + 1/2) dx_0, as a RatFun (denominator 2).
 fn r_center() -> RatFun {
     let mut num = Poly::var("x_lo_0").times(&Poly::constant(2));
     num = num.plus(
-        &Poly::var("c_0")
+        &Poly::var("c_0").plus(&Poly::var("idx_off_0"))
             .times(&Poly::var("dx_0"))
             .times(&Poly::constant(2)),
     );

@@ -35,6 +35,8 @@ const SCALARS: &[&str] = &[
     "dx_1",
     "schwarzschild_mass",
     "kerr_spin",
+    "idx_off_0",
+    "idx_off_1",
 ];
 
 fn curl_only(mut lf: LinFormR) -> LinFormR {

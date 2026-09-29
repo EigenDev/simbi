@@ -17,7 +17,7 @@
 // the point-form area-weighted divergence over a cell (the nmhd_rotor_cyl_rz form):
 //   div(B) = (1/(r_c dr)) (r_hi B_r[+r] - r_lo B_r) + (1/dz) (B_z[+z] - B_z)
 // with B = dt*curl(E). substituting curl, every E read cancels to the zero rational
-// function — for every input field. r is affine (x_lo_0 + (c_0+off) dx_0), so r symbols
+// function — for every input field. r is affine (x_lo_0 + (c_0 + idx_off_0 + off) dx_0), so r symbols
 // alone span the coefficient ring.
 // =============================================================================
 
@@ -28,16 +28,16 @@ use symbi_ir::proof::{LinFormR, Poly, RatFun};
 // fields: the single out-of-plane corner EMF `ez` + the in-place `b`. scalars: dt + the
 // 2D grid geometry (axis 0 = r, axis 1 = z).
 const FIELDS: &[&str] = &["ez", "b"];
-const SCALARS: &[&str] = &["dt", "x_lo_0", "dx_0", "x_lo_1", "dx_1"];
+const SCALARS: &[&str] = &["dt", "x_lo_0", "dx_0", "x_lo_1", "dx_1", "idx_off_0", "idx_off_1"];
 
 fn curl_only(mut lf: LinFormR) -> LinFormR {
     lf.terms.retain(|(key, _), _| key != "b");
     lf
 }
 
-// r at r-face offset `off`: x_lo_0 + (c_0 + off) dx_0.
+// r at r-face offset `off`: x_lo_0 + (c_0 + idx_off_0 + off) dx_0.
 fn r_at(off: i64) -> Poly {
-    let mut p = Poly::var("x_lo_0").plus(&Poly::var("c_0").times(&Poly::var("dx_0")));
+    let mut p = Poly::var("x_lo_0").plus(&Poly::var("c_0").plus(&Poly::var("idx_off_0")).times(&Poly::var("dx_0")));
     if off != 0 {
         p = p.plus(&Poly::constant(off).times(&Poly::var("dx_0")));
     }
@@ -49,7 +49,7 @@ fn two_rc() -> Poly {
     Poly::var("x_lo_0")
         .times(&Poly::constant(2))
         .plus(
-            &Poly::var("c_0")
+            &Poly::var("c_0").plus(&Poly::var("idx_off_0"))
                 .times(&Poly::var("dx_0"))
                 .times(&Poly::constant(2)),
         )
