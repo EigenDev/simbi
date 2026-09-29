@@ -671,6 +671,12 @@ fn restrict_face_bit_matches_reference() {
 // normal axis pair-averages the time-interpolated coarse face lattice (exact
 // on coincident even faces), transverse axes apply the van-leer plm sweep
 // (axis 0 innermost among them, operating on the pair-averaged leaf values).
+// a midpoint face (odd normal index) adds the divergence-closing term
+// (1/8) \sum_t (s_t^hi - s_t^lo): s_t^{lo,hi} is the van-leer slope along the
+// normal of transverse component t on the parent cell's lo / hi t-face. a
+// bilinear B_t across the parent makes \partial_t B_t vary linearly along the
+// normal; the quadratic normal profile that cancels it lifts the midpoint by
+// that amount (Balsara 2001).
 // =============================================================================
 
 fn face_prolong_reference<const D: usize>(
@@ -716,10 +722,37 @@ fn face_prolong_reference<const D: usize>(
     eval(coarse, &fine_face, axis, D as isize - 1, &mut [0; 3])
 }
 
+/// the divergence-closing term of a midpoint face: \sum_t (s_t^hi - s_t^lo) over the
+/// transverse components t, each slope taken along the normal from the time-interpolated
+/// component at the parent's t-face shifted by -1, 0, +1 along the normal.
+fn face_prolong_cross<const D: usize>(
+    transverse: &impl Fn(usize, [isize; D]) -> f64,
+    fine_face: [isize; D],
+    axis: usize,
+) -> f64 {
+    let parent: [isize; D] = std::array::from_fn(|kk| fine_face[kk].div_euclid(2));
+    let mut cross = 0.0;
+    for t in (0..D).filter(|&t| t != axis) {
+        let mut slopes = [0.0f64; 2];
+        for (side, slope) in slopes.iter_mut().enumerate() {
+            let at = |shift: isize| {
+                let mut c = parent;
+                c[t] += side as isize;
+                c[axis] += shift;
+                transverse(t, c)
+            };
+            let (vm, vc, vp) = (at(-1), at(0), at(1));
+            *slope = reference::van_leer(vc - vm, vp - vc);
+        }
+        cross += slopes[1] - slopes[0];
+    }
+    cross
+}
+
 fn run_prolong_face<const D: usize>(axis: usize, alpha: f64) {
     let seed_old = 400 + (10 * D + axis) as u64;
     let seed_new = 500 + (10 * D + axis) as u64;
-    let out = KernelRun::new(refine_prolong_face_gv(D, 2, axis))
+    let run = KernelRun::new(refine_prolong_face_gv(D, 2, axis))
         .grid([P_BUF_EXT; D])
         .buffer_lo([P_BUF_LO; D])
         .compute_window([-4; D], [8; D])
@@ -731,12 +764,28 @@ fn run_prolong_face<const D: usize>(axis: usize, alpha: f64) {
             let abs: Vec<i64> = local.iter().map(|&l| l as i64 + P_BUF_LO as i64).collect();
             noise(seed_new, &abs)
         })
-        .scalars(&[("alpha", alpha)])
-        .run();
+        .scalars(&[("alpha", alpha)]);
+    // the transverse face components t{t}_old / t{t}_new feeding the divergence-closing term
+    let seed_t = move |t: usize, new: bool| 600 + (100 * new as u64) + (10 * D + 3 * axis + t) as u64;
+    let mut run = run;
+    for t in (0..D).filter(|&t| t != axis) {
+        for (suffix, new) in [("old", false), ("new", true)] {
+            let seed = seed_t(t, new);
+            run = run.field_with(&format!("t{t}_{suffix}"), move |local| {
+                let abs: Vec<i64> = local.iter().map(|&l| l as i64 + P_BUF_LO as i64).collect();
+                noise(seed, &abs)
+            });
+        }
+    }
+    let out = run.run();
 
     let coarse = move |c: [isize; D]| {
         let abs: Vec<i64> = c.iter().map(|&x| x as i64).collect();
         (1.0 - alpha) * noise(seed_old, &abs) + alpha * noise(seed_new, &abs)
+    };
+    let transverse = move |t: usize, c: [isize; D]| {
+        let abs: Vec<i64> = c.iter().map(|&x| x as i64).collect();
+        (1.0 - alpha) * noise(seed_t(t, false), &abs) + alpha * noise(seed_t(t, true), &abs)
     };
     let win = symbi_algebra::Domain::new(std::array::from_fn(|ax| symbi_algebra::Space {
         name: ["i", "j", "k"][ax],
@@ -744,7 +793,9 @@ fn run_prolong_face<const D: usize>(axis: usize, alpha: f64) {
         hi: 4,
     }));
     for f in win.iter() {
-        let want = face_prolong_reference(&coarse, f, axis);
+        let base = face_prolong_reference(&coarse, f, axis);
+        let midpoint = f[axis].rem_euclid(2) == 1;
+        let want = if midpoint { base + face_prolong_cross(&transverse, f, axis) * 0.125 } else { base };
         let local: Vec<usize> = f
             .iter()
             .map(|&x| (x - P_BUF_LO as isize) as usize)
