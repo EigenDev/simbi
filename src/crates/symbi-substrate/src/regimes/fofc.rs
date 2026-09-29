@@ -726,6 +726,9 @@ pub(crate) fn fofc_orchestrate<const D: usize, const DOF: usize, Mem, Sc>(
     // the cells where fallback is most likely. self-gating (no-op when the sim has no bodies); a
     // no-op where the godunov already fuses the body (iso cartesian), so it never double-applies.
     body_apply: impl Fn(),
+    // the driver's composite step on a stage update, applied after the redo's update and its
+    // sources, where the first span's update passed it
+    redo_update: &mut dyn FnMut(),
     // the admissible-boundary projection (GR-hydro): blend every spliced cell toward the admissible
     // stage-input anchor onto partial-G before the c2p, so the recovery succeeds on every cell and the
     // freeze tier below fires only on a genuinely inadmissible anchor. a no-op for regimes without a
@@ -844,6 +847,7 @@ where
             body_apply(); // re-apply the immersed-body source on the redo (mirrors the HO godunov->additive->body order)
         }
     }
+    redo_update();
     // admissible-boundary projection — the tier below every conservative correction above, and it
     // must sit below all of them: the flux splice and the source limiter both act on the operator
     // (a face flux, a source magnitude) and neither can move a cell that is already outside G. this

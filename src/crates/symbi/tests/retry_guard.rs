@@ -98,7 +98,7 @@ impl KernelSet<2, 2, HostMemory, f64> for Rejector {
     fn rollback_snapshot_is_complete(&self, _s: &Store) -> bool {
         true
     }
-    fn fofc(&self, s: &Store, _dt: f64, _a0: f64, _ac: f64, stage: u8) -> FofcReport {
+    fn fofc(&self, s: &Store, _dt: f64, _a0: f64, _ac: f64, stage: u8, _redo_update: &mut dyn FnMut()) -> FofcReport {
         if stage != 1 {
             return FofcReport::inactive();
         }

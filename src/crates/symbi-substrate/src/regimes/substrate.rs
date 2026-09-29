@@ -698,6 +698,7 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize> Kerne
         a0: f64,
         ac: f64,
         stage: u8,
+        redo_update: &mut dyn FnMut(),
     ) -> symbi_sim::substrate_seam::FofcReport {
         // isothermal is HLLE-only by physics; the first-order redo is the same fan at theta = 0
         // (PCM) — the positivity-preserving Einfeldt fan. the substrate-owned pressure (cs^2*rho)
@@ -728,6 +729,7 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize> Kerne
                     self.body_source(sim, ac * dt)
                 }
             },
+            redo_update,
             || None, // iso: no admissible-boundary projection (density-only admissibility; keeps the freeze)
             // freeze parachute evolves by the iso body source (eos param = cs, no energy field).
             sim.immersed.is_some().then(|| (ac * dt, self.cs)),

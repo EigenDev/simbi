@@ -676,6 +676,7 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize, const
         a0: f64,
         ac: f64,
         stage: u8,
+        redo_update: &mut dyn FnMut(),
     ) -> symbi_sim::substrate_seam::FofcReport {
         // the first-order redo runs at theta = 0 (PCM). flat (Minkowski) SRHD uses HLLE — the
         // positivity-preserving Einfeldt fan — regardless of the production solver (HLLC can
@@ -707,6 +708,7 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize, const
             || self.godunov_stage(sim, dt, a0, ac),
             || self.source_apply(sim, ac * dt),
             || {}, // rhd has no immersed-body source (trait-default no-op)
+            redo_update,
             || {
                 // admissible-boundary projection: on a curved background, project every spliced cell
                 // onto partial-G along the segment to the admissible stage input, replacing the freeze

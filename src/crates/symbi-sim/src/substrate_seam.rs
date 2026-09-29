@@ -361,6 +361,11 @@ where
     /// the returned report carries the projection ledger receipt when the
     /// regime ran an admissible-boundary projection; the sim books it, scaled
     /// by the stage's downstream propagation weight, at the stage boundary.
+    ///
+    /// `redo_update` is the driver's composite step on a stage's conservative update, applied
+    /// once the update and its sources are in and before the recovery; the redo recomputes the
+    /// update and applies it at the same point, so a corrected stage and an uncorrected one
+    /// treat every cell the correction leaves alone identically.
     fn fofc(
         &self,
         _store: &FieldStore<NDIM, DOF, Mem, Sc>,
@@ -368,6 +373,7 @@ where
         _a0: f64,
         _ac: f64,
         _stage: u8,
+        _redo_update: &mut dyn FnMut(),
     ) -> FofcReport {
         FofcReport::inactive()
     }

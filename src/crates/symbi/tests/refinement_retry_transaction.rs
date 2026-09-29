@@ -70,6 +70,7 @@ impl KernelSet<1, 1, HostMemory, f64> for RejectOnce {
         _a0: f64,
         _ac: f64,
         _stage: u8,
+        _redo_update: &mut dyn FnMut(),
     ) -> symbi_sim::substrate_seam::FofcReport {
         use symbi_sim::substrate_seam::{FofcDecision, FofcReport, SourceReplayOutcome};
         // root, first fine substep, then second fine substep: reject only the latter.

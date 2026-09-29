@@ -288,7 +288,7 @@ fn neighbor_report(stage: usize) -> (u64, SourceReplayOutcome, bool) {
                 .workspace
                 .fofc_cut_trouble
                 .store(cut_trouble[0], std::sync::atomic::Ordering::Relaxed);
-            let report = ks[0].fofc(sh[0], dt, args.a0, args.ac, ii as u8 + 1);
+            let report = ks[0].fofc(sh[0], dt, args.a0, args.ac, ii as u8 + 1, &mut || {});
             return (report.troubled(), report.replay(), cut_trouble[0]);
         }
         for i in 0..2 {

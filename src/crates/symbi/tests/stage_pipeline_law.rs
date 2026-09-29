@@ -107,6 +107,7 @@ impl KernelSet<2, 2, HostMemory, f64> for Recorder {
         _a0: f64,
         _ac: f64,
         _stage: u8,
+        _redo_update: &mut dyn FnMut(),
     ) -> symbi_sim::substrate_seam::FofcReport {
         self.push("fofc");
         symbi_sim::substrate_seam::FofcReport::inactive()

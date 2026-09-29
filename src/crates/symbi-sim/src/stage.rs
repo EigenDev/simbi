@@ -582,8 +582,10 @@ where
             PhaseKind::Fofc => {
                 // the single fold of the ladder's decision into the stage outcome; the
                 // report's counts already flowed to the census as observations.
+                // the redo's update passes the same composite step the first span's update passed
+                let mut redo_update = || hook(HookPoint::BeforeC2p);
                 let report = prof("fofc", || {
-                    kernels.fofc(sim, args.dt, args.a0, args.ac, tag)
+                    kernels.fofc(sim, args.dt, args.a0, args.ac, tag, &mut redo_update)
                 });
                 // book the projection's receipt into the sim-owned ledger — the
                 // substrate returns it, the sim owns the transaction. a retried

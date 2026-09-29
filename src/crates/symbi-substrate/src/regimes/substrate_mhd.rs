@@ -486,6 +486,7 @@ where
         a0: f64,
         ac: f64,
         stage: u8,
+        redo_update: &mut dyn FnMut(),
     ) -> symbi_sim::substrate_seam::FofcReport {
         // every stage ends its constrained-transport update the same way, the RK2 predictor
         // included: it curls the edge EMF into the faces from the anchor saved in `bface_n` and
@@ -558,6 +559,7 @@ where
             || self.godunov_stage(sim, dt, a0, ac),
             || self.source_apply(sim, ac * dt),
             || {}, // MHD has no immersed-body source (trait-default no-op)
+            redo_update,
             || {
                 // tier 2, below the conservative source limiter: the limiter scales a source and
                 // therefore cannot act on a cell that is already outside G with no source left to
@@ -860,12 +862,13 @@ where
         a0: f64,
         ac: f64,
         stage: u8,
+        redo_update: &mut dyn FnMut(),
     ) -> symbi_sim::substrate_seam::FofcReport {
         // the projection ledger's step transaction closes in the driver: the
         // report carries this substage's projection receipt, the sim books it
         // into the pending bucket, and the accepted-step boundary commits or the
         // retry discards the whole step's bucket.
-        self.fofc_impl(sim, dt, a0, ac, stage)
+        self.fofc_impl(sim, dt, a0, ac, stage, redo_update)
     }
 
     fn fofc_active(&self) -> bool {

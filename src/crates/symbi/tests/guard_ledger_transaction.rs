@@ -100,6 +100,7 @@ impl KernelSet<1, 1, HostMemory, f64> for GuardMock {
         _a0: f64,
         _ac: f64,
         _stage: u8,
+        _redo_update: &mut dyn FnMut(),
     ) -> FofcReport {
         let call = self.calls.fetch_add(1, Ordering::SeqCst) + 1;
         if self.panic_at == Some(call) {
