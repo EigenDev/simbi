@@ -201,6 +201,17 @@ impl PhaseRules {
             accepted(l)?;
             return prefix(byte);
         }
+        // a peer owing this observer no grant at the rollback or its audit leaves no trace of a
+        // rejected attempt in which it owed nothing else: its next grant may belong to a later
+        // attempt of the same step, or to a retry of the step after an accepted one
+        let silent_rollback = !owed(self.rollback) && !owed(self.rollback_audit);
+        if silent_rollback && next.step == l.step && next.attempt > l.attempt + 1 {
+            return prefix(byte);
+        }
+        if silent_rollback && next.step == l.step + 1 && next.attempt > 0 {
+            accepted(l)?;
+            return prefix(byte);
+        }
         Err(format!("{next:?} does not follow {l:?}"))
     }
 }
@@ -443,6 +454,14 @@ mod tests {
         assert!(r.allows(None, e(3, 0, 9, 0), all, None).is_ok(), "a rollback as the first phase observed");
         assert!(r.allows(None, e(3, 0, 10, 0), all, None).is_err(), "a rollback audit whose rollback was owed");
         assert!(r.allows(None, e(3, 0, 10, 0), |b| b != 9, None).is_ok(), "a rollback audit by a peer owing no rollback grant");
+        // a diagonal peer owing this observer a grant at the last stage alone: an attempt rejected
+        // before that stage leaves no trace of it
+        let last_stage = |b: usize| b == 6;
+        assert!(r.allows(Some(e(0, 0, 6, 0)), e(1, 1, 6, 0), last_stage, None).is_ok(), "the next step's retry after a silent rejection");
+        assert!(r.allows(Some(e(0, 0, 6, 0)), e(1, 1, 6, 0), |b| b == 6 || b == 9, None).is_err(), "the next step's retry past an owed rollback");
+        assert!(r.allows(Some(e(0, 0, 3, 0)), e(1, 1, 6, 0), |b| b == 3 || b == 6, None).is_err(), "the next step's retry with step 0 unaccepted");
+        assert!(r.allows(Some(e(0, 0, 6, 0)), e(1, 1, 6, 0), |b| b == 3 || b == 6, None).is_err(), "the retry passes an owed stage");
+        assert!(r.allows(Some(e(0, 0, 3, 0)), e(0, 2, 3, 0), |b| b == 3, None).is_ok(), "two silent rejections of one step");
     }
 
     #[test]

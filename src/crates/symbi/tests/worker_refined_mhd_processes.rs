@@ -268,6 +268,11 @@ fn injection_from_env(me: WorkerId) -> Injection {
     let mut injection = Injection::default();
     // a root cell raised troubled at (step, stage) on whichever worker holds it:
     // `W_ROOT_TROUBLE` = step, stage, i, j on the root grid
+    if let Some(worker) = env_u64("W_REJECT_ROOT_WORKER") {
+        if worker == u64::from(me.0) {
+            injection.reject_at = vec![(env_u64("W_REJECT_ROOT_STEP").unwrap(), env_u64("W_REJECT_ROOT_STAGE").unwrap() as usize)];
+        }
+    }
     let root = env_list("W_ROOT_TROUBLE");
     if root.len() == 4 {
         injection.trouble_at = Some((root[0], root[1] as usize, [root[2] as isize, root[3] as isize, 0]));
@@ -1069,6 +1074,22 @@ fn a_magnetized_rejection_in_the_second_fine_substep_rolls_every_worker_back() {
     assert_rejection_matches_capped_control(test, &ragged_17_13(), 1, "the quad layout");
 }
 
+/// worker 1 rejects the last root stage of step 3; every worker rolls the root step back with its
+/// cell field and faces and replays it at the halved timestep
+#[test]
+fn a_magnetized_rejection_at_a_root_stage_rolls_every_worker_back() {
+    if in_worker_role() {
+        worker_main();
+    }
+    let test = "a_magnetized_rejection_at_a_root_stage_rolls_every_worker_back";
+    let rejection = [
+        ("W_REJECT_ROOT_WORKER", "1".to_string()),
+        ("W_REJECT_ROOT_STEP", "3".to_string()),
+        ("W_REJECT_ROOT_STAGE", "1".to_string()),
+    ];
+    assert_rejecting_run_matches_capped_control(test, &ragged_17_13(), &rejection, "the quad layout, root stage");
+}
+
 /// the patch's hi face on a cut: the fine faces beyond it prolong from parent faces the tile
 /// gathers from its neighbors, the flux and EMF units cross to the tiles holding the
 /// corrected cells and faces, and a rejection in the second fine substep after the first
@@ -1120,12 +1141,15 @@ fn a_magnetized_patch_corner_on_two_cuts_corrects_every_shared_face() {
 /// every worker rolls back, and the run equals a clean run capped to the accepted timestep in
 /// every record
 fn assert_rejection_matches_capped_control(test: &str, arm: &Arm, worker: u32, label: &str) {
-    let rejecting = run_arm(
-        test,
-        "rejecting",
-        arm,
-        &[("W_REJECT_FINE_WORKER", worker.to_string()), ("W_REJECT_FINE", "3,1,1".into())],
-    );
+    let rejection = [("W_REJECT_FINE_WORKER", worker.to_string()), ("W_REJECT_FINE", "3,1,1".into())];
+    assert_rejecting_run_matches_capped_control(test, arm, &rejection, label);
+}
+
+/// the run under `rejection`, which rejects step 3 once, rolls every worker back and replays
+/// the step at the halved timestep: it equals the single hierarchy and a clean run whose
+/// timestep at step 3 is capped to the accepted one
+fn assert_rejecting_run_matches_capped_control(test: &str, arm: &Arm, rejection: &[(&str, String)], label: &str) {
+    let rejecting = run_arm(test, "rejecting", arm, rejection);
     assert_all_ok(&rejecting, label);
     let reports: Vec<&Report> = rejecting.iter().map(|o| o.report.as_ref().unwrap()).collect();
     for (w, r) in reports.iter().enumerate() {
