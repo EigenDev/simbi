@@ -135,8 +135,8 @@ pub fn viscous_adiabatic_gv() -> KernelProgram {
 
 /// the shakura-sunyaev alpha viscosity with the local adiabatic sound speed:
 /// nu(x) = alpha cs^2(x) / Omega_K(r), cs^2 = gamma p / rho read per stencil cell
-/// (the isothermal alpha kernel uses the one global cs; on a varying-cs
-/// gas the local read is the shakura-sunyaev prescription). Omega_K from body 0's
+/// (the isothermal alpha kernel reads its closure cs^2 per stencil cell the same
+/// way). Omega_K from body 0's
 /// mass at the in-plane distance. cartesian 2D; carries the viscous heating.
 pub fn viscous_adiabatic_alpha_gv() -> KernelProgram {
     viscous_adiabatic_alpha_impl(false)
@@ -391,7 +391,6 @@ pub fn viscous_iso_alpha_ortho_gv(coords: Coords) -> KernelProgram {
             NDIM as usize,
         );
         let (c0, c1) = (geo.centroid[0], geo.centroid[1]);
-        let cs2 = crate::gv::iso_cs2_gv(cx);
 
         let mut h1 = [[Gv::ZERO; 3]; 3];
         let mut h2 = [[Gv::ZERO; 3]; 3];
@@ -403,7 +402,10 @@ pub fn viscous_iso_alpha_ortho_gv(coords: Coords) -> KernelProgram {
                 let h = scale_factors_at(coords, NDIM as usize, &[x0, x1]);
                 h1[dj][di] = h[0];
                 h2[dj][di] = h[1];
-                // nu(R) = alpha cs^2 / Omega_k(R), R the radial coordinate x0.
+                // nu(R) = alpha cs^2 / Omega_k(R), R the radial coordinate x0, with the stencil
+                // cell's own closure cs^2, so the two cells sharing a face form the same stress.
+                let off = [di as i32 - 1, dj as i32 - 1];
+                let cs2 = cx.field_offset("cs2", FieldRef::IsoCs2, NDIM, &off);
                 nust[dj][di] = alpha_viscosity(alpha, cs2, gm, x0);
             }
         }
@@ -668,19 +670,20 @@ pub fn viscous_iso_alpha_gv_3d() -> KernelProgram {
             NDIM as usize,
         );
         let (xc, yc) = (geo.centroid[0], geo.centroid[1]);
-        let cs2 = crate::gv::iso_cs2_gv(cx);
 
-        // nu is z-invariant (cylindrical R), so every k-slice of the stencil is equal.
+        // Omega_k depends on the cylindrical R alone; cs^2 is the stencil cell's own closure
+        // value, so the two cells sharing a face form the same stress.
         let mut nust = [[[Gv::ZERO; 3]; 3]; 3];
-        for jj in 0..3usize {
-            for ii in 0..3usize {
-                let x = xc + Gv::from_f64(ii as f64 - 1.0) * dx;
-                let y = yc + Gv::from_f64(jj as f64 - 1.0) * dy;
-                let (rx, ry) = (x - bx, y - by);
-                let r = (rx * rx + ry * ry).sqrt();
-                let nu = alpha_viscosity(alpha, cs2, gm, r);
-                for kk in 0..3usize {
-                    nust[kk][jj][ii] = nu;
+        for kk in 0..3usize {
+            for jj in 0..3usize {
+                for ii in 0..3usize {
+                    let x = xc + Gv::from_f64(ii as f64 - 1.0) * dx;
+                    let y = yc + Gv::from_f64(jj as f64 - 1.0) * dy;
+                    let (rx, ry) = (x - bx, y - by);
+                    let r = (rx * rx + ry * ry).sqrt();
+                    let off = [ii as i32 - 1, jj as i32 - 1, kk as i32 - 1];
+                    let cs2 = cx.field_offset("cs2", FieldRef::IsoCs2, NDIM, &off);
+                    nust[kk][jj][ii] = alpha_viscosity(alpha, cs2, gm, r);
                 }
             }
         }
@@ -693,8 +696,8 @@ pub fn viscous_iso_alpha_gv_3d() -> KernelProgram {
 
 /// trace the alpha-viscosity isothermal operator, 2D cartesian: `nu(x) =
 /// alpha c_s^2 / Omega_k(r)`, `Omega_k = sqrt(GM/r^3)`, `r = |x - x_body|`
-/// (G = 1, so GM is the central body mass). the sound speed is the constant
-/// `cs` param (globally isothermal). nu vanishes toward the sink (Omega_k -> inf) — the
+/// (G = 1, so GM is the central body mass). the sound speed is the per-cell closure
+/// cs^2 read at each stencil cell. nu vanishes toward the sink (Omega_k -> inf) — the
 /// physical alpha-disk `nu ~ r^{3/2}`.
 pub fn viscous_iso_alpha_gv() -> KernelProgram {
     const NDIM: u8 = 2;
@@ -719,7 +722,6 @@ pub fn viscous_iso_alpha_gv() -> KernelProgram {
             NDIM as usize,
         );
         let (xc, yc) = (geo.centroid[0], geo.centroid[1]);
-        let cs2 = crate::gv::iso_cs2_gv(cx);
 
         let mut nust = [[Gv::ZERO; 3]; 3];
         for jj in 0..3usize {
@@ -728,6 +730,9 @@ pub fn viscous_iso_alpha_gv() -> KernelProgram {
                 let y = yc + Gv::from_f64(jj as f64 - 1.0) * dy;
                 let (rx, ry) = (x - bx, y - by);
                 let r = (rx * rx + ry * ry).sqrt();
+                // the stencil cell's own closure cs^2: the two cells sharing a face form the same stress
+                let off = [ii as i32 - 1, jj as i32 - 1];
+                let cs2 = cx.field_offset("cs2", FieldRef::IsoCs2, NDIM, &off);
                 nust[jj][ii] = alpha_viscosity(alpha, cs2, gm, r);
             }
         }

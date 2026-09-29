@@ -1625,7 +1625,7 @@ pub fn dispatch_viscous_alpha<const D: usize, const DOF: usize, Mem, Sc>(
     // (the central mass is on the axis), so the two kernels share every scalar apart
     // from body_0_pos, which the cartesian kernel alone declares.
     // the adiabatic (energy-carrying) gas reads the local cs^2 = gamma p / rho per
-    // stencil cell; the isothermal kernels read the one global cs scalar. the 2.5D
+    // stencil cell; the isothermal kernels read the closure field cs^2 per stencil cell. the 2.5D
     // magnetized gas (DOF = 3 on a 2-axis grid) selects the DOF-aware variant.
     let has_energy = sim.fields.cons.nrg_field().is_some();
     let name: String = match geom.coords {
