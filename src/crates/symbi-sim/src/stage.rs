@@ -24,7 +24,8 @@
 // =============================================================================
 
 use crate::driver::{prof, stage_tag};
-use crate::state::FieldStore;
+use crate::state::{ConsFieldsGeneric, FieldStore};
+use symbi_grid::Field;
 use crate::substrate_seam::KernelSet;
 use symbi_algebra::OrderedNumeric;
 use symbi_carrier::Scalar;
@@ -394,11 +395,11 @@ where
     1
 }
 
-/// the store's one-shot unrecoverable cell, applied at `point` of the stage it names: a negative
-/// energy into the stage input after the fluxes, at the cell wherever the store holds it, halo
-/// included, so every tile sharing the cell restarts its redo from the same input; and into the
-/// stage output before the recovery, on the interior, where the slot is marked fired. a regime
-/// without an energy field carries no such cell.
+/// the store's one-shot unrecoverable cell, applied at `point` of the stage it names: a deeply
+/// negative energy (the density, on a regime without an energy field) into the stage input after the
+/// fluxes, at the cell wherever the store holds it, halo included, so every tile sharing the cell
+/// restarts its redo from the same input; and into the stage output before the recovery, on the
+/// interior, where the slot is marked fired.
 fn apply_unrecoverable<const D: usize, const DOF: usize, Mem, Sc>(sim: &FieldStore<D, DOF, Mem, Sc>, stage: usize, point: HookPoint)
 where
     Mem: MemorySpace,
@@ -409,22 +410,32 @@ where
     if fired || (iteration, at_stage) != (sim.iteration, stage) {
         return;
     }
+    // the poisoned conserved: the total energy, or the density of a regime without an energy field
+    fn poisoned<const D: usize, const DOF: usize, Mem: MemorySpace, Sc: Scalar + OrderedNumeric>(
+        u: &ConsFieldsGeneric<D, DOF, Mem, Sc>,
+    ) -> &Field<Sc, D, Mem> {
+        u.nrg_field().unwrap_or(&u.den)
+    }
     let field = match point {
-        HookPoint::AfterFlux => sim.stage_input().nrg_field(),
+        HookPoint::AfterFlux => poisoned(sim.stage_input()),
         HookPoint::BeforeC2p => {
             *slot = Some((iteration, at_stage, cell, true));
             // the stage output carries state on the interior alone
             if !sim.geom.interior.contains(cell) {
                 return;
             }
-            sim.fields.cons.nrg_field()
+            poisoned(&sim.fields.cons)
         }
         HookPoint::BeforeGhostFill => return,
     };
-    if let Some(nrg) = field {
-        *nrg.view_mut().at_mut(cell) = Sc::from_f64(-1.0);
-    }
+    *field.view_mut().at_mut(cell) = Sc::from_f64(UNRECOVERABLE_POISON);
 }
+
+/// the poisoned value: a thousand times the O(1) density and energy of a test flow, negative. a
+/// shallow poison (-1) sits within reach of the first-order redo, whose stencil fluxes, driven by the
+/// unphysical cell itself, can carry it back into the admissible set; at this depth no flux divergence
+/// over one stage restores it, so the redo lands outside and the correcting select freezes the cell.
+const UNRECOVERABLE_POISON: f64 = -1.0e3;
 
 fn fold_span<const D: usize, const DOF: usize, Mem, Sc, K>(
     sim: &FieldStore<D, DOF, Mem, Sc>,
