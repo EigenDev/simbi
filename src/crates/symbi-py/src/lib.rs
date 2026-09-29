@@ -10411,9 +10411,6 @@ fn ungated_launch_combination(cfg: &Config) -> Option<String> {
     if cfg.regime == "imhd" && cfg.resistivity != 0.0 {
         return Some("resistivity with the imhd regime".to_string());
     }
-    if magnetized && cfg.dims == 3 {
-        return Some(format!("the {} regime on a three-dimensional grid", cfg.regime));
-    }
     if cfg.regime != "newtonian" && (cfg.viscosity != 0.0 || cfg.alpha != 0.0) {
         return Some(format!("viscous transport with the {} regime", cfg.regime));
     }

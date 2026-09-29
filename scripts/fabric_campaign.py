@@ -148,6 +148,10 @@ CASES: tuple[Case, ...] = (
          cuts=((), (8,), (8,)), restart_cuts=((), (), (6, 10)), trouble="trouble:3:0:5:0:7"),
     Case("ram44", "simbi_configs.examples.srhd.ram44", "Ram44", (32, 32), 8, ("full",),
          cuts=((16,), ()), restart_cuts=((10, 21), ())),
+    # the 3d vortex with a z flow on a periodic box: cuts along x and z, the correction against both
+    Case("nmhd_orszag_tang_3d", f"{N}.nmhd_orszag_tang_3d", "NewtonianOrszagTang3D", (16, 16, 16), 8, ("full",),
+         cuts=((8,), (), (8,)), restart_cuts=((5, 11), (), ()), trouble="trouble:3:0:7:3:7", magnetized=True,
+         periodic=True, faults=("reject", "bad_cfl", "lost")),
     # one refined box (root cells 8..24 at ratio 2) that the cuts cross; the correction arm flags
     # a root cell against the x = 13 cut just below the box
     Case("refined_blast", f"{N}.refined_blast", "RefinedBlast", (32, 32, 1), 8, ("full",),
@@ -352,6 +356,16 @@ def totals(path: Path) -> dict[str, tuple[float, float]]:
             for n, x in fields.items() if "cons" in n and n.startswith("level_0/")}
 
 
+def _vector_scale(start: dict[str, tuple[float, float]], name: str) -> float:
+    """the scale a conserved total's drift is measured against: its own initial absolute sum, or
+    for a vector component (`m1`, `b3`) the largest initial absolute sum among the components of
+    its vector, so a component that starts at zero is weighed against the field it belongs to"""
+    stem = name.rstrip("0123456789")
+    if stem == name:
+        return start[name][1]
+    return max(v[1] for n, v in start.items() if n.rstrip("0123456789") == stem)
+
+
 def max_div_b(path: Path) -> float:
     """the largest |div B| over the cells of a checkpoint from its staggered faces, on a
     unit square with nx cells across"""
@@ -506,7 +520,7 @@ def run_case(driver: Driver, case: Case) -> dict:
         start_path = initial_of(arms["many"].data)
         if start_path is not None and end:
             start = totals(start_path)
-            drift = {n: abs(end[n][0] - start[n][0]) / max(start[n][1], 1e-300) for n in end if n in start}
+            drift = {n: abs(end[n][0] - start[n][0]) / max(_vector_scale(start, n), 1e-300) for n in end if n in start}
             record["conservation"] = drift
             if case.periodic:
                 worst = max(drift.values(), default=0.0)

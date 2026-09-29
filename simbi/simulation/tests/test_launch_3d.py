@@ -8,7 +8,11 @@
 # on four (cut along x and z) equals the single-grid run, fresh and with the
 # correction fired on the cell where the shock meets both cuts; the tabulated
 # heating source, read at each cell's global position, equals the single
-# grid on four workers fresh and with the correction in the heated core.
+# grid on four workers fresh and with the correction in the heated core. the
+# newtonian orszag-tang vortex with a z velocity, under the Contact and the UCT
+# edge EMF, equals the single-grid run on four workers cut along x and z, every
+# staggered face included, fresh and with the correction fired on a cell against
+# both cuts.
 #
 # run: pytest -m simulation simbi/simulation/tests/test_launch_3d.py
 # =============================================================================
@@ -17,6 +21,7 @@ from pathlib import Path
 
 import pytest
 
+from simbi_configs.examples.newtonian.nmhd_orszag_tang_3d import NewtonianOrszagTang3D
 from simbi_configs.examples.newtonian.tabulated_source_3d import TabulatedSource3D
 from simbi_configs.examples.srhd.marti_muller_3d import MartiMuller3D
 
@@ -38,6 +43,7 @@ def _script_of(cls: type) -> str:
 
 SHOCK_SCRIPT = _script_of(MartiMuller3D)
 HEATING_SCRIPT = _script_of(TabulatedSource3D)
+VORTEX_SCRIPT = _script_of(NewtonianOrszagTang3D)
 
 
 def test_a_three_dimensional_shock_tube_launch_matches_the_single_grid_run(tmp_path: Path) -> None:
@@ -73,3 +79,20 @@ def test_a_three_dimensional_tabulated_source_launch_matches_the_single_grid_run
     _assert_flag_changed(clean, flagged)
     corrected = _script_launch(HEATING_SCRIPT, resolution, tmp_path / "corrected", four, STEPS, workers=4, env=inject)
     _assert_same_state(corrected, flagged, "four workers, the correction in the heated core")
+
+
+@pytest.mark.parametrize(("flags", "fields"), [([], ""), (["--ct-method", "uct"], "ct_method='uct'")], ids=["contact", "uct"])
+def test_a_three_dimensional_magnetized_launch_matches_the_single_grid_run(tmp_path: Path, flags: list[str], fields: str) -> None:
+    resolution = (16, 16, 16)
+    reference = _script_reference(NewtonianOrszagTang3D.__module__, "NewtonianOrszagTang3D", resolution, tmp_path / "single", STEPS, fields)
+    four = _layout(tmp_path / "four.toml", workers=4, shape=(2, 1, 2))
+    launched = _script_launch(VORTEX_SCRIPT, resolution, tmp_path / "four", four, STEPS, workers=4, flags=flags)
+    _assert_same_state(launched, reference, "four workers on the 3d vortex, cuts along x and z")
+    # the flagged cell (7, 3, 7) sits against the x cut at 8 and the z cut at 8
+    one = _layout(tmp_path / "one.toml", workers=1, shape=(1, 1, 1))
+    inject = {"SIMBI_FABRIC_INJECT": "trouble:3:0:7:3:7"}
+    clean = _script_launch(VORTEX_SCRIPT, resolution, tmp_path / "clean", one, STEPS, workers=1, flags=flags)
+    flagged = _script_launch(VORTEX_SCRIPT, resolution, tmp_path / "flagged", one, STEPS, workers=1, env=inject, flags=flags)
+    _assert_flag_changed(clean, flagged)
+    corrected = _script_launch(VORTEX_SCRIPT, resolution, tmp_path / "corrected", four, STEPS, workers=4, env=inject, flags=flags)
+    _assert_same_state(corrected, flagged, "four workers, the correction against both cuts of the 3d vortex")

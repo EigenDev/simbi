@@ -369,7 +369,7 @@ fired against a cut, "restart" a resume onto a changed, uneven partition,
 | newtonian | 2D Cartesian: periodic (fresh, restart, correction, ppm, rollback), periodic with reflecting walls and a gravity source, Neumann and Robin walls, pointwise user sources, the constant-nu viscous transport (fresh, restart equal to the uninterrupted run, nu shown to act); reflect, outflow, Neumann, Robin walls at cut corners. 2D spherical with a log radial axis over both poles (fresh, correction at the pole, restart); 2D cylindrical with the R = 0 axis and reflecting ends. 3D Cartesian with a tabulated source (four workers, correction); 3D spherical over both poles with a cut azimuth (two, three uneven, four workers, correction at the pole). |
 | rhd | 2D Cartesian (fresh, restart, correction, rollback); 3D Cartesian shock tube (two and four workers, correction). |
 | isothermal | 2D Cartesian periodic shear layer (fresh, restart, correction); a locally isothermal closure refused. |
-| nmhd | 2D Cartesian vortex (fresh with the face audit, restart, correction under Contact and UCT in both stages, shared-face mismatch aborting every worker, the numerics its substrate has no door for refused, a forced rejection refused); 2D Cartesian rotor with outflow walls (four workers, correction); reflect and outflow walls at cut corners; 2D (r, phi) disk plane with a periodic azimuth (four workers, correction); ohmic resistivity (two workers, correction, eta shown to act); 3D Cartesian and 3D spherical over both poles with a cut azimuth, in-process worker gates only. |
+| nmhd | 2D Cartesian vortex (fresh with the face audit, restart, correction under Contact and UCT in both stages, shared-face mismatch aborting every worker, the numerics its substrate has no door for refused, a forced rejection refused); 2D Cartesian rotor with outflow walls (four workers, correction); reflect and outflow walls at cut corners; 2D (r, phi) disk plane with a periodic azimuth (four workers, correction); ohmic resistivity (two workers, correction, eta shown to act); 3D Cartesian vortex with a z flow (four workers cut along x and z, correction against both cuts, under Contact and UCT); 3D spherical over both poles with a cut azimuth, in-process worker gates only. |
 | imhd | 2D Cartesian vortex (fresh with the face audit, correction under Contact and UCT). |
 
 The listed regime and operator combinations are locally validated; the
@@ -379,8 +379,7 @@ refused at startup by name: geometric radial spacing, the gas equations of
 state beyond the ideal gas, the balanced reconstruction, reconstruction
 beyond plm outside Newtonian hydro, the isothermal regimes on the
 spherical and cylindrical charts and in 3D, walls beyond periodic for the
-isothermal regimes, resistivity with the isothermal MHD closure, the 3D
-magnetized path, and the viscous transport outside Newtonian hydro (the
+isothermal regimes, resistivity with the isothermal MHD closure, and the viscous transport outside Newtonian hydro (the
 alpha prescription needs a central body, which is refused ahead of it).
 `SIMBI_LAUNCH_EXPERIMENTAL=1` runs such a combination anyway, as an
 experimental, unvalidated one, and the launch says so; successful
