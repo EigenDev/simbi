@@ -31,7 +31,7 @@ use crate::driver::{
     retry_timestep, select_timestep, stage_schedule,
 };
 use crate::plan_exchange::{AuditCost, AuditError, PlanExchange, StagingFault};
-use crate::stage::{StageArgs, StageOutcome, fold_stage_from_correction, fold_stage_through_mark};
+use crate::stage::{StageArgs, StageOutcome, fold_stage_from_correction, fold_stage_through_mark, raise_troubled_cell};
 use crate::state::{FieldStore, Timestepping};
 use crate::substrate_seam::{KernelSet, RegimeKind, RetryExclusion};
 use std::ops::ControlFlow;
@@ -780,8 +780,7 @@ where
                             let cell: [isize; D] = std::array::from_fn(|ax| cell[ax]);
                             for k in 0..n {
                                 if let Some(local) = exchange.local_cell(tiles[k], cell) {
-                                    *sh[k].workspace.fofc_flag.view_mut().at_mut(local) = 1.0;
-                                    troubled += 1;
+                                    troubled += raise_troubled_cell(sh[k], local);
                                 }
                             }
                         }

@@ -373,7 +373,21 @@ where
         return 0;
     }
     *slot = Some((iteration, at_stage, cell, true));
-    if !sim.geom.interior.contains(cell) || *sim.workspace.fofc_flag.view().at(cell) > Sc::from_f64(0.0) {
+    if !sim.geom.interior.contains(cell) {
+        return 0;
+    }
+    raise_troubled_cell(sim, cell)
+}
+
+/// raises the troubled flag of `cell` with its state left physical, so the correction it drives is
+/// the conservative first-order redo. the one writer of the flag outside the mark; returns 1 when
+/// the flag was clear and 0 when the mark had already raised it.
+pub(crate) fn raise_troubled_cell<const D: usize, const DOF: usize, Mem, Sc>(sim: &FieldStore<D, DOF, Mem, Sc>, cell: [isize; D]) -> u64
+where
+    Mem: MemorySpace,
+    Sc: Scalar + OrderedNumeric,
+{
+    if *sim.workspace.fofc_flag.view().at(cell) > Sc::from_f64(0.0) {
         return 0;
     }
     *sim.workspace.fofc_flag.view_mut().at_mut(cell) = Sc::from_f64(1.0);

@@ -10,11 +10,17 @@
 //   `freeze_streak`/`FREEZE_HALT` names are their own words);
 // - each channel buffer's field access appears only inside its sanctioned
 //   producer/reader functions (brace-tracked extents, so an unrelated
-//   function cannot borrow a sanctioned spelling):
+//   function cannot borrow a sanctioned spelling; a spelling matches as a
+//   whole identifier, so `.fofc_flags_in(` is a call, distinct from the
+//   `.fofc_flag` field):
 //     C2pStatus (`.c2p_error`)      — the regime `c2p` producers, the status
-//                                     decode, and the diagnostic scanners;
-//     TroubledCell (`.fofc_flag`)   — the orchestrator and the GRMHD ladder,
-//                                     which bind it once and pass the local;
+//                                     decodes (plain and excision-masked), and
+//                                     the diagnostic scanners;
+//     TroubledCell (`.fofc_flag`)   — the orchestrator, the GRMHD ladder and the
+//                                     mark, which bind it and pass the local; the
+//                                     troubled count; the cut exchange that
+//                                     carries the flags between tiles; and the
+//                                     one injector of a physical troubled cell;
 //     FreezeApplied (`.freeze_applied`) — the orchestrator, which hands it to
 //                                     the correcting selects;
 // - the three channels are three distinct field allocations.
@@ -78,16 +84,28 @@ const CHANNELS: &[ChannelRule] = &[
         allowed_fns: &[
             "c2p",
             "troubled_from_status",
+            "dispatch_fofc_flag_unexcised",
             "scan_c2p_errors",
             "first_c2p_error",
             "first_c2p_failure_state",
         ],
     },
     ChannelRule {
-        // TroubledCell: bound once by the orchestrator (and the GRMHD ladder
-        // body), then passed as a local to the ghost fill, splices, and counts.
+        // TroubledCell: bound by the orchestrator, the GRMHD ladder body and the
+        // mark, then passed as a local to the ghost fill, splices, and counts;
+        // reduced by the troubled count; moved across cuts by the exchange plan
+        // and the in-process trouble exchange; raised at one physical cell by
+        // the single troubled-cell injector.
         spelling: ".fofc_flag",
-        allowed_fns: &["fofc_orchestrate", "fofc_impl"],
+        allowed_fns: &[
+            "fofc_orchestrate",
+            "fofc_impl",
+            "fofc_mark",
+            "fofc_flags_in",
+            "plan_fields",
+            "exchange_trouble",
+            "raise_troubled_cell",
+        ],
     },
     ChannelRule {
         // FreezeApplied: bound once by the orchestrator, which hands it to the
@@ -96,6 +114,17 @@ const CHANNELS: &[ChannelRule] = &[
         allowed_fns: &["fofc_orchestrate"],
     },
 ];
+
+/// true when `code` spells `spelling` as a whole identifier: the character after it
+/// continues no identifier.
+fn spells(code: &str, spelling: &str) -> bool {
+    code.match_indices(spelling).any(|(at, _)| {
+        code[at + spelling.len()..]
+            .chars()
+            .next()
+            .is_none_or(|c| !(c.is_alphanumeric() || c == '_'))
+    })
+}
 
 /// channel-boundary violations in one source text: comment text is stripped,
 /// function extents are brace-tracked (a `fn` line opens a body, brace balance
@@ -127,7 +156,7 @@ fn channel_violations(text: &str) -> Vec<String> {
             entered |= code.contains('{');
         }
         for rule in CHANNELS {
-            if code.contains(rule.spelling)
+            if spells(code, rule.spelling)
                 && !(in_fn && rule.allowed_fns.contains(&fn_name.as_str()))
             {
                 hits.push(format!("{number}: {}", raw.trim()));
@@ -190,7 +219,7 @@ fn each_channel_stays_inside_its_boundary() {
         let text = std::fs::read_to_string(path).expect("source file must be readable");
         for (_, line) in production_lines(&text) {
             let code = line.split("//").next().unwrap_or("");
-            if CHANNELS.iter().any(|r| code.contains(r.spelling)) {
+            if CHANNELS.iter().any(|r| spells(code, r.spelling)) {
                 seen += 1;
             }
         }
@@ -254,4 +283,11 @@ fn channel_gate_flags_cross_channel_borrowing() {
                   fn fofc_orchestrate() {\n    let flag = &ws.fofc_flag;\n    \
                   let freeze = &ws.freeze_applied;\n}\n";
     assert!(channel_violations(lawful).is_empty());
+
+    // a call whose name extends a channel spelling is a different identifier.
+    let count_call = "fn stray_count() {\n    let n = kernels.fofc_flags_in(sim, region);\n}\n";
+    assert!(channel_violations(count_call).is_empty());
+    // the field spelled at the end of a line, or before punctuation, is still caught.
+    let field_at_end = "fn stray_view() {\n    let f = &ws.fofc_flag;\n    let g = ws.fofc_flag\n}\n";
+    assert_eq!(channel_violations(field_at_end).len(), 2);
 }
