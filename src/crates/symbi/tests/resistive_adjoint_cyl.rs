@@ -172,21 +172,48 @@ fn cyl_rz_resistive_current_is_the_curl_adjoint() {
 }
 
 // ---- end-to-end: the production evolve path (CFL fold + post_godunov routing) ----
+//
+// the seed B_z = b0 sin(k (r - r_min)), B_r = 0 (k (R_MAX - R_MIN) = 4 pi) is divergence-free on
+// the faces and sits between reflecting radial walls with a periodic z. a reflecting wall mirrors
+// the tangential B_z evenly, so the resistive decay is the radial diffusion
+//     dB_z/dt = eta (1/r) d_r (r d_r B_z),  d_r B_z = 0 at both walls.
+// decay is scored by the r-weighted projection of the cell B_z onto the seed profile, which reads
+// the seeded mode; a per-step transverse check holds every arm z-uniform, independently of it.
+// the ideal arm's loss is the scheme's numerical diffusion, second order in the spacing (its
+// projection loss falls 3.5x from N = 24 to 48 and 3.96x from 48 to 96); at N = 24 that floor is
+// 0.155 against a resistive loss of 0.431 and resistivity does not dominate it, at N = 48 it is
+// 0.044 against 0.390 (ratio 8.8). the resistive projection converges to the radial diffusion
+// reference at second order (error 0.054, 0.012, 0.0027 at N = 24, 48, 96).
 
-const B0: f64 = 1e-2; // tiny: magnetic pressure << p, so ideal dynamics are negligible over the run
+const B0: f64 = 1e-2; // magnetic pressure / gas pressure = 5e-5
 const T_FINAL: f64 = 0.3;
+const ETA: f64 = 0.05;
+const K: f64 = 4.0 * PI / (R_MAX - R_MIN);
+/// the coarse fixture and the resolved one, on square grids
+const COARSE: usize = 24;
+const RESOLVED: usize = 48;
+/// the dominance the resolved fixture asserts: resistive loss over the ideal numerical floor
+const DOMINANCE: f64 = 4.0;
+/// a second-order quantity shrinks 4x per doubling; 3 accepts it and rejects first order (2x)
+const SECOND_ORDER_GAIN: f64 = 3.0;
+/// the fraction of the resolved resistive error that the reference's own discretization error
+/// and the neglected magnetic backreaction may each reach: at 1% neither moves the convergence
+/// gain by more than 1%
+const REFERENCE_SHARE: f64 = 1e-2;
+/// the transverse bound on either face field's z-departure, in units of b0
+const TRANSVERSE: f64 = 1e-12;
 
-// a div-free poloidal seed: B_z = B0 sin(k (r - r_min)), B_r = 0. div B = (1/r) d_r(r B_r) + d_z B_z
-// = 0 (B_r = 0 and B_z has no z-dependence), so the CT machinery starts monopole-free. two radial
-// wavelengths (k (R_MAX - R_MIN) = 4 pi) -> the mode vanishes at both r-walls and decays briskly.
-fn make_decay_sim() -> Sim {
-    let k = 4.0 * PI / (R_MAX - R_MIN);
+fn shape(r: f64) -> f64 {
+    (K * (r - R_MIN)).sin()
+}
+
+fn make_decay_sim(n: usize, b0: f64) -> Sim {
     SimStateGeneric::<NewtonianMhd, 2, 3, Cylindrical, IdealGas<f64>, CpuSpace, HostMemory, f64>::build(
         NewtonianMhd,
         IdealGas { gamma: GAMMA },
         Cylindrical,
     )
-    .cells([N, N])
+    .cells([n, n])
     .bounds([R_MIN, 0.0], [R_MAX, Z_MAX])
     .boundaries(Boundaries::per_axis([
         [BoundaryType::Reflect, BoundaryType::Reflect],
@@ -195,55 +222,219 @@ fn make_decay_sim() -> Sim {
     .cfl(0.3)
     .allocate()
     .expect("cyl r-z decay sim construction failed")
-    .set_initial(|[r, _z]| MhdPrim::new(Prim::adiabatic(Density(1.0), Tensor::new([0.0, 0.0, 0.0]), Pressure(1.0)), Tensor::new([0.0, 0.0, B0 * (k * (r - R_MIN)).sin()])))
-    .seed_faces(|axis, [r, _z]| if axis == 1 { B0 * (k * (r - R_MIN)).sin() } else { 0.0 })
+    .set_initial(move |[r, _z]| MhdPrim::new(Prim::adiabatic(Density(1.0), Tensor::new([0.0, 0.0, 0.0]), Pressure(1.0)), Tensor::new([0.0, 0.0, b0 * shape(r)])))
+    .seed_faces(move |axis, [r, _z]| if axis == 1 { b0 * shape(r) } else { 0.0 })
     .build()
 }
 
-// max |B_z| (cell-centered) over the interior — the poloidal field amplitude. cyl r-z stores the
-// cell B in coordinate order [B_r, B_phi, B_z], so B_z is component 2 (component 1 is out-of-plane).
-fn bz_amplitude(s: &Sim) -> f64 {
+/// the r-weighted projection of the cell B_z onto the seed profile. cyl r-z stores the cell B in
+/// coordinate order [B_r, B_phi, B_z], so B_z is component 2.
+fn projection(s: &Sim) -> f64 {
     let m = s.fields.mhd.as_ref().unwrap();
-    s.geom
-        .interior
-        .iter()
-        .map(|c| m.bcell[2].view().at(c).abs())
-        .fold(0.0_f64, f64::max)
+    let lo = s.geom.interior.spaces[0].lo;
+    let dr = s.geom.dx[0];
+    let (mut num, mut den) = (0.0, 0.0);
+    for c in s.geom.interior.iter() {
+        let r = R_MIN + ((c[0] - lo) as f64 + 0.5) * dr;
+        num += *m.bcell[2].view().at(c) * shape(r) * r;
+        den += shape(r) * shape(r) * r;
+    }
+    num / den
 }
 
-fn evolve_decay(eta: f64) -> f64 {
-    let mut sim = make_decay_sim();
-    let a0 = bz_amplitude(&sim);
-    let sub = NewtonianMhdSubstrateKernelSet::<HostMemory, f64, 2>::new(
-        GAMMA,
-        0.3,
-        1.0,
-        &sim.geom.allocated,
-    )
-    .with_resistivity(eta);
-    evolve_with_callback(&mut sim, &sub, T_FINAL, u64::MAX, |_| {})
+/// the largest z-departure (max_z - min_z per radial row) of either face field
+fn transverse(s: &Sim) -> f64 {
+    let m = s.fields.mhd.as_ref().unwrap();
+    let i = &s.geom.interior.spaces;
+    let mut worst = 0.0f64;
+    for f in m.bface.b.iter() {
+        for ir in i[0].lo..i[0].hi {
+            let (lo, hi) = (i[1].lo..i[1].hi).fold((f64::INFINITY, f64::NEG_INFINITY), |(lo, hi), iz| {
+                let v = *f.view().at([ir, iz]);
+                (lo.min(v), hi.max(v))
+            });
+            worst = worst.max(hi - lo);
+        }
+    }
+    worst
+}
+
+/// one arm: the final projection relative to the seed's, and the largest per-step transverse
+/// departure relative to b0
+#[derive(Clone, Copy, Debug)]
+struct Decay {
+    retained: f64,
+    transverse: f64,
+}
+
+fn evolve_decay(n: usize, eta: f64, b0: f64) -> Decay {
+    let mut sim = make_decay_sim(n, b0);
+    let p0 = projection(&sim);
+    let sub = NewtonianMhdSubstrateKernelSet::<HostMemory, f64, 2>::new(GAMMA, 0.3, 1.0, &sim.geom.allocated)
+        .with_resistivity(eta);
+    let mut worst = 0.0f64;
+    evolve_with_callback(&mut sim, &sub, T_FINAL, 1, |s| worst = worst.max(transverse(s)))
         .expect("cyl decay evolve failed");
-    bz_amplitude(&sim) / a0
+    assert!((sim.time - T_FINAL).abs() < 1e-12, "the arm ended at t = {}", sim.time);
+    Decay { retained: projection(&sim) / p0, transverse: worst / b0 }
+}
+
+/// the radial diffusion reference: crank-nicolson on `cells` uniform radial cells over `steps`
+/// equal steps, the finite-volume flux r d_r B through each cell face and zero flux through the
+/// walls, started from the seed profile at the cell centers and scored by the same r-weighted
+/// projection, relative to its start
+fn radial_reference(cells: usize, steps: usize) -> f64 {
+    let dr = (R_MAX - R_MIN) / cells as f64;
+    let dt = T_FINAL / steps as f64;
+    let rc: Vec<f64> = (0..cells).map(|ii| R_MIN + (ii as f64 + 0.5) * dr).collect();
+    // A b = eta/(r dr^2) [r_+ (b_{i+1} - b_i) - r_- (b_i - b_{i-1})], wall faces carrying no flux
+    let face = |ii: usize| R_MIN + ii as f64 * dr;
+    let coef = |ii: usize| -> (f64, f64) {
+        let w = ETA / (rc[ii] * dr * dr);
+        let lo = if ii == 0 { 0.0 } else { w * face(ii) };
+        let hi = if ii == cells - 1 { 0.0 } else { w * face(ii + 1) };
+        (lo, hi)
+    };
+    let project = |b: &[f64]| -> f64 {
+        let (mut num, mut den) = (0.0, 0.0);
+        for (r, v) in rc.iter().zip(b) {
+            num += v * shape(*r) * r;
+            den += shape(*r) * shape(*r) * r;
+        }
+        num / den
+    };
+    let mut b: Vec<f64> = rc.iter().map(|&r| shape(r)).collect();
+    let p0 = project(&b);
+    let (mut sub, mut diag, mut sup, mut rhs) = (vec![0.0; cells], vec![0.0; cells], vec![0.0; cells], vec![0.0; cells]);
+    for _ in 0..steps {
+        for ii in 0..cells {
+            let (lo, hi) = coef(ii);
+            let left = if ii == 0 { 0.0 } else { b[ii - 1] };
+            let right = if ii == cells - 1 { 0.0 } else { b[ii + 1] };
+            rhs[ii] = b[ii] + 0.5 * dt * (lo * (left - b[ii]) + hi * (right - b[ii]));
+            sub[ii] = -0.5 * dt * lo;
+            sup[ii] = -0.5 * dt * hi;
+            diag[ii] = 1.0 + 0.5 * dt * (lo + hi);
+        }
+        // thomas elimination of the tridiagonal system
+        for ii in 1..cells {
+            let m = sub[ii] / diag[ii - 1];
+            diag[ii] -= m * sup[ii - 1];
+            rhs[ii] -= m * rhs[ii - 1];
+        }
+        b[cells - 1] = rhs[cells - 1] / diag[cells - 1];
+        for ii in (0..cells - 1).rev() {
+            b[ii] = (rhs[ii] - sup[ii] * b[ii + 1]) / diag[ii];
+        }
+    }
+    project(&b) / p0
+}
+
+/// every arm the two decay tests read, run once
+struct Arms {
+    ideal: [Decay; 2],
+    resistive: [Decay; 2],
+    weak_field: Decay,
+    reference: f64,
+    reference_refined: f64,
+}
+
+fn arms() -> &'static Arms {
+    static ARMS: std::sync::OnceLock<Arms> = std::sync::OnceLock::new();
+    ARMS.get_or_init(|| {
+        let arms = Arms {
+            ideal: [evolve_decay(COARSE, 0.0, B0), evolve_decay(RESOLVED, 0.0, B0)],
+            resistive: [evolve_decay(COARSE, ETA, B0), evolve_decay(RESOLVED, ETA, B0)],
+            weak_field: evolve_decay(RESOLVED, ETA, 0.1 * B0),
+            reference: radial_reference(2000, 1000),
+            reference_refined: radial_reference(4000, 2000),
+        };
+        for (arm, d) in [
+            ("ideal N=24", arms.ideal[0]),
+            ("ideal N=48", arms.ideal[1]),
+            ("resistive N=24", arms.resistive[0]),
+            ("resistive N=48", arms.resistive[1]),
+            ("resistive N=48, b0/10", arms.weak_field),
+        ] {
+            eprintln!("{arm}: retained {:.6}, transverse {:.3e} b0", d.retained, d.transverse);
+        }
+        eprintln!("reference {:.9}, refined {:.9}", arms.reference, arms.reference_refined);
+        arms
+    })
+}
+
+fn assert_transverse(arms: &Arms) {
+    for (arm, d) in [
+        ("ideal N=24", arms.ideal[0]),
+        ("ideal N=48", arms.ideal[1]),
+        ("resistive N=24", arms.resistive[0]),
+        ("resistive N=48", arms.resistive[1]),
+        ("resistive N=48 at b0/10", arms.weak_field),
+    ] {
+        assert!(
+            d.transverse <= TRANSVERSE,
+            "{arm}: a face field departed from z-uniformity by {:.3e} b0",
+            d.transverse
+        );
+    }
 }
 
 #[test]
 fn cyl_rz_resistivity_dominates_the_ideal_numerical_diffusion() {
-    // the end-to-end production path: the resistive CFL fold keeps the diffusion stable and
-    // post_godunov routes the cyl chart through the adjoint resistive EMF. proof that the resistive
-    // term is active (not silently skipped or a no-op): eta > 0 must lose substantially more field
-    // than the ideal scheme's own finite-resolution numerical diffusion floor.
-    let ideal = evolve_decay(0.0);
-    let resistive = evolve_decay(0.05);
-    // "dominates" = the resistive term erases far more field than the scheme's own numerical
-    // diffusion floor. compare the fractional losses (the cyl sinusoid mixes eigenmodes of the
-    // (1/r) d_r(r d_r) operator, so its absolute decay rate departs from the clean cartesian
-    // exp(-eta k^2 t); the loss ratio is the geometry-robust statement). the resistive loss
-    // dwarfs the ideal one.
-    let ideal_loss = 1.0 - ideal;
-    let resistive_loss = 1.0 - resistive;
+    let a = arms();
+    assert_transverse(a);
+    let floor = [1.0 - a.ideal[0].retained, 1.0 - a.ideal[1].retained];
+    // premise: the ideal loss is the resolved scheme's second-order numerical floor
+    assert!(floor[1] > 0.0, "the ideal arm lost nothing at N = {RESOLVED}; the floor is unmeasured");
     assert!(
-        resistive_loss > 4.0 * ideal_loss,
-        "cyl r-z resistivity did not dominate the numerical diffusion: ideal ratio {ideal} \
-         (loss {ideal_loss:.4}), resistive {resistive} (loss {resistive_loss:.4})"
+        floor[0] / floor[1] >= SECOND_ORDER_GAIN,
+        "the ideal loss fell only {:.2}x from N = {COARSE} to {RESOLVED} ({:.4} -> {:.4}); it is not a \
+         resolved numerical floor",
+        floor[0] / floor[1],
+        floor[0],
+        floor[1]
+    );
+    let resistive_loss = 1.0 - a.resistive[1].retained;
+    assert!(
+        resistive_loss > DOMINANCE * floor[1],
+        "cyl r-z resistivity did not dominate the numerical diffusion at N = {RESOLVED}: projection \
+         loss {resistive_loss:.4} resistive against {:.4} ideal (ratio {:.2})",
+        floor[1],
+        resistive_loss / floor[1]
+    );
+}
+
+#[test]
+fn cyl_rz_resistive_decay_converges_to_the_radial_diffusion_reference() {
+    let a = arms();
+    assert_transverse(a);
+    let error = [
+        (a.resistive[0].retained - a.reference).abs(),
+        (a.resistive[1].retained - a.reference).abs(),
+    ];
+    // the reference resolves the continuum far below the resolved fixture's error
+    let refinement = (a.reference_refined - a.reference).abs();
+    assert!(
+        refinement <= REFERENCE_SHARE * error[1],
+        "refining the reference moved it by {refinement:.3e}, against a resolved error of {:.3e}",
+        error[1]
+    );
+    // the reference evolves magnetic diffusion alone; the flow the field drives changes the
+    // resolved projection by far less than its error
+    let backreaction = (a.weak_field.retained - a.resistive[1].retained).abs();
+    assert!(
+        backreaction <= REFERENCE_SHARE * error[1],
+        "a tenfold weaker field changed the resolved projection by {backreaction:.3e}, against an \
+         error of {:.3e}",
+        error[1]
+    );
+    assert!(
+        error[0] / error[1] >= SECOND_ORDER_GAIN,
+        "the resistive projection error fell only {:.2}x from N = {COARSE} to {RESOLVED} ({:.4e} -> \
+         {:.4e} against the reference {:.6})",
+        error[0] / error[1],
+        error[0],
+        error[1],
+        a.reference
     );
 }
