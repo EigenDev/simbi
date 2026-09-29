@@ -33,8 +33,10 @@ use crate::state::FieldStore;
 /// which fallback-completion path ran on a corrected substage: the shared
 /// first-order redo (godunov from the spliced fluxes), or the GRMHD
 /// conservative replay that re-runs the update with the geometric source
-/// scaled to the largest admissible fraction. an untroubled or inactive pass
-/// carries `SharedRedo` — the normal path, with nothing replayed.
+/// scaled to the largest admissible fraction. an inactive pass, and a locally
+/// initiated pass with no troubled cell, carry `SharedRedo` — the normal path,
+/// with nothing replayed; a pass a neighbor's trouble drives carries the replay
+/// it ran.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum SourceReplayOutcome {
     SharedRedo,
@@ -140,9 +142,10 @@ impl FofcReport {
     /// `frozen_exterior` is the decision evidence — the freeze acts the store's
     /// retry exclusion leaves eligible — validated here and folded into the decision's
     /// coherence rather than stored (the four report fields stay orthogonal).
-    /// cross-field laws: an untroubled pass carries no acts, no replay claim,
-    /// and accepts; a conservative replay requires a troubled pass; a retry
-    /// requires at least one exterior freeze act. a freeze count exceeding the
+    /// cross-field laws of a locally initiated pass: an untroubled pass carries no acts, no
+    /// replay claim, and accepts; a conservative replay requires a troubled pass; a retry
+    /// requires at least one exterior freeze act. a pass a neighbor's trouble drives across a
+    /// cut reports through `of_cut_pass`, whose premises differ. a freeze count exceeding the
     /// troubled count is lawful — a splice-boundary neighbor of a flagged cell
     /// receives mixed-order fluxes and can freeze without having been flagged.
     pub fn of_pass(
@@ -188,9 +191,12 @@ impl FofcReport {
     }
 
     /// the report of a pass a neighbor's trouble drove: this tile's interior carries no
-    /// flag, the redo on the faces the two tiles share still acts, and a cell next to a shared
-    /// face receiving mixed-order fluxes can freeze. the replay stays the shared redo, since a
-    /// conservative replay needs a flagged interior; a retry requires an exterior freeze act.
+    /// flag, so it books no troubled cell, yet the pass is active: the redo on the faces the two
+    /// tiles share acts, and a cell next to a shared face receiving mixed-order fluxes can freeze.
+    /// the replay is the one the pass ran. curved GRMHD's conservative source replay is tile-wide
+    /// within an active substage, clipping each cell's geometric source by that cell's own
+    /// admissibility, so a tile beside the trouble runs it on the cells the single grid's
+    /// troubled pass covers, and reports it. a retry requires an exterior freeze act.
     pub fn of_cut_pass(
         frozen: u64,
         frozen_exterior: u64,
@@ -200,10 +206,6 @@ impl FofcReport {
         assert!(
             frozen_exterior <= frozen,
             "exterior freeze evidence ({frozen_exterior}) exceeds the freeze count ({frozen})"
-        );
-        assert!(
-            replay == SourceReplayOutcome::SharedRedo,
-            "a pass driven by a neighbor's trouble replays nothing of its own ({replay:?})"
         );
         if decision == FofcDecision::RetryStep {
             assert!(
