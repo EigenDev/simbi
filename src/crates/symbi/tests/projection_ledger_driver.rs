@@ -2,9 +2,12 @@
 // projection_ledger_driver.rs
 //
 // the projection ledger's step transaction, pinned on a real evolve run: a
-// violently magnetized near-horizon kerr-schild box whose first step trips the
-// admissible-boundary projection, driven through the tile driver the production
-// backend uses.
+// magnetized near-horizon kerr-schild box driven through the tile driver the
+// production backend uses. the store's one-shot hooks raise a troubled flag on
+// the central cell in the first step's predictor and push that cell's candidate
+// outside the admissible set inside the correction pass, so the
+// admissible-boundary projection fires once, on production code, at a known
+// step.
 //
 // the run goes through `Hierarchy::single(...).evolve_with_callback`, which is
 // exactly the path `run_simulation` takes for every grid — the single-grid case
@@ -22,8 +25,8 @@
 //   downstream shu-osher propagation weight lies in (0, 1].
 //
 // the projection firing inside the first accepted step is asserted as a
-// precondition, so a setup that stops exercising the tier reports its own
-// vacuity instead of passing empty.
+// precondition, so a hook that stops reaching the tier reports its own vacuity
+// instead of passing empty.
 // =============================================================================
 
 use std::f64::consts::PI;
@@ -76,6 +79,17 @@ fn violent_prim(x: f64, y: f64, z: f64) -> MhdPrim<f64, 3> {
     )
 }
 
+/// arms the run's one projection event on the central cell, in the predictor of the first step: a
+/// physical troubled flag drives the first-order correction pass, and inside it the cell's candidate
+/// leaves the admissible set against its admissible stage input, so the admissible-boundary
+/// projection maps it back and books its receipt through the production ledger
+fn arm_projection(sim: &KerrSim) {
+    let cell: [isize; 3] = std::array::from_fn(|a| sim.geom.interior.spaces[a].lo + (N / 2) as isize);
+    let predictor = symbi_sim::driver::stage_tag(0, 2);
+    *sim.workspace.troubled_once.lock().unwrap() = Some((0, 0, cell, false));
+    *sim.workspace.inadmissible_once.lock().unwrap() = Some((0, predictor, cell, false));
+}
+
 fn kerr_sim() -> KerrSim {
     let dx = 1.0 / N as f64;
     let metric = SchwarzschildKSCartesian { mass: MASS };
@@ -85,6 +99,7 @@ fn kerr_sim() -> KerrSim {
         .spacing([dx; 3])
         .boundaries(Boundaries::uniform(BoundaryType::Outflow))
         .cfl(CFL)
+        .timestepping(Timestepping::Rk2)
         .allocate()
         .expect("kerr sim")
         .set_initial(|[x, y, z]| violent_prim(x, y, z))
@@ -104,6 +119,7 @@ fn kerr_sim() -> KerrSim {
 #[test]
 fn the_projection_ledger_books_through_the_backend_driver() {
     let sim = kerr_sim();
+    arm_projection(&sim);
     let kern =
         RmhdSubstrateKernelSet3D::<HostMemory, f64>::new(GAMMA, CFL, 1.0, &sim.geom.allocated)
             .with_solver(Solver::Hlld)
@@ -146,6 +162,10 @@ fn the_projection_ledger_books_through_the_backend_driver() {
          the transaction hooks are not on the backend's path"
     );
     assert!(attempted.passes >= accepted.passes);
+    // the one pushed candidate books once: one fired pass and one projected cell over the whole
+    // run, the retries and later steps adding none
+    assert_eq!(accepted.passes_fired, 1, "the one projection event booked {} fired passes", accepted.passes_fired);
+    assert_eq!(accepted.projected_cells, 1, "the one projection event booked {} projected cells", accepted.projected_cells);
     assert!(accepted.injected_den.abs <= accepted.intervention_den.abs);
     assert!(accepted.injected_nrg.abs <= accepted.intervention_nrg.abs);
 }

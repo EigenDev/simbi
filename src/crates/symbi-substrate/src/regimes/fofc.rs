@@ -340,6 +340,32 @@ pub(crate) fn fofc_copy<const D: usize, const DOF: usize, Mem, Sc>(
     dispatch_fields_each::<Sc, Mem, D>(&name, &sim.geom.allocated, &inputs, &outputs, &[], &[]);
 }
 
+/// the store's one-shot inadmissible candidate: at the correction of (iteration, stage tag) it names,
+/// the interior cell's candidate energy becomes the negative of its stage-input energy, a state below
+/// the rest-mass energy and so outside the admissible set, with the stage input left admissible as
+/// the projection's anchor. the slot is marked fired; a regime without an energy field carries no
+/// such cell.
+fn push_candidate_outside<const D: usize, const DOF: usize, Mem, Sc>(sim: &FieldStore<D, DOF, Mem, Sc>, stage: u8)
+where
+    Mem: MemorySpace,
+    Sc: Scalar + OrderedNumeric,
+{
+    let mut slot = sim.workspace.inadmissible_once.lock().expect("the inadmissible-candidate slot");
+    let Some((iteration, at_stage, cell, fired)) = *slot else { return };
+    if fired || (iteration, at_stage) != (sim.iteration, stage) {
+        return;
+    }
+    *slot = Some((iteration, at_stage, cell, true));
+    let (Some(candidate), Some(anchor)) = (sim.fields.cons.nrg_field(), sim.stage_input().nrg_field()) else {
+        return;
+    };
+    if !sim.geom.interior.contains(cell) {
+        return;
+    }
+    let anchor_energy = (*anchor.view().at(cell)).to_f64();
+    *candidate.view_mut().at_mut(cell) = Sc::from_f64(-anchor_energy.abs());
+}
+
 /// dispatch the freeze-tier select kernel `{prefix}_fofc_select_{D}d` over the interior: keep the
 /// live spliced first-order conserved (`x_*` = the in-place cons/prim) where physical, else freeze to
 /// the stage input (`us_*` = u_stage). the face-based splice already made every kept cell
@@ -825,6 +851,7 @@ where
     // freeze tier afterwards counts only a genuinely inadmissible anchor. exact passthrough on an
     // admissible cell, hence a no-op wherever the tiers above already succeeded. a no-op entirely
     // for regimes with no baked projection (flat MHD, iso), which keep the freeze parachute.
+    push_candidate_outside(sim, stage);
     let projection_receipt = project();
     c2p();
     // the correcting select is the only component that freezes, and therefore the only

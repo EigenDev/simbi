@@ -1142,6 +1142,15 @@ pub struct RkWorkspaceGeneric<
     /// stage) raises once, its state left physical, so the correction it drives is the
     /// conservative first-order redo on consistent inputs across every tile sharing the cell.
     pub troubled_once: std::sync::Mutex<Option<(u64, usize, [isize; NDIM], bool)>>,
+    /// a test hook: one store-local interior cell whose first-order candidate leaves the
+    /// admissible set once, at (iteration, stage tag, cell, fired), the tag as `stage_tag` names
+    /// the stage. inside the correction pass, after every conservative tier and before the
+    /// admissible-boundary projection, the candidate's energy becomes the negative of the stage
+    /// input's, while the stage input, the projection's anchor, stays admissible; the projection
+    /// then maps the cell onto the boundary of the admissible set and books its receipt. the
+    /// correction pass itself runs only where a cell is troubled, so a test arms `troubled_once`
+    /// on the same cell and stage.
+    pub inadmissible_once: std::sync::Mutex<Option<(u64, u8, [isize; NDIM], bool)>>,
     /// body-feedback reduction scratch, allocated on the first feedback dispatch, so a body-free
     /// sim pays neither the memory nor a per-call allocation. the feedback kernels assign-write
     /// every cell of their dispatch region before the reduction reads it, so a reused buffer
@@ -3022,6 +3031,7 @@ where
             rejection_evidence: std::sync::Mutex::new(Vec::new()),
             unrecoverable_once: std::sync::Mutex::new(None),
             troubled_once: std::sync::Mutex::new(None),
+            inadmissible_once: std::sync::Mutex::new(None),
             body_scratch: std::sync::OnceLock::new(),
             #[cfg(debug_assertions)]
             stage_writes: std::sync::Mutex::new(None),

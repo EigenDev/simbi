@@ -8,9 +8,11 @@
 // the run goes through `Hierarchy::single(...).evolve_with_callback`, the exact
 // path `run_simulation` takes for a single grid, and reads only the returned
 // `RunDiagnostics` — never the process-visible `ledger_report()`. the driving
-// setup is a violently magnetized near-horizon kerr-schild box whose first step
-// trips the admissible-boundary projection, so the returned projection totals are
-// nonzero and the isolation claims are discriminating.
+// setup is a magnetized near-horizon kerr-schild box; the store's one-shot hooks
+// raise a troubled flag on the central cell in the first step's predictor and
+// push its candidate outside the admissible set inside the correction pass, so
+// the admissible-boundary projection fires on production code and the returned
+// projection totals are nonzero, which makes the isolation claims discriminating.
 //
 // gates:
 // - two sequential runs on one thread each report their own evidence; the second
@@ -70,6 +72,17 @@ fn violent_prim(x: f64, y: f64, z: f64) -> MhdPrim<f64, 3> {
     )
 }
 
+/// arms the run's one projection event on the central cell, in the predictor of the first step: a
+/// physical troubled flag drives the first-order correction pass, and inside it the cell's candidate
+/// leaves the admissible set against its admissible stage input, so the admissible-boundary
+/// projection maps it back and books its receipt through the production ledger
+fn arm_projection(sim: &KerrSim) {
+    let cell: [isize; 3] = std::array::from_fn(|a| sim.geom.interior.spaces[a].lo + (N / 2) as isize);
+    let predictor = symbi_sim::driver::stage_tag(0, 2);
+    *sim.workspace.troubled_once.lock().unwrap() = Some((0, 0, cell, false));
+    *sim.workspace.inadmissible_once.lock().unwrap() = Some((0, predictor, cell, false));
+}
+
 fn kerr_sim() -> KerrSim {
     let dx = 1.0 / N as f64;
     let metric = SchwarzschildKSCartesian { mass: MASS };
@@ -79,6 +92,7 @@ fn kerr_sim() -> KerrSim {
         .spacing([dx; 3])
         .boundaries(Boundaries::uniform(BoundaryType::Outflow))
         .cfl(CFL)
+        .timestepping(Timestepping::Rk2)
         .allocate()
         .expect("kerr sim")
         .set_initial(|[x, y, z]| violent_prim(x, y, z))
@@ -100,6 +114,7 @@ fn kerr_sim() -> KerrSim {
 /// the thread's ledger scope — which is exactly what the isolation gates probe.
 fn run_once() -> RunDiagnostics {
     let sim = kerr_sim();
+    arm_projection(&sim);
     let kern =
         RmhdSubstrateKernelSet3D::<HostMemory, f64>::new(GAMMA, CFL, 1.0, &sim.geom.allocated)
             .with_solver(Solver::Hlld)
