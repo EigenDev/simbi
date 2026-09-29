@@ -139,6 +139,7 @@ fn rhd_face_flux_1d_lowers_and_emits() {
             "mesh_adot_0",
             "x_lo_0",
             "dx_0",
+            "idx_off_0",
             "map_kind_0",
             "map_param_0",
             "mesh_vtrans_0",

@@ -962,7 +962,9 @@ mod local_width_tests {
             ("dx_0", 0.03),
             ("map_kind_0", 2.0),
             ("map_param_0", 1.2),
-            ("_coord_0", 5.0),
+            // cell 2 of a tile whose first cell sits at whole-grid index 3: global cell 5
+            ("_coord_0", 2.0),
+            ("idx_off_0", 3.0),
         ];
         let width = eval_width(&values);
         let expected = 0.03 * 1.2_f64.powi(5);
@@ -980,7 +982,9 @@ mod local_width_tests {
             ("dx_0", 0.04),
             ("map_kind_0", 1.0),
             ("map_param_0", 0.0),
-            ("_coord_0", 7.0),
+            // cell 4 of a tile whose first cell sits at whole-grid index 3: global cell 7
+            ("_coord_0", 4.0),
+            ("idx_off_0", 3.0),
         ];
         let width = eval_width(&values);
         let expected = 0.5 * (10.0_f64.powf(8.0 * 0.04) - 10.0_f64.powf(7.0 * 0.04));

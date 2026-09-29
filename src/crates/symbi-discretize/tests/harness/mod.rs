@@ -168,6 +168,16 @@ impl KernelRun {
                     // absolutely (a moving mesh, a curvilinear metric) reads it on every arm
                     // and its tests bind it explicitly.
                     0.0
+                } else if name.as_str().starts_with("idx_off_") {
+                    // `idx_off_{ax}` is the index of the buffer's first cell on the whole grid, so a
+                    // decomposed tile positions its cells exactly as the whole grid does; the harness
+                    // runs a whole grid, whose first cell is index 0. a tile test binds it.
+                    0.0
+                } else if name.as_str().starts_with("turn_") {
+                    // `turn_{ax}` / `turn_lo_{ax}` rotate the azimuth source across a polar axis face
+                    // by a half period; 0 is no rotation, the value off a polar seam. a polar-seam
+                    // test binds them.
+                    0.0
                 } else {
                     panic!("KernelRun: no value bound for scalar '{name}'")
                 }

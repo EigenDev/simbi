@@ -126,6 +126,8 @@ fn compiled_viscous_iso_alpha_matches_the_f64_chain_bitwise() {
 
     let n2 = N * N;
     let (mut rho, mut v0, mut v1) = (vec![0.0; n2], vec![0.0; n2], vec![0.0; n2]);
+    // the per-cell isothermal closure the alpha kernels read; uniform here
+    let cs2 = vec![CS * CS; n2];
     let (mut m0, mut m1) = (vec![0.0; n2], vec![0.0; n2]);
     for jj in 0..N {
         for ii in 0..N {
@@ -144,7 +146,6 @@ fn compiled_viscous_iso_alpha_matches_the_f64_chain_bitwise() {
         match name {
             "dt" => DT,
             "alpha" => ALPHA,
-            "cs" => CS,
             "body_0_mass" => GM,
             "body_0_pos_0" => BODY[0],
             "body_0_pos_1" => BODY[1],
@@ -173,6 +174,7 @@ fn compiled_viscous_iso_alpha_matches_the_f64_chain_bitwise() {
             CpuField::from_layout(&rho, &lo, &ext),
             CpuField::from_layout(&v0, &lo, &ext),
             CpuField::from_layout(&v1, &lo, &ext),
+            CpuField::from_layout(&cs2, &lo, &ext),
             CpuField::from_layout(&m0_in, &lo, &ext),
             CpuField::from_layout(&m1_in, &lo, &ext),
         ];
@@ -364,6 +366,8 @@ fn compiled_viscous_iso_alpha_3d_matches_the_f64_chain_bitwise() {
     let (mut rho, mut v0, mut v1, mut v2) =
         (vec![0.0; n3], vec![0.0; n3], vec![0.0; n3], vec![0.0; n3]);
     let (mut m0, mut m1, mut m2) = (vec![0.0; n3], vec![0.0; n3], vec![0.0; n3]);
+    // the per-cell isothermal closure the alpha kernels read; uniform here
+    let cs2 = vec![CS * CS; n3];
     for kk in 0..N3 {
         for jj in 0..N3 {
             for ii in 0..N3 {
@@ -385,7 +389,6 @@ fn compiled_viscous_iso_alpha_3d_matches_the_f64_chain_bitwise() {
         match name {
             "dt" => DT,
             "alpha" => ALPHA,
-            "cs" => CS,
             "body_0_mass" => GM,
             "body_0_pos_0" => BODY[0],
             "body_0_pos_1" => BODY[1],
@@ -416,6 +419,7 @@ fn compiled_viscous_iso_alpha_3d_matches_the_f64_chain_bitwise() {
             CpuField::from_layout(&v0, &lo, &ext),
             CpuField::from_layout(&v1, &lo, &ext),
             CpuField::from_layout(&v2, &lo, &ext),
+            CpuField::from_layout(&cs2, &lo, &ext),
             CpuField::from_layout(&m0_in, &lo, &ext),
             CpuField::from_layout(&m1_in, &lo, &ext),
             CpuField::from_layout(&m2_in, &lo, &ext),
@@ -643,6 +647,8 @@ fn compiled_viscous_iso_alpha_ortho_cyl_matches_the_f64_chain_bitwise() {
 
     let n2 = N * N;
     let (mut rho, mut v0, mut v1) = (vec![0.0; n2], vec![0.0; n2], vec![0.0; n2]);
+    // the per-cell isothermal closure the alpha kernels read; uniform here
+    let cs2 = vec![CS * CS; n2];
     let (mut m0, mut m1) = (vec![0.0; n2], vec![0.0; n2]);
     for jj in 0..N {
         for ii in 0..N {
@@ -664,7 +670,6 @@ fn compiled_viscous_iso_alpha_ortho_cyl_matches_the_f64_chain_bitwise() {
         match name {
             "dt" => DT,
             "alpha" => ALPHA,
-            "cs" => CS,
             "body_0_mass" => GM,
             "dx_0" => DR,
             "dx_1" => DPHI,
@@ -693,6 +698,7 @@ fn compiled_viscous_iso_alpha_ortho_cyl_matches_the_f64_chain_bitwise() {
             CpuField::from_layout(&rho, &lo, &ext),
             CpuField::from_layout(&v0, &lo, &ext),
             CpuField::from_layout(&v1, &lo, &ext),
+            CpuField::from_layout(&cs2, &lo, &ext),
             CpuField::from_layout(&m0_in, &lo, &ext),
             CpuField::from_layout(&m1_in, &lo, &ext),
         ];

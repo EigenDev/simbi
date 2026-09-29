@@ -31,8 +31,15 @@ fn emit(ndim: u8) -> (String, Vec<String>) {
 fn ghost_fill_1d_emits_integer_source_coord_and_vel_sign() {
     let (src, scalar_params) = emit(1);
 
-    // params, in first-use order: the lattice-map encoding then the grade sign.
-    assert_eq!(scalar_params, vec!["map_type_0", "arg_0", "vel_sign_0"]);
+    // params, in first-use order: the lattice-map encoding, the half-turn rotation of a
+    // gridded azimuth across a polar axis face, then the grade sign and the out-of-plane sign.
+    assert_eq!(
+        scalar_params,
+        vec!["map_type_0", "arg_0", "turn_0", "turn_lo_0", "vel_sign_0", "oop_sign_0"]
+    );
+    // the half-turn rotation is a cell count, integer like the lattice-map args.
+    assert!(src.contains("turn_0: i32"), "turn must be i32:\n{src}");
+    assert!(src.contains("turn_lo_0: i32"), "turn_lo must be i32:\n{src}");
     // the lattice-map source-coord args are integer; vel_sign is a float, typed `S`
     // (the kernels are precision-generic `fn k<S: Scalar>(..)`).
     assert!(
@@ -98,8 +105,14 @@ fn ghost_fill_scheme_is_dimension_generic() {
             "map_type_1",
             "arg_0",
             "arg_1",
+            "turn_0",
+            "turn_1",
+            "turn_lo_0",
+            "turn_lo_1",
             "vel_sign_0",
-            "vel_sign_1"
+            "vel_sign_1",
+            "oop_sign_0",
+            "oop_sign_1"
         ],
     );
     assert!(src.contains("map_type_1: i32") && src.contains("arg_1: i32"));

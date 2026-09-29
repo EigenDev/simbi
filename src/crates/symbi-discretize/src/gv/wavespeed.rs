@@ -2019,6 +2019,8 @@ mod log_radius_tests {
                     .map(|(_, v)| *v)
                     // an unbound spacing selector defaults to uniform (map_kind = 0).
                     .or_else(|| p.name.starts_with("map_kind_").then_some(0.0))
+                    // an unbound tile offset places the probe on the whole grid (idx_off = 0).
+                    .or_else(|| p.name.starts_with("idx_off_").then_some(0.0))
                     .unwrap_or_else(|| panic!("eval: missing param '{}'", p.name))
             })
             .collect();

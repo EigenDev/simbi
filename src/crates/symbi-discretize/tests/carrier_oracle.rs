@@ -972,6 +972,8 @@ fn imhd_flux_and_hlld_match_native_physics_on_uniform_state() {
         ("prim_b1", prim.mag()[1]),
         ("prim_b2", prim.mag()[2]),
         ("bface_n", prim.mag()[0]),
+        // the isothermal closure is a per-cell field: cs^2 of the uniform state
+        ("cs2", IMHD_CS * IMHD_CS),
     ];
     let want = &[
         ("flux_den", f.den()),
@@ -990,7 +992,7 @@ fn imhd_flux_and_hlld_match_native_physics_on_uniform_state() {
             .grid([NSWEEP])
             .compute_window([FCELL as i32], [1])
             .fields(&fields)
-            .scalars(&[("cs", IMHD_CS), ("theta", 1.0)])
+            .scalars(&[("theta", 1.0)])
             .run();
         eprintln!("[imhd {label}] uniform-state flux oracle");
         out.expect([FCELL], want, 1e-12);
