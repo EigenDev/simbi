@@ -35,7 +35,7 @@ _CONFIG = (
     Path(__file__).resolve().parents[3]
     / "simbi_configs"
     / "science"
-    / "simbi_projects"
+    / "projects"
     / "porous_turbulent_accretor.py"
 )
 
@@ -54,7 +54,7 @@ def _problem():
     sys.modules["_pta_seed"] = module
     spec.loader.exec_module(module)
     return module.PorousTurbulentAccretor(
-        seed_epsilon=_EPSILON, initial_profile="hydrostatic", well_balanced=True
+        seed_epsilon=_EPSILON, initial_profile="hydrostatic"
     )
 
 
@@ -192,7 +192,7 @@ def test_amplitude_scales_linearly_with_epsilon() -> None:
     threshold found by scanning eps is a statement about one number."""
     problem = _problem()
     half = type(problem)(
-        seed_epsilon=0.5 * _EPSILON, initial_profile="hydrostatic", well_balanced=True
+        seed_epsilon=0.5 * _EPSILON, initial_profile="hydrostatic"
     )
     rng = np.random.default_rng(2)
     points = _shell(rng, 20.0 * problem.accretor_radius)
@@ -210,7 +210,7 @@ def test_mode_table_is_deterministic_and_well_formed() -> None:
     compressive part the construction claims it does not."""
     problem = _problem()
     again = type(problem)(
-        seed_epsilon=_EPSILON, initial_profile="hydrostatic", well_balanced=True
+        seed_epsilon=_EPSILON, initial_profile="hydrostatic"
     )
     first, second = np.asarray(problem._seed_mode_table()), np.asarray(again._seed_mode_table())
     assert first.shape == second.shape
@@ -219,7 +219,6 @@ def test_mode_table_is_deterministic_and_well_formed() -> None:
     other = type(problem)(
         seed_epsilon=_EPSILON,
         initial_profile="hydrostatic",
-        well_balanced=True,
         turb_seed=43,
     )
     assert not np.array_equal(first, np.asarray(other._seed_mode_table())), (
@@ -242,7 +241,7 @@ def test_seed_requires_the_stratified_start() -> None:
     problem = _problem()
     with pytest.raises(Exception, match="no bounded seed mach"):
         type(problem)(
-            seed_epsilon=_EPSILON, initial_profile="uniform", well_balanced=True
+            seed_epsilon=_EPSILON, initial_profile="uniform"
         )
 
 
@@ -281,7 +280,6 @@ def test_the_starting_column_realizes_its_declared_index() -> None:
         problem = type(base)(
             seed_epsilon=_EPSILON,
             initial_profile="hydrostatic",
-            well_balanced=True,
             initial_index=index,
         )
         r_acc = problem.accretor_radius
@@ -310,7 +308,6 @@ def test_the_family_relation_carries_both_branch_endpoints() -> None:
         problem = type(base)(
             seed_epsilon=_EPSILON,
             initial_profile="hydrostatic",
-            well_balanced=True,
             initial_index=index,
         )
         r_acc = problem.accretor_radius

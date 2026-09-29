@@ -145,6 +145,9 @@ def test_the_seeded_power_law_column_receives_the_scale_invariant_seed(porosity)
         "--initial-profile", "power_law",
         "--entropy-slope", "0.1666666666666667",
     ]
+    # the sealed endpoint runs with the KM reconstruction it requires
+    if porosity == "0":
+        flags.append("--wb-reconstruction")
     bare = PorousTurbulentAccretor.from_cli(flags)
     assert bare.perturbation_expressions == bare._symmetry_break_expression()
 

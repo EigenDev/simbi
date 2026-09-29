@@ -29,6 +29,11 @@ from simbi_configs.science.projects.porous_turbulent_accretor import (
 POROSITIES = [0.0, 0.125, 0.5, 1.0]
 
 
+def _at(porosity: float) -> PorousTurbulentAccretor:
+    """the accretor at `porosity`, with the KM reconstruction the sealed endpoint requires"""
+    return PorousTurbulentAccretor(porosity=porosity, wb_reconstruction=porosity == 0.0)
+
+
 def velocity_reference(problem: PorousTurbulentAccretor) -> list[float]:
     """the sponge's velocity target sampled inside the damping shell, where kappa > 0.
 
@@ -46,7 +51,7 @@ def velocity_reference(problem: PorousTurbulentAccretor) -> list[float]:
 def test_the_reservoir_imposes_no_mass_current(porosity: float) -> None:
     # checked on the emitted source rather than the model flag: a wire that dropped the
     # setting would leave the flag reading correctly while the run carried a momentum target.
-    problem = PorousTurbulentAccretor(porosity=porosity)
+    problem = _at(porosity)
     assert problem.buffer_bondi_inflow is False
     velocity = velocity_reference(problem)
     assert all(abs(v) < 1.0e-12 for v in velocity), (
@@ -57,7 +62,7 @@ def test_the_reservoir_imposes_no_mass_current(porosity: float) -> None:
 
 def test_the_boundary_condition_does_not_step_with_porosity() -> None:
     # the one that makes the sweep a one-variable experiment.
-    targets = {p: PorousTurbulentAccretor(porosity=p).buffer_bondi_inflow for p in POROSITIES}
+    targets = {p: _at(p).buffer_bondi_inflow for p in POROSITIES}
     assert len(set(targets.values())) == 1, (
         f"the buffer's kinematic target varies across the sweep ({targets}); a step measured "
         "across porosity would then be partly a step in the boundary condition"
@@ -81,7 +86,7 @@ def test_the_inflow_variant_is_still_reachable() -> None:
 def test_the_thermodynamic_reference_is_the_isentrope(porosity: float) -> None:
     # the reservoir still has to supply something: density and pressure follow the hydrostatic
     # isentrope, which is what makes it a reservoir rather than a wall.
-    problem = PorousTurbulentAccretor(porosity=porosity)
+    problem = _at(porosity)
     graph = expr.ExprGraph()
     axes = [expr.variable(f"x{ii}", graph) for ii in (1, 2, 3)]
     outputs = problem.sponge_terms(*axes)

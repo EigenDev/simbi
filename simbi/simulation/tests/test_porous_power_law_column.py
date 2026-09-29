@@ -27,7 +27,7 @@ _CONFIG = (
     Path(__file__).resolve().parents[3]
     / "simbi_configs"
     / "science"
-    / "simbi_projects"
+    / "projects"
     / "porous_turbulent_accretor.py"
 )
 
@@ -62,6 +62,8 @@ def _problem(cls, **kwargs):
     its gas by construction, so it derives without tripping the loss-cone premise a
     draining surface has to satisfy."""
     kwargs.setdefault("porosity", 0.0)
+    # the sealed surface runs with the KM pressure-gravity pairing its marginal null needs
+    kwargs.setdefault("wb_reconstruction", True)
     kwargs.setdefault("initial_profile", "power_law")
     problem = cls(**kwargs)
     problem.setup()

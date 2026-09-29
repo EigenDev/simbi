@@ -21,11 +21,11 @@ import tempfile
 
 import h5py
 import numpy as np
+import pytest
 
 from simbi.simulation import runner
-from simbi_configs.science.simbi_projects.kitp_comp import (
-    BinaryThinDiskSimulation,
-)
+# the science configs live in a checkout outside this repository
+BinaryThinDiskSimulation = pytest.importorskip("simbi_configs.science.projects.kitp_comp").BinaryThinDiskSimulation
 
 
 def test_kitp_disk_steps_with_driven_boundaries() -> None:

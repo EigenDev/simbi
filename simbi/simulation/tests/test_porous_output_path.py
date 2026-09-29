@@ -45,6 +45,8 @@ def _path(cls, tmp_path, monkeypatch, **kwargs):
     # tripping the loss-cone premise a draining surface has to satisfy.
     monkeypatch.setenv("SCRATCH", str(tmp_path))
     kwargs.setdefault("porosity", 0.0)
+    # the sealed surface runs with the KM pressure-gravity pairing its marginal null needs
+    kwargs.setdefault("wb_reconstruction", True)
     problem = cls(**kwargs)
     problem.setup()
     return str(problem.data_directory.relative_to(tmp_path))
@@ -107,7 +109,7 @@ def test_segments_key_on_the_declared_defaults(porous_cls, tmp_path, monkeypatch
 
 def test_telescoping_ladder_carries_the_halving_cap(porous_cls, tmp_path, monkeypatch) -> None:
     monkeypatch.setenv("SCRATCH", str(tmp_path))
-    problem = porous_cls(porosity=0.0)
+    problem = porous_cls(porosity=0.0, wb_reconstruction=True)
     problem.setup()
     r_prev = problem.domain_radius * problem.bondi_radius
     for box in problem.refinement_regions:
@@ -125,13 +127,13 @@ def test_the_loss_cone_fraction_tracks_the_seed_amplitude(porous_cls, tmp_path, 
     monkeypatch.setenv("SCRATCH", str(tmp_path))
     inner = 20.0
 
-    bare = porous_cls(porosity=0.0)
+    bare = porous_cls(porosity=0.0, wb_reconstruction=True)
     bare.setup()
     assert bare.frustrated_fraction(inner) == 0.0
 
     seen = []
     for eps in (0.0625, 0.125, 0.25):
-        p = porous_cls(porosity=0.0, initial_profile="hydrostatic", seed_epsilon=eps)
+        p = porous_cls(porosity=0.0, wb_reconstruction=True, initial_profile="hydrostatic", seed_epsilon=eps)
         p.setup()
         seen.append(p.frustrated_fraction(inner))
     assert seen == sorted(seen), seen
@@ -150,8 +152,8 @@ def test_the_loss_cone_fraction_tracks_the_seed_amplitude(porous_cls, tmp_path, 
     # asserted rather than avoided, so the sweep documents where it ends instead of
     # appearing to have been truncated for convenience -- the previous endpoint bound of
     # 0.90 was measured at eps = 1/2, which the mach condition now excludes.
-    top = porous_cls(porosity=0.0, initial_profile="hydrostatic", seed_epsilon=0.25)
+    top = porous_cls(porosity=0.0, wb_reconstruction=True, initial_profile="hydrostatic", seed_epsilon=0.25)
     top.setup()
     assert top.seed_mach_number() < 1.0, top.seed_mach_number()
     with pytest.raises(Exception, match="reaches mach"):
-        porous_cls(porosity=0.0, initial_profile="hydrostatic", seed_epsilon=0.5).setup()
+        porous_cls(porosity=0.0, wb_reconstruction=True, initial_profile="hydrostatic", seed_epsilon=0.5).setup()

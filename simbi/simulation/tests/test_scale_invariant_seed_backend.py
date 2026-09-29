@@ -30,7 +30,7 @@ _CONFIG = (
     Path(__file__).resolve().parents[3]
     / "simbi_configs"
     / "science"
-    / "simbi_projects"
+    / "projects"
     / "porous_turbulent_accretor.py"
 )
 
@@ -58,12 +58,11 @@ def _tiny_run(tmp_path: Path, **overrides):
     from simbi.simulation import runner
 
     problem = _problem_class()(
-        initial_profile="hydrostatic",
+        **{"initial_profile": "hydrostatic", **overrides},
         base_resolution=_BASE_RESOLUTION,
         target_zones_per_bondi=_ZONES_PER_BONDI,
         total_bondi_times=_BONDI_TIMES,
         data_directory=tmp_path,
-        **overrides,
     )
     noise = io.StringIO()
     with contextlib.redirect_stdout(noise), contextlib.redirect_stderr(noise):
@@ -88,7 +87,7 @@ def test_backend_lands_more_seed_power_on_every_finer_level(tmp_path) -> None:
     represent and would give a flat or falling profile -- which is precisely the
     initial condition the band-limited seed produced, and the reason the science
     window went unseeded."""
-    _, checkpoint = _tiny_run(tmp_path, seed_epsilon=_EPSILON, well_balanced=True)
+    _, checkpoint = _tiny_run(tmp_path, seed_epsilon=_EPSILON)
     assert checkpoint.num_levels > 2, (
         f"the ladder built {checkpoint.num_levels} level(s); this gate needs a "
         "hierarchy to compare across"
@@ -109,7 +108,10 @@ def test_an_unseeded_run_still_builds(tmp_path) -> None:
     default every config emits, so it must cross the boundary untouched. a
     backend that applied the taper's shape contract before checking for modes
     would fail every run in the repository, seeded or not."""
-    _, checkpoint = _tiny_run(tmp_path, seed_epsilon=0.0, turb_mach=0.0)
+    # the uniform start: a hydrostatic start with refinement delivers its column through
+    # the seed and so requires one, while the uniform medium runs unseeded and emits the
+    # seedless payload this gate carries across the boundary
+    _, checkpoint = _tiny_run(tmp_path, initial_profile="uniform", seed_epsilon=0.0, turb_mach=0.0)
     assert _level_speed(checkpoint, 0) == 0.0, (
         "an unseeded, unturbulent initial condition carries velocity"
     )

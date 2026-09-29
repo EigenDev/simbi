@@ -27,7 +27,7 @@ _CONFIG = (
     Path(__file__).resolve().parents[3]
     / "simbi_configs"
     / "science"
-    / "simbi_projects"
+    / "projects"
     / "porous_turbulent_accretor.py"
 )
 
@@ -102,7 +102,7 @@ def _problem():
     sys.modules["_pta_wire"] = module
     spec.loader.exec_module(module)
     return module.PorousTurbulentAccretor(
-        seed_epsilon=1.0 / 16.0, initial_profile="hydrostatic", well_balanced=True
+        seed_epsilon=1.0 / 16.0, initial_profile="hydrostatic"
     )
 
 
