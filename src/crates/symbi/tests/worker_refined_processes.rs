@@ -491,6 +491,18 @@ fn run_worker(arm: &Arm, me: WorkerId, out: PathBuf) -> Result<(), WorkerError> 
         .with_role(PlanRole::RootSeed, root.lens().len() as u32);
     let fine = PlanExchange::new(&fine_plan, &fine_placement, me, table.clone())
         .with_role(PlanRole::Fine, (root.lens().len() + seed.lens().len()) as u32);
+    // the one-shot unrecoverable fine cell, armed on the fine store holding it: `W_FINE_FREEZE` =
+    // fine iteration, stage, i, j on the fine plan's grid
+    let freeze = env_list("W_FINE_FREEZE");
+    if freeze.len() == 4 {
+        let cell = [freeze[2] as isize, freeze[3] as isize];
+        for (k, id) in fine_ids.iter().enumerate() {
+            if let Some(local) = id.and_then(|id| fine.local_cell(id, cell)) {
+                *tiles[k].levels[1].state.workspace.unrecoverable_once.lock().unwrap() =
+                    Some((freeze[0], freeze[1] as usize, local, false));
+            }
+        }
+    }
     let flux = (contributions > 0).then(|| {
         PlanExchange::new(&flux_plan, &placement, me, table.clone())
             .with_role(PlanRole::FluxContribution, (root.lens().len() + seed.lens().len() + fine.lens().len()) as u32)
@@ -1099,6 +1111,38 @@ fn assert_flag_matches_uncut(test: &str, flag: (&'static str, String)) {
         assert_eq!(r.fofc.1, 0, "{test}: worker {w} froze {} cells", r.fofc.1);
     }
     assert_state_equal(&outcomes, &expected, "the cut flagged run");
+}
+
+/// a fine cell made unrecoverable in the predictor of the third root step's second fine substep,
+/// six fine cells from the fine column cut and eight from the row cut, so no neighbor holds a
+/// copy of its poisoned state: the correcting select freezes it, the freeze is accepted, and the
+/// run equals one worker holding the whole grid under the same poison with the same freeze. the
+/// frozen cell holds its poisoned stage input, so the next step would refuse its timestep
+/// candidate: both runs end with the step that freezes
+#[test]
+fn an_accepted_fine_freeze_matches_the_single_hierarchy() {
+    if in_worker_role() {
+        worker_main();
+    }
+    let test = "an_accepted_fine_freeze_matches_the_single_hierarchy";
+    let poison = ("W_FINE_FREEZE", "5,0,4,10".to_string());
+    let last = |arm: Arm| Arm { steps: 3, ..arm };
+    let uncut_clean = run_arm(test, "uncut_clean", &last(uncut()), &[]);
+    let uncut_frozen = run_arm(test, "uncut_frozen", &last(uncut()), &[poison.clone()]);
+    let clean = Reference::of(&uncut_clean, "the uncut clean run");
+    let expected = Reference::of(&uncut_frozen, "the uncut frozen run");
+    assert!(clean.values != expected.values, "the poison left the uncut run unchanged; the gate is vacuous");
+    assert!(expected.fofc.1 >= 1, "the uncut run froze no cell; the freeze never happened");
+    let outcomes = run_arm(test, "cut", &last(ragged_17_13()), &[poison]);
+    assert_all_ok(&outcomes, "the cut frozen run");
+    let reports: Vec<&Report> = outcomes.iter().map(|o| o.report.as_ref().unwrap()).collect();
+    let uncut_report = uncut_frozen[0].report.as_ref().unwrap();
+    let frozen: u64 = reports.iter().map(|r| r.fofc.1).sum();
+    assert_eq!(frozen, expected.fofc.1, "the cut run froze {frozen} cells against {} uncut", expected.fofc.1);
+    for (w, r) in reports.iter().enumerate() {
+        assert_eq!(r.dts, uncut_report.dts, "worker {w} took other timesteps than the uncut run");
+    }
+    assert_state_equal(&outcomes, &expected, "the cut frozen run");
 }
 
 /// the fine cell of the fine-cut arm above, flagged in the corrector of the second fine substep

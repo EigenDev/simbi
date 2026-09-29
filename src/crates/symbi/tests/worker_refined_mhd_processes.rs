@@ -266,6 +266,12 @@ fn env_list(name: &str) -> Vec<u64> {
 
 fn injection_from_env(me: WorkerId) -> Injection {
     let mut injection = Injection::default();
+    // a root cell raised troubled at (step, stage) on whichever worker holds it:
+    // `W_ROOT_TROUBLE` = step, stage, i, j on the root grid
+    let root = env_list("W_ROOT_TROUBLE");
+    if root.len() == 4 {
+        injection.trouble_at = Some((root[0], root[1] as usize, [root[2] as isize, root[3] as isize, 0]));
+    }
     if let Some(worker) = env_u64("W_CAP_WORKER") {
         if worker == u64::from(me.0) || worker == u64::MAX {
             injection.cap_dt_at = Some((env_u64("W_CAP_STEP").unwrap(), env_u64("W_CAP_BITS").unwrap()));
@@ -1212,6 +1218,76 @@ fn assert_fine_trouble_matches_uncut(test: &str, ct: &str, stage: usize) {
     assert_state_equal_without_stencil(&outcomes, &reference, &label);
     let div = assembled_root_div(&outcomes);
     assert!(div <= DIV_TOL, "{label}: the assembled root holds |div B| = {div:e}");
+}
+
+/// the four-worker run under `flag` and the corner EMF `ct` equals the one-worker run under the
+/// same flag in every value on both levels, with the same timesteps, no freeze and div B at
+/// round-off on every tile and on the assembled root; the flag changes the one-worker run
+fn assert_flag_matches_uncut(test: &str, ct: &str, flag: (&'static str, String)) {
+    let label = format!("{ct}, {}={}", flag.0, flag.1);
+    let base = vec![("W_CT", ct.to_string())];
+    let mut flagged = base.clone();
+    flagged.push(flag);
+    let uncut = Arm { cuts0: vec![], cuts1: vec![], owner: vec![0], patch: [(12, 20), (12, 20)], ng: 2 };
+    let tag = label.replace([',', ' ', '='], "_");
+    let clean = run_arm(test, &format!("clean_{tag}"), &uncut, &base);
+    let clean_ref = uncut_reference(&clean, &format!("{label}, the clean one-worker run"));
+    let one = run_arm(test, &format!("uncut_{tag}"), &uncut, &flagged);
+    let expected = uncut_reference(&one, &format!("{label}, the flagged one-worker run"));
+    let changed = expected.values.iter().filter(|(k, v)| clean_ref.values.get(k) != Some(v)).count();
+    assert!(changed > 0, "{label}: the flag left the one-worker run unchanged; the gate is vacuous");
+    assert_eq!(expected.report.fofc.1, 0, "{label}: the one-worker run froze a cell");
+    let mut outcomes = run_arm(test, &format!("cut_{tag}"), &ragged_17_13(), &flagged);
+    assert_all_ok(&outcomes, &label);
+    for (w, o) in outcomes.iter().enumerate() {
+        let r = o.report.as_ref().unwrap();
+        assert_eq!(r.dts, expected.report.dts, "{label}: worker {w} took other timesteps than the one-worker run");
+        assert_eq!(r.fofc.1, 0, "{label}: worker {w} froze {} cells", r.fofc.1);
+        assert!(r.div <= DIV_TOL, "{label}: worker {w} holds |div B| = {:e} on its own faces", r.div);
+    }
+    for o in outcomes.iter_mut() {
+        o.records.retain(|(k, _)| k.kind != 5);
+    }
+    let reference = Reference { values: expected.values.into_iter().filter(|(k, _)| k.kind != 5).collect(), report: expected.report };
+    assert_state_equal_without_stencil(&outcomes, &reference, &label);
+    let div = assembled_root_div(&outcomes);
+    assert!(div <= DIV_TOL, "{label}: the assembled root holds |div B| = {div:e}");
+}
+
+/// a fine cell in the corner of the fine cuts (fine column 10, fine row 2), flagged in the
+/// predictor and in the corrector of the second fine substep of step 3
+#[test]
+fn fine_trouble_in_a_tile_corner_matches_the_one_worker_run() {
+    if in_worker_role() {
+        worker_main();
+    }
+    for ct in ["contact", "uct"] {
+        for stage in [0, 1] {
+            assert_flag_matches_uncut(
+                "fine_trouble_in_a_tile_corner_matches_the_one_worker_run",
+                ct,
+                ("W_FINE_TROUBLE", format!("3,1,{stage},9,1")),
+            );
+        }
+    }
+}
+
+/// a root cell against the root cut at 17, outside the refined patch, flagged in the predictor
+/// and in the corrector of step 3
+#[test]
+fn root_trouble_against_a_cut_outside_the_patch_matches_the_one_worker_run() {
+    if in_worker_role() {
+        worker_main();
+    }
+    for ct in ["contact", "uct"] {
+        for stage in [0, 1] {
+            assert_flag_matches_uncut(
+                "root_trouble_against_a_cut_outside_the_patch_matches_the_one_worker_run",
+                ct,
+                ("W_ROOT_TROUBLE", format!("3,{stage},16,4")),
+            );
+        }
+    }
 }
 
 #[test]
