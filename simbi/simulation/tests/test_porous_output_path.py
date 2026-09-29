@@ -3,10 +3,13 @@
 #
 # the porous accretor's checkpoint directory is the run's identity: two
 # parameter points sharing one path silently mix two experiments in a single
-# checkpoint series. these gates pin the segment-free default path (every
-# archived series wrote to it), the swept segments, and the rule that sweep
-# segments key on the model's own declared defaults rather than on hardcoded
-# copies of them -- the copy is what let a default edit alias two experiments.
+# checkpoint series. these gates pin the current production default path,
+# distinct paths for distinct supported configurations, the swept segments, and
+# the rule that sweep segments key on the model's own declared defaults rather
+# than on hardcoded copies of them -- the copy is what let a default edit alias
+# two experiments. the endpoint contract rides here too: the sealed surface runs
+# KM reconstruction without a fixed reference, the draining surface neither, for
+# every solver, and setup refuses any other representation rather than rewrite it.
 # =============================================================================
 import importlib.util
 import inspect
@@ -52,38 +55,71 @@ def _path(cls, tmp_path, monkeypatch, **kwargs):
     return str(problem.data_directory.relative_to(tmp_path))
 
 
-def test_the_default_path_is_the_archived_one(porous_cls, tmp_path, monkeypatch) -> None:
-    # HLLC+ is a complete low-Mach/hydrostatic method: setup derives both balance
-    # mechanisms before constructing the path, so it cannot resume an older unbalanced
-    # series by accident.
+def test_the_default_production_path(porous_cls, tmp_path, monkeypatch) -> None:
+    # the default sealed run: KM reconstruction, no fixed reference, the HLLC+ solver. the
+    # path names each of the run's declared dials and nothing the run does not declare.
     assert (
         _path(porous_cls, tmp_path, monkeypatch)
-        == "porous_turbulent/uniform/p0/freeslip/mach0.0625/fmr8/racc4dx/wellbalanced/hllc_plus"
+        == "porous_turbulent/uniform/p0/freeslip/mach0.0625/fmr8/racc4dx/hllc_plus"
     )
 
 
-def test_hllc_plus_derives_the_complete_balanced_method(porous_cls) -> None:
-    problem = porous_cls(
-        porosity=0.0,
-        solver="hllc_plus",
-        wb_reconstruction=False,
-        well_balanced=False,
-    )
-    problem.setup()
-    assert problem.wb_reconstruction is True
-    assert problem.well_balanced is True
+def _refusal(porous_cls, **kwargs) -> str:
+    """the message the config raises for `kwargs`, or "" when it accepts them"""
+    try:
+        porous_cls(**kwargs).setup()
+    except Exception as err:  # noqa: BLE001 -- pydantic wraps the config's own ValueError
+        return str(err)
+    return ""
 
 
-def test_plain_hllc_remains_the_unbalanced_baseline(porous_cls) -> None:
-    problem = porous_cls(
-        porosity=0.0,
-        solver="hllc",
-        wb_reconstruction=False,
-        well_balanced=False,
-    )
-    problem.setup()
-    assert problem.wb_reconstruction is False
-    assert problem.well_balanced is False
+@pytest.mark.parametrize("solver", ["hllc_plus", "hllc"])
+def test_the_endpoints_refuse_every_other_representation(porous_cls, tmp_path, monkeypatch, solver) -> None:
+    # the sealed endpoint pairs pressure and gravity by KM reconstruction and integrates the
+    # state itself; the draining endpoint uses neither mechanism. the contract is the same
+    # for every solver: the solver chooses the flux, never the representation.
+    monkeypatch.setenv("SCRATCH", str(tmp_path))
+    sealed_bare = _refusal(porous_cls, porosity=0.0, solver=solver, wb_reconstruction=False)
+    assert "porosity 0 requires --wb-reconstruction" in sealed_bare, sealed_bare
+    sealed_ref = _refusal(porous_cls, porosity=0.0, solver=solver, wb_reconstruction=True, well_balanced=True)
+    assert "porosity 0 forbids --well-balanced" in sealed_ref, sealed_ref
+    for flags in ({"wb_reconstruction": True}, {"well_balanced": True}):
+        draining = _refusal(porous_cls, porosity=1.0, solver=solver, **flags)
+        assert "porosity 1 requires ordinary conservative reconstruction" in draining, (flags, draining)
+
+
+@pytest.mark.parametrize("solver", ["hllc_plus", "hllc"])
+def test_an_accepted_endpoint_keeps_its_declared_representation(porous_cls, tmp_path, monkeypatch, solver) -> None:
+    # setup validates the declared representation and leaves it as declared: the solver
+    # and both balance flags come out of setup exactly as they went in.
+    monkeypatch.setenv("SCRATCH", str(tmp_path))
+    for porosity, km in ((0.0, True), (1.0, False)):
+        problem = porous_cls(porosity=porosity, solver=solver, wb_reconstruction=km, well_balanced=False)
+        problem.setup()
+        assert problem.solver.value == solver
+        assert problem.wb_reconstruction is km
+        assert problem.well_balanced is False
+
+
+def test_distinct_supported_configurations_write_distinct_paths(porous_cls, tmp_path, monkeypatch) -> None:
+    # every pair below differs in a dial that changes what the scheme integrates, and every
+    # member is a configuration the config accepts; two of them sharing a directory would mix
+    # two experiments in one checkpoint series. the intermediate porosity is a research arm the
+    # endpoint contract leaves free, so both balance mechanisms are live dials there.
+    points = {
+        "sealed": {"porosity": 0.0},
+        "draining": {"porosity": 1.0, "wb_reconstruction": False},
+        "sealed, hllc": {"porosity": 0.0, "solver": "hllc"},
+        "half, neither": {"porosity": 0.5, "wb_reconstruction": False},
+        "half, km": {"porosity": 0.5, "wb_reconstruction": True},
+        "half, fixed reference": {"porosity": 0.5, "wb_reconstruction": False, "well_balanced": True},
+    }
+    paths = {label: _path(porous_cls, tmp_path, monkeypatch, **kw) for label, kw in points.items()}
+    shared = {}
+    for label, path in paths.items():
+        shared.setdefault(path, []).append(label)
+    collisions = {path: labels for path, labels in shared.items() if len(labels) > 1}
+    assert not collisions, f"supported configurations share an output path: {collisions}"
 
 
 def test_swept_dials_append_their_segments(porous_cls, tmp_path, monkeypatch) -> None:
