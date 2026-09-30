@@ -10403,9 +10403,42 @@ fn launch_experimental_opt_in() -> bool {
 /// the first combination of `cfg` the launched tiles install as the single path does but that no
 /// distributed gate has validated, named for the refusal; `None` when every combination in play
 /// carries a gate. the gated set is the table in the README's multi-process section
+/// the grids each regime's launch is gated on, 2D and 3D alike on the cartesian grid:
+/// - newtonian and relativistic hydro: the 2D and 3D spherical shells, the (r, z) and (r, phi)
+///   planes, the 3D cylindrical annulus
+/// - isothermal hydro: the 2D spherical shell and the (r, phi) plane
+/// - newtonian MHD: the (r, phi) and (r, z) planes and the 2D spherical shell
+/// - isothermal MHD: the (r, phi) plane
+fn gated_grid(cfg: &Config) -> bool {
+    let cylindrical = cfg.coord_system == "cylindrical";
+    let spherical = cfg.coord_system == "spherical";
+    let r_phi = cylindrical && cfg.dims == 2 && cfg.cyl_plane == CylPlane::RPhi;
+    let r_z = cylindrical && cfg.dims == 2 && cfg.cyl_plane == CylPlane::Rz;
+    let shell_2d = spherical && cfg.dims == 2;
+    if cfg.coord_system == "cartesian" {
+        return true;
+    }
+    match cfg.regime.as_str() {
+        "newtonian" | "rhd" => spherical || cylindrical,
+        "isothermal" => shell_2d || r_phi,
+        "nmhd" => r_phi || r_z || shell_2d,
+        "imhd" => r_phi,
+        _ => false,
+    }
+}
+
+/// the grid of a configuration as a refusal names it
+fn grid_name(cfg: &Config) -> String {
+    let chart = match (cfg.coord_system.as_str(), cfg.dims, cfg.cyl_plane) {
+        ("cylindrical", 2, CylPlane::RPhi) => "(r, phi) cylindrical".to_string(),
+        ("cylindrical", 2, CylPlane::Rz) => "(r, z) cylindrical".to_string(),
+        (other, _, _) => other.to_string(),
+    };
+    format!("{}-dimensional {chart} grid", cfg.dims)
+}
+
 fn ungated_launch_combination(cfg: &Config) -> Option<String> {
     let magnetized = matches!(cfg.regime.as_str(), "nmhd" | "imhd");
-    let isothermal = matches!(cfg.regime.as_str(), "isothermal" | "imhd");
     let spacings = [&cfg.x1_spacing, &cfg.x2_spacing, &cfg.x3_spacing];
     // geometric spacing is gated for newtonian hydro on the cartesian chart
     if spacings[..cfg.dims].iter().any(|s| s.eq_ignore_ascii_case("geometric"))
@@ -10423,12 +10456,8 @@ fn ungated_launch_combination(cfg: &Config) -> Option<String> {
     if cfg.regime != "newtonian" && cfg.reconstruction_name != "plm" {
         return Some(format!("{} reconstruction with the {} regime", cfg.reconstruction_name, cfg.regime));
     }
-    // the isothermal regimes are gated on the cartesian chart in 2D and 3D and on the 2D (r, phi)
-    // disk plane; isothermal hydro also on the 2D spherical (r, theta) chart
-    let disk_plane = cfg.coord_system == "cylindrical" && cfg.cyl_plane == CylPlane::RPhi && cfg.dims == 2;
-    let spherical_2d = cfg.coord_system == "spherical" && cfg.dims == 2 && cfg.regime == "isothermal";
-    if isothermal && !(cfg.coord_system == "cartesian" || disk_plane || spherical_2d) {
-        return Some(format!("the {} regime on a {}-dimensional {} chart", cfg.regime, cfg.dims, cfg.coord_system));
+    if !gated_grid(cfg) {
+        return Some(format!("the {} regime on the {}", cfg.regime, grid_name(cfg)));
     }
     // the constant-nu viscous transport is gated for newtonian and isothermal hydro and both
     // magnetized regimes on the 2D and 3D cartesian grid and the 2D (r, phi) disk plane, and for
