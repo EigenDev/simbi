@@ -10618,7 +10618,7 @@ fn validate_launch_scope(cfg: &Config) -> Result<(), String> {
 /// refused.
 fn validate_refined_launch_scope(cfg: &Config) -> Result<(), String> {
     let refused = |what: &str| Err(format!("{what} with mesh refinement is outside the distributed first release"));
-    if !matches!(cfg.regime.as_str(), "newtonian" | "rhd" | "nmhd") {
+    if !matches!(cfg.regime.as_str(), "newtonian" | "rhd" | "nmhd" | "rmhd") {
         return refused(&format!("the {} regime", cfg.regime));
     }
     if cfg.dims != 2 {
@@ -10820,11 +10820,11 @@ fn run_refined_worker_process(
             refined_session(cfg, launch, fault, drained, build_clock, &layout, tiles)
         }};
     }
-    match cfg.regime.as_str() {
-        "newtonian" => refined_gas!(Newtonian),
-        "rhd" => refined_gas!(Rhd),
-        "nmhd" => {
-            type Sim = SimDefaultGeneric<NewtonianMhd, 2, 3, Cartesian, EosSelect<f64>>;
+    // the refined tiles of a magnetized regime on the 2.5D plane (newtonian or relativistic MHD),
+    // each seeded from its slice of the global staggered faces
+    macro_rules! refined_mhd {
+        ($regime:ident) => {{
+            type Sim = SimDefaultGeneric<$regime, 2, 3, Cartesian, EosSelect<f64>>;
             if bufs.len() < 3 {
                 return Err(format!("mhd needs 3 staggered b-field generators, got {}", bufs.len()));
             }
@@ -10845,7 +10845,7 @@ fn run_refined_worker_process(
                 let (tile_lo, origin, m, bnd) = extents(flat);
                 let tile_faces: Vec<Vec<f64>> = (0..2).map(|d| tile_face_buffer::<2>(&bufs[d], n, m, tile_lo, d)).collect();
                 // the rollback snapshot restores every level's faces when a step is rejected
-                let sim = Sim::build(NewtonianMhd, host_eos(cfg), Cartesian)
+                let sim = Sim::build($regime, host_eos(cfg), Cartesian)
                     .cells(m)
                     .ghosts(ghost_width(cfg))
                     .origin(origin)
@@ -10869,7 +10869,13 @@ fn run_refined_worker_process(
                 tiles.push(refined_tile(cfg, &layout, flat, origin, m, sim, kernels_of)?);
             }
             refined_session(cfg, launch, fault, drained, build_clock, &layout, tiles)
-        }
+        }};
+    }
+    match cfg.regime.as_str() {
+        "newtonian" => refined_gas!(Newtonian),
+        "rhd" => refined_gas!(Rhd),
+        "nmhd" => refined_mhd!(NewtonianMhd),
+        "rmhd" => refined_mhd!(Rmhd),
         other => Err(format!("the {other} regime with mesh refinement is outside the distributed first release")),
     }
 }

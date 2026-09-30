@@ -7,8 +7,9 @@
 # partition from the launch's own two-level checkpoint; and a patch face on a
 # cut refused by name, whose fine ghosts would read the root halo past its
 # depth. each arm runs the refined blast in newtonian hydro and the
-# magnetized blast in 2.5D newtonian MHD, the latter under the Contact and the
-# UCT edge EMF, its staggered faces on both levels compared with the cells; a
+# magnetized blast in 2.5D newtonian and special-relativistic MHD, the latter
+# two under the Contact and the UCT edge EMF, their staggered faces on both
+# levels compared with the cells; a
 # resumed launch names no scheme flag, so the recorded edge EMF continues. the
 # same fresh run and repartitioned restart with the workers started as a
 # scheduler starts them: rank and size from the environment, every worker
@@ -33,6 +34,7 @@ import pytest
 
 from simbi_configs.examples.newtonian.refined_blast import RefinedBlast
 from simbi_configs.examples.newtonian.refined_mhd_blast import RefinedMhdBlast
+from simbi_configs.examples.srmhd.refined_rmhd_blast import RefinedRmhdBlast
 
 from simbi.simulation.tests.test_launch import (
     EXIT,
@@ -79,6 +81,8 @@ PROBLEMS = [
     pytest.param(Problem(RefinedBlast, [], "", ""), id="hydro"),
     pytest.param(Problem(RefinedMhdBlast, [], "", "contact"), id="mhd-contact"),
     pytest.param(Problem(RefinedMhdBlast, ["--ct-method", "uct"], "ct_method='uct'", "uct"), id="mhd-uct"),
+    pytest.param(Problem(RefinedRmhdBlast, [], "", "contact"), id="rmhd-contact"),
+    pytest.param(Problem(RefinedRmhdBlast, ["--ct-method", "uct"], "ct_method='uct'", "uct"), id="rmhd-uct"),
 ]
 
 
@@ -326,7 +330,8 @@ def _assert_complete_faces(path: Path, magnetized: bool) -> None:
 
 @pytest.mark.parametrize("problem", PROBLEMS)
 def test_scheduler_started_refined_workers_match_and_resume_onto_another_partition(tmp_path: Path, problem: Problem) -> None:
-    magnetized = problem.cls is RefinedMhdBlast
+    # a problem records the edge EMF of its staggered field, and none without one
+    magnetized = bool(problem.ct_method)
     reference = problem.reference(tmp_path / "single", STEPS)
     fresh = _scheduler_launch(problem, tmp_path / "fresh", 4, "cuts = [[13], [18]]", STEPS)
     _assert_same_levels(fresh, reference, "scheduler-started, four workers")

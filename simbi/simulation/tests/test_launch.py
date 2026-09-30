@@ -584,7 +584,7 @@ ROCHE_PASSAGE = str(Path(RochePassage.__module__.replace(".", "/") + ".py"))
 
 @pytest.mark.parametrize(
     ("script", "reason"),
-    [(TRACED_KH, "a tracer population"), (REFINED_RMHD, "the rmhd regime with mesh refinement"), (ROCHE_PASSAGE, "an immersed body")],
+    [(TRACED_KH, "a tracer population"), (REFINED_RMHD, "a 3-dimensional grid with mesh refinement"), (ROCHE_PASSAGE, "an immersed body")],
 )
 def test_out_of_scope_problems_are_refused_by_name(tmp_path: Path, script: str, reason: str) -> None:
     # a layout with as many axes as the problem's grid, so the refusal is the scope's
