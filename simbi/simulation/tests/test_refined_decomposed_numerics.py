@@ -7,7 +7,9 @@
 #   differ from plm;
 # - a passive scalar seeded non-uniformly, shown to be carried.
 # - a second nested refinement level spanning the cut, fresh and resumed from a
-#   checkpoint written on the tiles halfway, every level included.
+#   checkpoint written on the tiles halfway, every level included;
+# - periodic kelvin-helmholtz layers on four tiles whose ragged cuts wrap both
+#   axes, the root closed across its seams, shown to differ from outflow walls.
 # a census, which the tiled drivers do not reduce across tiles, is refused by
 # name on host tiles and through `simbi launch` rather than left unrecorded, and
 # so are immersed bodies with nested levels on host tiles.
@@ -167,3 +169,43 @@ def test_immersed_bodies_with_nested_levels_on_host_tiles_are_refused_by_name(tm
     with pytest.raises(Exception, match="immersed bodies with 3 nested refinement levels and gpus > 1"):
         _run(GravitatingRefinedBlast, tmp_path / "tiles", 2, **NESTED)
     assert not list((tmp_path / "tiles").glob("*final*.h5")), "a refused run published a final checkpoint"
+
+
+def _fresh_kh(out: Path, gpus: int, **kwargs) -> Path:
+    """the refined kelvin-helmholtz run in a fresh interpreter: the example draws its noise from a
+    module-level generator, so every arm starts from the same seed only in its own process"""
+    fields = ", ".join(f"{k}={v!r}" for k, v in kwargs.items())
+    snippet = (
+        "import sys\n"
+        "from simbi.simulation import runner\n"
+        "from simbi_configs.examples.newtonian.refined_kh import RefinedKelvinHelmholtz\n"
+        f"runner.run(RefinedKelvinHelmholtz(resolution=(64, 64), gpus={gpus}, data_directory=sys.argv[1]{', ' + fields if fields else ''}), "
+        f"compute_mode='cpu', max_steps={STEPS})\n"
+    )
+    done = subprocess.run([sys.executable, "-c", snippet, str(out)], capture_output=True, text=True, timeout=900)
+    assert done.returncode == 0, f"the kh run failed:\n{done.stderr[-3000:]}"
+    (final,) = sorted(out.glob("*final*.h5"))
+    return final
+
+
+def test_a_periodic_refined_run_on_four_tiles_matches_the_single_hierarchy(tmp_path: Path, host_tiles) -> None:
+    # the fine box spans root cells 4..60 in x and 8..56 in y of the 64 x 64 root, clear of the seams
+    single = _fresh_kh(tmp_path / "single", 1)
+    walled = _fresh_kh(tmp_path / "walled", 1, boundary_conditions="outflow")
+    assert any(not np.array_equal(x, _datasets(walled)[n]) for n, x in _datasets(single).items()), "the seams left the run unchanged; the wrap is never exercised"
+    tiles = _fresh_kh(tmp_path / "tiles", 4, decompose=[[26], [36]])
+    # the conserved halo ring holds no state (no stage reads it and no exchange moves it); on a
+    # periodic root the single writer leaves it zero and the tiled writer fills it, so it is
+    # trimmed here and every other dataset is compared whole
+    xs, ys = _datasets(tiles), _datasets(single)
+    assert xs.keys() == ys.keys(), f"dataset sets differ: {sorted(xs.keys() ^ ys.keys())}"
+    with h5py.File(single, "r") as f:
+        ng = {lv: int(f[lv]["mesh"].attrs["halo_width"]) for lv in f if lv.startswith("level_")}
+    for name, x in xs.items():
+        level, _, field = name.partition("/")
+        if field.startswith("conserved/"):
+            h = ng[level]
+            x, y = x[h:-h, h:-h], ys[name][h:-h, h:-h]
+        else:
+            y = ys[name]
+        assert x.shape == y.shape and np.array_equal(x, y), f"four refined tiles wrapping both axes: {name} differs"

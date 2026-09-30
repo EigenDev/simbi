@@ -336,9 +336,9 @@ where
     tracer_interface_ledgers: Vec<std::cell::RefCell<Vec<InterfaceTransfer>>>,
     tracer_root_global_cells: [usize; NDIM],
     tracer_root_offset: [usize; NDIM],
-    /// the axes whose tile grid closes into a ring, carried down to every level's layout: a
-    /// wrapping axis sends mass leaving the grid to the far end rather than out of it.
-    tracer_root_wraps: [bool; NDIM],
+    /// the axes whose tile grid closes into a ring: the root halo exchange carries the leg across
+    /// the seam, and every level's tracer layout sends mass leaving the grid to the far end.
+    root_wraps: [bool; NDIM],
     /// set by `step_root` when the cfl dt is fatal (NaN / non-positive). `Some` halts the march at
     /// the last computed state; the driver writes a
     /// `.crashed` checkpoint and reports it, halting before advancing past t_final on garbage.
@@ -635,12 +635,12 @@ where
             tile_offset: std::array::from_fn(|aa| {
                 self.tracer_root_offset[aa] * scale + interior.spaces[aa].lo as usize
             }),
-            wraps: self.tracer_root_wraps,
+            wraps: self.root_wraps,
             level: level as u8,
         }
     }
 
-    pub fn set_tracer_root_layout(
+    pub fn set_root_layout(
         &mut self,
         global_cells: [usize; NDIM],
         tile_offset: [usize; NDIM],
@@ -648,7 +648,7 @@ where
     ) {
         self.tracer_root_global_cells = global_cells;
         self.tracer_root_offset = tile_offset;
-        self.tracer_root_wraps = wraps;
+        self.root_wraps = wraps;
         let parent_cells: [usize; NDIM] =
             std::array::from_fn(|aa| self.levels[0].state.geom.interior.spaces[aa].size());
         self.tracer_interfaces = (0..self.levels.len().saturating_sub(1))
@@ -1140,7 +1140,7 @@ where
             tracer_interface_ledgers: Vec::new(),
             tracer_root_global_cells,
             tracer_root_offset: [0; NDIM],
-            tracer_root_wraps: [false; NDIM],
+            root_wraps: [false; NDIM],
             crash: None,
             equilibrium_mask_radius: None,
             prev_dt_cfl: 0.0,
@@ -1615,7 +1615,7 @@ where
             tracer_interface_ledgers,
             tracer_root_global_cells: root_cells,
             tracer_root_offset: [0; NDIM],
-            tracer_root_wraps: [false; NDIM],
+            root_wraps: [false; NDIM],
             crash: None,
             equilibrium_mask_radius: None,
             prev_dt_cfl: 0.0,
@@ -4869,6 +4869,27 @@ where
 // decomposed hierarchy driver (refinement x decomposition)
 // =============================================================================
 
+/// the halo topology of `level` over the tiles in `order`: the root closes the axes its tile grid
+/// wraps; a refined level lies inside the domain, clear of every seam.
+fn level_topology<R, const NDIM: usize, const DOF: usize, M, E, S, Mem, K>(
+    tiles: &[Hierarchy<R, NDIM, DOF, M, E, S, Mem, K>],
+    level: usize,
+    order: &[usize],
+) -> Topology<NDIM>
+where
+    R: Regime<f64, NDIM>,
+    M: Metric<f64, NDIM> + Copy,
+    E: Eos<f64>,
+    S: ExecutionSpace,
+    Mem: MemorySpace,
+    K: KernelSet<NDIM, DOF, Mem, f64>,
+{
+    match (level, order.first()) {
+        (0, Some(&i)) => Topology::wrapping(tiles[i].root_wraps),
+        _ => Topology::open(),
+    }
+}
+
 /// the sub-grid of tiles that carry one refined level. with one refined box per level the
 /// refined tiles form a contiguous rectangle; `order[k]` is the tile index at fine-flatten position
 /// `k`, and `devices[k]`/`counts` give that sub-grid's device map + shape for `exchange_grid`. when
@@ -4929,7 +4950,7 @@ where
         {
             let states: Vec<&FieldStore<NDIM, DOF, Mem, f64>> =
                 grid.order.iter().map(|&i| &*tiles[i].levels[level - 1].state).collect();
-            let schedule = schedule_of_tiles(&states, grid.counts, &Topology::open());
+            let schedule = schedule_of_tiles(&states, grid.counts, &level_topology(tiles, level - 1, &grid.order));
             symbi_sim::decomp::exchange_grid_cons(&states, &schedule, &grid.devices, transport);
         }
         for (k, &i) in grid.order.iter().enumerate() {
@@ -5178,7 +5199,7 @@ where
                 .iter()
                 .map(|&i| &*tiles[i].levels[level].state)
                 .collect();
-            let schedule = schedule_of_tiles(&states, counts, &Topology::open());
+            let schedule = schedule_of_tiles(&states, counts, &level_topology(tiles, level, order));
             symbi_sim::decomp::exchange_trouble(&states, &schedule, devices, transport)
         };
         drain_devices::<Mem>(devices);
@@ -5228,7 +5249,7 @@ fn exchange_level_halos<R, const NDIM: usize, const DOF: usize, M, E, S, Mem, K,
             .iter()
             .map(|&i| &*tiles[i].levels[level].state)
             .collect();
-        let schedule = schedule_of_tiles(&states, counts, &Topology::open());
+        let schedule = schedule_of_tiles(&states, counts, &level_topology(tiles, level, order));
         exchange_grid(&states, &schedule, devices, transport);
     }
     for (k, &i) in order.iter().enumerate() {
