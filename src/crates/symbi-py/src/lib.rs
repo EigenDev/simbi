@@ -10455,23 +10455,6 @@ fn ungated_launch_combination(cfg: &Config) -> Option<String> {
     if !gated_grid(cfg) {
         return Some(format!("the {} regime on the {}", cfg.regime, grid_name(cfg)));
     }
-    // the constant-nu viscous transport is gated for newtonian and isothermal hydro and both
-    // magnetized regimes on the 2D and 3D cartesian grid and the 2D (r, phi) disk plane, and for
-    // newtonian and isothermal hydro on the 2D spherical (r, theta) grid; the alpha prescription
-    // needs a central body, refused ahead of this
-    let viscous = cfg.viscosity != 0.0 || cfg.alpha != 0.0;
-    let viscous_grid = cfg.coord_system == "cartesian"
-        || (cfg.coord_system == "cylindrical" && cfg.cyl_plane == CylPlane::RPhi && cfg.dims == 2)
-        || (cfg.coord_system == "spherical" && cfg.dims == 2 && !magnetized);
-    let gated_viscous = matches!(cfg.regime.as_str(), "newtonian" | "isothermal" | "nmhd" | "imhd")
-        && cfg.alpha == 0.0
-        && viscous_grid;
-    if viscous && !gated_viscous {
-        return Some(format!(
-            "viscous transport with the {} regime on a {}-dimensional {} grid",
-            cfg.regime, cfg.dims, cfg.coord_system
-        ));
-    }
     None
 }
 

@@ -6,13 +6,15 @@
 # in: newtonian and isothermal hydro on a uniform-radius spherical (r, theta)
 # shell spanning both poles, newtonian and isothermal hydro, newtonian and
 # isothermal MHD on the (r, phi) disk plane, and all four on a 3d cartesian
-# periodic box. each case on four workers equals the single-grid run bit for
+# periodic box; newtonian and isothermal hydro on the (r, z) plane with the axis
+# on the grid, the 3d spherical shell and the 3d cylindrical annulus; newtonian
+# and isothermal MHD on the (r, z) plane and the 2d spherical shell. each case on four workers equals the single-grid run bit for
 # bit, fresh and with the correction fired against a cut; the viscosity acts,
 # the inviscid launch differing from the viscous one; a run checkpointed
 # halfway resumes to the uninterrupted single-grid state on one worker and
-# onto three unevenly owned tiles from a four-worker checkpoint. viscosity on a
-# grid outside that scope, newtonian hydro on a 3d spherical grid, is refused
-# at startup by name.
+# onto three unevenly owned tiles from a four-worker checkpoint. a viscosity on
+# a relativistic regime, which carries no viscous operator, is refused at
+# startup by name rather than dropped.
 #
 # run: pytest -m simulation simbi/simulation/tests/test_launch_viscous_charts.py
 # =============================================================================
@@ -46,6 +48,11 @@ SPHERE = dict(resolution=(32, 32), cuts=[[16], [16]], trouble="trouble:3:1:15:31
 DISK = dict(resolution=(32, 32), cuts=[[7], [16]], trouble="trouble:3:0:6:0", restart=[[10, 21], []])
 ROTOR = dict(DISK, resolution=(32, 32, 1))
 BOX = dict(resolution=(16, 16, 16), cuts=[[8], [], [8]], trouble="trouble:3:0:7:3:7", restart=[[5, 11], [], []])
+RZ = dict(resolution=(32, 32), cuts=[[16], [16]], trouble="trouble:3:0:15:15", restart=[[10, 21], []])
+SHELL_3D = dict(resolution=(16, 16, 16), cuts=[[], [8], [8]], trouble="trouble:3:0:5:0:7", restart=[[], [], [6, 10]])
+ANNULUS = BOX
+JET = dict(ROTOR)
+MHD_SHELL = dict(SPHERE, resolution=(32, 32, 1))
 CASES = {
     "newtonian_spherical": (f"{N}.viscous_spherical_pulse", "ViscousSphericalPulse", SPHERE),
     "isothermal_spherical": (f"{ISO}.viscous_isothermal_spherical_pulse", "ViscousIsothermalSphericalPulse", SPHERE),
@@ -57,6 +64,16 @@ CASES = {
     "isothermal_3d": (f"{ISO}.viscous_isothermal_shear_3d", "ViscousIsothermalShear3D", BOX),
     "nmhd_3d": (f"{N}.viscous_nmhd_orszag_tang_3d", "ViscousNewtonianOrszagTang3D", BOX),
     "imhd_3d": (f"{ISO}.viscous_imhd_orszag_tang_3d", "ViscousIsothermalOrszagTang3D", BOX),
+    "newtonian_rz": (f"{N}.viscous_rz_pulse", "ViscousRzPulse", RZ),
+    "isothermal_rz": (f"{ISO}.viscous_isothermal_rz_pulse", "ViscousIsothermalRzPulse", RZ),
+    "newtonian_shell_3d": (f"{N}.viscous_spherical_pulse_3d", "ViscousSphericalPulse3D", SHELL_3D),
+    "isothermal_shell_3d": (f"{ISO}.viscous_isothermal_spherical_pulse_3d", "ViscousIsothermalSphericalPulse3D", SHELL_3D),
+    "newtonian_annulus": (f"{N}.viscous_cylindrical_pulse_3d", "ViscousCylindricalPulse3D", ANNULUS),
+    "isothermal_annulus": (f"{ISO}.viscous_isothermal_cylindrical_pulse_3d", "ViscousIsothermalCylindricalPulse3D", ANNULUS),
+    "nmhd_rz": (f"{N}.viscous_nmhd_jet_rz", "ViscousNewtonianJetRz", JET),
+    "imhd_rz": (f"{ISO}.viscous_imhd_jet_rz", "ViscousIsothermalJetRz", JET),
+    "nmhd_shell": (f"{N}.viscous_nmhd_spherical_field", "ViscousNewtonianSphericalField", MHD_SHELL),
+    "imhd_shell": (f"{ISO}.viscous_imhd_spherical_field", "ViscousIsothermalSphericalField", MHD_SHELL),
 }
 
 
@@ -104,34 +121,33 @@ def test_a_viscous_launch_resumed_onto_another_partition_matches(tmp_path: Path,
     _assert_same_state(resumed, reference, f"{name}: resumed onto three uneven workers against the uninterrupted run")
 
 
-VISCOUS_SPHERE_3D = """
-from typing import Annotated
+
+VISCOUS_BLAST = """
 from pydantic import computed_field
-from simbi import ProblemParam
-from simbi_configs.examples.newtonian.spherical_pulse_3d import SphericalPulse3D
+from simbi_configs.examples.srhd.synge_blast import SyngeBlast
 
-class ViscousSphericalPulse3D(SphericalPulse3D):
-    nu: Annotated[float, ProblemParam(1.0e-2, cli=True, description="constant kinematic viscosity")]
-
+class ViscousSyngeBlast(SyngeBlast):
     @computed_field
     @property
     def viscosity(self) -> float:
-        return self.nu
+        return 0.01
 """
 
 
-def test_viscosity_on_a_3d_spherical_grid_is_refused_by_name(tmp_path: Path) -> None:
-    script = tmp_path / "viscous_spherical_pulse_3d.py"
-    script.write_text(VISCOUS_SPHERE_3D)
-    layout = _layout(tmp_path / "two.toml", workers=2, cuts=[[4], [], []])
+def test_viscosity_on_a_relativistic_regime_is_refused_by_name(tmp_path: Path) -> None:
+    script = tmp_path / "viscous_synge_blast.py"
+    script.write_text(VISCOUS_BLAST)
+    layout = _layout(tmp_path / "two.toml", workers=2, cuts=[[8], []])
     cmd = [
         sys.executable, "-m", "simbi.cli", "launch", str(script), "--layout", str(layout), "--max-steps", "1",
-        "--resolution", "8,8,8", "--data-directory", str(tmp_path / "refused"), "--checkpoint-interval", "1e9",
+        "--resolution", "16,16", "--data-directory", str(tmp_path / "refused"), "--checkpoint-interval", "1e9",
     ]
     env = {k: v for k, v in os.environ.items() if k != "SIMBI_LAUNCH_EXPERIMENTAL"}
+    env["SIMBI_LAUNCH_EXPERIMENTAL"] = "1"
     env["PYTHONPATH"] = os.pathsep.join([str(Path.cwd()), env.get("PYTHONPATH", "")])
+    # the opt-in admits every ungated combination, so the refusal comes from the regime itself
     done = subprocess.run(cmd, capture_output=True, text=True, timeout=600, env=env)
     assert done.returncode != 0, f"the launch succeeded:\n{done.stdout}"
     flat = " ".join(done.stderr.split())
-    assert "viscous transport with the newtonian regime on a 3-dimensional spherical grid" in flat, done.stderr
+    assert "viscous transport is not built for the rhd regime" in flat, done.stderr
     assert not list((tmp_path / "refused").glob("*.h5")), "a checkpoint was published"
