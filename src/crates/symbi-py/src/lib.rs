@@ -10390,10 +10390,14 @@ fn ungated_launch_combination(cfg: &Config) -> Option<String> {
     let magnetized = matches!(cfg.regime.as_str(), "nmhd" | "imhd");
     let isothermal = matches!(cfg.regime.as_str(), "isothermal" | "imhd");
     let spacings = [&cfg.x1_spacing, &cfg.x2_spacing, &cfg.x3_spacing];
-    if spacings[..cfg.dims].iter().any(|s| s.eq_ignore_ascii_case("geometric")) {
-        return Some("geometric spacing".to_string());
+    // geometric spacing is gated for newtonian hydro on the cartesian chart
+    if spacings[..cfg.dims].iter().any(|s| s.eq_ignore_ascii_case("geometric"))
+        && !(cfg.regime == "newtonian" && cfg.coord_system == "cartesian")
+    {
+        return Some(format!("geometric spacing with the {} regime on the {} chart", cfg.regime, cfg.coord_system));
     }
-    if !magnetized && cfg.eos_name != "ideal" {
+    // the synge perfect gas is gated for relativistic hydro
+    if !magnetized && cfg.eos_name != "ideal" && !(cfg.regime == "rhd" && cfg.eos_name == "synge") {
         return Some(format!("the {} equation of state", cfg.eos_name));
     }
     if cfg.wb_reconstruction {

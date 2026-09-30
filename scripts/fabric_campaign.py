@@ -148,6 +148,13 @@ CASES: tuple[Case, ...] = (
          cuts=((), (8,), (8,)), restart_cuts=((), (), (6, 10)), trouble="trouble:3:0:5:0:7"),
     Case("ram44", "simbi_configs.examples.srhd.ram44", "Ram44", (32, 32), 8, ("full",),
          cuts=((16,), ()), restart_cuts=((10, 21), ())),
+    # geometric widths on both axes under a tabulated source, and the synge gas blast
+    Case("geometric_tabulated", f"{N}.decomposed_tabulated_geometric", "DecomposedTabulatedGeometric", (32, 16), 8,
+         ("full",), cuts=((16,), (8,)), restart_cuts=((10, 21), ()), trouble="trouble:3:0:15:7",
+         faults=("reject", "bad_cfl", "lost")),
+    Case("synge_blast", "simbi_configs.examples.srhd.synge_blast", "SyngeBlast", (32, 32), 8, ("full",),
+         cuts=((16,), (16,)), restart_cuts=((10, 21), ()), trouble="trouble:3:0:15:15",
+         faults=("reject", "bad_cfl", "lost")),
     # the 3d vortex with a z flow on a periodic box: cuts along x and z, the correction against both
     Case("nmhd_orszag_tang_3d", f"{N}.nmhd_orszag_tang_3d", "NewtonianOrszagTang3D", (16, 16, 16), 8, ("full",),
          cuts=((8,), (), (8,)), restart_cuts=((5, 11), (), ()), trouble="trouble:3:0:7:3:7", magnetized=True,
