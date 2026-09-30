@@ -725,8 +725,7 @@ const SQRT_MINUS_G: &str = "sqrt_minus_g";
 fn conserved_densitization<const D: usize, const DOF: usize, Mem: MemorySpace>(
     store: &FieldStore<D, DOF, Mem, f64>,
 ) -> Option<&'static str> {
-    let curved = store.geom.spacetime != symbi_geometry::Spacetime::Minkowski;
-    (curved && store.fields.mhd.is_none()).then_some(SQRT_MINUS_G)
+    store.conserved_is_densitized().then_some(SQRT_MINUS_G)
 }
 
 

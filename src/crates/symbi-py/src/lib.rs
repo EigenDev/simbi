@@ -37,7 +37,7 @@ use symbi_display::{
 use symbi_geometry::MotionState;
 use symbi_geometry::{
     KerrKS, KerrKSCartesian, KerrKSCylindrical, SchwarzschildKS, SchwarzschildKSCartesian,
-    SchwarzschildKSCylindrical,
+    SchwarzschildKSCylindrical, SchwarzschildKSCylindricalRz,
 };
 use symbi_hydro::energy::IsoModel;
 use symbi_hydro::eos::Eos;
@@ -2289,7 +2289,7 @@ fn run_loop<R, const D: usize, const DOF: usize, M, E, S, Mem, K>(
 ) -> Result<symbi_sim::run_diagnostics::RunDiagnostics, Box<dyn std::error::Error>>
 where
     R: Regime<f64, D>,
-    M: Metric<f64, D> + Copy + Send + Sync,
+    M: Metric<f64, D> + Metric<f64, DOF> + Copy + Send + Sync,
     E: symbi_hydro::eos::EosFor<f64, <R as Regime<f64, D>>::Energy> + Send + Sync,
     S: ExecutionSpace,
     Mem: MemorySpace + Sync,
@@ -6792,7 +6792,8 @@ macro_rules! hydro_dispatch {
             // GR (kerr-schild) cylindrical 2D: the plane selector splits the two charts. the (R, phi)
             // equatorial disk (planar_cylindrical) is diagonal (z = 0, r = R), DOF = 2 (v_R, v_phi);
             // the (R, z) 2.5D axisymmetric-swirl (the default) lifts v_phi, DOF = 3, requiring the
-            // 5-tuple. both use the one SchwarzschildKSCylindrical metric (D = 2 disk / D = 3 swirl).
+            // 5-tuple. the disk takes SchwarzschildKSCylindrical (evaluated at z = 0), the meridional
+            // plane SchwarzschildKSCylindricalRz (evaluated at (R, 0, z)).
             (2, "cylindrical") if $cfg.spacetime == "schwarzschild_ks" => match $cfg.cyl_plane {
                 symbi_sim::state::CylPlane::RPhi => build_and_run_hydro!(
                     $cfg, $prims, $regime, $regime_ty, 2, 2,
@@ -6809,8 +6810,8 @@ macro_rules! hydro_dispatch {
                     }
                     build_and_run_hydro!(
                         $cfg, $prims, $regime, $regime_ty, 2, 3,
-                        SchwarzschildKSCylindrical { mass: $cfg.schwarzschild_mass },
-                        SchwarzschildKSCylindrical<f64>
+                        SchwarzschildKSCylindricalRz { mass: $cfg.schwarzschild_mass },
+                        SchwarzschildKSCylindricalRz<f64>
                     )
                 }
             },
@@ -7799,11 +7800,20 @@ macro_rules! mhd_dispatch {
             // plane (axes [0, 2], non-diagonal gamma_Rz, toroidal E_phi CT) and the (R, phi)
             // equatorial disk (axes [0, 1], diagonal on the equator, vertical E_z CT). MHD momentum
             // is a full 3-vector in both, so one metric arm serves; HLLE gas flux + contact/UCT-HLL CT.
-            (2, "cylindrical") if $cfg.spacetime == "schwarzschild_ks" => build_and_run_mhd!(
-                $cfg, $prims, $bufs, $regime, $regime_ty, 2,
-                SchwarzschildKSCylindrical { mass: $cfg.schwarzschild_mass },
-                SchwarzschildKSCylindrical<f64>
-            ),
+            // the host metric follows the plane: the equatorial disk evaluates at z = 0, the
+            // meridional plane at (R, 0, z)
+            (2, "cylindrical") if $cfg.spacetime == "schwarzschild_ks" => match $cfg.cyl_plane {
+                symbi_sim::state::CylPlane::RPhi => build_and_run_mhd!(
+                    $cfg, $prims, $bufs, $regime, $regime_ty, 2,
+                    SchwarzschildKSCylindrical { mass: $cfg.schwarzschild_mass },
+                    SchwarzschildKSCylindrical<f64>
+                ),
+                symbi_sim::state::CylPlane::Rz => build_and_run_mhd!(
+                    $cfg, $prims, $bufs, $regime, $regime_ty, 2,
+                    SchwarzschildKSCylindricalRz { mass: $cfg.schwarzschild_mass },
+                    SchwarzschildKSCylindricalRz<f64>
+                ),
+            },
             (2, "cylindrical") => build_and_run_mhd!(
                 $cfg,
                 $prims,

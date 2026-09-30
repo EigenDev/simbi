@@ -26,6 +26,6 @@ pub use coord_map::{CellInterval, CoordMap, LogMap, UniformMap};
 pub use metric::{
     Cartesian, ComponentBasis, Cylindrical, CylindricalRPhi, DiagonalMetric, Geometry, KerrKS,
     KerrKSCartesian, KerrKSCylindrical, Metric, SchwarzschildKS, SchwarzschildKSCartesian,
-    SchwarzschildKSCylindrical, Spacetime, Spherical,
+    SchwarzschildKSCylindrical, SchwarzschildKSCylindricalRz, Spacetime, Spherical,
 };
 pub use motion::MotionState;

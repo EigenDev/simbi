@@ -2443,6 +2443,14 @@ impl<const NDIM: usize, const DOF: usize, Mem: MemorySpace, Sc: Scalar + Ordered
 
     /// whether this run carries the passive scalar (dye): the cons `chi` slot is
     /// allocated. every chi consumer gates on this, so an undyed run pays nothing.
+    /// whether the conserved state carries the spacetime measure sqrt(-g): relativistic hydro on
+    /// a curved spacetime stores the densitized state, every other configuration (flat
+    /// spacetime, and GR MHD, whose induction seam is Valencia) the undensitized one
+    #[inline]
+    pub fn conserved_is_densitized(&self) -> bool {
+        self.geom.spacetime != symbi_geometry::Spacetime::Minkowski && self.fields.mhd.is_none()
+    }
+
     #[inline]
     pub fn has_passive_scalar(&self) -> bool {
         self.fields.cons.chi_field().is_some()
@@ -3374,7 +3382,7 @@ impl<R, const D: usize, const DOF: usize, M, E, S, Mem>
     SimStateGeneric<R, D, DOF, M, E, S, Mem, f64>
 where
     R: Regime<f64, D>,
-    M: Metric<f64, D> + Copy,
+    M: Metric<f64, D> + Metric<f64, DOF> + Copy,
     E: Eos<f64>,
     S: ExecutionSpace,
     Mem: MemorySpace,
@@ -3398,8 +3406,14 @@ where
         let nrg = self.fields.cons.nrg.as_ref().map(|f| f.view());
         let mut mass = 0.0_f64;
         let mut energy = 0.0_f64;
+        // a densitized state carries sqrt(-g) inside its conserved variables, so its totals
+        // integrate the plain coordinate volume; the undensitized state integrates the measure
+        let densitized = self.conserved_is_densitized();
+        let coordinate_volume = |c: [isize; D]| {
+            (0..D).map(|ax| bg.cell_width(c, ax)).product::<f64>() * bg.ungridded_measure()
+        };
         for c in self.geom.interior.iter() {
-            let vol = bg.labframe_volume(c, a);
+            let vol = if densitized { coordinate_volume(c) } else { bg.labframe_volume(c, a) };
             mass += *den.at(c) * vol;
             if let Some(nv) = nrg.as_ref() {
                 energy += *nv.at(c) * vol;
@@ -3436,15 +3450,30 @@ where
         // max Lorentz factor: relativistic regimes only (v is the orthonormal
         // 3-velocity, |v| < 1, so W = 1/sqrt(1 - sum v_k^2)). non-relativistic v is
         // unbounded, so W is left None.
+        // the velocity is orthonormal on a flat spacetime, where v^2 is its flat norm, and the
+        // contravariant Valencia v^i on a curved one, where v^2 = gamma_ij v^i v^j at the cell
+        let curved = self.geom.spacetime.component_basis() == symbi_geometry::ComponentBasis::Contravariant;
         let max_w = if <R as Regime<f64, D>>::SPEC.is_relativistic {
             let vel: [_; DOF] = std::array::from_fn(|k| self.fields.prim.vel[k].view());
             let mut mw = 1.0_f64;
             for c in self.geom.interior.iter() {
-                let mut v2 = 0.0_f64;
-                for v in vel.iter() {
-                    let vk = *v.at(c);
-                    v2 += vk * vk;
-                }
+                let v: [f64; DOF] = std::array::from_fn(|k| *vel[k].at(c));
+                let v2 = if curved {
+                    let center = self.geom.cell_coord(c);
+                    let x = Tensor::new(std::array::from_fn(|slot| match self.geom.axes.iter().position(|&a| a == slot) {
+                        Some(d) => center[d],
+                        // an ungridded polar slot takes the equator, every other ungridded slot is
+                        // a symmetry direction
+                        None if slot == 1 && self.geom.coords == symbi_geometry::Geometry::Spherical => {
+                            std::f64::consts::FRAC_PI_2
+                        }
+                        None => 0.0,
+                    }));
+                    let g = <M as Metric<f64, DOF>>::spatial_metric(&self.physics.metric, x);
+                    (0..DOF).flat_map(|i| (0..DOF).map(move |j| (i, j))).map(|(i, j)| g[(i, j)] * v[i] * v[j]).sum()
+                } else {
+                    v.iter().map(|vk| vk * vk).sum::<f64>()
+                };
                 if v2 < 1.0 {
                     mw = mw.max(1.0 / (1.0 - v2).sqrt());
                 }
@@ -3492,6 +3521,18 @@ where
             max_ke_over_eint,
         })
     }
+}
+
+impl<R, const D: usize, const DOF: usize, M, E, S, Mem>
+    SimStateGeneric<R, D, DOF, M, E, S, Mem, f64>
+where
+    R: Regime<f64, D>,
+    M: Metric<f64, D> + Copy,
+    E: Eos<f64>,
+    S: ExecutionSpace,
+    Mem: MemorySpace,
+{
+
 
     /// how many fields the live heatmap can cycle through (density + pressure /
     /// Lorentz W / |B| when the regime carries them). bounds the `f`-key cycle.

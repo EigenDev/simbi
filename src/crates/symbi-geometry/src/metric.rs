@@ -1698,6 +1698,145 @@ impl<S: Scalar> Metric<S, 2> for SchwarzschildKSCylindrical<S> {
     }
 }
 
+/// schwarzschild in cylindrical kerr-schild coordinates on the meridional (R, z) plane: the
+/// axisymmetric chart a 2D grid with axes [R, z] resolves. a point [R, z] is the 3D point
+/// (R, phi = 0, z) of [`SchwarzschildKSCylindrical`]: r = sqrt(R^2 + z^2), the (R, z) block of the
+/// spatial metric carries the kerr-schild off-diagonal, and phi decouples (gamma_phi-phi = R^2), so
+/// the (R, z) block of the inverse is the inverse of the block. the measure is the full
+/// sqrt(gamma) = R sqrt(1 + 2M/r): the azimuthal scale R rides inside it and the ungridded
+/// azimuth's 2 pi comes from the block geometry, as on the flat (r, z) chart. D = 3 is the full
+/// chart, for the momentum-DOF-lifted state.
+#[derive(Debug, Clone, Copy)]
+pub struct SchwarzschildKSCylindricalRz<S> {
+    /// the geometric mass M (units G = c = 1)
+    pub mass: S,
+}
+
+impl<S: Scalar> SchwarzschildKSCylindricalRz<S> {
+    #[inline]
+    fn full(&self) -> SchwarzschildKSCylindrical<S> {
+        SchwarzschildKSCylindrical { mass: self.mass }
+    }
+    #[inline]
+    fn lift(x: Tensor<S, 2>) -> Tensor<S, 3> {
+        Tensor::new([x[0], S::ZERO, x[1]])
+    }
+}
+
+impl<S: Scalar> Metric<S, 2> for SchwarzschildKSCylindricalRz<S> {
+    fn geometry(&self) -> Geometry {
+        Geometry::Cylindrical
+    }
+    fn spacetime(&self) -> Spacetime {
+        Spacetime::SchwarzschildKS
+    }
+    fn spacetime_scalars(&self) -> Vec<(&'static str, S)> {
+        vec![("schwarzschild_mass", self.mass)]
+    }
+    fn to_cartesian(&self, x: Tensor<S, 2>) -> Tensor<S, 2> {
+        x
+    }
+    fn from_cartesian(&self, x: Tensor<S, 2>) -> Tensor<S, 2> {
+        x
+    }
+    fn lapse(&self, x: Tensor<S, 2>) -> S {
+        <SchwarzschildKSCylindrical<S> as Metric<S, 3>>::lapse(&self.full(), Self::lift(x))
+    }
+    fn lapse_sq(&self, x: Tensor<S, 2>) -> S {
+        <SchwarzschildKSCylindrical<S> as Metric<S, 3>>::lapse_sq(&self.full(), Self::lift(x))
+    }
+    fn shift(&self, x: Tensor<S, 2>) -> Tensor<S, 2> {
+        let b = <SchwarzschildKSCylindrical<S> as Metric<S, 3>>::shift(&self.full(), Self::lift(x));
+        Tensor::new([b[0], b[2]])
+    }
+    fn spatial_metric(&self, x: Tensor<S, 2>) -> Matrix<S, 2> {
+        let g = <SchwarzschildKSCylindrical<S> as Metric<S, 3>>::spatial_metric(&self.full(), Self::lift(x));
+        let slot = [0usize, 2];
+        Matrix::from_fn(|ii, jj| g[(slot[ii], slot[jj])])
+    }
+    fn spatial_metric_inv(&self, x: Tensor<S, 2>) -> Matrix<S, 2> {
+        let g = <SchwarzschildKSCylindrical<S> as Metric<S, 3>>::spatial_metric_inv(&self.full(), Self::lift(x));
+        let slot = [0usize, 2];
+        Matrix::from_fn(|ii, jj| g[(slot[ii], slot[jj])])
+    }
+    fn sqrt_det_gamma(&self, x: Tensor<S, 2>) -> S {
+        <SchwarzschildKSCylindrical<S> as Metric<S, 3>>::sqrt_det_gamma(&self.full(), Self::lift(x))
+    }
+    fn volume_factor(&self, x: Tensor<S, 2>) -> S {
+        self.sqrt_det_gamma(x)
+    }
+}
+
+impl<S: Scalar> Metric<S, 3> for SchwarzschildKSCylindricalRz<S> {
+    fn geometry(&self) -> Geometry {
+        Geometry::Cylindrical
+    }
+    fn spacetime(&self) -> Spacetime {
+        Spacetime::SchwarzschildKS
+    }
+    fn spacetime_scalars(&self) -> Vec<(&'static str, S)> {
+        vec![("schwarzschild_mass", self.mass)]
+    }
+    fn to_cartesian(&self, x: Tensor<S, 3>) -> Tensor<S, 3> {
+        <SchwarzschildKSCylindrical<S> as Metric<S, 3>>::to_cartesian(&self.full(), x)
+    }
+    fn from_cartesian(&self, x: Tensor<S, 3>) -> Tensor<S, 3> {
+        <SchwarzschildKSCylindrical<S> as Metric<S, 3>>::from_cartesian(&self.full(), x)
+    }
+    fn lapse(&self, x: Tensor<S, 3>) -> S {
+        <SchwarzschildKSCylindrical<S> as Metric<S, 3>>::lapse(&self.full(), x)
+    }
+    fn lapse_sq(&self, x: Tensor<S, 3>) -> S {
+        <SchwarzschildKSCylindrical<S> as Metric<S, 3>>::lapse_sq(&self.full(), x)
+    }
+    fn shift(&self, x: Tensor<S, 3>) -> Tensor<S, 3> {
+        <SchwarzschildKSCylindrical<S> as Metric<S, 3>>::shift(&self.full(), x)
+    }
+    fn spatial_metric(&self, x: Tensor<S, 3>) -> Matrix<S, 3> {
+        <SchwarzschildKSCylindrical<S> as Metric<S, 3>>::spatial_metric(&self.full(), x)
+    }
+    fn spatial_metric_inv(&self, x: Tensor<S, 3>) -> Matrix<S, 3> {
+        <SchwarzschildKSCylindrical<S> as Metric<S, 3>>::spatial_metric_inv(&self.full(), x)
+    }
+    fn sqrt_det_gamma(&self, x: Tensor<S, 3>) -> S {
+        <SchwarzschildKSCylindrical<S> as Metric<S, 3>>::sqrt_det_gamma(&self.full(), x)
+    }
+    fn volume_factor(&self, x: Tensor<S, 3>) -> S {
+        <SchwarzschildKSCylindrical<S> as Metric<S, 3>>::volume_factor(&self.full(), x)
+    }
+}
+
+// D = 1 has no meridional plane; provided fail-loud so generic kernel bounds resolve.
+impl<S: Scalar> Metric<S, 1> for SchwarzschildKSCylindricalRz<S> {
+    fn geometry(&self) -> Geometry {
+        Geometry::Cylindrical
+    }
+    fn spacetime(&self) -> Spacetime {
+        Spacetime::SchwarzschildKS
+    }
+    fn spacetime_scalars(&self) -> Vec<(&'static str, S)> {
+        vec![("schwarzschild_mass", self.mass)]
+    }
+    fn to_cartesian(&self, x: Tensor<S, 1>) -> Tensor<S, 1> {
+        x
+    }
+    fn from_cartesian(&self, x: Tensor<S, 1>) -> Tensor<S, 1> {
+        x
+    }
+    fn spatial_metric(&self, _x: Tensor<S, 1>) -> Matrix<S, 1> {
+        unreachable!("the meridional (R, z) plane is two-dimensional")
+    }
+    fn spatial_metric_inv(&self, _x: Tensor<S, 1>) -> Matrix<S, 1> {
+        unreachable!("the meridional (R, z) plane is two-dimensional")
+    }
+    fn sqrt_det_gamma(&self, _x: Tensor<S, 1>) -> S {
+        unreachable!("the meridional (R, z) plane is two-dimensional")
+    }
+    fn volume_factor(&self, _x: Tensor<S, 1>) -> S {
+        unreachable!("the meridional (R, z) plane is two-dimensional")
+    }
+}
+
 /// spinning Kerr in ingoing kerr-schild coordinates (horizon-penetrating, spherical (r, theta,
 /// phi)). Sigma = r^2 + a^2 cos^2(theta), b = 2 M r / Sigma:
 ///
