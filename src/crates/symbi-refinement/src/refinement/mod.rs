@@ -34,7 +34,7 @@ pub use emf_register::EmfRegister;
 pub use equilibrium::EquilibriumFlux;
 pub use flux_register::{FaceRole, FluxRegister};
 pub use hierarchy::{
-    FineSubgrid, Hierarchy, LevelData, RefinementRegion, evolve_hierarchy_decomposed, fine_subgrid,
+    FineSubgrid, Hierarchy, LevelData, RefinementRegion, evolve_hierarchy_decomposed, fine_subgrid, fine_subgrid_of_level,
     gather_decomposed_hierarchy_tracers, seed_decomposed_fine_from_coarse,
     seed_decomposed_hierarchy_tracers,
 };

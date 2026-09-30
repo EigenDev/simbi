@@ -6,8 +6,11 @@
 # - ppm with the convergence-gated flattening (quartic prolongation), shown to
 #   differ from plm;
 # - a passive scalar seeded non-uniformly, shown to be carried.
+# - a second nested refinement level spanning the cut, fresh and resumed from a
+#   checkpoint written on the tiles halfway, every level included.
 # a census, which the tiled drivers do not reduce across tiles, is refused by
-# name on host tiles and through `simbi launch` rather than left unrecorded.
+# name on host tiles and through `simbi launch` rather than left unrecorded, and
+# so are immersed bodies with nested levels on host tiles.
 #
 # run: pytest -m simulation simbi/simulation/tests/test_refined_decomposed_numerics.py
 # =============================================================================
@@ -23,6 +26,7 @@ import pytest
 import simbi.expression as expr
 from simbi.simulation import runner
 from simbi.simulation.tests.test_launch import _layout
+from simbi.types.bodies import BodyCapability, GravitationalProperties, ImmersedBodyConfig
 from simbi_configs.examples.newtonian.refined_blast import RefinedBlast
 
 pytestmark = pytest.mark.simulation
@@ -54,8 +58,8 @@ class CensusedRefinedBlast(RefinedBlast):
         return [_census()]
 
 
-def _run(cls, out: Path, gpus: int, **kwargs) -> Path:
-    runner.run(cls(resolution=RESOLUTION, gpus=gpus, data_directory=out, **kwargs), compute_mode="cpu", max_steps=STEPS)
+def _run(cls, out: Path, gpus: int, steps: int = STEPS, **kwargs) -> Path:
+    runner.run(cls(resolution=RESOLUTION, gpus=gpus, data_directory=out, **kwargs), compute_mode="cpu", max_steps=steps)
     files = sorted(out.glob("*final*.h5"))
     assert len(files) == 1, f"expected one final checkpoint in {out}, found {files}"
     return files[0]
@@ -121,3 +125,45 @@ def test_a_census_through_launch_is_refused_by_name(tmp_path: Path) -> None:
     done = subprocess.run(cmd, capture_output=True, text=True, timeout=600, env=env)
     assert done.returncode != 0, f"the launch succeeded:\n{done.stdout}"
     assert "a census is outside the distributed first release" in " ".join(done.stderr.split()), done.stderr
+
+
+# the second region spans the cut at x = 0 that two tiles place, with no face on it
+NESTED = dict(refinement_max_levels=3, refinement_regions=[[-0.25, 0.25, -0.25, 0.25], [-0.125, 0.125, -0.125, 0.125]], refinement_ratios=[2, 2])
+
+
+class GravitatingRefinedBlast(RefinedBlast):
+    @property
+    def immersed_bodies(self):
+        return [ImmersedBodyConfig(capability=BodyCapability.GRAVITATIONAL, mass=0.1, radius=0.0, position=(0.0, 0.0, 0.0),
+                                   velocity=(0.0, 0.0, 0.0), gravitational=GravitationalProperties(softening_length=0.05))]
+
+
+def _level_2_written(path: Path) -> None:
+    with h5py.File(path, "r") as f:
+        assert "level_2" in f, f"{path.name} holds no second refined level"
+
+
+def test_a_second_nested_level_on_two_refined_tiles_matches_the_single_hierarchy(tmp_path: Path, host_tiles) -> None:
+    single = _run(RefinedBlast, tmp_path / "single", 1, **NESTED)
+    _level_2_written(single)
+    tiles = _run(RefinedBlast, tmp_path / "tiles", 2, **NESTED)
+    _level_2_written(tiles)
+    _assert_same(tiles, single, "two refined tiles, three levels")
+
+
+def test_a_second_nested_level_resumed_on_two_refined_tiles_matches_the_uninterrupted_run(tmp_path: Path, host_tiles) -> None:
+    single = _run(RefinedBlast, tmp_path / "single", 1, **NESTED)
+    partial = _run(RefinedBlast, tmp_path / "first", 2, steps=1, **NESTED)
+    _level_2_written(partial)
+    with h5py.File(partial, "r") as f:
+        written_at = int(f["level_0"].attrs["iteration"])
+    assert 0 < written_at < STEPS
+    # the tiled driver counts its step budget from the checkpoint it resumes
+    resumed = _run(RefinedBlast, tmp_path / "resumed", 2, steps=STEPS - written_at, checkpoint_file=str(partial), **NESTED)
+    _assert_same(resumed, single, "two refined tiles, three levels, resumed")
+
+
+def test_immersed_bodies_with_nested_levels_on_host_tiles_are_refused_by_name(tmp_path: Path, host_tiles) -> None:
+    with pytest.raises(Exception, match="immersed bodies with 3 nested refinement levels and gpus > 1"):
+        _run(GravitatingRefinedBlast, tmp_path / "tiles", 2, **NESTED)
+    assert not list((tmp_path / "tiles").glob("*final*.h5")), "a refused run published a final checkpoint"

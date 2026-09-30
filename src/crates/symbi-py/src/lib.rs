@@ -3564,13 +3564,17 @@ fn clip_regions_to_tile<const D: usize>(
             .map(|i| maps[a].face(i as isize + 1) - maps[a].face(i as isize))
             .fold(f64::INFINITY, f64::min)
     });
+    // region k refines level k, whose cells are 2^-k of the root's: a tile keeps the regions down
+    // to the first one it holds no cell of, so its levels are the run's first levels in order
     let mut out = Vec::new();
-    for r in regions {
+    for (k, r) in regions.iter().enumerate() {
         let lo: [f64; D] = std::array::from_fn(|a| r.x_lo[a].max(origin[a]));
         let up: [f64; D] = std::array::from_fn(|a| r.x_hi[a].min(hi[a]));
-        if (0..D).all(|a| up[a] - lo[a] > 0.5 * min_w[a]) {
-            out.push((RefinementRegion { x_lo: lo, x_hi: up }, *r));
+        let level_w = 0.5f64.powi(k as i32);
+        if !(0..D).all(|a| up[a] - lo[a] > 0.5 * min_w[a] * level_w) {
+            break;
         }
+        out.push((RefinementRegion { x_lo: lo, x_hi: up }, *r));
     }
     out
 }
@@ -5877,14 +5881,12 @@ fn tile_offsets<const D: usize>(partition: &Partition<D>) -> Vec<[isize; D]> {
         .collect()
 }
 
-/// the multi-gpu (gpus>1) refined path: decompose a 2-level static-refinement hierarchy. each tile
-/// is a per-tile `Hierarchy` (its root slab + the global refinement region clipped to that slab, or
-/// single-level where the region misses it); `evolve_hierarchy_decomposed` drives them in lockstep
-/// (root + first-fine-level halo exchange), reproducing the monolithic hierarchy to round-off.
-/// for output, gather each level into the global hierarchy -- the
-/// root over `counts`, the fine over the `fine_subgrid` sub-grid (a decomposition of the global
-/// fine level) -- and write all its levels through the existing multi-level checkpoint writer.
-/// exactly one refined region is carried (the lib driver decomposes the root + first fine level).
+/// the multi-gpu (gpus>1) refined path: decompose a nested static-refinement hierarchy. each tile
+/// is a per-tile `Hierarchy` (its root slab + the global refinement regions clipped to that slab,
+/// down to the first region it misses); `evolve_hierarchy_decomposed` drives them in lockstep with
+/// a halo exchange on every level, reproducing the single hierarchy bit for bit. for output, each
+/// level is written from the sub-grid of the tiles carrying it (a decomposition of the global
+/// level) through the partitioned multi-level checkpoint writer.
 fn run_refined_decomposed_loop<R, const D: usize, const DOF: usize, M, E, S, Mem, K>(
     cfg: &Config,
     mut tiles: Vec<Hierarchy<R, D, DOF, M, E, S, Mem, K>>,
@@ -5901,9 +5903,7 @@ where
     K: KernelSet<D, DOF, Mem, f64>,
 {
     use symbi::sim::decomp::enable_peer_mesh;
-    use symbi::sim::refinement::{
-        evolve_hierarchy_decomposed, fine_subgrid,
-    };
+    use symbi::sim::refinement::{evolve_hierarchy_decomposed, fine_subgrid_of_level};
     use symbi_sim::checkpoint::{
         LevelTiles, PhysicsIdentity, TileView, load_partitioned_level, write_partitioned_checkpoint,
     };
@@ -5967,44 +5967,49 @@ where
     };
     let cp_width = checkpoint_time_width(cfg);
 
-    // the fine sub-grid (which tiles carry a fine level + their order/counts) for the fine gather.
-    let fg = fine_subgrid(&tiles, counts, &devices);
-    reporter.milestone(&format!(
-        "refinement: {} of {ntiles} tiles carry a fine level",
-        fg.as_ref().map_or(0, |f| f.order.len())
-    ));
-    // the fine level's global grid and each fine tile's offset on it: a tile's fine interior
-    // starts at twice its root offset plus its own fine interior origin (the refinement ratio
-    // is two), and the grid spans the refined tiles' fine interiors with the root's origin at
-    // half the root spacing.
-    let fine = fg.as_ref().map(|fg| {
-        let fine_offset = |i: usize| -> [isize; D] {
-            let f = &tiles[i].levels[1].state.geom.interior;
-            std::array::from_fn(|ax| root_offsets[i][ax] * 2 + f.spaces[ax].lo)
-        };
-        let offsets: Vec<[isize; D]> = fg.order.iter().map(|&i| fine_offset(i)).collect();
-        let cells: [usize; D] = std::array::from_fn(|ax| {
-            (0..fg.counts[ax])
-                .map(|k| {
-                    let mut rc = [0usize; D];
-                    rc[ax] = k;
-                    let i = fg.order[symbi::sim::decomp::flatten(rc, fg.counts)];
-                    tiles[i].levels[1].state.geom.interior.spaces[ax].size()
+    // per refined level: the sub-grid of the tiles carrying it, each tile's offset on the level's
+    // global grid, and that grid. a tile's level-l interior starts at 2^l times its root offset
+    // plus its own level-l interior origin (every refinement ratio is two), and the grid spans the
+    // tiles' level-l interiors with the root's origin at 2^-l of the root spacing.
+    let depth = tiles.iter().map(|h| h.levels.len()).max().unwrap_or(1);
+    let fine: Vec<(symbi::sim::refinement::FineSubgrid<D>, Vec<[isize; D]>, symbi_sim::checkpoint::GlobalGrid<D>)> = (1..depth)
+        .map(|level| {
+            let fg = fine_subgrid_of_level(&tiles, counts, &devices, level)
+                .expect("the tiles carrying a level of the run");
+            let offsets: Vec<[isize; D]> = fg
+                .order
+                .iter()
+                .map(|&i| {
+                    let f = &tiles[i].levels[level].state.geom.interior;
+                    std::array::from_fn(|ax| (root_offsets[i][ax] << level) + f.spaces[ax].lo)
                 })
-                .sum()
-        });
-        let interior_lo: [isize; D] =
-            std::array::from_fn(|ax| offsets.iter().map(|o| o[ax]).min().unwrap_or(0));
-        let grid = symbi_sim::checkpoint::GlobalGrid {
-            cells,
-            interior_lo,
-            ng: tiles[fg.order[0]].levels[1].state.geom.ng,
-            x_lo: root_grid.x_lo,
-            dx: std::array::from_fn(|ax| root_grid.dx[ax] / 2.0),
-            maps: None,
-        };
-        (offsets, grid)
-    });
+                .collect();
+            let cells: [usize; D] = std::array::from_fn(|ax| {
+                (0..fg.counts[ax])
+                    .map(|k| {
+                        let mut rc = [0usize; D];
+                        rc[ax] = k;
+                        let i = fg.order[symbi::sim::decomp::flatten(rc, fg.counts)];
+                        tiles[i].levels[level].state.geom.interior.spaces[ax].size()
+                    })
+                    .sum()
+            });
+            let interior_lo: [isize; D] = std::array::from_fn(|ax| offsets.iter().map(|o| o[ax]).min().unwrap_or(0));
+            let grid = symbi_sim::checkpoint::GlobalGrid {
+                cells,
+                interior_lo,
+                ng: tiles[fg.order[0]].levels[level].state.geom.ng,
+                x_lo: root_grid.x_lo,
+                dx: std::array::from_fn(|ax| root_grid.dx[ax] / (1u64 << level) as f64),
+                maps: None,
+            };
+            (fg, offsets, grid)
+        })
+        .collect();
+    reporter.milestone(&format!(
+        "refinement: {} of {ntiles} tiles carry a fine level, {depth} levels",
+        fine.first().map_or(0, |(fg, _, _)| fg.order.len())
+    ));
     // a restart reads every level of every tile from the checkpoint's global grids.
     if let Some(path) = cfg.restart_path.as_deref() {
         let stored = symbi_sim::checkpoint::checkpoint_level_count(path).map_err(|e| format!("{e}"))?;
@@ -6012,16 +6017,16 @@ where
             load_partitioned_level(&mut tile.levels[0].state, path, 0, root_offsets[i], &root_grid)
                 .map_err(|e| format!("restart of tile {i} root from '{path}': {e}"))?;
         }
-        if let Some((offsets, grid)) = fine.as_ref() {
-            if stored < 2 {
-                return Err(format!(
-                    "restart from '{path}': the checkpoint holds one level, this run refines; a \
-                     refined decomposed run resumes from a refined checkpoint"
-                ));
-            }
-            for (k, &i) in fg.as_ref().unwrap().order.iter().enumerate() {
-                load_partitioned_level(&mut tiles[i].levels[1].state, path, 1, offsets[k], grid)
-                    .map_err(|e| format!("restart of tile {i} fine level from '{path}': {e}"))?;
+        if stored < depth {
+            return Err(format!(
+                "restart from '{path}': the checkpoint holds {stored} level(s), this run refines to \
+                 {depth}; a refined decomposed run resumes from a checkpoint of its own depth"
+            ));
+        }
+        for (level, (fg, offsets, grid)) in fine.iter().enumerate().map(|(k, f)| (k + 1, f)) {
+            for (k, &i) in fg.order.iter().enumerate() {
+                load_partitioned_level(&mut tiles[i].levels[level].state, path, level, offsets[k], grid)
+                    .map_err(|e| format!("restart of tile {i} level {level} from '{path}': {e}"))?;
             }
         }
     }
@@ -6039,13 +6044,13 @@ where
             grid: root_grid.clone(),
             header: None,
         }];
-        if let (Some(fg), Some((offsets, grid))) = (fg.as_ref(), fine.as_ref()) {
+        for (level, (fg, offsets, grid)) in fine.iter().enumerate().map(|(k, f)| (k + 1, f)) {
             levels.push(LevelTiles {
                 tiles: fg
                     .order
                     .iter()
                     .zip(offsets)
-                    .map(|(&i, &offset)| TileView { state: &tiles[i].levels[1].state.store, offset })
+                    .map(|(&i, &offset)| TileView { state: &tiles[i].levels[level].state.store, offset })
                     .collect(),
                 grid: grid.clone(),
                 header: None,
@@ -6140,16 +6145,15 @@ where
 }
 
 /// the multi-gpu (gpus>1) refined hydro path: per-tile static-refinement hierarchies driven by the
-/// `evolve_hierarchy_decomposed` (root + first-fine-level halo exchange).
-/// each tile builds its root slab + the global refinement region clipped to that slab (single-level
-/// where the region misses it); a patch that spans a cut is split into the abutting tiles and the
-/// fine halos are exchanged at the cut. output gathers each level into the global hierarchy (root
-/// over `counts`, fine over the fine sub-grid) and writes the multi-level checkpoint. hydro + a
-/// single refined region, carrying immersed bodies (with shapes), user sources, and driven
-/// boundaries -- each attached per tile and evolved in lockstep, matching the monolithic
-/// hierarchy to round-off. mass-transport tracers use global owners and
-/// migrate complete records across cuts. mesh motion, the passive scalar, and bonded fragments are
-/// not carried here.
+/// `evolve_hierarchy_decomposed` (a halo exchange on every level).
+/// each tile builds its root slab + the global refinement regions clipped to that slab (down to the
+/// first region it misses); a patch that spans a cut is split into the abutting tiles and the
+/// halos of every refined level are exchanged at the cut. output writes each level from the tiles
+/// carrying it through the multi-level checkpoint writer. hydro with nested refined regions,
+/// carrying user sources and driven boundaries, and immersed bodies (with shapes) under one
+/// refined region -- each attached per tile and evolved in lockstep, matching the single
+/// hierarchy bit for bit. mass-transport tracers use global owners and migrate complete records
+/// across cuts. mesh motion and bonded fragments are carried by the single hierarchy alone.
 macro_rules! build_and_run_hydro_decomposed_refined {
     ($cfg:expr, $prims:expr, $regime:expr, $regime_ty:ty, $d:literal, $geom:expr, $geom_ty:ty) => {{
         use symbi::sim::decomp::unflatten;
@@ -6185,6 +6189,16 @@ macro_rules! build_and_run_hydro_decomposed_refined {
         let solver = cfg.solver;
         let prolong = prolong_order_for(&cfg.reconstruction_name);
         let regions = refinement_regions_nd::<$d>(&cfg.refinement_regions)?;
+        // immersed bodies give each tile's own finest level the full bodies; a tile holding fewer
+        // levels than the run would couple them on a level the single hierarchy leaves to proxies
+        if regions.len() > 1 && !cfg.bodies.is_empty() {
+            return Err(format!(
+                "immersed bodies with {} nested refinement levels and gpus > 1: a tile holding fewer \
+                 levels than the run would couple the bodies on a coarser level than the single \
+                 hierarchy; run on one device or keep one refinement region",
+                regions.len() + 1
+            ));
+        }
 
         // build N per-tile hierarchies (root slab + the clipped region, or single-level).
         let mut tiles: Vec<Hier> = Vec::with_capacity(ntiles);

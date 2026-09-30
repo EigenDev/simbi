@@ -323,6 +323,10 @@ where
     /// set while the coupled root step drives the ideal-MHD hierarchy operator: the material drain
     /// belongs to the split operator D outside that operator, so no level tail penalizes.
     drain_suppressed: bool,
+    /// the number of levels the whole run carries, when this hierarchy is one tile of a
+    /// decomposed run and holds fewer: the finest-level physics (viscous transport, the horizon
+    /// ledger, the surface stack) belongs to the run's finest level, which such a tile lacks.
+    run_levels: Option<usize>,
     /// flux_registers[ll] corrects the interface between level ll and ll+1.
     pub flux_registers: Vec<FluxRegister<NDIM, DOF, Mem>>,
     /// emf_registers[ll] corrects the coarse bface at the same interface (mhd
@@ -986,6 +990,16 @@ where
     pub fn seed_fine_from_coarse(&self) -> symbi_xpu::Result<usize> {
         let mut reseeded = 0usize;
         for ll in 1..self.levels.len() {
+            reseeded += self.seed_level_from_parent(ll)?;
+        }
+        Ok(reseeded)
+    }
+
+    /// seed level `ll` from level `ll - 1` and audit it, as [`Self::seed_fine_from_coarse`] does
+    /// for every level in turn; returns the count of cells re-seeded by parent injection.
+    pub fn seed_level_from_parent(&self, ll: usize) -> symbi_xpu::Result<usize> {
+        let mut reseeded = 0usize;
+        {
             let (lo, hi) = self.levels.split_at(ll);
             let coarse = &lo[ll - 1].state;
             let fine = &hi[0].state;
@@ -1119,6 +1133,7 @@ where
             injection_ledger: std::collections::BTreeMap::new(),
             prolong_order: ProlongOrder::Plm,
             drain_suppressed: false,
+            run_levels: None,
             flux_registers: Vec::new(),
             emf_registers: Vec::new(),
             tracer_interfaces: Vec::new(),
@@ -1379,6 +1394,35 @@ where
                     }
                 }
                 contributing = real_on_cut;
+            } else {
+                // a deeper patch face on a cut of its parent level: the parent cell its reflux
+                // corrects is on the neighbor tile, and register contributions cross root cuts
+                // alone
+                let parent_cuts = levels.last().unwrap().cut_sides;
+                let level = levels.len();
+                for ax in 0..NDIM {
+                    let whole_face = &whole_coverages.last().unwrap().spaces[ax];
+                    let on_cut = (coverage.spaces[ax].lo == parent.geom.interior.spaces[ax].lo
+                        && whole_face.lo == coverage.spaces[ax].lo
+                        && parent_cuts[ax][0])
+                        || (coverage.spaces[ax].hi == parent.geom.interior.spaces[ax].hi
+                            && whole_face.hi == coverage.spaces[ax].hi
+                            && parent_cuts[ax][1]);
+                    if on_cut {
+                        return Err(symbi_xpu::XpuError {
+                            operation: "refinement region",
+                            code: 0,
+                            detail: format!(
+                                "a level-{level} refinement patch face on axis {ax} lies on a decomposition \
+                                 cut: the level-{} cell its reflux corrects is on the neighbor tile, and \
+                                 register contributions cross root cuts alone; move the cut or the patch \
+                                 face by at least one cell of level {}",
+                                level - 1,
+                                level - 1
+                            ),
+                        });
+                    }
+                }
             }
             // fine ghost depth: one above the root's (the prolongation stencil
             // is one order above the evolution reconstruction).
@@ -1564,6 +1608,7 @@ where
             injection_ledger: std::collections::BTreeMap::new(),
             prolong_order,
             drain_suppressed: false,
+            run_levels: None,
             flux_registers,
             emf_registers,
             tracer_interfaces,
@@ -3251,12 +3296,39 @@ where
     }
 
 
-    /// step epilogue: emf bookkeeping (mhd) + the finer-level subcycle + restrict + reflux + the
-    /// level clock. pure extraction from `advance_level`. for the decomposed root the driver calls
-    /// this after the (exchanged) root stages; the fine subcycle here is tile-local (the patch lives
-    /// inside one tile), so it reuses the recursive `advance_level` on the finer level unchanged.
+    /// step epilogue: the tail ahead of the finer subcycle, the recursive subcycle of the finer
+    /// level with its restriction and reflux into this one, and the tail after it.
     pub fn level_step_tail(&mut self, level: usize, dt: f64, alpha0: f64) -> bool {
-        let has_finer = level + 1 < self.levels.len();
+        self.level_tail_pre(level, dt);
+        if level + 1 < self.levels.len() {
+            if self.level_subcycle(level, dt) {
+                return true;
+            }
+            self.level_restrict_reflux(level, alpha0);
+            phase_probe::sample("restrict", level, &self.levels[level].state);
+        }
+        self.level_tail_post(level, dt);
+        false
+    }
+
+    /// the number of levels of the run this hierarchy belongs to: its own, or the whole run's
+    /// when it is one tile of a decomposed run.
+    pub fn run_levels(&self) -> usize {
+        self.run_levels.unwrap_or(self.levels.len())
+    }
+
+    /// mark this tile as one of a decomposed run of `levels` levels.
+    pub fn set_run_levels(&mut self, levels: usize) {
+        assert!(levels >= self.levels.len(), "a tile holds {} levels of a {levels}-level run", self.levels.len());
+        self.run_levels = Some(levels);
+    }
+
+    /// the step tail ahead of the finer subcycle: boundary tracer injection, emf bookkeeping, the
+    /// post-step (viscous transport on the run's finest level), excision, the horizon ledger and
+    /// the surface stack on the run's finest level, rigid walls on every level, and the Ito
+    /// coefficients of the continuous tracers.
+    pub fn level_tail_pre(&mut self, level: usize, dt: f64) {
+        let has_finer = level + 1 < self.run_levels();
         if self.levels[level].state.has_tracers() {
             let ledger = std::mem::take(&mut self.injection_ledger);
             let layout = self.tracer_layout(level);
@@ -3375,22 +3447,19 @@ where
         if self.levels[level].state.continuous_tracers.is_some() {
             self.prepare_level_ito_coefficients(level);
         }
-        if has_finer {
-            if self.level_subcycle(level, dt) {
-                return true;
-            }
-            self.level_restrict_reflux(level, alpha0);
-            phase_probe::sample("restrict", level, &self.levels[level].state);
-        }
+    }
+
+    /// the step tail after the finer subcycle and its restriction: continuous tracer transport,
+    /// the per-level censuses and the level clock.
+    pub fn level_tail_post(&mut self, level: usize, dt: f64) {
         if self.levels[level].state.continuous_tracers.is_some() {
             self.advance_level_continuous_tracers(level, dt);
         }
         self.sample_per_level_censuses(level);
         self.level_clock(level, dt);
-        if !has_finer {
+        if level + 1 == self.run_levels() {
             phase_probe::sample("tail", level, &self.levels[level].state);
         }
-        false
     }
 
     /// record a per-level census sample from this level's own accepted subcycle step.
@@ -4800,7 +4869,7 @@ where
 // decomposed hierarchy driver (refinement x decomposition)
 // =============================================================================
 
-/// the sub-grid of tiles that carry the first fine level. with one refined box per level the
+/// the sub-grid of tiles that carry one refined level. with one refined box per level the
 /// refined tiles form a contiguous rectangle; `order[k]` is the tile index at fine-flatten position
 /// `k`, and `devices[k]`/`counts` give that sub-grid's device map + shape for `exchange_grid`. when
 /// the patch is tile-local the sub-grid is 1x1, so the fine exchange is a no-op; when
@@ -4811,10 +4880,8 @@ pub struct FineSubgrid<const NDIM: usize> {
     pub devices: Vec<i32>,
 }
 
-/// derive the first-fine-level sub-grid from which tiles carry a fine level. None if no tile is
-/// refined. asserts the refined tiles fill a rectangle (the single-box invariant). pub so the
-/// seed every tile's fine levels from its coarse level, decomposition-aware: the root
-/// conserved cut halos are exchanged first, then each tile prolongs.
+/// seed every tile's refined levels from their parents, decomposition-aware: level by level, the
+/// parent level's conserved cut halos are exchanged first, then each tile prolongs.
 ///
 /// a refined patch spanning a cut needs this exchange on top of the per-tile
 /// [`Hierarchy::seed_fine_from_coarse`]: the seed prolongs conserved components, its stencil at
@@ -4851,23 +4918,32 @@ where
     K: KernelSet<NDIM, DOF, Mem, f64>,
     T: HaloTransport,
 {
-    drain_devices::<Mem>(devices);
-    {
-        let states: Vec<&FieldStore<NDIM, DOF, Mem, f64>> =
-            tiles.iter().map(|t| &*t.levels[0].state).collect();
-        let schedule = schedule_of_tiles(&states, counts, &Topology::open());
-        symbi_sim::decomp::exchange_grid_cons(&states, &schedule, devices, transport);
-    }
+    let depth = tiles.iter().map(|t| t.levels.len()).max().unwrap_or(1);
     let mut reseeded = 0usize;
-    for (i, t) in tiles.iter().enumerate() {
-        if t.levels.len() > 1 {
-            reseeded += symbi_xpu::with_device(devices[i], || t.seed_fine_from_coarse())?;
+    for level in 1..depth {
+        // the parent level's conserved cut halos, over the tiles carrying it
+        let parents: Vec<usize> = (0..tiles.len()).filter(|&i| tiles[i].levels.len() >= level).collect();
+        let Some(grid) = fine_subgrid_of_level(tiles, counts, devices, level - 1) else { break };
+        debug_assert_eq!(grid.order.len(), parents.len());
+        drain_devices::<Mem>(&grid.devices);
+        {
+            let states: Vec<&FieldStore<NDIM, DOF, Mem, f64>> =
+                grid.order.iter().map(|&i| &*tiles[i].levels[level - 1].state).collect();
+            let schedule = schedule_of_tiles(&states, grid.counts, &Topology::open());
+            symbi_sim::decomp::exchange_grid_cons(&states, &schedule, &grid.devices, transport);
+        }
+        for (k, &i) in grid.order.iter().enumerate() {
+            if tiles[i].levels.len() > level {
+                reseeded += symbi_xpu::with_device(grid.devices[k], || tiles[i].seed_level_from_parent(level))?;
+            }
         }
     }
     Ok(reseeded)
 }
 
-/// python decomposed-refinement loop can gather the fine level with the same tile order + counts.
+/// the sub-grid of the tiles carrying the first refined level; None if no tile is refined.
+/// asserts the refined tiles fill a rectangle (the single-box invariant). pub so the python
+/// decomposed-refinement loop can gather a level with the same tile order + counts.
 pub fn fine_subgrid<R, const NDIM: usize, const DOF: usize, M, E, S, Mem, K>(
     tiles: &[Hierarchy<R, NDIM, DOF, M, E, S, Mem, K>],
     counts: [usize; NDIM],
@@ -4881,8 +4957,26 @@ where
     Mem: MemorySpace,
     K: KernelSet<NDIM, DOF, Mem, f64>,
 {
+    fine_subgrid_of_level(tiles, counts, devices, 1)
+}
+
+/// the sub-grid of the tiles carrying refined level `level`; None if no tile carries it
+pub fn fine_subgrid_of_level<R, const NDIM: usize, const DOF: usize, M, E, S, Mem, K>(
+    tiles: &[Hierarchy<R, NDIM, DOF, M, E, S, Mem, K>],
+    counts: [usize; NDIM],
+    devices: &[i32],
+    level: usize,
+) -> Option<FineSubgrid<NDIM>>
+where
+    R: Regime<f64, NDIM>,
+    M: Metric<f64, NDIM> + Copy,
+    E: symbi_hydro::eos::EosFor<f64, <R as Regime<f64, NDIM>>::Energy>,
+    S: ExecutionSpace,
+    Mem: MemorySpace,
+    K: KernelSet<NDIM, DOF, Mem, f64>,
+{
     let refined: Vec<usize> = (0..tiles.len())
-        .filter(|&i| tiles[i].levels.len() > 1)
+        .filter(|&i| tiles[i].levels.len() > level)
         .collect();
     if refined.is_empty() {
         return None;
@@ -5315,9 +5409,17 @@ where
     };
     let root_order: Vec<usize> = (0..n).collect();
     let nstages = tiles[0].levels[0].state.timestepping.stages().len();
-    let fine = match decomp {
-        Some((devices, counts, _)) => fine_subgrid(tiles, counts, devices),
-        None => None,
+    // the sub-grid of every refined level; each tile learns the run's depth, since the finest
+    // level's physics belongs to the run's finest level whichever levels the tile holds
+    let fine: Vec<FineSubgrid<NDIM>> = match decomp {
+        Some((devices, counts, _)) => {
+            let depth = tiles.iter().map(|h| h.levels.len()).max().unwrap_or(1);
+            for h in tiles.iter_mut() {
+                h.set_run_levels(depth);
+            }
+            (1..depth).map_while(|level| fine_subgrid_of_level(tiles, counts, devices, level)).collect()
+        }
+        None => Vec::new(),
     };
     // cut halos current before the first flux.
     if let Some((devices, counts, transport)) = decomp {
@@ -5442,6 +5544,90 @@ where
     run_diagnostics()
 }
 
+/// the subcycle of level `parent + 1` across its tiles within one step `dt` of `parent`: ratio
+/// substeps, each prolonging the coarse-fine ghosts from the parent at the substep's time
+/// fraction, then the stages with the troubled marks and the halos crossing the cuts, the tail
+/// ahead of the finer subcycle, the subcycle of the next level with its restriction and reflux
+/// into this one, and the tail after it. `fine[k]` is the sub-grid of the tiles carrying level
+/// `k + 1`. returns whether some tile rejected the step.
+#[allow(clippy::too_many_arguments)]
+fn decomposed_subcycle<R, const NDIM: usize, const DOF: usize, M, E, S, Mem, K, T>(
+    tiles: &mut [Hierarchy<R, NDIM, DOF, M, E, S, Mem, K>],
+    parent: usize,
+    fine: &[FineSubgrid<NDIM>],
+    transport: &T,
+    nstages: usize,
+    dt: f64,
+) -> bool
+where
+    R: Regime<f64, NDIM> + Copy,
+    M: Metric<f64, NDIM> + Copy + Send + Sync,
+    E: symbi_hydro::eos::EosFor<f64, <R as Regime<f64, NDIM>>::Energy> + Copy + Send + Sync,
+    S: ExecutionSpace,
+    Mem: MemorySpace + Sync,
+    K: KernelSet<NDIM, DOF, Mem, f64>,
+    T: HaloTransport,
+{
+    let level = parent + 1;
+    let fg = &fine[parent];
+    let fine_dt = dt / RATIO as f64;
+    for sub in 0..RATIO {
+        let alpha = sub as f64 / RATIO as f64;
+        for (k, &i) in fg.order.iter().enumerate() {
+            symbi_xpu::with_device(fg.devices[k], || {
+                tiles[i].prolong_cf(level, alpha);
+                tiles[i].levels[level].kernels.ghost_fill(&tiles[i].levels[level].state);
+            });
+        }
+        // the cut halos filled before the flux reads them
+        exchange_level_halos(tiles, level, &fg.order, fg.counts, &fg.devices, transport);
+        for &i in &fg.order {
+            phase_probe::set_tile(i);
+            phase_probe::sample("prolong", level, &tiles[i].levels[level].state);
+        }
+        for (k, &i) in fg.order.iter().enumerate() {
+            symbi_xpu::with_device(fg.devices[k], || tiles[i].level_step_begin(level, fine_dt));
+            phase_probe::set_tile(i);
+            phase_probe::sample("begin", level, &tiles[i].levels[level].state);
+        }
+        for jj in 0..nstages {
+            if decomposed_level_stage(tiles, level, &fg.order, fg.counts, &fg.devices, transport, jj, fine_dt, alpha) {
+                return true;
+            }
+            migrate_level_tracers(tiles, level);
+            exchange_level_halos(tiles, level, &fg.order, fg.counts, &fg.devices, transport);
+            for &i in &fg.order {
+                phase_probe::set_tile(i);
+                phase_probe::sample(phase_probe::STAGE[jj], level, &tiles[i].levels[level].state);
+            }
+        }
+        spawn_decomposed_injections(tiles, &fg.order, level);
+        for (k, &i) in fg.order.iter().enumerate() {
+            phase_probe::set_tile(i);
+            symbi_xpu::with_device(fg.devices[k], || tiles[i].level_tail_pre(level, fine_dt));
+        }
+        if let Some(finer) = fine.get(level) {
+            if decomposed_subcycle(tiles, level, fine, transport, nstages, fine_dt) {
+                return true;
+            }
+            for (k, &i) in finer.order.iter().enumerate() {
+                phase_probe::set_tile(i);
+                symbi_xpu::with_device(finer.devices[k], || tiles[i].level_restrict_reflux(level, alpha));
+            }
+            exchange_level_halos(tiles, level, &fg.order, fg.counts, &fg.devices, transport);
+            for &i in &finer.order {
+                phase_probe::set_tile(i);
+                phase_probe::sample("restrict", level, &tiles[i].levels[level].state);
+            }
+        }
+        for (k, &i) in fg.order.iter().enumerate() {
+            phase_probe::set_tile(i);
+            symbi_xpu::with_device(fg.devices[k], || tiles[i].level_tail_post(level, fine_dt));
+        }
+    }
+    false
+}
+
 /// one collective root step of the decomposed march at an agreed timestep: every tile
 /// snapshots its retry state, the root stages advance in lockstep with a halo exchange
 /// between each, the fine subcycle runs with its own exchanges, and a rejection anywhere
@@ -5453,7 +5639,7 @@ fn decomposed_root_attempt<R, const NDIM: usize, const DOF: usize, M, E, S, Mem,
     counts: [usize; NDIM],
     devices: &[i32],
     transport: &T,
-    fine: &Option<FineSubgrid<NDIM>>,
+    fine: &[FineSubgrid<NDIM>],
     root_order: &[usize],
     nstages: usize,
     retry_sidecars: &[HierarchyRetrySidecars<NDIM>],
@@ -5535,75 +5721,12 @@ where
                         }
                     });
                 }
-                // the fine subcycle, decomposed across the refined tiles: ratio substeps, each fine substep
-                // driven stage-by-stage with a fine halo exchange (a no-op for a tile-local 1x1 sub-grid).
-                if let Some(fg) = &fine {
-                    let fine_dt = gdt / RATIO as f64;
-                    'fine_subcycle: for sub in 0..RATIO {
-                        let alpha = sub as f64 / RATIO as f64;
-                        for (k, &i) in fg.order.iter().enumerate() {
-                            symbi_xpu::with_device(fg.devices[k], || {
-                                tiles[i].prolong_cf(1, alpha);
-                                tiles[i].levels[1]
-                                    .kernels
-                                    .ghost_fill(&tiles[i].levels[1].state);
-                            });
-                        }
-                        // fill the fine cut halo before the fine flux reads it.
-                        exchange_level_halos(
-                            tiles,
-                            1,
-                            &fg.order,
-                            fg.counts,
-                            &fg.devices,
-                            transport,
-                        );
-                        for &i in &fg.order {
-                            phase_probe::set_tile(i);
-                            phase_probe::sample("prolong", 1, &tiles[i].levels[1].state);
-                        }
-                        for (k, &i) in fg.order.iter().enumerate() {
-                            symbi_xpu::with_device(fg.devices[k], || {
-                                tiles[i].level_step_begin(1, fine_dt)
-                            });
-                            phase_probe::set_tile(i);
-                            phase_probe::sample("begin", 1, &tiles[i].levels[1].state);
-                        }
-                        for jj in 0..nstages {
-                            retry |= decomposed_level_stage(
-                                tiles, 1, &fg.order, fg.counts, &fg.devices, transport, jj, fine_dt, alpha,
-                            );
-                            if retry {
-                                break 'fine_subcycle;
-                            }
-                            migrate_level_tracers(tiles, 1);
-                            exchange_level_halos(
-                                tiles,
-                                1,
-                                &fg.order,
-                                fg.counts,
-                                &fg.devices,
-                                transport,
-                            );
-                            for &i in &fg.order {
-                                phase_probe::set_tile(i);
-                                phase_probe::sample(phase_probe::STAGE[jj], 1, &tiles[i].levels[1].state);
-                            }
-                        }
-                        spawn_decomposed_injections(tiles, &fg.order, 1);
-                        for (k, &i) in fg.order.iter().enumerate() {
-                            phase_probe::set_tile(i);
-                            retry |= symbi_xpu::with_device(fg.devices[k], || {
-                                tiles[i].level_step_tail(1, fine_dt, alpha)
-                            });
-                        }
-                        if retry {
-                            break 'fine_subcycle;
-                        }
-                    }
-                    // tile-local restrict + flux/emf reflux + c2p + ghost on each refined tile's root,
-                    // then the root halos carry the restricted covered cells: the next step's
-                    // prolongation snapshot and the cut-adjacent stencils read them.
+                // the refined levels, subcycled across their tiles, then each refined tile's root
+                // takes the restriction and reflux of level 1, and the root halos carry the
+                // restricted covered cells: the next step's prolongation snapshot and the
+                // cut-adjacent stencils read them.
+                if let Some(fg) = fine.first() {
+                    retry |= decomposed_subcycle(tiles, 0, fine, transport, nstages, gdt);
                     if !retry {
                         for (k, &i) in fg.order.iter().enumerate() {
                             phase_probe::set_tile(i);
@@ -5670,8 +5793,8 @@ where
             }
             drain_devices::<Mem>(devices);
             exchange_level_halos(tiles, 0, &root_order, counts, devices, transport);
-            if let Some(fg) = &fine {
-                exchange_level_halos(tiles, 1, &fg.order, fg.counts, &fg.devices, transport);
+            for (k, fg) in fine.iter().enumerate() {
+                exchange_level_halos(tiles, k + 1, &fg.order, fg.counts, &fg.devices, transport);
             }
             gdt = symbi_sim::driver::retry_timestep(gdt, t)
                 .unwrap_or_else(|err| panic!("{}", err.detail));
@@ -5756,7 +5879,7 @@ where
 }
 
 /// the decomposed hierarchy driver (refinement x decomposition): lockstep-advance N
-/// per-tile hierarchies, decomposing the root and the first fine level. the root stages run with a
+/// per-tile hierarchies, decomposing every level. the root stages run with a
 /// root halo exchange between them (rk2 corrector reads each neighbor's stage-1 update); the fine
 /// subcycle is driven here so its stages can exchange the fine halos between fine tiles when a
 /// patch spans a tile cut. for a tile-local patch the fine sub-grid is 1x1, so the fine exchange
@@ -5765,8 +5888,9 @@ where
 /// cut-adjacent ghost is overwritten by the next root exchange). global dt = min over tiles of
 /// `root_cfl_dt()`. `decomposed == monolithic` holds for both tile-local and cut-spanning patches.
 ///
-/// levels 2+ are advanced tile-locally (inside the level-1 fine tile, via the recursive
-/// `level_step_tail(1)`); a patch spanning a cut on a level >= 2 lies outside this driver's scope.
+/// every refined level subcycles across the tiles carrying it, with its own halo exchange across
+/// the cuts, and restricts into its parent before the parent's tail completes; a tile holding
+/// fewer levels than the run leaves the finest-level physics to the run's finest level.
 /// hydro only in the root post-step (the root clock is advanced directly; mesh motion and immersed
 /// bodies belong to the single-grid path). `on_checkpoint(iteration, time, &tiles)` fires every
 /// `interval` root steps and once at the end (devices drained first).
