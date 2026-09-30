@@ -4,7 +4,7 @@
 # a combination the launched tiles build as the single path does but that no
 # distributed gate has validated is refused at startup by name, and runs only
 # under the explicit experimental opt-in, which the launch announces. the
-# isothermal magnetized vortex on a three-dimensional grid stands for the class.
+# kelvin-helmholtz layer under the balanced reconstruction stands for the class.
 #
 # run: pytest -m simulation simbi/simulation/tests/test_launch_experimental.py
 # =============================================================================
@@ -16,7 +16,7 @@ from pathlib import Path
 
 import pytest
 
-from simbi_configs.examples.isothermal.imhd_orszag_tang import IsothermalOrszagTang
+from simbi_configs.examples.newtonian.kh import KelvinHelmholtz
 
 from simbi.simulation.tests.test_launch import (
     EXIT,
@@ -26,14 +26,15 @@ from simbi.simulation.tests.test_launch import (
 
 pytestmark = pytest.mark.simulation
 
-SCRIPT = str(Path(IsothermalOrszagTang.__module__.replace(".", "/") + ".py"))
+SCRIPT = str(Path(KelvinHelmholtz.__module__.replace(".", "/") + ".py"))
 
 
 def _command(tmp_path: Path, out: str) -> list[str]:
-    layout = _layout(tmp_path / "two.toml", workers=2, shape=(2, 1, 1))
+    layout = _layout(tmp_path / "two.toml", workers=2, shape=(2, 1))
     return [
         sys.executable, "-m", "simbi.cli", "launch", SCRIPT, "--layout", str(layout), "--max-steps", "1",
-        "--resolution", "8,8,4", "--data-directory", str(tmp_path / out), "--checkpoint-interval", "1e9",
+        "--resolution", "16,16", "--data-directory", str(tmp_path / out), "--checkpoint-interval", "1e9",
+        "--wb-reconstruction",
     ]
 
 
@@ -42,7 +43,7 @@ def test_an_ungated_combination_is_refused_by_name(tmp_path: Path) -> None:
     done = subprocess.run(_command(tmp_path, "refused"), capture_output=True, text=True, timeout=600, env=env)
     assert done.returncode != 0, f"the launch succeeded:\n{done.stdout}"
     flat = " ".join(done.stderr.split())
-    assert "the imhd regime on a 3-dimensional cartesian chart is installed on the launched path without a distributed gate" in flat, done.stderr
+    assert "the balanced reconstruction is installed on the launched path without a distributed gate" in flat, done.stderr
     assert "SIMBI_LAUNCH_EXPERIMENTAL=1" in flat
     assert not (tmp_path / "refused").exists() or not list((tmp_path / "refused").glob("*.h5")), "a checkpoint was published"
 
@@ -53,5 +54,5 @@ def test_the_experimental_opt_in_runs_the_combination_and_says_so(tmp_path: Path
     assert done.returncode == 0, f"launch failed:\nstdout:\n{done.stdout}\nstderr:\n{done.stderr}"
     exits = {int(w): int(c) for w, c in EXIT.findall(done.stdout)}
     assert exits == {0: 0, 1: 0}, f"worker exit codes {exits}"
-    assert "experimental combination without a distributed gate: the imhd regime on a 3-dimensional cartesian chart" in " ".join(done.stderr.split()), done.stderr
+    assert "experimental combination without a distributed gate: the balanced reconstruction" in " ".join(done.stderr.split()), done.stderr
     assert len(list((tmp_path / "experimental").glob("*final*.h5"))) == 1

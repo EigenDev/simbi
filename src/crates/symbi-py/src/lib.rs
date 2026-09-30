@@ -10406,7 +10406,8 @@ fn ungated_launch_combination(cfg: &Config) -> Option<String> {
     if cfg.regime != "newtonian" && cfg.reconstruction_name != "plm" {
         return Some(format!("{} reconstruction with the {} regime", cfg.reconstruction_name, cfg.regime));
     }
-    if isothermal && (cfg.coord_system != "cartesian" || cfg.dims == 3) {
+    // the isothermal regimes are gated on the cartesian chart in 2D and 3D
+    if isothermal && cfg.coord_system != "cartesian" {
         return Some(format!("the {} regime on a {}-dimensional {} chart", cfg.regime, cfg.dims, cfg.coord_system));
     }
     if isothermal && cfg.boundaries.iter().any(|b| *b != BoundaryType::Periodic) {
