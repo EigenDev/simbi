@@ -153,28 +153,17 @@ impl From<FabricError> for WorkerError {
     }
 }
 
-/// the first-release scope: 2D and 3D newtonian hydro, relativistic hydro and newtonian MHD,
+/// the first-release scope: 2D and 3D newtonian and relativistic hydro and MHD,
 /// adiabatic or globally isothermal, on the cartesian, spherical and cylindrical charts of a
 /// flat spacetime, in host memory, on a static mesh, without dye, bodies, tracers, or
 /// excision.
 pub fn refuse<const D: usize, const DOF: usize, M: MemorySpace, K: KernelSet<D, DOF, M, f64>>(
-    regime: RegimeKind,
     stores: &[&FieldStore<D, DOF, M, f64>],
     kernels: &[&K],
 ) -> Result<(), WorkerError> {
     let refused = |reason: &str| {
         WorkerError::Refused(format!("{reason} is outside the distributed first release"))
     };
-    if !matches!(
-        regime,
-        RegimeKind::Newtonian
-            | RegimeKind::Rhd
-            | RegimeKind::IsoNewtonian
-            | RegimeKind::NewtonianMhd
-            | RegimeKind::IsoMhd
-    ) {
-        return Err(refused(&format!("the {regime:?} regime")));
-    }
     if !matches!(D, 2 | 3) {
         return Err(refused(&format!("a {D}-dimensional grid")));
     }
@@ -603,7 +592,7 @@ where
     }
     {
         let sh = shared!();
-        refuse(cfg.regime, &sh, kernels).map_err(|e| fail(fabric, e))?;
+        refuse(&sh, kernels).map_err(|e| fail(fabric, e))?;
         // a rejection replays the step from its entry, which needs the whole entry state kept
         if !cfg.injection.reject_at.is_empty() {
             for (store, kernel) in sh.iter().zip(kernels) {

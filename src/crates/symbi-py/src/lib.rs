@@ -2076,6 +2076,22 @@ fn wrap_topology<const D: usize>(phys: &Boundaries<D>, counts: [usize; D]) -> To
     Topology::wrapping(std::array::from_fn(|ax| axis_wraps(phys, counts, ax)))
 }
 
+/// the halo topology on the run's chart: a wrapping axis the metric depends on carries distinct
+/// end faces. the radius of a cylinder or a sphere and the polar angle vary face areas and edge
+/// lengths along themselves; a curved spacetime varies them along every axis.
+fn chart_topology<const D: usize>(cfg: &Config, phys: &Boundaries<D>, counts: [usize; D]) -> Topology<D> {
+    let curved = cfg.spacetime != "minkowski";
+    let distinct = std::array::from_fn(|ax| {
+        curved
+            || match cfg.coord_system.as_str() {
+                "cylindrical" => ax == 0,
+                "spherical" => ax <= 1,
+                _ => false,
+            }
+    });
+    wrap_topology(phys, counts).with_distinct_ends(distinct)
+}
+
 fn seed_configured_tracers<const D: usize, const DOF: usize, Mem: symbi::symbi_xpu::MemorySpace>(
     sim: &symbi_sim::state::FieldStore<D, DOF, Mem, f64>,
     cfg: &Config,
@@ -5612,7 +5628,7 @@ where
         Ok(t_io.elapsed().as_secs_f64())
     };
     let phys = boundaries_nd::<D>(&cfg.boundaries);
-    let topology = wrap_topology(&phys, counts);
+    let topology = chart_topology(cfg, &phys, counts);
     wrap_capability(&topology, cfg.wb_reconstruction, !cfg.bodies.is_empty())?;
 
     let ntiles = tiles.len();
@@ -10487,7 +10503,7 @@ fn gated_grid(cfg: &Config) -> bool {
     }
     match cfg.regime.as_str() {
         "newtonian" | "rhd" | "isothermal" => spherical || cylindrical,
-        "nmhd" | "imhd" => r_phi || r_z || shell_2d,
+        "nmhd" | "imhd" => r_phi || r_z || shell_2d || (cfg.dims == 3 && (spherical || cylindrical)),
         _ => false,
     }
 }
@@ -10517,7 +10533,7 @@ fn ungated_launch_combination(cfg: &Config) -> Option<String> {
 /// before any tile is built.
 fn validate_launch_scope(cfg: &Config) -> Result<(), String> {
     let refused = |what: &str| Err(format!("{what} is outside the distributed first release"));
-    if !matches!(cfg.regime.as_str(), "newtonian" | "rhd" | "isothermal" | "nmhd" | "imhd") {
+    if !matches!(cfg.regime.as_str(), "newtonian" | "rhd" | "isothermal" | "nmhd" | "imhd" | "rmhd") {
         return refused(&format!("the {} regime", cfg.regime));
     }
     // ppm is baked for newtonian hydro on the flat cartesian grid alone; the other launched tile
@@ -10528,23 +10544,23 @@ fn validate_launch_scope(cfg: &Config) -> Result<(), String> {
     // the magnetized substrate installs the limiter (plm, or pcm at a zero slope), the solver and
     // the edge EMF and has no door for a flattening or an equation of state; a request for one is
     // refused here so a comparison never appears to exercise a setting the run ignores
-    if cfg.regime == "nmhd" {
+    if matches!(cfg.regime.as_str(), "nmhd" | "rmhd") {
         if cfg.ppm_flatten_full > 0.0 || cfg.ppm_flatten_onset > 0.0 {
-            return refused("ppm flattening with the nmhd regime");
+            return refused(&format!("ppm flattening with the {} regime", cfg.regime));
         }
         if cfg.eos_name != "ideal" {
-            return refused(&format!("the {} equation of state with the nmhd regime", cfg.eos_name));
+            return refused(&format!("the {} equation of state with the {} regime", cfg.eos_name, cfg.regime));
         }
         if cfg.wb_reconstruction {
-            return refused("well-balanced reconstruction with the nmhd regime");
+            return refused(&format!("well-balanced reconstruction with the {} regime", cfg.regime));
         }
     }
-    if matches!(cfg.regime.as_str(), "nmhd" | "imhd") && !cfg.gradient_bcs.is_empty() {
+    if matches!(cfg.regime.as_str(), "nmhd" | "imhd" | "rmhd") && !cfg.gradient_bcs.is_empty() {
         return refused(&format!("a gradient wall with the {} regime", cfg.regime));
     }
     // the launched magnetized tiles install no user source; a source the single path would
     // apply is refused rather than dropped
-    if matches!(cfg.regime.as_str(), "nmhd" | "imhd") && !cfg.source_jsons.is_empty() {
+    if matches!(cfg.regime.as_str(), "nmhd" | "imhd" | "rmhd") && !cfg.source_jsons.is_empty() {
         return refused(&format!("a user source with the {} regime", cfg.regime));
     }
     if !matches!(cfg.dims, 2 | 3) {
@@ -11205,7 +11221,7 @@ fn run_worker_process(
     let placement = Placement::new(launch.workers as u32, owner)?;
     let me = WorkerId(launch.worker as u32);
     let phys = boundaries_nd::<$d>(&cfg.boundaries);
-    let topology = wrap_topology(&phys, counts);
+    let topology = chart_topology(cfg, &phys, counts);
     wrap_capability(&topology, cfg.wb_reconstruction, false)?;
     let seam = polar_seam_of_partition::<$d>(&cfg.coord_system, &phys, &topology, &partition);
     let theta = build_theta(cfg);
@@ -11362,6 +11378,66 @@ fn run_worker_process(
             session_over!(NewtonianMhd, 3, tiles)
         }};
     }
+    macro_rules! rmhd_tiles {
+        ($geom:expr, $geom_ty:ty) => {{
+            type Sim = SimDefaultGeneric<Rmhd, $d, 3, $geom_ty, EosSelect<f64>>;
+            if bufs.len() < 3 {
+                return Err(format!("mhd needs 3 staggered b-field generators, got {}", bufs.len()));
+            }
+            let ct = cfg.ct_method;
+            let mut tiles = Vec::with_capacity(mine.len());
+            for &flat in &mine {
+                let tc = unflatten(flat, counts);
+                let ext = partition.tile_extents(tc);
+                let tile_lo: [usize; $d] = std::array::from_fn(|ax| ext[ax].0);
+                let m: [usize; $d] = std::array::from_fn(|ax| ext[ax].1);
+                let bnd = seam_faces_as_cuts(tile_boundaries(&phys, tc, counts), seam.as_ref());
+                // each tile's slice of the global staggered buffers: a shared interface face
+                // reads the same global value on both of its tiles
+                let tile_faces: Vec<Vec<f64>> =
+                    (0..$d).map(|d| tile_face_buffer::<$d>(&bufs[d], n, m, tile_lo, d)).collect();
+                let sim = Sim::build(Rmhd, host_eos(cfg), $geom)
+                    .cells(m)
+                    .origin(origin)
+                    .spacing(spacing)
+                    .coord_maps(maps)
+                    .index_offset(placed(tile_lo))
+                    .boundaries(bnd)
+                    .cfl(cfg.cfl)
+                    .timestepping(cfg.timestepping)
+                    .cyl_plane(cfg.cyl_plane)
+                    .allocate()
+                    .map_err(|e| format!("tile {flat} allocate: {e:?}"))?
+                    .set_initial_indexed(|idx, _x| {
+                        let lin = global_lin::<$d>(&tile_lo, &idx, &n);
+                        let row = &prims[lin];
+                        let gidx: [isize; $d] =
+                            std::array::from_fn(|ax| tile_lo[ax] as isize + idx[ax]);
+                        let mag: [f64; 3] = std::array::from_fn(|k| {
+                            if k < $d { face_avg_cell_b::<$d>(&bufs[k], k, gidx, n) } else { bufs[k][lin] }
+                        });
+                        MhdPrim::new(
+                            Prim::adiabatic(Density(row[0]), Tensor::new([row[1], row[2], row[3]]), Pressure(row[4])),
+                            Tensor::new(mag),
+                        )
+                    })
+                    .seed_faces_indexed(&tile_faces)
+                    .build();
+                // the numerics the single relativistic magnetized path installs: the limiter, the
+                // solver, the ohmic resistivity and the edge EMF
+                let sub = sim
+                    .substrate()
+                    .theta(theta)
+                    .with_solver(solver)
+                    .map_err(|e| format!("tile {flat} substrate/solver: {e:?}"))?
+                    .with_viscosity(cfg.viscosity)
+                    .with_resistivity(cfg.resistivity)
+                    .ct_method(ct);
+                tiles.push((sim, sub));
+            }
+            session_over!(Rmhd, 3, tiles)
+        }};
+    }
     macro_rules! iso_tiles {
         ($geom:expr, $geom_ty:ty) => {{
             type Sim = SimDefault<IsoNewtonian, $d, $geom_ty, Isothermal<f64>>;
@@ -11489,6 +11565,7 @@ fn run_worker_process(
         "newtonian" => charted!(gas_tiles, Newtonian, Newtonian),
         "rhd" => charted!(gas_tiles, Rhd, Rhd),
         "nmhd" => charted!(nmhd_tiles),
+        "rmhd" => charted!(rmhd_tiles),
         "isothermal" => charted!(iso_tiles),
         "imhd" => charted!(imhd_tiles),
         other => Err(format!("the {other} regime is outside the distributed first release")),
@@ -12065,7 +12142,7 @@ fn launch_worker(
     }
     let drain_clock = std::time::Instant::now();
     let prims = drain_prims(prim_gen)?;
-    let bufs = if matches!(cfg.regime.as_str(), "nmhd" | "imhd") { drain_bfields(staggered_bfields)? } else { Vec::new() };
+    let bufs = if matches!(cfg.regime.as_str(), "nmhd" | "imhd" | "rmhd") { drain_bfields(staggered_bfields)? } else { Vec::new() };
     let drained = drain_clock.elapsed();
     py.detach(|| run_worker_process(&cfg, &prims, &bufs, &params, drained))
         .map_err(PyRuntimeError::new_err)

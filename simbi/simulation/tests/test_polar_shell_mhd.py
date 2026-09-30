@@ -2,7 +2,7 @@
 # test_polar_shell_mhd.py
 #
 # newtonian MHD on a 3D spherical shell spanning both poles through the public
-# runner. every azimuthal copy of a radial edge on the axis is one physical
+# runner, and its isothermal twin for the held flux. every azimuthal copy of a radial edge on the axis is one physical
 # segment, and the stage reconciles the copies of each ring to one EMF, so:
 # - under contact and under uct the unnormalized discrete magnetic flux out of
 #   every cell, weighted by the constrained-transport face weights, is held to
@@ -22,6 +22,7 @@ import numpy as np
 import pytest
 
 from simbi.simulation import runner
+from simbi_configs.examples.isothermal.imhd_polar_shell_3d import IsothermalPolarShell3D
 from simbi_configs.examples.newtonian.nmhd_polar_shell_3d import NewtonianPolarShell3D
 
 pytestmark = pytest.mark.simulation
@@ -30,13 +31,13 @@ RESOLUTION = (8, 8, 16)
 STEPS = 10
 
 
-def _run(out: Path, steps: int, ct: str = "contact", gpus: int = 1, decompose=None, checkpoint: Path | None = None) -> Path:
+def _run(out: Path, steps: int, ct: str = "contact", gpus: int = 1, decompose=None, checkpoint: Path | None = None, cls=NewtonianPolarShell3D) -> Path:
     kwargs = dict(resolution=RESOLUTION, data_directory=str(out), checkpoint_interval=1e9, ct_method=ct, gpus=gpus)
     if decompose is not None:
         kwargs["decompose"] = decompose
     if checkpoint is not None:
         kwargs["checkpoint_file"] = str(checkpoint)
-    runner.run(NewtonianPolarShell3D(**kwargs), compute_mode="cpu", max_steps=steps)
+    runner.run(cls(**kwargs), compute_mode="cpu", max_steps=steps)
     files = sorted(out.glob("*final*.h5"))
     assert len(files) == 1, f"expected one final checkpoint in {out}, found {files}"
     return files[0]
@@ -88,9 +89,10 @@ def host_tiles(monkeypatch):
     monkeypatch.setenv("SYMBI_GPU_OVERSUBSCRIBE", "1")
 
 
+@pytest.mark.parametrize("cls", [NewtonianPolarShell3D, IsothermalPolarShell3D])
 @pytest.mark.parametrize("ct", ["contact", "uct"])
-def test_every_cells_flux_is_held_at_both_poles(tmp_path: Path, ct: str) -> None:
-    final = _run(tmp_path, STEPS, ct=ct)
+def test_every_cells_flux_is_held_at_both_poles(tmp_path: Path, ct: str, cls) -> None:
+    final = _run(tmp_path, STEPS, ct=ct, cls=cls)
     before, scale = _cell_flux(_initial(tmp_path))
     after, _ = _cell_flux(final)
     change = np.abs(after - before)

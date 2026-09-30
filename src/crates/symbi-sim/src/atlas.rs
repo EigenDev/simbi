@@ -593,6 +593,12 @@ impl<const D: usize> ExchangePlan<D> {
                 // both tiles, never a halo.
                 if let FieldKind::Face(d) = entry.kind {
                     if d as usize == leg.axis {
+                        // the wrap leg of an axis with distinct ends joins two different
+                        // faces: nothing to audit.
+                        let wraps = unflatten(leg.lo, counts)[leg.axis] + 1 == counts[leg.axis];
+                        if wraps && !topology.ends_coincide(leg.axis) {
+                            continue;
+                        }
                         // the audit of that interface: the lower tile's closing face against
                         // the upper tile's opening face, over the faces both tiles own.
                         let lo = &fields[leg.lo][f];
@@ -1513,6 +1519,29 @@ mod tests {
             assert_eq!(seen, halos, "every halo transfer was matched");
             assert!(seen > 0);
         }
+    }
+
+    /// an interface audit joins the closing face of the lower tile to the opening face of the
+    /// upper one. on a wrapping axis with distinct ends (a periodic radius) the wrap leg joins
+    /// two different faces and carries no audit; interior cuts and wraps whose ends coincide
+    /// carry one audit per leg, and the halo transfers stay the same.
+    #[test]
+    fn a_wrap_with_distinct_ends_carries_no_audit() {
+        let p = even();
+        let wrapping = Topology::wrapping([true, true]);
+        let audits = |topology: &Topology<2>, axis: u8| {
+            let plan = ExchangePlan::compile(&p, topology, &mhd_schema(), 2).unwrap();
+            let n = plan.transfers().filter(|t| t.audit && t.axis == axis).count();
+            (n, plan.transfers().filter(|t| !t.audit).count())
+        };
+        let (coincide_x, halos) = audits(&wrapping, 0);
+        let (distinct_x, distinct_halos) = audits(&wrapping.with_distinct_ends([true, false]), 0);
+        let (distinct_y, _) = audits(&wrapping.with_distinct_ends([true, false]), 1);
+        // two tile rows, each with an interior cut and a wrap along x
+        assert_eq!(coincide_x, 4, "every x leg of a coinciding wrap carries an audit");
+        assert_eq!(distinct_x, 2, "only the interior x cuts carry an audit when the x ends are distinct");
+        assert_eq!(distinct_y, 4, "the y wrap keeps its audit");
+        assert_eq!(distinct_halos, halos, "the halo transfers are the same");
     }
 
     /// a destination lies in the ghost band of its field on the leg's axis and a source lies in

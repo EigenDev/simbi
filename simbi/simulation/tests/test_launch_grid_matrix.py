@@ -8,13 +8,18 @@
 # plane, the (r, phi) disk and the 3d annulus; newtonian MHD on the (r, z)
 # plane and on the 2d spherical shell under both edge EMFs; isothermal hydro on
 # the (r, z) plane, the 3d shell and the 3d annulus; isothermal MHD on the (r, z)
-# plane and the 2d shell under both edge EMFs. each case on four
+# plane and the 2d shell under both edge EMFs; newtonian and isothermal MHD on
+# the 3d shell spanning both poles, its azimuth cut, and on a 3d annulus
+# periodic on every axis, its radius cut, under both edge EMFs. each case on four
 # workers equals the single-grid run bit for bit, every staggered face included,
 # fresh and with the correction fired against a cut (the flag asserted to change
 # the run on one worker), and a run checkpointed halfway on four workers resumes
-# onto three unevenly owned tiles to the uninterrupted single-grid state. a
-# regime on a grid outside its gated set, newtonian MHD on a 3d cylindrical
-# grid, is refused at startup by name.
+# onto three unevenly owned tiles to the uninterrupted single-grid state. the
+# annulus wraps its radius: the first and last radial faces are two different
+# faces the curl gives different values, which the interface audit leaves to
+# their own tiles while it audits the interior cut. a regime on a grid outside
+# its gated set, special-relativistic MHD on the (r, phi) disk, is refused at
+# startup by name.
 #
 # run: pytest -m simulation simbi/simulation/tests/test_launch_grid_matrix.py
 # =============================================================================
@@ -55,6 +60,9 @@ SHELL_3D = dict(resolution=(16, 16, 16), cuts=[[], [8], [8]], trouble="trouble:3
 JET = dict(resolution=(32, 32, 1), cuts=[[7], [16]], trouble="trouble:3:0:6:0", restart=[[10, 21], []], steps=MHD_STEPS)
 MHD_SHELL = dict(SHELL, resolution=(32, 32, 1), steps=MHD_STEPS)
 UCT = dict(flags=["--ct-method", "uct"], fields="ct_method='uct'")
+# the pole rows (theta cells 0 and 7 of 8) cut into two azimuth slabs, so every axis ring spans
+# two tiles; the flag sits on the north pole row against the azimuth cut at 8
+POLAR_SHELL = dict(resolution=(8, 8, 16), cuts=[[], [4], [8]], trouble="trouble:3:0:3:0:7", restart=[[], [], [5, 11]], steps=MHD_STEPS)
 CASES = {
     "newtonian_rz": (f"{N}.rz_pulse", "RzPulse", RZ),
     "newtonian_disk": (f"{N}.viscous_disk_cyl", "ViscousDiskCyl", dict(DISK, flags=["--nu", "0.0"], fields="nu=0.0")),
@@ -68,6 +76,10 @@ CASES = {
     "nmhd_rz_uct": (f"{N}.nmhd_jet_rz", "NewtonianJetRz", dict(JET, **UCT)),
     "nmhd_shell": (f"{N}.nmhd_spherical_field", "NewtonianSphericalField", MHD_SHELL),
     "nmhd_shell_uct": (f"{N}.nmhd_spherical_field", "NewtonianSphericalField", dict(MHD_SHELL, **UCT)),
+    "nmhd_shell_3d": (f"{N}.nmhd_polar_shell_3d", "NewtonianPolarShell3D", POLAR_SHELL),
+    "nmhd_shell_3d_uct": (f"{N}.nmhd_polar_shell_3d", "NewtonianPolarShell3D", dict(POLAR_SHELL, **UCT)),
+    "imhd_shell_3d": (f"{ISO}.imhd_polar_shell_3d", "IsothermalPolarShell3D", POLAR_SHELL),
+    "imhd_shell_3d_uct": (f"{ISO}.imhd_polar_shell_3d", "IsothermalPolarShell3D", dict(POLAR_SHELL, **UCT)),
     "isothermal_rz": (f"{ISO}.isothermal_rz_pulse", "IsothermalRzPulse", RZ),
     "isothermal_shell_3d": (f"{ISO}.isothermal_spherical_pulse_3d", "IsothermalSphericalPulse3D", SHELL_3D),
     "isothermal_annulus": (f"{ISO}.isothermal_cylindrical_pulse_3d", "IsothermalCylindricalPulse3D", ANNULUS),
@@ -115,6 +127,8 @@ def test_a_launch_resumed_onto_three_uneven_workers_matches(tmp_path: Path, name
     _assert_same_state(resumed, reference, f"{name}: resumed onto three uneven workers against the uninterrupted run")
 
 
+
+
 MHD_ANNULUS = """
 import math
 from typing import Annotated
@@ -126,20 +140,81 @@ class OrszagTangAnnulus(NewtonianOrszagTang3D):
     coord_system: Annotated[CoordSystem, ProblemParam(CoordSystem.CYLINDRICAL, description="coordinate system")]
     bounds: Annotated[list[tuple[float, float]], ProblemParam([(0.1, 1.0), (0.0, 2.0 * math.pi), (0.0, 1.0)], description="bounds")]
 """
+IMHD_ANNULUS = MHD_ANNULUS.replace("newtonian.nmhd_orszag_tang_3d import NewtonianOrszagTang3D", "isothermal.imhd_orszag_tang_3d import IsothermalOrszagTang3D").replace(
+    "(NewtonianOrszagTang3D)", "(IsothermalOrszagTang3D)"
+)
+# the radius (8 cells over [0.1, 1.0]) cut at 4 and wrapped; the flag sits against the radial cut
+ANNULUS_MHD = dict(resolution=(8, 8, 8), cuts=[[4], [], [4]], trouble="trouble:3:0:3:2:3", restart=[[3, 5], [], []], steps=MHD_STEPS)
 
 
-def test_mhd_on_a_3d_cylindrical_grid_is_refused_by_name(tmp_path: Path) -> None:
-    script = tmp_path / "orszag_tang_annulus.py"
-    script.write_text(MHD_ANNULUS)
-    layout = _layout(tmp_path / "two.toml", workers=2, cuts=[[4], [], []])
+@pytest.fixture(params=["nmhd", "imhd"])
+def annulus(request, tmp_path: Path, monkeypatch) -> tuple[str, str]:
+    """the periodic annulus as an importable module and as a launch script, newtonian and isothermal"""
+    source = tmp_path / "src"
+    source.mkdir()
+    (source / "orszag_tang_annulus.py").write_text(MHD_ANNULUS if request.param == "nmhd" else IMHD_ANNULUS)
+    monkeypatch.setenv("PYTHONPATH", os.pathsep.join([str(source), str(Path.cwd()), os.environ.get("PYTHONPATH", "")]))
+    return "orszag_tang_annulus", str(source / "orszag_tang_annulus.py")
+
+
+def _wrap_faces_differ(path: Path) -> bool:
+    with h5py.File(path, "r") as f:
+        b1 = f["level_0/partition_0/hydro/magnetic/B1/data"][()]
+    return bool((b1[..., 0] != b1[..., -1]).any())
+
+
+@pytest.mark.parametrize("ct", ["contact", "uct"])
+def test_mhd_on_an_annulus_wrapped_in_radius_matches_fresh_corrected_and_resumed(tmp_path: Path, annulus, ct: str) -> None:
+    module, script = annulus
+    case, flags = ANNULUS_MHD, ["--ct-method", ct]
+    resolution, steps = case["resolution"], case["steps"]
+    reference = _script_reference(module, "OrszagTangAnnulus", resolution, tmp_path / "single", steps, fields=f"ct_method={ct!r}")
+    assert _wrap_faces_differ(reference), "the first and last radial faces agree; the wrap is indistinguishable from one face"
+    audit = {"SIMBI_FABRIC_AUDIT": "all"}
+    four = _layout(tmp_path / "four.toml", workers=4, cuts=case["cuts"])
+    launched = _script_launch(script, resolution, tmp_path / "four", four, steps, workers=4, env=audit, flags=flags)
+    _assert_same_state(launched, reference, f"annulus {ct}: four workers auditing every exchange")
+    one = _layout(tmp_path / "one.toml", workers=1, cuts=[[], [], []])
+    inject = {"SIMBI_FABRIC_INJECT": case["trouble"]}
+    clean = _script_launch(script, resolution, tmp_path / "clean", one, steps, workers=1, flags=flags)
+    flagged = _script_launch(script, resolution, tmp_path / "flagged", one, steps, workers=1, env=inject, flags=flags)
+    _assert_flag_changed(clean, flagged)
+    corrected = _script_launch(script, resolution, tmp_path / "corrected", four, steps, workers=4, env=dict(inject, **audit), flags=flags)
+    _assert_same_state(corrected, flagged, f"annulus {ct}: four workers, the correction against the radial cut")
+    partial = _script_launch(script, resolution, tmp_path / "first", four, steps // 2, workers=4, flags=flags)
+    with h5py.File(partial, "r") as f:
+        written_at = int(f["level_0"].attrs["iteration"])
+    assert 0 < written_at < steps
+    three = _layout(tmp_path / "three.toml", workers=3, cuts=case["restart"])
+    resumed = _script_launch(script, resolution, tmp_path / "three", three, steps - written_at, workers=3, checkpoint=partial, env=audit, flags=flags)
+    _assert_same_state(resumed, reference, f"annulus {ct}: resumed onto three uneven workers")
+
+
+RMHD_DISK = """
+import math
+from typing import Annotated
+from simbi import ProblemParam
+from simbi.types import CoordSystem
+from simbi_configs.examples.srmhd.rmhd_orszag_tang import OrszagTang
+
+class OrszagTangDisk(OrszagTang):
+    coord_system: Annotated[CoordSystem, ProblemParam(CoordSystem.CYLINDRICAL, description="coordinate system")]
+    bounds: Annotated[list[tuple[float, float]], ProblemParam([(0.1, 1.0), (0.0, 2.0 * math.pi)], description="bounds")]
+"""
+
+
+def test_rmhd_on_a_curvilinear_grid_is_refused_by_name(tmp_path: Path) -> None:
+    script = tmp_path / "orszag_tang_disk.py"
+    script.write_text(RMHD_DISK)
+    layout = _layout(tmp_path / "two.toml", workers=2, cuts=[[4], []])
     cmd = [
         sys.executable, "-m", "simbi.cli", "launch", str(script), "--layout", str(layout), "--max-steps", "1",
-        "--resolution", "8,8,8", "--data-directory", str(tmp_path / "refused"), "--checkpoint-interval", "1e9",
+        "--resolution", "8,8,1", "--data-directory", str(tmp_path / "refused"), "--checkpoint-interval", "1e9",
     ]
     env = {k: v for k, v in os.environ.items() if k != "SIMBI_LAUNCH_EXPERIMENTAL"}
     env["PYTHONPATH"] = os.pathsep.join([str(Path.cwd()), env.get("PYTHONPATH", "")])
     done = subprocess.run(cmd, capture_output=True, text=True, timeout=600, env=env)
     assert done.returncode != 0, f"the launch succeeded:\n{done.stdout}"
     flat = " ".join(done.stderr.split())
-    assert "the nmhd regime on the 3-dimensional cylindrical grid" in flat, done.stderr
+    assert "the rmhd regime on the 2-dimensional" in flat, done.stderr
     assert not list((tmp_path / "refused").glob("*.h5")), "a checkpoint was published"

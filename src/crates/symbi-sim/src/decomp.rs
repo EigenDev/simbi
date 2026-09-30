@@ -996,27 +996,44 @@ impl<const D: usize> Partition<D> {
 
 /// which axes wrap. a periodic axis's first and last tiles are neighbors, so the schedule
 /// carries a leg across that seam like any other; an open axis leaves its end tiles to the
-/// physical boundary fill.
+/// physical boundary fill. `distinct_ends` marks a wrapping axis the metric depends on (a
+/// radius, a polar angle): its first and last faces have different areas and edge lengths, so
+/// the CT curl gives them different values from the same edge EMFs and each tile keeps its own.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Topology<const D: usize> {
     periodic: [bool; D],
+    distinct_ends: [bool; D],
 }
 
 impl<const D: usize> Topology<D> {
     /// every axis open: the first and last tiles carry physical boundaries.
     pub fn open() -> Self {
+        Self::wrapping([false; D])
+    }
+
+    /// the axes marked true wrap their end tiles onto each other; their end faces coincide.
+    pub fn wrapping(periodic: [bool; D]) -> Self {
         Self {
-            periodic: [false; D],
+            periodic,
+            distinct_ends: [false; D],
         }
     }
 
-    /// the axes marked true wrap their end tiles onto each other.
-    pub fn wrapping(periodic: [bool; D]) -> Self {
-        Self { periodic }
+    /// the axes marked true carry distinct first and last faces across their wrap.
+    pub fn with_distinct_ends(self, distinct_ends: [bool; D]) -> Self {
+        Self {
+            distinct_ends,
+            ..self
+        }
     }
 
     pub fn is_periodic(&self, axis: usize) -> bool {
         self.periodic[axis]
+    }
+
+    /// the last face of the axis and its first face are one interface.
+    pub fn ends_coincide(&self, axis: usize) -> bool {
+        !self.distinct_ends[axis]
     }
 }
 

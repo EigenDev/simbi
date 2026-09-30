@@ -33,7 +33,7 @@ from simbi_configs.examples.newtonian.nmhd_orszag_tang import NewtonianOrszagTan
 from simbi_configs.examples.newtonian.ordered_sources import OrderedSources
 from simbi_configs.examples.newtonian.refined_kh import RefinedKelvinHelmholtz
 from simbi_configs.examples.srhd.ram44 import Ram44
-from simbi_configs.examples.srmhd.magnetic_blast import MagneticBomb
+from simbi_configs.examples.newtonian.traced_kh import TracedKelvinHelmholtz
 
 from simbi.simulation.tests.process_guard import ProcessGuard, descendants
 
@@ -577,18 +577,18 @@ def test_a_shared_face_mismatch_exits_every_worker_and_publishes_no_checkpoint(t
         assert int(f["level_0"].attrs["iteration"]) == 0, "a checkpoint after the perturbation was published"
 
 
-MHD_BLAST = str(Path(MagneticBomb.__module__.replace(".", "/") + ".py"))
+TRACED_KH = str(Path(TracedKelvinHelmholtz.__module__.replace(".", "/") + ".py"))
 REFINED_KH = str(Path(RefinedKelvinHelmholtz.__module__.replace(".", "/") + ".py"))
 ROCHE_PASSAGE = str(Path(RochePassage.__module__.replace(".", "/") + ".py"))
 
 
 @pytest.mark.parametrize(
     ("script", "reason"),
-    [(MHD_BLAST, "the rmhd regime"), (REFINED_KH, "a periodic boundary with mesh refinement"), (ROCHE_PASSAGE, "an immersed body")],
+    [(TRACED_KH, "a tracer population"), (REFINED_KH, "a periodic boundary with mesh refinement"), (ROCHE_PASSAGE, "an immersed body")],
 )
 def test_out_of_scope_problems_are_refused_by_name(tmp_path: Path, script: str, reason: str) -> None:
     # a layout with as many axes as the problem's grid, so the refusal is the scope's
-    problem_class = {MHD_BLAST: MagneticBomb, REFINED_KH: RefinedKelvinHelmholtz, ROCHE_PASSAGE: RochePassage}[script]
+    problem_class = {TRACED_KH: TracedKelvinHelmholtz, REFINED_KH: RefinedKelvinHelmholtz, ROCHE_PASSAGE: RochePassage}[script]
     default = problem_class.model_fields["resolution"].default
     dims = max(1, sum(1 for r in default if int(r) > 1))
     layout = _layout(tmp_path / "two.toml", workers=2, shape=(2,) + (1,) * (dims - 1))
