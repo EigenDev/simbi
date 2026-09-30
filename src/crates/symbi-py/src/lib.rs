@@ -10404,11 +10404,9 @@ fn launch_experimental_opt_in() -> bool {
 /// distributed gate has validated, named for the refusal; `None` when every combination in play
 /// carries a gate. the gated set is the table in the README's multi-process section
 /// the grids each regime's launch is gated on, 2D and 3D alike on the cartesian grid:
-/// - newtonian and relativistic hydro: the 2D and 3D spherical shells, the (r, z) and (r, phi)
-///   planes, the 3D cylindrical annulus
-/// - isothermal hydro: the 2D spherical shell and the (r, phi) plane
-/// - newtonian MHD: the (r, phi) and (r, z) planes and the 2D spherical shell
-/// - isothermal MHD: the (r, phi) plane
+/// - newtonian, relativistic and isothermal hydro: the 2D and 3D spherical shells, the (r, z)
+///   and (r, phi) planes, the 3D cylindrical annulus
+/// - newtonian and isothermal MHD: the (r, phi) and (r, z) planes and the 2D spherical shell
 fn gated_grid(cfg: &Config) -> bool {
     let cylindrical = cfg.coord_system == "cylindrical";
     let spherical = cfg.coord_system == "spherical";
@@ -10419,10 +10417,8 @@ fn gated_grid(cfg: &Config) -> bool {
         return true;
     }
     match cfg.regime.as_str() {
-        "newtonian" | "rhd" => spherical || cylindrical,
-        "isothermal" => shell_2d || r_phi,
-        "nmhd" => r_phi || r_z || shell_2d,
-        "imhd" => r_phi,
+        "newtonian" | "rhd" | "isothermal" => spherical || cylindrical,
+        "nmhd" | "imhd" => r_phi || r_z || shell_2d,
         _ => false,
     }
 }

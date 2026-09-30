@@ -6,7 +6,9 @@
 # the axis on the grid, on the (r, phi) disk and on a 3d cylindrical annulus;
 # special-relativistic hydro on the 2d and 3d spherical shells, the (r, z)
 # plane, the (r, phi) disk and the 3d annulus; newtonian MHD on the (r, z)
-# plane and on the 2d spherical shell under both edge EMFs. each case on four
+# plane and on the 2d spherical shell under both edge EMFs; isothermal hydro on
+# the (r, z) plane, the 3d shell and the 3d annulus; isothermal MHD on the (r, z)
+# plane and the 2d shell under both edge EMFs. each case on four
 # workers equals the single-grid run bit for bit, every staggered face included,
 # fresh and with the correction fired against a cut (the flag asserted to change
 # the run on one worker), and a run checkpointed halfway on four workers resumes
@@ -39,6 +41,7 @@ pytestmark = pytest.mark.simulation
 
 N = "simbi_configs.examples.newtonian"
 R = "simbi_configs.examples.srhd"
+ISO = "simbi_configs.examples.isothermal"
 # the flagged cells sit in the initial gradient against a cut: on the (r, z) plane the pulse at
 # (0.4, 0.5) spans radial cells 9..16 of 32, cut at 16; on the disk and the (r, z) jet the core's
 # edge at r = 0.3 falls in radial cell 7 of the 32 spanning [0.1, 1.0], cut there; on the annulus
@@ -65,6 +68,13 @@ CASES = {
     "nmhd_rz_uct": (f"{N}.nmhd_jet_rz", "NewtonianJetRz", dict(JET, **UCT)),
     "nmhd_shell": (f"{N}.nmhd_spherical_field", "NewtonianSphericalField", MHD_SHELL),
     "nmhd_shell_uct": (f"{N}.nmhd_spherical_field", "NewtonianSphericalField", dict(MHD_SHELL, **UCT)),
+    "isothermal_rz": (f"{ISO}.isothermal_rz_pulse", "IsothermalRzPulse", RZ),
+    "isothermal_shell_3d": (f"{ISO}.isothermal_spherical_pulse_3d", "IsothermalSphericalPulse3D", SHELL_3D),
+    "isothermal_annulus": (f"{ISO}.isothermal_cylindrical_pulse_3d", "IsothermalCylindricalPulse3D", ANNULUS),
+    "imhd_rz": (f"{ISO}.imhd_jet_rz", "IsothermalJetRz", JET),
+    "imhd_rz_uct": (f"{ISO}.imhd_jet_rz", "IsothermalJetRz", dict(JET, **UCT)),
+    "imhd_shell": (f"{ISO}.imhd_spherical_field", "IsothermalSphericalField", MHD_SHELL),
+    "imhd_shell_uct": (f"{ISO}.imhd_spherical_field", "IsothermalSphericalField", dict(MHD_SHELL, **UCT)),
 }
 
 
