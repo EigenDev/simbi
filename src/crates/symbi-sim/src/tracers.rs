@@ -184,13 +184,13 @@ pub fn cic_stencil<const D: usize>(
     let mut lower = [0isize; D];
     let mut upper_weight = [0.0; D];
     for dd in 0..D {
-        let containing = match geometry.maps {
-            Some(maps) => maps[dd].index_at(position[dd]),
-            None => ((position[dd] - geometry.x_lo[dd]) / geometry.dx[dd]).floor() as isize,
-        };
-        let center = |ii| match geometry.maps {
-            Some(maps) => maps[dd].center(ii),
-            None => geometry.x_lo[dd] + (ii as f64 + 0.5) * geometry.dx[dd],
+        // local indices; positions at the whole-grid index, so a tile placed by index offset
+        // interpolates the whole grid's cells
+        let containing = geometry.cell_at(dd, position[dd]);
+        let center = |ii: isize| {
+            let mut idx = [0isize; D];
+            idx[dd] = ii;
+            geometry.cell_coord(idx)[dd]
         };
         let base = if position[dd] < center(containing) {
             containing - 1
@@ -532,15 +532,12 @@ pub fn partition_physical_bounds<const D: usize>(
     geometry: &crate::state::PartitionGeometry<D>,
 ) -> [(f64, f64); D] {
     std::array::from_fn(|dd| {
-        let lo_index = geometry.interior.spaces[dd].lo;
-        let hi_index = geometry.interior.spaces[dd].hi;
-        match geometry.maps {
-            Some(maps) => (maps[dd].face(lo_index), maps[dd].face(hi_index)),
-            None => (
-                geometry.x_lo[dd] + lo_index as f64 * geometry.dx[dd],
-                geometry.x_lo[dd] + hi_index as f64 * geometry.dx[dd],
-            ),
-        }
+        let face = |ii: isize| {
+            let mut idx = [0isize; D];
+            idx[dd] = ii;
+            geometry.stagger_coord(idx, [crate::state::Loc::Face; D])[dd]
+        };
+        (face(geometry.interior.spaces[dd].lo), face(geometry.interior.spaces[dd].hi))
     })
 }
 
@@ -1343,10 +1340,7 @@ where
         |owner| {
             let coord = container_cell(owner, &interior, layout)
                 .expect("boundary injection destination belongs to this grid");
-            let lo: [f64; D] = std::array::from_fn(|dd| match sim.geom.maps {
-                Some(maps) => maps[dd].face(coord[dd]),
-                None => sim.geom.x_lo[dd] + coord[dd] as f64 * sim.geom.dx[dd],
-            });
+            let lo: [f64; D] = sim.geom.stagger_coord(coord, [crate::state::Loc::Face; D]);
             let width: [f64; D] = std::array::from_fn(|dd| geometry.cell_width(coord, dd));
             (
                 std::array::from_fn(|dd| scale_end * lo[dd] + offset_end[dd]),
@@ -1362,6 +1356,42 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// a tile placed on its grid by the grid's origin and an index offset interpolates at the
+    /// same cells, with the same weights, as the tile placed by its own lower corner
+    #[test]
+    fn an_offset_tile_builds_the_stencil_of_a_tile_placed_by_its_corner() {
+        use crate::state::{Boundaries, BoundaryType, SimState, Timestepping};
+        use symbi_geometry::Cartesian;
+        use symbi_hydro::eos::IdealGas;
+        use symbi_hydro::newtonian::Newtonian;
+        use symbi_xpu::{CpuSpace, HostMemory};
+        let make = |x_lo: f64| {
+            SimState::<Newtonian, 1, Cartesian, IdealGas<f64>, CpuSpace, HostMemory>::new(
+                Newtonian,
+                IdealGas { gamma: 1.4 },
+                Cartesian,
+                [4],
+                [x_lo],
+                [0.25],
+                2,
+                Boundaries::uniform(BoundaryType::Outflow),
+                0.4,
+                Timestepping::Euler,
+                0,
+            )
+            .unwrap()
+        };
+        let by_corner = make(1.0);
+        let mut by_offset = make(0.0);
+        by_offset.geom.index_offset = [4];
+        for x in [1.05, 1.3, 1.6, 1.85] {
+            let a = cic_stencil(&by_corner.geom, &by_corner.geom.allocated, [x]);
+            let b = cic_stencil(&by_offset.geom, &by_offset.geom.allocated, [x]);
+            assert_eq!(a, b, "the stencil at x = {x}");
+            assert!(a.is_ok(), "the stencil at x = {x}: {a:?}");
+        }
+    }
 
     /// arrays collected over `interior.iter()` are indexed by the ordinal, and the two must
     /// stay the same walk. the container address of the same cell runs the opposite way, so
@@ -2700,20 +2730,25 @@ pub fn seed_mass_weighted<const D: usize, const DOF: usize, Mem: MemorySpace>(
     let mut masses = Vec::new();
     let mut owners: Vec<crate::mass_transport::ContainerId> = Vec::new();
     let mut cells: Vec<([f64; D], [f64; D])> = Vec::new();
+    // on a uniform grid every cell has one volume and the density alone orders the seeds; on a
+    // mapped grid each cell's mass is its density times its own volume
+    let mapped = sim.geom.maps.is_some();
     for c in interior.iter() {
-        masses.push(*sim.fields.cons.den.view().at(c));
+        let width: [f64; D] = std::array::from_fn(|a| sim.geom.cell_width(c, a));
+        let volume: f64 = width.iter().product();
+        let den = *sim.fields.cons.den.view().at(c);
+        masses.push(if mapped { den * volume } else { den });
         owners.push(cell_container(c, &interior, layout));
-        let mut lo = [0.0; D];
-        let mut dxs = [0.0; D];
-        let center = sim.geom.centroid(c);
-        for a in 0..D {
-            lo[a] = center[a] - 0.5 * sim.geom.dx[a];
-            dxs[a] = sim.geom.dx[a];
-        }
-        cells.push((lo, dxs));
+        let lo: [f64; D] = if mapped {
+            sim.geom.stagger_coord(c, [crate::state::Loc::Face; D])
+        } else {
+            let center = sim.geom.centroid(c);
+            std::array::from_fn(|a| center[a] - 0.5 * sim.geom.dx[a])
+        };
+        cells.push((lo, width));
     }
     let counts = systematic_counts(&masses, n);
-    let vol: f64 = sim.geom.dx[..D].iter().product();
+    let vol: f64 = if mapped { 1.0 } else { sim.geom.dx[..D].iter().product() };
     let weight = if n == 0 {
         0.0
     } else {
@@ -3315,10 +3350,7 @@ where
             }
             let position: [f64; D] =
                 std::array::from_fn(|dd| *tracers.x[dd].as_ptr::<f64>().add(ii));
-            let coord: [isize; D] = std::array::from_fn(|dd| match sim.geom.maps {
-                Some(maps) => maps[dd].index_at(position[dd]),
-                None => ((position[dd] - sim.geom.x_lo[dd]) / sim.geom.dx[dd]).floor() as isize,
-            });
+            let coord: [isize; D] = std::array::from_fn(|dd| sim.geom.cell_at(dd, position[dd]));
             if !interior.contains(coord) {
                 continue;
             }
@@ -3542,29 +3574,6 @@ fn face_destination<const D: usize>(
     }
 }
 
-/// the tile holding a position: its global cell, then the tile whose extent contains that
-/// cell. read off the partition's own cuts rather than by dividing a domain length into equal
-/// tiles, so unequal tiles place a tracer as exactly as even ones do. `None` outside the grid.
-fn tile_owner<const D: usize>(
-    x: &[f64; D],
-    glo: [f64; D],
-    dx: [f64; D],
-    partition: &crate::decomp::Partition<D>,
-) -> Option<usize> {
-    let n = partition.n_cells();
-    let mut cell = [0usize; D];
-    for a in 0..D {
-        let idx = ((x[a] - glo[a]) / dx[a]).floor();
-        if idx < 0.0 || idx >= n[a] as f64 {
-            return None;
-        }
-        cell[a] = idx as usize;
-    }
-    Some(crate::decomp::flatten(
-        partition.tile_of(cell),
-        partition.counts(),
-    ))
-}
 
 /// seed `n` tracers from `global`'s density (the monolithic seeding) and split them across the
 /// partition's tiles by initial position, returning one set per tile in flat order. the
@@ -3576,7 +3585,7 @@ pub fn seed_and_partition<const D: usize, const DOF: usize, Mem: MemorySpace>(
     partition: &crate::decomp::Partition<D>,
 ) -> Vec<TracerSet<D>> {
     let set = seed_mass_weighted(global, n);
-    partition_seeded(global, set, partition)
+    partition_seeded(set, partition)
 }
 
 pub fn seed_and_partition_with_cohorts<const D: usize, const DOF: usize, Mem: MemorySpace>(
@@ -3586,16 +3595,13 @@ pub fn seed_and_partition_with_cohorts<const D: usize, const DOF: usize, Mem: Me
     cell_cohorts: &[u16],
 ) -> Result<Vec<TracerSet<D>>, String> {
     let set = seed_mass_weighted_with_cohorts(global, n, cell_cohorts)?;
-    Ok(partition_seeded(global, set, partition))
+    Ok(partition_seeded(set, partition))
 }
 
-fn partition_seeded<const D: usize, const DOF: usize, Mem: MemorySpace>(
-    global: &FieldStore<D, DOF, Mem, f64>,
+fn partition_seeded<const D: usize>(
     set: TracerSet<D>,
     partition: &crate::decomp::Partition<D>,
 ) -> Vec<TracerSet<D>> {
-    let glo: [f64; D] = std::array::from_fn(|a| global.geom.x_lo[a]);
-    let dx: [f64; D] = std::array::from_fn(|a| global.geom.dx[a]);
     let ntiles: usize = partition.n_tiles();
     let mut per_tile: Vec<TracerSet<D>> = (0..ntiles)
         .map(|_| TracerSet {
@@ -3604,8 +3610,9 @@ fn partition_seeded<const D: usize, const DOF: usize, Mem: MemorySpace>(
         })
         .collect();
     for i in 0..set.x.len() {
-        // the seed is inside the domain by construction, so `tile_owner` is always Some.
-        let dest = tile_owner(&set.x[i], glo, dx, partition).unwrap_or(0);
+        // the owner a seed carries is its global container address, which names its tile on any
+        // spacing
+        let dest = crate::decomp::owner_tile(partition, set.owner[i].0 as usize);
         per_tile[dest].x.push(set.x[i]);
         per_tile[dest].id.push(set.id[i]);
         per_tile[dest].cohort.push(set.cohort[i]);

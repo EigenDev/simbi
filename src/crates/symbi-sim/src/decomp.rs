@@ -1994,7 +1994,7 @@ fn fold_into_domain<const D: usize>(
 /// the tile that owns the cell a tracer's owner id names. the id rides as a flat index over
 /// the global cell grid, axis-0 fastest; the partition's own cut lists resolve it, so tiles of
 /// unequal size resolve exactly as even ones do.
-fn owner_tile<const D: usize>(partition: &Partition<D>, owner: usize) -> usize {
+pub(crate) fn owner_tile<const D: usize>(partition: &Partition<D>, owner: usize) -> usize {
     let n = partition.n_cells();
     let mut linear = owner;
     let global: [usize; D] = std::array::from_fn(|dd| {
@@ -2242,8 +2242,8 @@ fn spawn_decomposed_injection<const D: usize, const DOF: usize, M: MemorySpace>(
         let sh: Vec<&FieldStore<D, DOF, M, f64>> = stores.iter().map(|s| &**s).collect();
         tile_partition_of(&sh, schedule.counts())
     };
-    let global_lo = stores[0].geom.x_lo;
-    let dx = stores[0].geom.dx;
+    // positions of global cells from the grid's first tile, at the global index less its offset
+    let first_geom = &stores[0].geom;
     let first = stores
         .iter()
         .find_map(|store| store.tracers.as_ref())
@@ -2276,11 +2276,12 @@ fn spawn_decomposed_injection<const D: usize, const DOF: usize, M: MemorySpace>(
         |owner| {
             let n_global = partition.n_cells();
             let mut linear = owner.0 as usize;
-            std::array::from_fn(|dd| {
+            let local: [isize; D] = std::array::from_fn(|dd| {
                 let index = linear % n_global[dd];
                 linear /= n_global[dd];
-                global_lo[dd] + (index as f64 + 0.5) * dx[dd]
-            })
+                index as isize - first_geom.index_offset[dd]
+            });
+            first_geom.cell_coord(local)
         },
         key,
     )
@@ -2331,13 +2332,8 @@ fn spawn_decomposed_continuous_injection<const D: usize, const DOF: usize, M: Me
         let sh: Vec<&FieldStore<D, DOF, M, f64>> = stores.iter().map(|s| &**s).collect();
         tile_partition_of(&sh, schedule.counts())
     };
-    let global_lo: [f64; D] = std::array::from_fn(|dd| {
-        stores
-            .iter()
-            .map(|store| crate::tracers::partition_physical_bounds(&store.geom)[dd].0)
-            .fold(f64::INFINITY, f64::min)
-    });
-    let dx = stores[0].geom.dx;
+    // positions of global cells from the grid's first tile, at the global index less its offset
+    let first_geom = &stores[0].geom;
     let template = stores
         .iter()
         .filter_map(|store| store.continuous_tracers.as_ref())
@@ -2369,14 +2365,14 @@ fn spawn_decomposed_continuous_injection<const D: usize, const DOF: usize, M: Me
         |owner| {
             let n_global = partition.n_cells();
             let mut linear = owner.0 as usize;
-            let index: [usize; D] = std::array::from_fn(|dd| {
+            let local: [isize; D] = std::array::from_fn(|dd| {
                 let index = linear % n_global[dd];
                 linear /= n_global[dd];
-                index
+                index as isize - first_geom.index_offset[dd]
             });
             (
-                std::array::from_fn(|dd| global_lo[dd] + index[dd] as f64 * dx[dd]),
-                dx,
+                first_geom.stagger_coord(local, [crate::state::Loc::Face; D]),
+                std::array::from_fn(|dd| first_geom.cell_width(local, dd)),
             )
         },
         key,
@@ -4082,6 +4078,59 @@ mod tests {
         let record = target.swap_remove_host(0).unwrap();
         assert_eq!(record.id, seed.id[0]);
         assert_eq!(record.x, [2.5]);
+        assert_eq!(record.random_counter, 23);
+        assert_eq!(record.owner, crate::mass_transport::ContainerId(2));
+    }
+
+    #[test]
+    fn continuous_migration_across_a_cut_of_offset_placed_tiles() {
+        use crate::state::{Boundaries, BoundaryType, SimState, Timestepping};
+        use crate::tracers::{ContinuousTracerSet, TracerSet};
+        use symbi_geometry::Cartesian;
+        use symbi_hydro::eos::IdealGas;
+        use symbi_hydro::newtonian::Newtonian;
+        use symbi_xpu::{CpuSpace, HostMemory};
+
+        // both tiles carry the grid's origin; the second is placed by its index offset
+        let make = |offset: isize| {
+            let mut sim = SimState::<Newtonian, 1, Cartesian, IdealGas<f64>, CpuSpace, HostMemory>::new(
+                Newtonian,
+                IdealGas { gamma: 1.4 },
+                Cartesian,
+                [2],
+                [0.0],
+                [1.0],
+                2,
+                Boundaries::uniform(BoundaryType::Outflow),
+                0.4,
+                Timestepping::Euler,
+                0,
+            )
+            .unwrap();
+            sim.geom.index_offset = [offset];
+            sim
+        };
+        let mut lo = make(0);
+        let mut hi = make(2);
+        let seed = TracerSet::<1>::seed_stratified(&[([2.0], [1.0])], &[crate::mass_transport::ContainerId(0)], &[1], 0.5);
+        let mut particles =
+            ContinuousTracerSet::<1, HostMemory>::from_discrete(&seed, crate::mass_transport::ItoOrder::Three).unwrap();
+        unsafe {
+            *particles.random_counter.as_mut_ptr::<u64>() = 23;
+        }
+        lo.continuous_tracers = Some(particles);
+        hi.continuous_tracers =
+            Some(ContinuousTracerSet::allocate(0, crate::mass_transport::ItoOrder::Three).unwrap());
+
+        let schedule = Schedule::open([2], lo.geom.ng);
+        let migrated = migrate_continuous_tracers(&mut [&mut lo, &mut hi], &schedule).unwrap();
+
+        assert_eq!(migrated, 1);
+        assert_eq!(lo.continuous_tracers.as_ref().unwrap().len, 0);
+        let target = hi.continuous_tracers.as_mut().unwrap();
+        assert_eq!(target.len, 1);
+        let record = target.swap_remove_host(0).unwrap();
+        assert_eq!(record.id, seed.id[0]);
         assert_eq!(record.random_counter, 23);
         assert_eq!(record.owner, crate::mass_transport::ContainerId(2));
     }

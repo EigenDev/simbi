@@ -208,6 +208,11 @@ pub struct BlockGeometry<M, S: Scalar, const D: usize> {
     /// leaves unresolved, and the chart alone leaves that open: cylindrical (R, phi) and (R, z) are
     /// both 2d cylindrical and leave different coordinates ungridded.
     pub axes: [usize; D],
+    /// the whole-grid index of local cell 0 per axis: a tile placed on its grid by the grid's own
+    /// origin and maps evaluates every position at the whole-grid index `idx + index_offset`, so
+    /// its host geometry is the whole grid's bit for bit. zero on an undivided grid and on a tile
+    /// placed by its own origin.
+    pub index_offset: [isize; D],
 }
 
 impl<M, S: Scalar, const D: usize> BlockGeometry<M, S, D>
@@ -222,6 +227,7 @@ where
             dx,
             x_lo,
             maps: None,
+            index_offset: [0; D],
         }
     }
 
@@ -236,7 +242,14 @@ where
             x_lo,
             maps: Some(maps),
             axes,
+            index_offset: [0; D],
         }
+    }
+
+    /// the same geometry evaluated at the whole-grid index `idx + index_offset`
+    pub fn with_index_offset(mut self, index_offset: [isize; D]) -> Self {
+        self.index_offset = index_offset;
+        self
     }
 
     /// the measure of the coordinates the grid leaves unresolved.
@@ -279,7 +292,7 @@ where
     #[inline]
     pub fn cell_width(&self, idx: [isize; D], ax: usize) -> S {
         if let Some(ref maps) = self.maps {
-            S::from_f64(maps[ax].width(idx[ax]))
+            S::from_f64(maps[ax].width(idx[ax] + self.index_offset[ax]))
         } else {
             self.dx[ax]
         }
@@ -290,11 +303,11 @@ where
     pub fn centroid(&self, idx: [isize; D]) -> Tensor<S, D> {
         if let Some(ref maps) = self.maps {
             Tensor::new(std::array::from_fn(|ax| {
-                S::from_f64(maps[ax].center(idx[ax]))
+                S::from_f64(maps[ax].center(idx[ax] + self.index_offset[ax]))
             }))
         } else {
             Tensor::new(std::array::from_fn(|ax| {
-                self.x_lo[ax] + S::from_f64(idx[ax] as f64 + 0.5) * self.dx[ax]
+                self.x_lo[ax] + S::from_f64((idx[ax] + self.index_offset[ax]) as f64 + 0.5) * self.dx[ax]
             }))
         }
     }
@@ -323,9 +336,9 @@ where
     #[inline]
     fn axis_face(&self, idx: [isize; D], ax: usize) -> S {
         if let Some(ref maps) = self.maps {
-            S::from_f64(maps[ax].face(idx[ax]))
+            S::from_f64(maps[ax].face(idx[ax] + self.index_offset[ax]))
         } else {
-            self.x_lo[ax] + S::from_f64(idx[ax] as f64) * self.dx[ax]
+            self.x_lo[ax] + S::from_f64((idx[ax] + self.index_offset[ax]) as f64) * self.dx[ax]
         }
     }
 

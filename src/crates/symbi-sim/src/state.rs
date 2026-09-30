@@ -1781,6 +1781,17 @@ impl<const D: usize> PartitionGeometry<D> {
         self.stagger_coord(coord, std::array::from_fn(|_| Loc::Center))
     }
 
+    /// the local index of the cell containing `x` on axis `ax`: the whole grid's containing cell
+    /// less this tile's index offset, the inverse of `stagger_coord`
+    #[inline]
+    pub fn cell_at(&self, ax: usize, x: f64) -> isize {
+        let whole = match self.maps.as_ref() {
+            Some(maps) => maps[ax].index_at(x),
+            None => ((x - self.x_lo[ax]) / self.dx[ax]).floor() as isize,
+        };
+        whole - self.index_offset[ax]
+    }
+
     /// cell width along axis ax at a given index.
     #[inline]
     pub fn cell_width(&self, coord: [isize; D], ax: usize) -> f64 {
@@ -1804,11 +1815,14 @@ impl<const D: usize> PartitionGeometry<D> {
         // the grid's real coordinate roles, so the cell volume knows which coordinates are
         // unresolved: a cylindrical (R, z) plane leaves phi ungridded, an (R, phi) disk leaves z.
         let axes: [usize; D] = std::array::from_fn(|d| self.axes[d]);
-        if let Some(maps) = self.maps {
+        // evaluated at the whole-grid index, so a tile placed by index offset measures the whole
+        // grid's cells
+        let block = if let Some(maps) = self.maps {
             symbi_geometry::BlockGeometry::with_maps(metric, maps, axes)
         } else {
             symbi_geometry::BlockGeometry::uniform(metric, self.x_lo, self.dx, axes)
-        }
+        };
+        block.with_index_offset(self.index_offset)
     }
 }
 

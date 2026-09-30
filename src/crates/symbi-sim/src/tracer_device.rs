@@ -48,6 +48,8 @@ extern "C" __global__ void continuous_tracer_advance(
     unsigned long long seed,
     int alo0, int alo1, int alo2,
     unsigned int shape0, unsigned int shape1, unsigned int shape2,
+    int off0, int off1, int off2,
+    unsigned int* outside,
     unsigned int map_kind0, unsigned int map_kind1, unsigned int map_kind2,
     double map_p00, double map_p01, double map_p02,
     double map_p10, double map_p11, double map_p12,
@@ -68,6 +70,7 @@ extern "C" __global__ void continuous_tracer_advance(
     const double* third[3] = {third0, third1, third2};
     int alo[3] = {alo0, alo1, alo2};
     unsigned int shape[3] = {shape0, shape1, shape2};
+    int off[3] = {off0, off1, off2};
     unsigned int map_kind[3] = {map_kind0, map_kind1, map_kind2};
     double map_p0[3] = {map_p00, map_p01, map_p02};
     double map_p1[3] = {map_p10, map_p11, map_p12};
@@ -110,11 +113,16 @@ extern "C" __global__ void continuous_tracer_advance(
             containing = (int)floor((logical[axis] - xlo[axis]) / dx[axis]);
             containing_center = xlo[axis] + ((double)containing + 0.5) * dx[axis];
         }
+        // the map places the particle at a whole-grid index; the tile addresses its own cells
+        // at that index less its offset, and a particle beyond them has no stencil here
         int base = logical[axis] < containing_center ? containing - 1 : containing;
+        int local = base - off[axis];
         int high_base = alo[axis] + (int)shape[axis] - 2;
-        base = base < alo[axis] ? alo[axis] : base;
-        base = base > high_base ? high_base : base;
-        lower[axis] = base;
+        if (local < alo[axis] || local > high_base) {
+            atomicOr(outside, 1u);
+            return;
+        }
+        lower[axis] = local;
         double center0;
         double center1;
         if (map_kind[axis] == 1u) {
@@ -247,6 +255,12 @@ pub(crate) fn advance_device<const D: usize, Mem: MemorySpace>(
             1
         }
     });
+    // the tile's whole-grid index offset: the map places a particle at a whole-grid index
+    let offset: [i32; 3] = std::array::from_fn(|dd| if dd < D { geometry.index_offset[dd] as i32 } else { 0 });
+    // set by any particle whose stencil lies beyond this tile's allocated cells
+    let outside = symbi_grid::Field::<u32, 1, Mem>::zeros(&symbi_algebra::Domain::new([symbi_algebra::Space { name: "flag", lo: 0, hi: 1 }]))
+        .map_err(|error| format!("continuous tracer device flag allocation failed: {error:?}"))?;
+    let outside_ptr = outside.as_mut_ptr() as u64;
     let mut map_kind = [0u32; 3];
     let mut map_p0 = [0.0; 3];
     let mut map_p1 = [0.0; 3];
@@ -285,7 +299,7 @@ pub(crate) fn advance_device<const D: usize, Mem: MemorySpace>(
         "tracers/continuous_advance",
         "continuous_tracer_advance",
     );
-    let mut args = KernelArgs::with_capacity_bytes(640, 59);
+    let mut args = KernelArgs::with_capacity_bytes(704, 63);
     for pointer in x_ptr
         .into_iter()
         .chain(step_ptr)
@@ -306,6 +320,10 @@ pub(crate) fn advance_device<const D: usize, Mem: MemorySpace>(
     for value in shape {
         args.push(&value);
     }
+    for value in offset {
+        args.push(&value);
+    }
+    args.push(&outside_ptr);
     for value in map_kind {
         args.push(&value);
     }
@@ -329,5 +347,8 @@ pub(crate) fn advance_device<const D: usize, Mem: MemorySpace>(
             .map_err(|error| format!("continuous tracer device launch failed: {error:?}"))?;
     }
     symbi_xpu::ctx_sync();
+    if *outside.at([0]) != 0 {
+        return Err("a continuous tracer lies outside its tile's interpolation domain".to_string());
+    }
     Ok(())
 }

@@ -20,9 +20,9 @@
 // =============================================================================
 
 use symbi::regimes::substrate_newton::AdiabaticSubstrateKernelSet;
-use symbi::sim::decomp::{LocalCopy, evolve_decomposed, flatten, gather_interiors, unflatten};
+use symbi::sim::decomp::{LocalCopy, Partition, evolve_decomposed, flatten, gather_interiors, unflatten};
 use symbi::sim::state::*;
-use symbi::sim::tracers::{body_accretion_reservoir, seed_mass_weighted};
+use symbi::sim::tracers::{body_accretion_reservoir, seed_and_partition};
 use symbi_algebra::Tensor;
 use symbi_geometry::Cartesian;
 use symbi_hydro::eos::IdealGas;
@@ -395,8 +395,13 @@ fn binary_euler_two_tile_x_cut() {
 fn decomposed_accretors_preserve_distinct_tracer_reservoirs() {
     let counts = [2, 1];
     let mut tiles = grid_tiles(counts, Timestepping::Euler, two_accretors);
-    for (sim, _) in &mut tiles {
-        sim.tracers = Some(seed_mass_weighted(&**sim, 4096));
+    // one population of 8192 seeded on the undivided grid, each tracer handed to the tile owning
+    // the cell its global owner address names
+    let reference = grid_tiles([1, 1], Timestepping::Euler, two_accretors);
+    let partition = Partition::explicit([N, N], [vec![N / 2], vec![]]).expect("partition");
+    let per_tile = seed_and_partition(&*reference[0].0, 8192, &partition);
+    for ((sim, _), set) in tiles.iter_mut().zip(per_tile) {
+        sim.tracers = Some(set);
     }
 
     run(&mut tiles, counts, Timestepping::Euler);
@@ -414,4 +419,13 @@ fn decomposed_accretors_preserve_distinct_tracer_reservoirs() {
         per_body.iter().all(|&count| count > 50),
         "both decomposed accretors must own tracer receipts: {per_body:?}"
     );
+    let mut ids: Vec<u64> = tiles
+        .iter()
+        .filter_map(|(sim, _)| sim.tracers.as_ref())
+        .flat_map(|tracers| tracers.id.iter().copied())
+        .collect();
+    let held = ids.len();
+    ids.sort_unstable();
+    ids.dedup();
+    assert_eq!(ids.len(), held, "a tracer id is held by two tiles");
 }
