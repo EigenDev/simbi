@@ -141,6 +141,20 @@ def test_an_isothermal_magnetized_launch_with_a_correction_against_the_cut_match
     assert _max_div_b(launched) < 1e-10
 
 
+def test_a_locally_isothermal_launch_resumed_from_a_checkpoint_is_refused_by_name(tmp_path: Path) -> None:
+    # the tiled seed continues cs^2 across a clipped edge only for a uniform closure; a resumed
+    # launch passes the same front door before any tile is built or seeded
+    reference = _script_reference(RefinedLocallyIso.__module__, "RefinedLocallyIso", (16, 16, 1), tmp_path / "single", 1)
+    layout = _layout(tmp_path / "two.toml", workers=2, shape=(2, 1))
+    cmd = [sys.executable, "-m", "simbi.cli", "launch", LOCAL_ISO_SCRIPT, "--layout", str(layout), "--max-steps", "1", "--resolution", "16,16,1",
+           "--data-directory", str(tmp_path / "out"), "--checkpoint-interval", "1e9", "--checkpoint", str(reference)]
+    done = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
+    assert done.returncode != 0, f"the resumed launch succeeded:\n{done.stdout}"
+    flat = " ".join(done.stderr.split())
+    assert "a locally isothermal closure is outside the distributed first release" in flat, done.stderr
+    assert not list((tmp_path / "out").glob("*.h5")), "a checkpoint was published"
+
+
 def test_a_locally_isothermal_launch_is_refused_by_name(tmp_path: Path) -> None:
     layout = _layout(tmp_path / "two.toml", workers=2, shape=(2, 1))
     cmd = [sys.executable, "-m", "simbi.cli", "launch", LOCAL_ISO_SCRIPT, "--layout", str(layout), "--max-steps", "1", "--resolution", "16,16,1", "--data-directory", str(tmp_path / "out"), "--checkpoint-interval", "1e9"]

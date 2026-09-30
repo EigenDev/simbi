@@ -15,7 +15,10 @@
 # magnetized blast made periodic under both edge EMFs, the root wrapped across
 # its seam by the launch's plans, fresh and resumed. relativistic hydro: the
 # synge blast with a fine box over its hot disk, under the synge and the ideal
-# gas, shown to differ, fresh and resumed. a patch on a periodic face
+# gas, shown to differ, fresh and resumed. isothermal hydro (the drifting blob)
+# and isothermal MHD (the walled orszag-tang vortex, under contact and uct,
+# shown to differ), each with a fine box over the central half, fresh and
+# resumed. a patch on a periodic face
 # and an alpha viscosity with refinement are refused by name.
 #
 # run: pytest -m simulation simbi/simulation/tests/test_launch_refined_numerics.py
@@ -202,6 +205,35 @@ def test_a_relativistic_refined_launch_matches_fresh_and_resumed(tmp_path: Path,
     assert 0 < written_at < STEPS
     resumed = _script_launch(script, RHD_RESOLUTION, tmp_path / "resumed", four, STEPS - written_at, workers=4, checkpoint=first)
     _assert_same_levels(resumed, reference, f"rhd {eos}: resumed onto four workers")
+
+
+ISO = "simbi_configs.examples.isothermal"
+# (module, class, resolution, launch flags, reference fields)
+ISOTHERMAL = {
+    "isothermal": (f"{ISO}.refined_isothermal_blob", "RefinedIsothermalBlob", (32, 32), [], ""),
+    "imhd-contact": (f"{ISO}.refined_imhd_orszag_tang", "RefinedIsothermalOrszagTang", (32, 32, 1), [], ""),
+    "imhd-uct": (f"{ISO}.refined_imhd_orszag_tang", "RefinedIsothermalOrszagTang", (32, 32, 1), ["--ct-method", "uct"], "ct_method='uct'"),
+}
+
+
+@pytest.mark.parametrize("name", list(ISOTHERMAL))
+def test_an_isothermal_refined_launch_matches_fresh_and_resumed(tmp_path: Path, name: str) -> None:
+    module, cls, resolution, flags, fields = ISOTHERMAL[name]
+    script = module.replace(".", "/") + ".py"
+    reference = _script_reference(module, cls, resolution, tmp_path / "single", STEPS, fields=fields)
+    if fields:
+        contact = _script_reference(module, cls, resolution, tmp_path / "contact", STEPS)
+        assert _differs(reference, contact), f"{name}: the edge EMF left the refined run unchanged; the gate is vacuous"
+    four = _layout(tmp_path / "four.toml", workers=4, cuts=[[13], [18]])
+    launched = _script_launch(script, resolution, tmp_path / "four", four, STEPS, workers=4, flags=flags)
+    _assert_same_levels(launched, reference, f"{name}: four workers")
+    two = _layout(tmp_path / "two.toml", workers=2, shape=(2, 1))
+    first = _script_launch(script, resolution, tmp_path / "first", two, STEPS // 2, workers=2, flags=flags)
+    with h5py.File(first, "r") as f:
+        written_at = int(f["level_0"].attrs["iteration"])
+    assert 0 < written_at < STEPS
+    resumed = _script_launch(script, resolution, tmp_path / "resumed", four, STEPS - written_at, workers=4, checkpoint=first)
+    _assert_same_levels(resumed, reference, f"{name}: resumed onto four workers")
 
 
 def test_a_refined_patch_on_a_periodic_face_is_refused_by_name(tmp_path: Path) -> None:

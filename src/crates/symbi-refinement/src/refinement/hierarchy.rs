@@ -1020,12 +1020,23 @@ where
             }
             // the isothermal closure's cs^2(x): prolonged over the fine interior and a band of two
             // ghost cells, the band the fine flux, drain, and viscous stencils read across the
-            // coarse-fine boundary, then continued into the remaining ghosts.
+            // coarse-fine boundary, clipped to the cells the parent's allocation can supply, then
+            // continued into the remaining ghosts. the clip bites where a refined patch runs out to
+            // the edge of a decomposed tile; there the continuation equals the prolongation of a
+            // uniform cs^2, the globally isothermal closure the tiled drivers admit.
             if let (Some(ccs), Some(fcs)) = (coarse.fields.cs2.as_ref(), fine.fields.cs2.as_ref()) {
                 let mut band = region.clone();
                 for ax in 0..NDIM {
                     band = band.extend(ax, 2, 2);
                 }
+                let clipped = clip_to_prolongable(&band, &coarse.geom.allocated, order).unwrap_or(region.clone());
+                let bit = (0..NDIM).any(|ax| {
+                    (clipped.spaces[ax].lo, clipped.spaces[ax].hi) != (band.spaces[ax].lo, band.spaces[ax].hi)
+                });
+                if bit {
+                    assert_uniform_closure(ccs, &coarse.geom.allocated, ll);
+                }
+                let band = clipped;
                 prolong_field(ccs, &zero, fcs, &band, order, 0.0);
                 fine.extend_isothermal_cs2_into_ghosts(&band);
             }
@@ -4868,6 +4879,37 @@ where
 // =============================================================================
 // decomposed hierarchy driver (refinement x decomposition)
 // =============================================================================
+
+/// the uniform cs^2 a clipped closure seed continues: a fine ghost band the parent's allocation
+/// cannot supply is continued from the fine interior, which equals the prolongation only when the
+/// parent's cs^2 is one finite value everywhere it is allocated. a spatially varying closure needs
+/// the parent's or the neighbor's own data there; it stops here by name.
+fn assert_uniform_closure<const NDIM: usize, Mem: MemorySpace>(
+    cs2: &Field<f64, NDIM, Mem>,
+    allocated: &Domain<NDIM>,
+    level: usize,
+) {
+    assert!(
+        Mem::IS_HOST_ACCESSIBLE,
+        "level {level}: the clipped closure seed reads the parent's cs^2 on the host"
+    );
+    symbi_substrate::regimes::substrate_gpu::device_sync::<Mem>();
+    let view = cs2.view();
+    let first = *view.at(std::array::from_fn(|ax| allocated.spaces[ax].lo));
+    let varying = allocated.iter().find(|c| {
+        let v = *view.at(*c);
+        !v.is_finite() || v.to_bits() != first.to_bits()
+    });
+    if let Some(cell) = varying {
+        panic!(
+            "level {level}: a refined patch runs to the edge of its parent's allocation, where the \
+             closure seed continues cs^2 from the fine interior, but the parent's cs^2 is not one \
+             finite value ({} at {cell:?} against {first}); a spatially varying closure needs the \
+             parent's or the neighbor's data at that edge",
+            *view.at(cell)
+        );
+    }
+}
 
 /// the halo topology of `level` over the tiles in `order`: the root closes the axes its tile grid
 /// wraps; a refined level lies inside the domain, clear of every seam.
