@@ -6447,7 +6447,10 @@ macro_rules! build_and_run_hydro_decomposed {
             let ext = partition.tile_extents(tc);
             let tile_lo: [usize; $d] = std::array::from_fn(|ax| ext[ax].0);
             let m: [usize; $d] = std::array::from_fn(|ax| ext[ax].1);
-            let origin: [f64; $d] = tile_origin::<$d>(cfg, tile_lo);
+            // every tile carries the whole grid's origin and maps and the whole-grid index of its first
+            // cell, so each position it evaluates is the whole grid's bit for bit
+            let origin: [f64; $d] = std::array::from_fn(|ax| cfg.x_lo[ax]);
+            let offset: [isize; $d] = std::array::from_fn(|ax| tile_lo[ax] as isize);
             let spacing: [f64; $d] = std::array::from_fn(|ax| cfg.dx[ax]);
             let bnd = tile_boundaries(&phys, tc, counts);
             let dev = flat as i32;
@@ -6457,7 +6460,8 @@ macro_rules! build_and_run_hydro_decomposed {
                     .ghosts(ghost_width(cfg))
                     .origin(origin)
                     .spacing(spacing)
-                    .coord_maps(tile_axis_maps::<$d>(cfg, tile_lo))
+                    .coord_maps(axis_maps::<$d>(cfg))
+                    .index_offset(offset)
                     .boundaries(bnd)
                     .cfl(cfg.cfl)
                     .timestepping(cfg.timestepping)
@@ -6547,9 +6551,9 @@ macro_rules! build_and_run_hydro_decomposed {
                         cfg.excision_pre_scale,
                     );
                 // attach the user source per tile (two-pass via attach_runtime_source). each tile
-                // evaluates S at its own global coords (the per-tile origin above), so a
-                // position-dependent force is correct across cuts -- decomposed == monolithic
-                // to round-off. the global output sim carries no
+                // evaluates S at the whole grid's coordinates of its cells (the whole-grid origin
+                // and index offset above), so a position-dependent force is correct across cuts --
+                // decomposed == monolithic bit for bit. the global output sim carries no
                 // source (it is touched only at gather/output).
                 let sub = attach_configured_sources(
                     sub,
@@ -7340,7 +7344,10 @@ macro_rules! build_and_run_mhd_decomposed {
             let ext = partition.tile_extents(tc);
             let tile_lo: [usize; $d] = std::array::from_fn(|ax| ext[ax].0);
             let m: [usize; $d] = std::array::from_fn(|ax| ext[ax].1);
-            let origin: [f64; $d] = tile_origin::<$d>(cfg, tile_lo);
+            // every tile carries the whole grid's origin and maps and the whole-grid index of its first
+            // cell, so each position it evaluates is the whole grid's bit for bit
+            let origin: [f64; $d] = std::array::from_fn(|ax| cfg.x_lo[ax]);
+            let offset: [isize; $d] = std::array::from_fn(|ax| tile_lo[ax] as isize);
             let spacing: [f64; $d] = std::array::from_fn(|ax| cfg.dx[ax]);
             let bnd = tile_boundaries(&phys, tc, counts);
             let dev = flat as i32;
@@ -7353,7 +7360,8 @@ macro_rules! build_and_run_mhd_decomposed {
                     .cells(m)
                     .origin(origin)
                     .spacing(spacing)
-                    .coord_maps(tile_axis_maps::<$d>(cfg, tile_lo))
+                    .coord_maps(axis_maps::<$d>(cfg))
+                    .index_offset(offset)
                     .boundaries(bnd)
                     .cfl(cfg.cfl)
                     .timestepping(cfg.timestepping)
@@ -7537,7 +7545,10 @@ macro_rules! build_and_run_imhd_decomposed {
             let ext = partition.tile_extents(tc);
             let tile_lo: [usize; $d] = std::array::from_fn(|ax| ext[ax].0);
             let m: [usize; $d] = std::array::from_fn(|ax| ext[ax].1);
-            let origin: [f64; $d] = tile_origin::<$d>(cfg, tile_lo);
+            // every tile carries the whole grid's origin and maps and the whole-grid index of its first
+            // cell, so each position it evaluates is the whole grid's bit for bit
+            let origin: [f64; $d] = std::array::from_fn(|ax| cfg.x_lo[ax]);
+            let offset: [isize; $d] = std::array::from_fn(|ax| tile_lo[ax] as isize);
             let spacing: [f64; $d] = std::array::from_fn(|ax| cfg.dx[ax]);
             let bnd = tile_boundaries(&phys, tc, counts);
             let dev = flat as i32;
@@ -7548,7 +7559,8 @@ macro_rules! build_and_run_imhd_decomposed {
                     .cells(m)
                     .origin(origin)
                     .spacing(spacing)
-                    .coord_maps(tile_axis_maps::<$d>(cfg, tile_lo))
+                    .coord_maps(axis_maps::<$d>(cfg))
+                    .index_offset(offset)
                     .boundaries(bnd)
                     .cfl(cfg.cfl)
                     .timestepping(cfg.timestepping)
@@ -7909,7 +7921,10 @@ macro_rules! build_and_run_iso_decomposed {
             let ext = partition.tile_extents(tc);
             let tile_lo: [usize; $d] = std::array::from_fn(|ax| ext[ax].0);
             let m: [usize; $d] = std::array::from_fn(|ax| ext[ax].1);
-            let origin: [f64; $d] = tile_origin::<$d>(cfg, tile_lo);
+            // every tile carries the whole grid's origin and maps and the whole-grid index of its first
+            // cell, so each position it evaluates is the whole grid's bit for bit
+            let origin: [f64; $d] = std::array::from_fn(|ax| cfg.x_lo[ax]);
+            let offset: [isize; $d] = std::array::from_fn(|ax| tile_lo[ax] as isize);
             let spacing: [f64; $d] = std::array::from_fn(|ax| cfg.dx[ax]);
             let bnd = tile_boundaries(&phys, tc, counts);
             let dev = flat as i32;
@@ -7918,7 +7933,8 @@ macro_rules! build_and_run_iso_decomposed {
                     .cells(m)
                     .origin(origin)
                     .spacing(spacing)
-                    .coord_maps(tile_axis_maps::<$d>(cfg, tile_lo))
+                    .coord_maps(axis_maps::<$d>(cfg))
+                    .index_offset(offset)
                     .boundaries(bnd)
                     .cfl(cfg.cfl)
                     .timestepping(cfg.timestepping)

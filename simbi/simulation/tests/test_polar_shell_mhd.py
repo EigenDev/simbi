@@ -8,8 +8,9 @@
 #   every cell, weighted by the constrained-transport face weights, is held to
 #   roundoff over the run, the two pole rows included;
 # - a run checkpointed halfway resumes to the uninterrupted state bit for bit;
-# - host tiles cutting the azimuth into two halves reproduce the single grid
-#   bit for bit.
+# - host tiles cutting the azimuth into two equal and three uneven slabs
+#   reproduce the single grid bit for bit: each tile is placed by the whole
+#   grid's origin and the index of its first cell.
 #
 # run: pytest -m simulation simbi/simulation/tests/test_polar_shell_mhd.py
 # =============================================================================
@@ -107,7 +108,8 @@ def test_a_resumed_run_continues_bit_for_bit(tmp_path: Path) -> None:
     _assert_same_state(resumed, whole, "resumed against uninterrupted")
 
 
-def test_azimuth_halves_match_the_single_grid(tmp_path: Path, host_tiles) -> None:
+@pytest.mark.parametrize(("gpus", "cuts"), [(2, [[], [], [8]]), (3, [[], [], [5, 11]])])
+def test_azimuth_cut_tiles_match_the_single_grid(tmp_path: Path, host_tiles, gpus: int, cuts) -> None:
     single = _run(tmp_path / "single", STEPS)
-    tiles = _run(tmp_path / "tiles", STEPS, gpus=2, decompose=[[], [], [8]])
-    _assert_same_state(tiles, single, "two azimuth tiles")
+    tiles = _run(tmp_path / "tiles", STEPS, gpus=gpus, decompose=cuts)
+    _assert_same_state(tiles, single, f"{gpus} azimuth tiles")
