@@ -10416,7 +10416,16 @@ fn ungated_launch_combination(cfg: &Config) -> Option<String> {
     if cfg.regime == "imhd" && cfg.resistivity != 0.0 {
         return Some("resistivity with the imhd regime".to_string());
     }
-    if cfg.regime != "newtonian" && (cfg.viscosity != 0.0 || cfg.alpha != 0.0) {
+    // the constant-nu viscous transport is gated for newtonian hydro, and on the 2D cartesian
+    // chart for the isothermal and magnetized regimes; the alpha prescription needs a central
+    // body, refused ahead of this
+    let viscous = cfg.viscosity != 0.0 || cfg.alpha != 0.0;
+    let gated_viscous = cfg.regime == "newtonian"
+        || (matches!(cfg.regime.as_str(), "isothermal" | "nmhd" | "imhd")
+            && cfg.coord_system == "cartesian"
+            && cfg.dims == 2
+            && cfg.alpha == 0.0);
+    if viscous && !gated_viscous {
         return Some(format!("viscous transport with the {} regime", cfg.regime));
     }
     None
