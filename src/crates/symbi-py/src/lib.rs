@@ -10610,15 +10610,15 @@ fn validate_launch_scope(cfg: &Config) -> Result<(), String> {
     Ok(())
 }
 
-/// the refined launch's gated scope: 2D newtonian hydro or 2.5D newtonian MHD on a uniform
-/// cartesian grid with one refined patch of ratio two, the ideal gas, open or periodic boundaries
+/// the refined launch's gated scope: 2D newtonian or relativistic hydro or 2.5D newtonian MHD on a
+/// uniform cartesian grid with one refined patch of ratio two, open or periodic boundaries
 /// with the patch clear of a periodic face; pcm, plm or
 /// ppm with its flattening, a constant viscosity, a resistivity, user sources and gradient walls
 /// where the outer scope admits them for the regime. every other refined combination is named and
 /// refused.
 fn validate_refined_launch_scope(cfg: &Config) -> Result<(), String> {
     let refused = |what: &str| Err(format!("{what} with mesh refinement is outside the distributed first release"));
-    if !matches!(cfg.regime.as_str(), "newtonian" | "nmhd") {
+    if !matches!(cfg.regime.as_str(), "newtonian" | "rhd" | "nmhd") {
         return refused(&format!("the {} regime", cfg.regime));
     }
     if cfg.dims != 2 {
@@ -10632,9 +10632,6 @@ fn validate_refined_launch_scope(cfg: &Config) -> Result<(), String> {
     }
     if cfg.refinement_regions.len() != 1 {
         return refused(&format!("{} refined regions", cfg.refinement_regions.len()));
-    }
-    if cfg.eos_name != "ideal" {
-        return refused(&format!("the {} equation of state", cfg.eos_name));
     }
     if cfg.wb_reconstruction {
         return refused("a well-balanced reconstruction");
@@ -10748,7 +10745,7 @@ where
 }
 
 /// evolve this worker's refined hierarchies through the fabric, the tiles built per regime:
-/// newtonian hydro, or newtonian MHD on the 2.5D plane with each tile seeded from its slice of
+/// newtonian or relativistic hydro, or newtonian MHD on the 2.5D plane with each tile seeded from its slice of
 /// the global staggered faces
 fn run_refined_worker_process(
     cfg: &Config,
@@ -10774,9 +10771,11 @@ fn run_refined_worker_process(
         let m: [usize; 2] = std::array::from_fn(|ax| ext[ax].1);
         (tile_lo, tile_origin::<2>(cfg, tile_lo), m, tile_boundaries(&phys, tc, counts))
     };
-    match cfg.regime.as_str() {
-        "newtonian" => {
-            type Sim = SimDefault<Newtonian, 2, Cartesian, EosSelect<f64>>;
+    // the refined tiles of a gas regime (newtonian or relativistic hydro): each level installs
+    // the numerics the single hierarchy installs
+    macro_rules! refined_gas {
+        ($regime:ident) => {{
+            type Sim = SimDefault<$regime, 2, Cartesian, EosSelect<f64>>;
             // the numerics the single hierarchy installs on every level: reconstruction, the ppm
             // flatten, the eos, the solver, the viscosity, the user sources and the gradient walls
             let kernels_of = |s: &Sim| {
@@ -10792,8 +10791,8 @@ fn run_refined_worker_process(
                 let ks = attach_configured_sources(
                     ks,
                     &cfg.source_jsons,
-                    <Newtonian as Regime<f64, 2>>::SPEC,
-                    &state_law_of(cfg, <Newtonian as Regime<f64, 2>>::SPEC),
+                    <$regime as Regime<f64, 2>>::SPEC,
+                    &state_law_of(cfg, <$regime as Regime<f64, 2>>::SPEC),
                 )
                 .expect("refined source attach");
                 attach_gradient_walls(ks, cfg, |ks, gbc| ks.with_gradient_boundary(gbc).0).expect("refined gradient wall")
@@ -10801,7 +10800,7 @@ fn run_refined_worker_process(
             let mut tiles = Vec::with_capacity(layout.mine.len());
             for &flat in &layout.mine {
                 let (tile_lo, origin, m, bnd) = extents(flat);
-                let sim = Sim::build(Newtonian, host_eos(cfg), Cartesian)
+                let sim = Sim::build($regime, host_eos(cfg), Cartesian)
                     .cells(m)
                     .ghosts(ghost_width(cfg))
                     .origin(origin)
@@ -10819,7 +10818,11 @@ fn run_refined_worker_process(
                 tiles.push(refined_tile(cfg, &layout, flat, origin, m, sim, kernels_of)?);
             }
             refined_session(cfg, launch, fault, drained, build_clock, &layout, tiles)
-        }
+        }};
+    }
+    match cfg.regime.as_str() {
+        "newtonian" => refined_gas!(Newtonian),
+        "rhd" => refined_gas!(Rhd),
         "nmhd" => {
             type Sim = SimDefaultGeneric<NewtonianMhd, 2, 3, Cartesian, EosSelect<f64>>;
             if bufs.len() < 3 {

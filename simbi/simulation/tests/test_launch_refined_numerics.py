@@ -13,7 +13,9 @@
 # own is the single-process refined pcm run, which takes the plm prolongation.
 # periodic boundaries: the kelvin-helmholtz layers on a 64 x 64 root and the
 # magnetized blast made periodic under both edge EMFs, the root wrapped across
-# its seam by the launch's plans, fresh and resumed. a patch on a periodic face
+# its seam by the launch's plans, fresh and resumed. relativistic hydro: the
+# synge blast with a fine box over its hot disk, under the synge and the ideal
+# gas, shown to differ, fresh and resumed. a patch on a periodic face
 # and an alpha viscosity with refinement are refused by name.
 #
 # run: pytest -m simulation simbi/simulation/tests/test_launch_refined_numerics.py
@@ -157,6 +159,49 @@ def test_a_periodic_refined_launch_matches_fresh_and_resumed(tmp_path: Path) -> 
     assert 0 < written_at < STEPS
     resumed = _script_launch(script, KH_RESOLUTION, tmp_path / "resumed", four, STEPS - written_at, workers=4, checkpoint=first)
     _assert_same_levels(resumed, reference, "periodic kh: resumed onto four workers")
+
+
+RHD = ("simbi_configs.examples.srhd.refined_synge_blast", "RefinedSyngeBlast")
+RHD_RESOLUTION = (32, 32)
+
+
+def _ideal_rhd_module(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[str, str, str]:
+    """the refined synge blast under the ideal gas at gamma = 4/3, importable by the reference and
+    by the launched workers"""
+    module, cls = RHD
+    (tmp_path / "ideal_rhd.py").write_text(
+        "from typing import Annotated\n"
+        "from simbi import ProblemParam\n"
+        "from simbi.types.input import Eos\n"
+        f"from {module} import {cls}\n\n\n"
+        f"class IdealRhd({cls}):\n"
+        "    eos: Annotated[Eos, ProblemParam(Eos.IDEAL, description='the ideal gas')]\n"
+        "    adiabatic_index: Annotated[float, ProblemParam(4.0 / 3.0, description='adiabatic index')]\n"
+    )
+    monkeypatch.setenv("PYTHONPATH", os.pathsep.join([str(tmp_path), os.getcwd(), os.environ.get("PYTHONPATH", "")]))
+    return "ideal_rhd", "IdealRhd", str(tmp_path / "ideal_rhd.py")
+
+
+@pytest.mark.parametrize("eos", ["synge", "ideal"])
+def test_a_relativistic_refined_launch_matches_fresh_and_resumed(tmp_path: Path, eos: str, monkeypatch) -> None:
+    synge_module, synge_cls = RHD
+    ideal_module, ideal_cls, ideal_script = _ideal_rhd_module(tmp_path, monkeypatch)
+    arms = {"synge": (synge_module, synge_cls, synge_module.replace(".", "/") + ".py"), "ideal": (ideal_module, ideal_cls, ideal_script)}
+    module, cls, script = arms[eos]
+    other_module, other_cls, _ = arms["ideal" if eos == "synge" else "synge"]
+    reference = _script_reference(module, cls, RHD_RESOLUTION, tmp_path / "single", STEPS)
+    contrast = _script_reference(other_module, other_cls, RHD_RESOLUTION, tmp_path / "contrast", STEPS)
+    assert _differs(reference, contrast), "the equation of state left the refined run unchanged; the gate is vacuous"
+    four = _layout(tmp_path / "four.toml", workers=4, cuts=[[13], [18]])
+    launched = _script_launch(script, RHD_RESOLUTION, tmp_path / "four", four, STEPS, workers=4)
+    _assert_same_levels(launched, reference, f"rhd {eos}: four workers")
+    two = _layout(tmp_path / "two.toml", workers=2, shape=(2, 1))
+    first = _script_launch(script, RHD_RESOLUTION, tmp_path / "first", two, STEPS // 2, workers=2)
+    with h5py.File(first, "r") as f:
+        written_at = int(f["level_0"].attrs["iteration"])
+    assert 0 < written_at < STEPS
+    resumed = _script_launch(script, RHD_RESOLUTION, tmp_path / "resumed", four, STEPS - written_at, workers=4, checkpoint=first)
+    _assert_same_levels(resumed, reference, f"rhd {eos}: resumed onto four workers")
 
 
 def test_a_refined_patch_on_a_periodic_face_is_refused_by_name(tmp_path: Path) -> None:
