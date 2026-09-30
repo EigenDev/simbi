@@ -374,9 +374,10 @@ where
     }
 
     /// face area in direction `dir`.
-    /// area = volume_factor_on_face * product of dx_perp.
-    /// uses the full volume factor, undivided by scale_factor[dir], to
-    /// maintain discrete compatibility with the CT curl formulas.
+    /// area = volume_factor_on_face * product of dx_perp: the full volume factor at the CT face
+    /// center, undivided by scale_factor[dir]. this is the weight under which the CT curl of a
+    /// contravariant face component telescopes; `ct_face_weight` gives the weight for the storage
+    /// basis the spacetime evolves.
     #[inline]
     pub fn face_area(&self, idx: [isize; D], dir: usize) -> S {
         let x = self.face_position(idx, dir);
@@ -388,6 +389,30 @@ where
             }
         }
         area
+    }
+
+    /// the face weight W under which the constrained-transport curl preserves
+    /// sum_d (W_d B_d)^+ - (W_d B_d)^- to roundoff, for the face component the spacetime stores.
+    /// a contravariant component (the curved spacetimes) telescopes under `face_area`; an
+    /// orthonormal component (minkowski) under `face_area` divided by the scale factor of the
+    /// face's normal coordinate at the face center: r for the polar angle, r sin(theta) for the
+    /// spherical azimuth, R for the cylindrical azimuth, and 1 for every length coordinate.
+    #[inline]
+    pub fn ct_face_weight(&self, idx: [isize; D], dir: usize) -> S {
+        use crate::metric::{ComponentBasis, Geometry};
+        let area = self.face_area(idx, dir);
+        if self.metric.spacetime().component_basis() == ComponentBasis::Contravariant {
+            return area;
+        }
+        let x = self.face_position(idx, dir);
+        let coordinate = |slot: usize| self.axes.iter().position(|&a| a == slot).map(|ax| x[ax]);
+        let radius = coordinate(0).unwrap_or(S::ONE);
+        match (self.metric.geometry(), self.axes[dir]) {
+            (Geometry::Spherical, 1) => area / radius,
+            (Geometry::Spherical, 2) => area / (radius * coordinate(1).map_or(S::ONE, |theta| theta.sin())),
+            (Geometry::Cylindrical, 1) => area / radius,
+            _ => area,
+        }
     }
 
     /// lab-frame (physical) volume for ALE moving meshes.

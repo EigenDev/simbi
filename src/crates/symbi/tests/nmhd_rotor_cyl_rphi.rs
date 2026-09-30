@@ -164,3 +164,37 @@ fn nmhd_rotor_cyl_rphi_preserves_divb_winds_field_stays_physical() {
         sim.iteration, sim.time, max_br, max_rel
     );
 }
+
+// the divergence the run reports (conservation_diag, the progress table's div B column) is the
+// divergence the r-phi curl preserves: the phi faces weigh dr, the r faces r_f dphi, so as the
+// rotor winds B_r out of B_phi the reported value stays at roundoff with the metric divergence
+// above. a phi-face weight carrying the extra r_c of the full volume factor reports the wound
+// field's (r_c - 1) d_phi B_phi as a divergence.
+#[test]
+fn the_reported_divergence_is_the_one_the_curl_preserves() {
+    let mut sim = make_sim();
+    let sub = sim
+        .substrate()
+        .theta(1.5)
+        .with_solver(Solver::Hlld)
+        .expect("valid solver/regime pair");
+    evolve(&mut sim, &sub, T_FINAL).expect("cyl r-phi rotor evolve failed");
+    let rel = rel_divb(&sim);
+    assert!(rel < 1e-11, "the curl left the metric divergence at rel={rel:e}");
+    let mhd = sim.fields.mhd.as_ref().unwrap();
+    let mut max_b = B0;
+    let mut max_br = 0.0_f64;
+    for c in sim.geom.interior.iter() {
+        max_br = max_br.max(mhd.bface[0].view().at(c).abs());
+        max_b = max_b.max(mhd.bface[1].view().at(c).abs());
+    }
+    // the premise: the rotor wound an azimuthally varying B_r, so d_phi B_phi is nonzero and a
+    // mis-weighted phi face shows up in the report
+    assert!(max_br > 0.01, "the field did not wind: max|B_r| = {max_br:e}; the report is not exercised");
+    let reported = sim.conservation_diag().expect("diag").div_b.expect("div b");
+    assert!(
+        reported / max_b < 1e-11,
+        "the reported div B {reported:e} (rel {:e}) departs from the preserved divergence (rel {rel:e})",
+        reported / max_b
+    );
+}

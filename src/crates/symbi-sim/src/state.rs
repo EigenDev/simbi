@@ -3406,12 +3406,13 @@ where
             }
         }
 
-        // max|div B| from the staggered faces, area-weighted so it is the true
-        // constrained-transport divergence on curvilinear grids: div B =
-        // (1/V) sum_d (A_d^+ B_d^+ - A_d^- B_d^-). face areas + cell volume come
-        // from the block geometry; on a cartesian grid A_d = prod of the transverse
-        // widths and this reduces to the plain (B_hi - B_lo)/dx form. the +1 normal
-        // face exists on bface (allocated interior.extend(d, 0, 1)).
+        // max|div B| from the staggered faces, weighted so it is the divergence the
+        // constrained-transport curl preserves: div B = (1/V) sum_d (W_d^+ B_d^+ - W_d^- B_d^-)
+        // with W the CT face weight of the stored basis (orthonormal on flat charts, where the
+        // face area is divided by the normal coordinate's scale factor; contravariant on the
+        // curved spacetimes). on a cartesian grid W_d = prod of the transverse widths and this
+        // reduces to the plain (B_hi - B_lo)/dx form. the +1 normal face exists on bface
+        // (allocated interior.extend(d, 0, 1)).
         let div_b = self.fields.mhd.as_ref().map(|mhd| {
             let mut max_div = 0.0_f64;
             for c in self.geom.interior.iter() {
@@ -3425,7 +3426,7 @@ where
                     hi[d] += 1;
                     let b_lo = *mhd.bface[d].view().at(c);
                     let b_hi = *mhd.bface[d].view().at(hi);
-                    flux += bg.face_area(hi, d) * b_hi - bg.face_area(c, d) * b_lo;
+                    flux += bg.ct_face_weight(hi, d) * b_hi - bg.ct_face_weight(c, d) * b_lo;
                 }
                 max_div = max_div.max((flux / vol).abs());
             }
