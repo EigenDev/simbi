@@ -4,10 +4,9 @@
 # mesh refinement through `simbi launch`: a root grid with one fine box,
 # launched across workers whose cuts cross the box, against the single-process
 # refined run, both levels compared bit for bit; resumed onto a changed
-# partition from the launch's own two-level checkpoint; and the refined
-# combinations outside the gated scope refused by name: a periodic boundary,
-# and a patch face on a cut, whose fine ghosts would read the root halo past
-# its depth. each arm runs the refined blast in newtonian hydro and the
+# partition from the launch's own two-level checkpoint; and a patch face on a
+# cut refused by name, whose fine ghosts would read the root halo past its
+# depth. each arm runs the refined blast in newtonian hydro and the
 # magnetized blast in 2.5D newtonian MHD, the latter under the Contact and the
 # UCT edge EMF, its staggered faces on both levels compared with the cells; a
 # resumed launch names no scheme flag, so the recorded edge EMF continues. the

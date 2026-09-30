@@ -10632,7 +10632,8 @@ fn validate_launch_scope(cfg: &Config) -> Result<(), String> {
 }
 
 /// the refined launch's gated scope: 2D newtonian hydro or 2.5D newtonian MHD on a uniform
-/// cartesian grid with one refined patch of ratio two, the ideal gas, open boundaries; pcm, plm or
+/// cartesian grid with one refined patch of ratio two, the ideal gas, open or periodic boundaries
+/// with the patch clear of a periodic face; pcm, plm or
 /// ppm with its flattening, a constant viscosity, a resistivity, user sources and gradient walls
 /// where the outer scope admits them for the regime. every other refined combination is named and
 /// refused.
@@ -10659,8 +10660,15 @@ fn validate_refined_launch_scope(cfg: &Config) -> Result<(), String> {
     if cfg.wb_reconstruction {
         return refused("a well-balanced reconstruction");
     }
-    if cfg.boundaries.contains(&BoundaryType::Periodic) {
-        return refused("a periodic boundary");
+    // the root and seed plans carry the wrap of a periodic axis; the fine level, its registers and
+    // its face stencils live inside the domain, so the patch keeps clear of a periodic face
+    let phys = boundaries_nd::<2>(&cfg.boundaries);
+    let patch = launch_patch(cfg)?;
+    for ax in 0..2 {
+        let periodic = phys.lo(ax) == BoundaryType::Periodic && phys.hi(ax) == BoundaryType::Periodic;
+        if periodic && (patch[ax].0 == 0 || patch[ax].1 >= cfg.n_cells[ax]) {
+            return refused(&format!("a refined patch on the periodic face of axis {ax}"));
+        }
     }
     if cfg.alpha > 0.0 {
         return refused("an alpha viscosity");
@@ -10949,8 +10957,10 @@ where
     let schema = plan_schema(root_store);
     let cons_schema = plan_cons_schema(root_store);
     let open = symbi::sim::decomp::Topology::open();
-    let root_plan = ExchangePlan::compile(partition, &open, &schema, ng).map_err(|e| e.to_string())?;
-    let seed_plan = ExchangePlan::compile(partition, &open, &cons_schema, ng).map_err(|e| e.to_string())?;
+    // the root level wraps a periodic axis across its seam; the fine level lies inside the domain
+    let wrap = chart_topology(cfg, &boundaries_nd::<2>(&cfg.boundaries), counts);
+    let root_plan = ExchangePlan::compile(partition, &wrap, &schema, ng).map_err(|e| e.to_string())?;
+    let seed_plan = ExchangePlan::compile(partition, &wrap, &cons_schema, ng).map_err(|e| e.to_string())?;
     let fine_lo = |t: TileId| -> [isize; 2] {
         let tc = unflatten(t.0 as usize, fine_counts);
         let root_ext = partition.tile_extents(fine_partition.root_tile_of(tc));
