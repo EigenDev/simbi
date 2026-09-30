@@ -409,3 +409,13 @@ fn centered_cuts_match_after_one_root_step() {
     assert_one_step_matches([16, 16], PLM);
     assert_one_step_matches([16, 16], PPM);
 }
+
+#[test]
+fn ppm_root_cuts_18_14_match_after_one_root_step() {
+    assert_one_step_matches([18, 14], PPM);
+}
+
+#[test]
+fn ppm_root_cuts_17_13_match_after_one_root_step() {
+    assert_one_step_matches([17, 13], PPM);
+}
