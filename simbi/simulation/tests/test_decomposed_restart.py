@@ -51,38 +51,24 @@ def _interior_datasets(f: h5py.File):
     return out
 
 
-def _assert_same_state(a: Path, b: Path, label: str, scale_tolerance: float | None = None) -> None:
-    """the two checkpoints hold the same physical state: bit for bit when `scale_tolerance` is
-    unset, otherwise within that fraction of each field's largest magnitude, the bound the
-    decomposition equivalence gates hold a decomposed march to, since each tile evaluates its
-    coordinate map from its own origin and the geometric source follows at roundoff."""
+def _assert_same_state(a: Path, b: Path, label: str) -> None:
+    """the two checkpoints hold the same state bit for bit: every tile evaluates the whole grid's
+    coordinates at the whole-grid index of its cells, so a repartitioned march reproduces the
+    single grid's arithmetic exactly."""
     with h5py.File(a, "r") as fa, h5py.File(b, "r") as fb:
         for key in ("time", "iteration"):
             assert fa["level_0"].attrs[key] == fb["level_0"].attrs[key], f"{label}: level attr {key}"
         xs, ys = _interior_datasets(fa), _interior_datasets(fb)
         assert xs.keys() == ys.keys(), f"{label}: dataset sets differ"
-        # a field's scale is the largest magnitude in its group (the conserved set, the
-        # primitives, the faces), so a component that is zero up to roundoff, such as the
-        # polar momentum of a radial flow, is measured against the flow it rides in.
-        group_scale = {}
-        for name, x in xs.items():
-            group = name.rsplit("/", 1)[0]
-            group_scale[group] = max(group_scale.get(group, 1e-300), np.abs(x).max(), np.abs(ys[name]).max())
         for name, x in xs.items():
             y = ys[name]
             assert x.shape == y.shape, f"{label}: {name} shape"
-            if scale_tolerance is None:
-                np.testing.assert_array_equal(x, y, err_msg=f"{label}: {name}")
-            else:
-                scale = group_scale[name.rsplit("/", 1)[0]]
-                worst = np.abs(x - y).max()
-                assert worst <= scale_tolerance * scale, f"{label}: {name} differs by {worst:.3e} against scale {scale:.3e}"
+            np.testing.assert_array_equal(x, y, err_msg=f"{label}: {name}")
         for dim in fa["level_0/mesh/geometry"]:
             for key, value in fa["level_0/mesh/geometry"][dim].attrs.items():
                 assert fb["level_0/mesh/geometry"][dim].attrs[key] == value, f"{label}: {dim}/{key}"
 
 
-DECOMPOSITION_BOUND = 1e-12
 
 
 @pytest.mark.parametrize("gpus,decompose", [(1, None), (2, None), (3, [[3, 5], []])])
@@ -99,12 +85,12 @@ def test_a_checkpoint_resumes_under_any_partition(tmp_path: Path, monkeypatch) -
     start = _run(tmp_path / "start", gpus=1, steps=2)
     one = _run(tmp_path / "one", gpus=1, steps=1, checkpoint=start)
     two = _run(tmp_path / "two", gpus=2, steps=1, checkpoint=start)
-    _assert_same_state(one, two, "one tile -> two tiles", DECOMPOSITION_BOUND)
+    _assert_same_state(one, two, "one tile -> two tiles")
     one_again = _run(tmp_path / "one_again", gpus=1, steps=1, checkpoint=one)
     from_two_to_one = _run(tmp_path / "two_to_one", gpus=1, steps=1, checkpoint=two)
     from_two_to_three = _run(tmp_path / "two_to_three", gpus=3, steps=1, checkpoint=two, decompose=[[3, 5], []])
-    _assert_same_state(one_again, from_two_to_one, "two tiles -> one tile", DECOMPOSITION_BOUND)
-    _assert_same_state(one_again, from_two_to_three, "two tiles -> three uneven tiles", DECOMPOSITION_BOUND)
+    _assert_same_state(one_again, from_two_to_one, "two tiles -> one tile")
+    _assert_same_state(one_again, from_two_to_three, "two tiles -> three uneven tiles")
 
 
 def test_a_refined_checkpoint_resumes_across_partitions(tmp_path: Path, monkeypatch) -> None:
