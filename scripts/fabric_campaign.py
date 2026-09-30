@@ -27,8 +27,9 @@
 # checkpoints equal interior cell for interior cell (bit for bit) across
 # single, one, many and restart, the corrected many-worker run equal to the
 # corrected one-worker run, the rejection count per worker, the conserved
-# totals of a periodic case within roundoff of the initial checkpoint, and
-# div B on a magnetized case. per case the driver writes result.json; the
+# totals of a periodic case within roundoff of the initial checkpoint, the
+# edge EMF the resumed magnetized run records, a non-default edge EMF changing
+# the run against contact, and div B on a magnetized case. per case the driver writes result.json; the
 # campaign writes provenance.txt (commit, dirty state, host, backend hash,
 # scheduler job) and summary.json / summary.md.
 #
@@ -53,7 +54,7 @@ import socket
 import subprocess
 import sys
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from math import prod
 from pathlib import Path
 
@@ -101,6 +102,19 @@ class Case:
     @property
     def script(self) -> str:
         return str(ROOT / (self.module.replace(".", "/") + ".py"))
+
+    @property
+    def ct_method(self) -> str:
+        """the edge EMF a magnetized case runs under: the `--ct-method` flag, else contact"""
+        if not self.magnetized:
+            return ""
+        return self.flags[self.flags.index("--ct-method") + 1] if "--ct-method" in self.flags else "contact"
+
+    def under_contact(self) -> Case:
+        """the same case under the contact edge EMF: the `--ct-method` flag and its field dropped"""
+        at = self.flags.index("--ct-method")
+        fields = ", ".join(f for f in self.fields.split(", ") if f and not f.startswith("ct_method="))
+        return replace(self, flags=self.flags[:at] + self.flags[at + 2:], fields=fields)
 
     @property
     def dims(self) -> int:
@@ -175,6 +189,21 @@ CASES: tuple[Case, ...] = (
     Case("imhd_orszag_tang_3d", "simbi_configs.examples.isothermal.imhd_orszag_tang_3d", "IsothermalOrszagTang3D",
          (16, 16, 16), 8, ("full",), cuts=((8,), (), (8,)), restart_cuts=((5, 11), (), ()),
          trouble="trouble:3:0:7:3:7", magnetized=True, periodic=True, faults=("reject", "bad_cfl", "lost")),
+    # the isothermal regimes on the curvilinear charts: the log-radial shell spanning both poles,
+    # and the rotating core on the (r, phi) disk plane with a periodic azimuth
+    Case("isothermal_spherical_pulse", "simbi_configs.examples.isothermal.isothermal_spherical_pulse",
+         "IsothermalSphericalPulse", (32, 32), 8, ("full",), cuts=((16,), (16,)), restart_cuts=((10, 21), ()),
+         trouble="trouble:3:1:15:31", faults=("reject", "bad_cfl", "lost")),
+    Case("isothermal_disk_cyl", "simbi_configs.examples.isothermal.isothermal_disk_cyl", "IsothermalDiskCyl",
+         (32, 32), 8, ("full",), cuts=((7,), (16,)), restart_cuts=((10, 21), ()), trouble="trouble:3:0:6:0",
+         faults=("reject", "bad_cfl", "lost")),
+    Case("imhd_rotor_cyl", "simbi_configs.examples.isothermal.imhd_rotor_cyl", "IsothermalRotorCyl",
+         (32, 32, 1), 8, ("full",), cuts=((7,), (16,)), restart_cuts=((10, 21), ()), env=AUDIT_ALL,
+         magnetized=True, trouble="trouble:3:0:6:0", faults=("reject", "bad_cfl", "lost")),
+    Case("imhd_rotor_cyl_uct", "simbi_configs.examples.isothermal.imhd_rotor_cyl", "IsothermalRotorCyl",
+         (32, 32, 1), 8, ("full",), cuts=((7,), (16,)), restart_cuts=((10, 21), ()), env=AUDIT_ALL,
+         flags=("--ct-method", "uct"), fields="ct_method='uct'", magnetized=True, trouble="trouble:3:0:6:0",
+         faults=("reject", "bad_cfl", "lost")),
     # geometric widths on both axes under a tabulated source, and the synge gas blast
     Case("geometric_tabulated", f"{N}.decomposed_tabulated_geometric", "DecomposedTabulatedGeometric", (32, 16), 8,
          ("full",), cuts=((16,), (8,)), restart_cuts=((10, 21), ()), trouble="trouble:3:0:15:7",
@@ -382,6 +411,17 @@ def interior(path: Path) -> tuple[dict[str, np.ndarray], dict[str, float]]:
     return fields, attrs
 
 
+def recorded_ct_method(path: Path) -> str | None:
+    """the edge EMF a checkpoint records it was evolved under, wherever the file keeps it"""
+    found: list[str] = []
+    with h5py.File(path, "r") as f:
+        for obj in [f, *(f[k] for k in f.keys())]:
+            if "ct_method" in obj.attrs:
+                value = obj.attrs["ct_method"]
+                found.append(value.decode() if isinstance(value, bytes) else str(value))
+    return found[0] if found else None
+
+
 def totals(path: Path) -> dict[str, tuple[float, float]]:
     """the sum and the absolute sum of every conserved dataset over the interior"""
     fields, _ = interior(path)
@@ -475,6 +515,15 @@ def run_case(driver: Driver, case: Case) -> dict:
     one_cuts = tuple(() for _ in case.cuts)
     arms["single"] = driver.reference(case, where / "single")
     checks["single"] = ok(arms["single"], 1)
+    # a case under another edge EMF exercises it only where the in-plane faces carry field: the
+    # contact run of the same problem differs, or the method's arms test nothing
+    if case.ct_method not in ("", "contact"):
+        arms["single_contact"] = driver.reference(case.under_contact(), where / "single_contact")
+        checks["single_contact"] = ok(arms["single_contact"], 1)
+        if checks["single_contact"] is None and checks["single"] is None:
+            checks["ct_method changes the run"] = (
+                None if same_state(final_of(arms["single_contact"].data), final_of(arms["single"].data)) else
+                f"{case.ct_method} and contact evolve the same state; the ct_method arms are vacuous")
     arms["one"] = driver.launch(case, "one", where / "one", one_cuts, case.steps)
     checks["one"] = ok(arms["one"], 1)
     arms["many"] = driver.launch(case, "many", where / "many", case.cuts, case.steps)
@@ -490,6 +539,13 @@ def run_case(driver: Driver, case: Case) -> dict:
                                         checkpoint=final_of(half.data))
         checks["restart"] = ok(arms["restart"], case.workers(case.restart_cuts))
         record["restart_written_at"] = written_at
+        # the resumed run continues the faces under the edge EMF the case asks for
+        if case.magnetized and checks["restart"] is None:
+            resumed_ct = recorded_ct_method(final_of(arms["restart"].data))
+            record["restart_ct_method"] = resumed_ct
+            checks["restart ct_method"] = (
+                None if resumed_ct == case.ct_method else
+                f"the resumed run records ct_method={resumed_ct!r}; the case runs {case.ct_method!r}")
     else:
         checks["restart"] = "half: skipped after the partial run failed"
     for name in ("one", "many", "restart"):

@@ -10406,15 +10406,20 @@ fn ungated_launch_combination(cfg: &Config) -> Option<String> {
     if cfg.regime != "newtonian" && cfg.reconstruction_name != "plm" {
         return Some(format!("{} reconstruction with the {} regime", cfg.reconstruction_name, cfg.regime));
     }
-    // the isothermal regimes are gated on the cartesian chart in 2D and 3D
-    if isothermal && cfg.coord_system != "cartesian" {
+    // the isothermal regimes are gated on the cartesian chart in 2D and 3D and on the 2D (r, phi)
+    // disk plane; isothermal hydro also on the 2D spherical (r, theta) chart
+    let disk_plane = cfg.coord_system == "cylindrical" && cfg.cyl_plane == CylPlane::RPhi && cfg.dims == 2;
+    let spherical_2d = cfg.coord_system == "spherical" && cfg.dims == 2 && cfg.regime == "isothermal";
+    if isothermal && !(cfg.coord_system == "cartesian" || disk_plane || spherical_2d) {
         return Some(format!("the {} regime on a {}-dimensional {} chart", cfg.regime, cfg.dims, cfg.coord_system));
     }
-    // the isothermal regimes are gated with periodic, reflecting and outflow walls; a gradient
-    // wall and every other wall kind stay ungated
-    let gated_wall = |b: &BoundaryType| matches!(b, BoundaryType::Periodic | BoundaryType::Reflect | BoundaryType::Outflow);
+    // the isothermal regimes are gated with periodic, reflecting and outflow walls and the
+    // spherical pole; a gradient wall and every other wall kind stay ungated
+    let gated_wall = |b: &BoundaryType| {
+        matches!(b, BoundaryType::Periodic | BoundaryType::Reflect | BoundaryType::Outflow | BoundaryType::Axis)
+    };
     if isothermal && (!cfg.boundaries.iter().all(gated_wall) || !cfg.gradient_bcs.is_empty()) {
-        return Some(format!("a wall beyond periodic, reflecting and outflow with the {} regime", cfg.regime));
+        return Some(format!("a wall beyond periodic, reflecting, outflow and the pole with the {} regime", cfg.regime));
     }
     // the constant-nu viscous transport is gated for newtonian hydro, and on the 2D cartesian
     // chart for the isothermal and magnetized regimes; the alpha prescription needs a central
