@@ -536,6 +536,13 @@ where
                 ct::average_with_predictor_emf(sim);
             }
             ct::fofc_emf_splice(sim, flag);
+            // every azimuthal copy of an edge on a coordinate axis is one physical segment: the
+            // redo keeps the ring's reconciled accepted EMF, identical on every tile holding a
+            // copy, so the cells touching the axis keep their discrete magnetic flux
+            {
+                let mhd = sim.fields.mhd.as_ref().expect("the MHD redo requires magnetic fields");
+                symbi_sim::axis_ring::restore_rings_from(sim, &mhd.efield_ho);
+            }
             if stage == 1 {
                 ct::save_predictor_emf(sim);
             }
@@ -1438,14 +1445,11 @@ where
             self.theta,
         );
     }
-    fn post_godunov(&self, sim: &FieldStore<D, 3, Mem, Sc>, dt: f64, stage: u8) {
-        crate::regimes::mhd_substrate::post_godunov(
-            sim,
-            R::SPEC.has_energy,
-            dt,
-            stage,
-            self.resistivity,
-        );
+    fn stage_emf(&self, sim: &FieldStore<D, 3, Mem, Sc>, _dt: f64, stage: u8) {
+        crate::regimes::mhd_substrate::complete_stage_emf(sim, stage, self.resistivity);
+    }
+    fn stage_curl(&self, sim: &FieldStore<D, 3, Mem, Sc>, dt: f64, stage: u8) {
+        crate::regimes::mhd_substrate::curl_stage_emf(sim, R::SPEC.has_energy, dt, stage);
     }
 
     fn has_additive_source(&self) -> bool {

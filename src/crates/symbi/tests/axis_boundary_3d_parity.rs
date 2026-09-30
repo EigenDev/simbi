@@ -308,20 +308,18 @@ fn the_evolved_field_keeps_its_divergence_its_closing_face_and_its_polar_seam() 
     let after = sim.conservation_diag().expect("diag").div_b.expect("div b");
     let gap = closing_face_gap(&sim);
     // the reported divergence is weighted by the CT face weights (ct_face_weight), under which
-    // the curl preserves every interior cell's divergence to roundoff. measured at t = 0.05 on
-    // the (6, 8, 8) shell: max |div B| 6.000e-3 -> 9.636e-3, the whole change in the two pole
-    // rows (per-cell change ~1e-4 there, ~1e-17 in every other row): a pole cell's phi faces
-    // carry the radial EMF of the axis edge at phi_k and phi_{k+1}, which the corner-EMF stage
-    // computes per phi index, so the axis segment's two traversals differ and the pole cells
-    // leak. the closing phi face's two copies agree to 2.8e-17 against a field of 0.1. the
-    // bounds hold the divergence within five percent of its seed and the closing gap at roundoff.
+    // the curl preserves every cell's flux: the edges on the axis carry one reconciled EMF per
+    // ring, so the pole cells telescope like every other. measured at t = 0.05 on the (6, 8, 8)
+    // shell: max |div B| 6.000471e-3 before and after, and the two copies of the closing phi face
+    // agree to 2.8e-17 against a field of 0.1. the bounds hold the divergence at roundoff of its
+    // seed and the closing gap at roundoff.
     assert!(
         sim.time >= 0.05 - 1e-12,
         "the run reached t = 0.05 (t = {})",
         sim.time
     );
     assert!(
-        after <= 1.05 * before,
+        (after - before).abs() <= 1e-12 * before,
         "max |div B| left its seeded level: {before:.3e} -> {after:.3e}"
     );
     assert!(

@@ -437,8 +437,27 @@ where
     /// rejected attempt's primitives.
     fn restore_step(&self, _store: &FieldStore<NDIM, DOF, Mem, Sc>) {}
 
-    /// post-godunov hook (e.g., constrained transport for MHD). default: no-op.
-    fn post_godunov(&self, _store: &FieldStore<NDIM, DOF, Mem, Sc>, _dt: f64, _stage: u8) {}
+    /// the stage's complete edge EMF, the ideal EMF of its sweep plus every non-ideal and
+    /// time-averaging contribution, ready for the curl (constrained transport). default: no-op.
+    fn stage_emf(&self, _store: &FieldStore<NDIM, DOF, Mem, Sc>, _dt: f64, _stage: u8) {}
+
+    /// the stage's constrained-transport update from its complete edge EMF: the predictor
+    /// history save, the curl into the faces and the face-to-cell field. default: no-op.
+    fn stage_curl(&self, _store: &FieldStore<NDIM, DOF, Mem, Sc>, _dt: f64, _stage: u8) {}
+
+    /// the edges on a coordinate axis reconciled to one EMF per ring, on a store holding every
+    /// copy of its rings; a no-op on a grid with no axis edge.
+    fn axis_emf(&self, store: &FieldStore<NDIM, DOF, Mem, Sc>) {
+        crate::axis_ring::reconcile_whole_rings(store);
+    }
+
+    /// the whole post-godunov update of one store holding every copy of its axis rings: the
+    /// complete EMF, the shared axis edges reconciled, then the curl.
+    fn post_godunov(&self, store: &FieldStore<NDIM, DOF, Mem, Sc>, dt: f64, stage: u8) {
+        self.stage_emf(store, dt, stage);
+        self.axis_emf(store);
+        self.stage_curl(store, dt, stage);
+    }
 
     /// electric field computation (MHD). default: no-op.
     fn efield(&self, _store: &FieldStore<NDIM, DOF, Mem, Sc>) {}

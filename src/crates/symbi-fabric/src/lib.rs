@@ -26,6 +26,7 @@ pub mod rendezvous;
 pub mod tcp;
 
 pub use endpoint::{
+    ABSENT,
     Fabric, Link, Loopback, OpKind, PhaseSpec, Progress, RecvState, SendState, Stats,
 };
 pub use error::{AbortReason, Deadline, FabricError};

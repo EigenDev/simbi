@@ -2520,6 +2520,12 @@ where
             sh
         }};
     }
+    // a tile touching a pole or the R = 0 line of a 3D curvilinear grid holds axis edges whose
+    // copies the stage reconciles over the whole ring, across tiles
+    let has_axis_rings = {
+        let sh = shared!();
+        sh.iter().any(|s| !crate::axis_ring::axis_rings(*s).is_empty())
+    };
 
     // prime prim + ghosts (the stage entry contract), then seed the cut halos.
     {
@@ -2657,10 +2663,27 @@ where
                     allow_elision: false,
                 };
                 let mut troubled = 0u64;
-                for i in 0..n {
-                    troubled += symbi_xpu::with_device(devices[i], || {
-                        crate::stage::fold_stage_through_mark(sh[i], kernels[i], args, &mut |_| {})
-                    });
+                if has_axis_rings {
+                    // the edges on a coordinate axis are reconciled over the whole ring between
+                    // the stage's complete EMF and its curl, across every tile holding a copy
+                    for i in 0..n {
+                        symbi_xpu::with_device(devices[i], || {
+                            crate::stage::fold_stage_through_emf(sh[i], kernels[i], args, &mut |_| {})
+                        });
+                    }
+                    drain_devices::<M>(devices);
+                    crate::axis_ring::reconcile_across(&sh);
+                    for i in 0..n {
+                        troubled += symbi_xpu::with_device(devices[i], || {
+                            crate::stage::fold_stage_curl_through_mark(sh[i], kernels[i], args, &mut |_| {})
+                        });
+                    }
+                } else {
+                    for i in 0..n {
+                        troubled += symbi_xpu::with_device(devices[i], || {
+                            crate::stage::fold_stage_through_mark(sh[i], kernels[i], args, &mut |_| {})
+                        });
+                    }
                 }
                 let mut cut_trouble = vec![false; n];
                 if troubled > 0 {

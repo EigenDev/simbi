@@ -31,7 +31,10 @@ use crate::driver::{
     retry_timestep, select_timestep, stage_schedule,
 };
 use crate::plan_exchange::{AuditCost, AuditError, PlanExchange, StagingFault};
-use crate::stage::{StageArgs, StageOutcome, fold_stage_from_correction, fold_stage_through_mark, raise_troubled_cell};
+use crate::stage::{
+    StageArgs, StageOutcome, fold_stage_curl_through_mark, fold_stage_from_correction, fold_stage_through_emf,
+    fold_stage_through_mark, raise_troubled_cell,
+};
 use crate::state::{FieldStore, Timestepping};
 use crate::substrate_seam::{KernelSet, RegimeKind, RetryExclusion};
 use std::ops::ControlFlow;
@@ -634,6 +637,29 @@ where
             )),
         ));
     }
+    // whether any worker holds an edge on a coordinate axis, agreed once so every worker issues
+    // the same collective sequence; the ring vector spans the whole grid of the plan's tiles
+    let n_cells: [usize; D] = std::array::from_fn(|ax| {
+        exchange
+            .plan()
+            .tiles
+            .iter()
+            .map(|t| (t.offset[ax] + t.interior[ax].size() as isize) as usize)
+            .max()
+            .unwrap_or(0)
+    });
+    let local_rings = {
+        let sh = shared!();
+        sh.iter().any(|s| !crate::axis_ring::axis_rings(*s).is_empty())
+    };
+    let has_axis_rings = fabric
+        .collective(OpKind::Any, u64::from(local_rings), deadline)
+        .map_err(|e| fail(fabric, e.into()))?
+        != 0;
+    let ring_len = {
+        let sh = shared!();
+        sh.first().map_or(0, |s| crate::axis_ring::ring_vector_len(n_cells, s.geom.coords))
+    };
     let multistage = needs_step_snapshot(stages);
     let schedule = stage_schedule(stages);
 
@@ -769,10 +795,30 @@ where
                 // cells marked; the worker then makes one vote for all of them, so workers
                 // holding different numbers of tiles issue the same collective sequence.
                 let mut troubled = 0u64;
-                for k in 0..n {
-                    troubled += with_device(dev(k), || {
-                        fold_stage_through_mark(sh[k], kernels[k], args, &mut |_| {})
-                    });
+                if has_axis_rings {
+                    // the edges on a coordinate axis are reconciled over the whole ring between
+                    // the stage's complete EMF and its curl: every worker supplies the copies its
+                    // tiles own to one assembled vector and reconciles the rings it holds from it
+                    for k in 0..n {
+                        with_device(dev(k), || fold_stage_through_emf(sh[k], kernels[k], args, &mut |_| {}));
+                    }
+                    let entries: Vec<(u64, u64)> =
+                        (0..n).flat_map(|k| crate::axis_ring::ring_entries(sh[k], n_cells)).collect();
+                    let clock = Instant::now();
+                    let assembled = fabric
+                        .assemble(ring_len, &entries, deadline)
+                        .map_err(|e| fail(fabric, e.into()))?;
+                    timing.collectives += clock.elapsed();
+                    for k in 0..n {
+                        crate::axis_ring::apply_assembled(sh[k], n_cells, &assembled, symbi_fabric::ABSENT);
+                        troubled += with_device(dev(k), || fold_stage_curl_through_mark(sh[k], kernels[k], args, &mut |_| {}));
+                    }
+                } else {
+                    for k in 0..n {
+                        troubled += with_device(dev(k), || {
+                            fold_stage_through_mark(sh[k], kernels[k], args, &mut |_| {})
+                        });
+                    }
                 }
                 if attempt == 0 {
                     if let Some((at_step, at_stage, cell)) = cfg.injection.trouble_at {

@@ -709,7 +709,7 @@ mod tests {
         assert!(
             disagreement(&mine, &previous, WorkerId(1))
                 .unwrap()
-                .contains("protocol 1 against 5")
+                .contains("protocol 1 against 6")
         );
         let mut table = mine.clone();
         table.identity.phase_table_digest = Digest(11);

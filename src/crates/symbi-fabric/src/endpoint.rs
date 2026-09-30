@@ -207,7 +207,15 @@ pub enum OpKind {
     CheckpointOpen = 3,
     /// whether every contribution is nonzero: the checkpoint is complete
     CheckpointClose = 4,
+    /// a dense vector assembled from sparse contributions: each worker supplies (index, bits)
+    /// pairs over a declared length, every index by at most one worker, and the result holds
+    /// each supplied value at its index and `ABSENT` elsewhere. no value is combined with
+    /// another, so the result is independent of which worker supplied what
+    Assemble = 5,
 }
+
+/// the bits an assembled vector holds at an index no worker supplied
+pub const ABSENT: u64 = u64::MAX;
 
 impl OpKind {
     fn from_byte(b: u8) -> Option<Self> {
@@ -216,28 +224,38 @@ impl OpKind {
             2 => OpKind::Any,
             3 => OpKind::CheckpointOpen,
             4 => OpKind::CheckpointClose,
+            5 => OpKind::Assemble,
             _ => return None,
         })
     }
 }
 
-/// the payload of a Contribute or Result frame: the kind byte and the value bits.
-const OP_PAYLOAD: usize = 9;
-
-fn encode_op(kind: OpKind, value: u64) -> [u8; OP_PAYLOAD] {
-    let mut out = [0u8; OP_PAYLOAD];
-    out[0] = kind as u8;
-    out[1..].copy_from_slice(&value.to_le_bytes());
+/// the payload of a Contribute or Result frame: the kind byte and its words, little endian. a
+/// scalar operation carries one word; an assembled contribution carries the declared length and
+/// then (index, bits) pairs, and its result the declared length's words.
+fn encode_op(kind: OpKind, words: &[u64]) -> Vec<u8> {
+    let mut out = Vec::with_capacity(1 + 8 * words.len());
+    out.push(kind as u8);
+    for w in words {
+        out.extend_from_slice(&w.to_le_bytes());
+    }
     out
 }
 
-fn decode_op(payload: &[u8]) -> Option<(OpKind, u64)> {
-    if payload.len() != OP_PAYLOAD {
+fn decode_op(payload: &[u8]) -> Option<(OpKind, Vec<u64>)> {
+    if payload.is_empty() || (payload.len() - 1) % 8 != 0 {
         return None;
     }
     let kind = OpKind::from_byte(payload[0])?;
-    let value = u64::from_le_bytes(payload[1..].try_into().expect("eight bytes"));
-    Some((kind, value))
+    let words: Vec<u64> = payload[1..]
+        .chunks_exact(8)
+        .map(|c| u64::from_le_bytes(c.try_into().expect("eight bytes")))
+        .collect();
+    let well_formed = match kind {
+        OpKind::Assemble => !words.is_empty() && words.len() % 2 == 1,
+        _ => words.len() == 1,
+    };
+    well_formed.then_some((kind, words))
 }
 
 /// the coordinator's table for one operation: one contribution per worker.
@@ -245,7 +263,7 @@ fn decode_op(payload: &[u8]) -> Option<(OpKind, u64)> {
 struct Gather {
     op: u32,
     kind: Option<OpKind>,
-    values: Vec<Option<u64>>,
+    values: Vec<Option<Vec<u64>>>,
     count: usize,
 }
 
@@ -274,11 +292,11 @@ impl Gather {
 struct Collective {
     next_op: u32,
     pending: Option<(u32, OpKind)>,
-    result: Option<u64>,
+    result: Option<Vec<u64>>,
     gathers: [Gather; 2],
     /// results the coordinator holds back for a peer: the race-gate hook
     delay: Option<(WorkerId, Duration)>,
-    held: Vec<(WorkerId, Header, [u8; OP_PAYLOAD], Instant)>,
+    held: Vec<(WorkerId, Header, Vec<u8>, Instant)>,
 }
 
 /// the transfers of one phase from this worker's point of view.
@@ -849,10 +867,10 @@ impl<L: Link> Fabric<L> {
                 if !self.is_coordinator() {
                     return Err(FabricError::protocol(from, "Contribute sent to a worker"));
                 }
-                let Some((kind, value)) = decode_op(payload) else {
+                let Some((kind, words)) = decode_op(payload) else {
                     return Err(FabricError::protocol(from, "malformed Contribute payload"));
                 };
-                self.table_contribution(from, header.id, kind, value)
+                self.table_contribution(from, header.id, kind, words)
             }
             Kind::Result => {
                 if self.is_coordinator() {
@@ -864,12 +882,23 @@ impl<L: Link> Fabric<L> {
                 if from != WorkerId(0) {
                     return Err(FabricError::protocol(from, "Result from a worker"));
                 }
-                let Some((kind, value)) = decode_op(payload) else {
+                let Some((kind, words)) = decode_op(payload).or_else(|| {
+                    // an assembled result is the dense vector, any length but at least one word
+                    let kind = OpKind::from_byte(*payload.first()?)?;
+                    (kind == OpKind::Assemble && payload.len() > 1 && (payload.len() - 1) % 8 == 0)
+                        .then(|| {
+                            let words = payload[1..]
+                                .chunks_exact(8)
+                                .map(|c| u64::from_le_bytes(c.try_into().expect("eight bytes")))
+                                .collect();
+                            (kind, words)
+                        })
+                }) else {
                     return Err(FabricError::protocol(from, "malformed Result payload"));
                 };
                 match self.collective.pending {
                     Some((op, k)) if op == header.id && k == kind => {
-                        self.collective.result = Some(value);
+                        self.collective.result = Some(words);
                         Ok(())
                     }
                     other => Err(FabricError::protocol(
@@ -965,7 +994,7 @@ impl<L: Link> Fabric<L> {
         from: WorkerId,
         op: u32,
         kind: OpKind,
-        value: u64,
+        words: Vec<u64>,
     ) -> Result<(), FabricError> {
         let workers = self.workers;
         let current = self.collective.gathers[0].op;
@@ -980,11 +1009,20 @@ impl<L: Link> Fabric<L> {
             ));
         };
         if kind == OpKind::Min {
-            let v = f64::from_bits(value);
+            let v = f64::from_bits(words[0]);
             if !v.is_finite() || v <= 0.0 {
                 return Err(FabricError::protocol(
                     from,
                     format!("Min contribution {v:e}"),
+                ));
+            }
+        }
+        if kind == OpKind::Assemble {
+            let len = words[0];
+            if let Some(index) = words[1..].chunks_exact(2).map(|p| p[0]).find(|&i| i >= len) {
+                return Err(FabricError::protocol(
+                    from,
+                    format!("assembled index {index} beyond the declared length {len}"),
                 ));
             }
         }
@@ -1005,32 +1043,53 @@ impl<L: Link> Fabric<L> {
                 format!("duplicate contribution to op {op}"),
             ));
         }
-        gather.values[from.0 as usize] = Some(value);
+        gather.values[from.0 as usize] = Some(words);
         gather.count += 1;
         if slot == 0 && gather.count == workers {
             let kind = gather.kind.expect("set with the first contribution");
-            let values = gather
+            let contributions: Vec<&Vec<u64>> = gather
                 .values
                 .iter()
-                .map(|v| v.expect("every worker contributed"));
-            let result = match kind {
-                OpKind::Min => values
-                    .map(f64::from_bits)
-                    .fold(f64::INFINITY, f64::min)
-                    .to_bits(),
-                OpKind::Any => u64::from(values.into_iter().any(|v| v != 0)),
+                .map(|v| v.as_ref().expect("every worker contributed"))
+                .collect();
+            let scalars = || contributions.iter().map(|w| w[0]);
+            let result: Vec<u64> = match kind {
+                OpKind::Min => vec![scalars().map(f64::from_bits).fold(f64::INFINITY, f64::min).to_bits()],
+                OpKind::Any => vec![u64::from(scalars().any(|v| v != 0))],
                 OpKind::CheckpointOpen | OpKind::CheckpointClose => {
-                    u64::from(values.into_iter().all(|v| v != 0))
+                    vec![u64::from(scalars().all(|v| v != 0))]
+                }
+                OpKind::Assemble => {
+                    let len = contributions[0][0];
+                    if let Some(w) = contributions.iter().position(|c| c[0] != len) {
+                        return Err(FabricError::protocol(
+                            WorkerId(w as u32),
+                            format!("op {op} assembled over {} words against {len}", contributions[w][0]),
+                        ));
+                    }
+                    let mut dense = vec![ABSENT; len as usize];
+                    for (w, c) in contributions.iter().enumerate() {
+                        for pair in c[1..].chunks_exact(2) {
+                            if dense[pair[0] as usize] != ABSENT {
+                                return Err(FabricError::protocol(
+                                    WorkerId(w as u32),
+                                    format!("op {op} index {} supplied twice", pair[0]),
+                                ));
+                            }
+                            dense[pair[0] as usize] = pair[1];
+                        }
+                    }
+                    dense
                 }
             };
+            let payload = encode_op(kind, &result);
             let header = Header {
                 kind: Kind::Result,
                 session: self.session,
                 epoch: none_epoch(),
                 id: op,
-                payload_len: OP_PAYLOAD as u32,
+                payload_len: payload.len() as u32,
             };
-            let payload = encode_op(kind, result);
             for peer in 1..workers {
                 let peer = WorkerId(peer as u32);
                 match self.collective.delay {
@@ -1038,7 +1097,7 @@ impl<L: Link> Fabric<L> {
                         self.collective.held.push((
                             peer,
                             header,
-                            payload,
+                            payload.clone(),
                             Instant::now() + duration,
                         ));
                     }
@@ -1076,10 +1135,8 @@ impl<L: Link> Fabric<L> {
     /// issue the next collective operation with this worker's contribution. the result
     /// arrives through `collective_progress`.
     pub fn begin_collective(&mut self, kind: OpKind, value: u64) -> Result<u32, FabricError> {
-        if let Some((op, k)) = self.collective.pending {
-            return Err(self.local(format!(
-                "collective {kind:?} begun while op {op} ({k:?}) is pending"
-            )));
+        if kind == OpKind::Assemble {
+            return Err(self.local("an assembled collective begins through begin_assemble"));
         }
         if kind == OpKind::Min {
             let v = f64::from_bits(value);
@@ -1087,28 +1144,58 @@ impl<L: Link> Fabric<L> {
                 return Err(self.local(format!("Min contribution {v:e}")));
             }
         }
+        self.begin_words(kind, vec![value])
+    }
+
+    /// issue an assembled collective over `len` words with this worker's (index, bits) entries.
+    /// the result, `len` words with `ABSENT` at every index no worker supplied, arrives through
+    /// `collective_vec_progress`.
+    pub fn begin_assemble(&mut self, len: u64, entries: &[(u64, u64)]) -> Result<u32, FabricError> {
+        if let Some(&(index, _)) = entries.iter().find(|(i, _)| *i >= len) {
+            return Err(self.local(format!("assembled index {index} beyond the length {len}")));
+        }
+        let mut words = Vec::with_capacity(1 + 2 * entries.len());
+        words.push(len);
+        for &(index, bits) in entries {
+            words.push(index);
+            words.push(bits);
+        }
+        self.begin_words(OpKind::Assemble, words)
+    }
+
+    fn begin_words(&mut self, kind: OpKind, words: Vec<u64>) -> Result<u32, FabricError> {
+        if let Some((op, k)) = self.collective.pending {
+            return Err(self.local(format!(
+                "collective {kind:?} begun while op {op} ({k:?}) is pending"
+            )));
+        }
         let op = self.collective.next_op;
         self.collective.next_op += 1;
         self.collective.pending = Some((op, kind));
         self.collective.result = None;
         if self.is_coordinator() {
-            self.table_contribution(self.me, op, kind, value)?;
+            self.table_contribution(self.me, op, kind, words)?;
         } else {
+            let payload = encode_op(kind, &words);
             let header = Header {
                 kind: Kind::Contribute,
                 session: self.session,
                 epoch: none_epoch(),
                 id: op,
-                payload_len: OP_PAYLOAD as u32,
+                payload_len: payload.len() as u32,
             };
-            self.link
-                .send(self.me, WorkerId(0), header, &encode_op(kind, value))?;
+            self.link.send(self.me, WorkerId(0), header, &payload)?;
         }
         Ok(op)
     }
 
     /// service the link; the result bits once the pending operation has completed.
     pub fn collective_progress(&mut self) -> Result<Option<u64>, FabricError> {
+        Ok(self.collective_vec_progress()?.map(|words| words[0]))
+    }
+
+    /// service the link; the result words once the pending operation has completed.
+    pub fn collective_vec_progress(&mut self) -> Result<Option<Vec<u64>>, FabricError> {
         if self.collective.pending.is_none() {
             return Err(self.local("collective progress with no operation pending"));
         }
@@ -1118,6 +1205,33 @@ impl<L: Link> Fabric<L> {
             return Ok(Some(result));
         }
         Ok(None)
+    }
+
+    /// a complete assembled collective: contribute `entries` over `len` words, then service
+    /// until the dense result arrives or `deadline` passes
+    pub fn assemble(
+        &mut self,
+        len: u64,
+        entries: &[(u64, u64)],
+        deadline: Duration,
+    ) -> Result<Vec<u64>, FabricError> {
+        let op = self.begin_assemble(len, entries)?;
+        let start = Instant::now();
+        loop {
+            let mark = self.advance_mark();
+            if let Some(result) = self.collective_vec_progress()? {
+                return Ok(result);
+            }
+            if start.elapsed() > deadline {
+                return Err(FabricError::Deadline {
+                    phase: Deadline::Transfer,
+                    peer: None,
+                    epoch: None,
+                    pending: 1 + usize::from(op == 0),
+                });
+            }
+            self.pause_if_idle(mark);
+        }
     }
 
     /// a complete collective: contribute, then service until the result arrives or
@@ -1228,7 +1342,7 @@ impl<L: Link> Fabric<L> {
             .values
             .iter()
             .flatten()
-            .all(|&v| v != 0)
+            .all(|words| words[0] != 0)
     }
 
     /// wait until every worker's block traffic and this worker's own sends have drained,

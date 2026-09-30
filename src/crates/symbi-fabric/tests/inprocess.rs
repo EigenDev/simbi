@@ -15,7 +15,7 @@ use std::cell::Cell;
 use std::time::{Duration, Instant};
 use symbi_fabric::frame::encode_f64s;
 use symbi_fabric::{
-    Epoch, Fabric, FabricError, Header, Kind, Link, Loopback, OpKind, PhaseSpec, Progress,
+    ABSENT, Epoch, Fabric, FabricError, Header, Kind, Link, Loopback, OpKind, PhaseSpec, Progress,
     SessionId, TransferId, WorkerId,
 };
 
@@ -924,4 +924,64 @@ fn pending_work_alone_pauses_every_pass() {
         st.advancing_passes, 0,
         "a pass with only pending work counted as progress"
     );
+}
+
+
+/// drive an assembled collective on both endpoints until both hold the result.
+fn run_assemble(
+    a: &mut Fabric<Loopback>,
+    b: &mut Fabric<Loopback>,
+    len: u64,
+    ea: &[(u64, u64)],
+    eb: &[(u64, u64)],
+) -> Result<(Vec<u64>, Vec<u64>), FabricError> {
+    a.begin_assemble(len, ea)?;
+    b.begin_assemble(len, eb)?;
+    let (mut ra, mut rb) = (None, None);
+    for _ in 0..16 {
+        if ra.is_none() {
+            ra = a.collective_vec_progress()?;
+        }
+        if rb.is_none() {
+            rb = b.collective_vec_progress()?;
+        }
+        if let (Some(ra), Some(rb)) = (&ra, &rb) {
+            return Ok((ra.clone(), rb.clone()));
+        }
+    }
+    panic!("the assembled collective made no progress");
+}
+
+#[test]
+fn an_assembled_vector_places_every_supplied_value_and_marks_the_rest_absent() {
+    let link = Loopback::new();
+    let (mut a, mut b) = pair2(&link);
+    let (ra, rb) = run_assemble(
+        &mut a,
+        &mut b,
+        5,
+        &[(0, 1.5f64.to_bits()), (3, (-2.0f64).to_bits())],
+        &[(1, 0.25f64.to_bits())],
+    )
+    .unwrap();
+    assert_eq!(ra, rb, "every worker holds the same vector");
+    assert_eq!(ra, vec![1.5f64.to_bits(), 0.25f64.to_bits(), ABSENT, (-2.0f64).to_bits(), ABSENT]);
+    // the scalar collectives keep their sequence after an assembled one
+    let (ra, rb) = run_collective(&mut a, &mut b, OpKind::Any, 0, 1);
+    assert_eq!((ra, rb), (1, 1));
+}
+
+#[test]
+fn an_index_supplied_by_two_workers_is_a_protocol_error() {
+    let link = Loopback::new();
+    let (mut a, mut b) = pair2(&link);
+    let err = run_assemble(&mut a, &mut b, 3, &[(2, 1.0f64.to_bits())], &[(2, 1.0f64.to_bits())]).unwrap_err();
+    assert!(err.is_protocol(), "{err:?}");
+}
+
+#[test]
+fn an_index_beyond_the_declared_length_is_refused_locally() {
+    let link = Loopback::new();
+    let (mut a, _b) = pair2(&link);
+    assert!(a.begin_assemble(3, &[(3, 0)]).unwrap_err().is_protocol());
 }

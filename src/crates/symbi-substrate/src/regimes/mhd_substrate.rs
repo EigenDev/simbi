@@ -17,7 +17,7 @@
 //
 // usage:
 //  mhd_substrate::godunov_stage(sim, has_energy, gas_prefix, gamma, dt, a0, ac);
-//  mhd_substrate::post_godunov(sim, has_energy, dt, stage);
+//  mhd_substrate::complete_stage_emf(sim, stage, eta); mhd_substrate::curl_stage_emf(sim, has_energy, dt, stage);
 // =============================================================================
 
 use symbi_ir::{CtCellCt, CtEdgeCt, CtFaceCt, CtScratch, FieldBind, Transverse};
@@ -1566,78 +1566,61 @@ pub(crate) fn average_with_predictor_emf<const D: usize, const DOF: usize, Mem, 
     }
 }
 
-/// the CT corrector: RK2 E save (stage 1) / time-average (stage 2) over the complex's
-/// edges, then the curl bface update (per in-plane face axis, from its incident edges)
-/// + the face->cell B interpolation with the 1/2|B|^2 magnetic-energy correction. one
-/// code path for every D — driven by the `StaggerComplex` table, no per-D branch.
-pub(crate) fn post_godunov<const D: usize, const DOF: usize, Mem, Sc>(
+/// the stage's complete edge EMF: the ideal EMF of its sweep plus the ohmic `eta * J` and the
+/// body-localized `eta * chi * J`, the current taken from the live faces, which hold the stage
+/// input here (B^n in the predictor and the forward-Euler stage, B* in the corrector); the RK2
+/// corrector then time-averages it with the saved predictor EMF. `eta * J` carries the resistive
+/// diffusion `eta * lap(B)` through the same curl, div-B-clean; chart routing (cartesian
+/// 2.5D/3D, cyl r-z/r-phi, sph r-theta, 3D sph/cyl) lives in apply_resistive_emf, which refuses
+/// any chart without an adjoint-verified resistive curl. ohmic heating is automatic and
+/// energy-conserving: nrg is the total energy, and `bcell_from_bface` reconciles it with the
+/// resistively-decayed B, so the dissipated 1/2 B^2 becomes internal energy to machine precision.
+/// the edges on a coordinate axis are reconciled between this and `curl_stage_emf`.
+pub(crate) fn complete_stage_emf<const D: usize, const DOF: usize, Mem, Sc>(
     sim: &FieldStore<D, DOF, Mem, Sc>,
-    has_energy: bool,
-    dt: f64,
     stage: u8,
     eta: f64,
 ) where
     Mem: MemorySpace + Sync,
     Sc: Scalar + OrderedNumeric,
 {
-    let mhd = sim.fields.mhd.as_ref().expect("MHD requires mhd fields");
-
-    // each stage's complete edge EMF: the ideal EMF of its sweep plus the ohmic `eta * J` and the
-    // body-localized `eta * chi * J`, the current taken from the live faces, which hold the stage
-    // input here (B^n in the predictor and the forward-Euler stage, B* in the corrector). `eta * J`
-    // carries the resistive diffusion `eta * lap(B)` through the same curl, div-B-clean; chart
-    // routing (cartesian 2.5D/3D, cyl r-z/r-phi, sph r-theta, 3D sph/cyl) lives in
-    // apply_resistive_emf, which refuses any chart without an adjoint-verified resistive curl. ohmic
-    // heating is automatic and energy-conserving: nrg is the total energy, and `bcell_from_bface`
-    // reconciles it with the resistively-decayed B, so the dissipated 1/2 B^2 becomes internal energy
-    // to machine precision.
-    let add_resistive_emf = || {
-        if eta > 0.0 {
-            apply_resistive_emf::<D, DOF, Mem, Sc>(sim, eta);
-        }
-        body_resistive_emf::<D, DOF, Mem, Sc>(sim);
-    };
-
-    // RK2: the predictor saves its complete edge EMF and the corrector time-averages its own
-    // complete EMF with it.
-    if stage == 1 {
-        add_resistive_emf();
-        save_predictor_emf(sim);
-        // the RK2 predictor CT update: save the pre-curl anchor B^n (also the FOFC anchor), then curl
-        // E^n to advance bface to the predictor B* = B^n - dt curl(E^n) and interpolate the predictor
-        // cell field. the corrector stage's godunov then evaluates E* = E(B*), so the averaged EMF is
-        // a true midpoint rather than 1/2(E^n + E(B^n)). the closing stage restores B^n before its curl.
-        {
-            let pairs: Vec<(&Field<Sc, D, Mem>, &Field<Sc, D, Mem>)> =
-                (0..D).map(|d| (&mhd.bface[d], &mhd.bface_n[d])).collect();
-            fofc_copy_fields(&pairs);
-        }
-        ct_curl::<D, DOF, Mem, Sc>(sim, dt); // bface <- B* = B^n - dt curl(E^n)
-        bcell_from_bface::<D, DOF, Mem, Sc>(sim, has_energy);
-        return;
+    if eta > 0.0 {
+        apply_resistive_emf::<D, DOF, Mem, Sc>(sim, eta);
     }
+    body_resistive_emf::<D, DOF, Mem, Sc>(sim);
     if stage == 2 {
-        add_resistive_emf();
         average_with_predictor_emf(sim);
-        // the corrector restores the pre-curl anchor B^n the predictor saved into bface_n (bface holds
-        // the predictor B*), then curls the averaged EMF once from B^n. bface_n stays the FOFC redo
-        // anchor. the single-stage Euler path (stage 0) takes the else branch instead.
-        let pairs: Vec<(&Field<Sc, D, Mem>, &Field<Sc, D, Mem>)> =
-            (0..D).map(|d| (&mhd.bface_n[d], &mhd.bface[d])).collect();
-        fofc_copy_fields(&pairs);
-    } else {
-        // the forward-Euler single stage: capture the pre-curl anchor B^n as the FOFC redo anchor,
-        // complete its EMF from B^n, then curl its current field directly.
-        let pairs: Vec<(&Field<Sc, D, Mem>, &Field<Sc, D, Mem>)> =
-            (0..D).map(|d| (&mhd.bface[d], &mhd.bface_n[d])).collect();
-        fofc_copy_fields(&pairs);
-        add_resistive_emf();
     }
+}
 
-    // the curl bface update: `bface -= dt*curl(efield)` per in-plane face axis.
+/// the CT update from the stage's complete (reconciled) edge EMF, one code path for every D,
+/// driven by the `StaggerComplex` table:
+///   RK2 predictor  save the EMF as the history, anchor B^n in bface_n (also the FOFC anchor),
+///                  curl to B* = B^n - dt curl(E^n); the corrector's godunov then evaluates
+///                  E* = E(B*), so the averaged EMF is a true midpoint
+///   RK2 corrector  restore the anchor B^n the predictor saved, curl the averaged EMF once from it
+///   forward Euler  anchor B^n in bface_n (the FOFC redo anchor), curl directly
+/// then the face->cell B interpolation with the 1/2|B|^2 magnetic-energy correction.
+pub(crate) fn curl_stage_emf<const D: usize, const DOF: usize, Mem, Sc>(
+    sim: &FieldStore<D, DOF, Mem, Sc>,
+    has_energy: bool,
+    dt: f64,
+    stage: u8,
+) where
+    Mem: MemorySpace + Sync,
+    Sc: Scalar + OrderedNumeric,
+{
+    let mhd = sim.fields.mhd.as_ref().expect("MHD requires mhd fields");
+    if stage == 1 {
+        save_predictor_emf(sim);
+    }
+    let pairs: Vec<(&Field<Sc, D, Mem>, &Field<Sc, D, Mem>)> = if stage == 2 {
+        (0..D).map(|d| (&mhd.bface_n[d], &mhd.bface[d])).collect()
+    } else {
+        (0..D).map(|d| (&mhd.bface[d], &mhd.bface_n[d])).collect()
+    };
+    fofc_copy_fields(&pairs);
     ct_curl::<D, DOF, Mem, Sc>(sim, dt);
-
-    // face->cell B interpolation + the magnetic-energy correction on cons.nrg, in place.
     bcell_from_bface::<D, DOF, Mem, Sc>(sim, has_energy);
 }
 

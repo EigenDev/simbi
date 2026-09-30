@@ -115,8 +115,14 @@ impl KernelSet<2, 2, HostMemory, f64> for Recorder {
     fn fofc_active(&self) -> bool {
         self.fofc
     }
-    fn post_godunov(&self, _s: &Store, _dt: f64, _stage: u8) {
-        self.push("post_godunov");
+    fn stage_emf(&self, _s: &Store, _dt: f64, _stage: u8) {
+        self.push("stage_emf");
+    }
+    fn axis_emf(&self, _s: &Store) {
+        self.push("axis_emf");
+    }
+    fn stage_curl(&self, _s: &Store, _dt: f64, _stage: u8) {
+        self.push("stage_curl");
     }
     fn efield(&self, _s: &Store) {
         self.push("efield");

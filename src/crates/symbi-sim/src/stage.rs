@@ -98,7 +98,9 @@ pub enum PhaseKind {
     Flux,
     Efield,
     Godunov,
-    PostGodunov,
+    StageEmf,
+    AxisEmf,
+    StageCurl,
     SourceApply,
     BodySource,
     C2p,
@@ -184,9 +186,27 @@ pub const STAGE_PIPELINE: &[Phase] = &[
         writes: FieldSet::CONS,
         gate: Gate::Always,
     },
+    // the constrained-transport update in three phases: the stage's complete edge EMF, the
+    // edges on a coordinate axis reconciled to one value per ring, then the curl. a driver
+    // holding a ring over several tiles folds the stage apart at the reconciliation and
+    // reconciles across its tiles in between.
     Phase {
-        name: "post_godunov",
-        kind: PhaseKind::PostGodunov,
+        name: "stage_emf",
+        kind: PhaseKind::StageEmf,
+        reads: FieldSet::CONS,
+        writes: FieldSet::NONE,
+        gate: Gate::Always,
+    },
+    Phase {
+        name: "axis_emf",
+        kind: PhaseKind::AxisEmf,
+        reads: FieldSet::NONE,
+        writes: FieldSet::NONE,
+        gate: Gate::Always,
+    },
+    Phase {
+        name: "stage_curl",
+        kind: PhaseKind::StageCurl,
         reads: FieldSet::CONS,
         writes: FieldSet::NONE,
         gate: Gate::Always,
@@ -300,6 +320,10 @@ enum StageSpan {
     ThroughMark,
     /// the correction and every phase after it
     FromCorrection,
+    /// every phase through the stage's complete edge EMF, before its axis rings are reconciled
+    ThroughStageEmf,
+    /// the curl and every phase after it before the correction, then the troubled-cell mark
+    FromStageCurlThroughMark,
 }
 
 /// fold one RK stage of the canonical pipeline over a kernel set.
@@ -332,6 +356,39 @@ where
     K: KernelSet<D, DOF, Mem, Sc> + ?Sized,
 {
     fold_span(sim, kernels, args, StageSpan::ThroughMark, hook).1
+}
+
+/// the first span of a stage folded in three: every phase through the stage's complete edge EMF.
+/// a driver whose tiles share an axis ring reconciles the ring across them before
+/// `fold_stage_curl_through_mark` continues the stage.
+pub fn fold_stage_through_emf<const D: usize, const DOF: usize, Mem, Sc, K>(
+    sim: &FieldStore<D, DOF, Mem, Sc>,
+    kernels: &K,
+    args: StageArgs,
+    hook: &mut impl FnMut(HookPoint),
+) where
+    Mem: MemorySpace,
+    Sc: Scalar + OrderedNumeric,
+    K: KernelSet<D, DOF, Mem, Sc> + ?Sized,
+{
+    let _ = fold_span(sim, kernels, args, StageSpan::ThroughStageEmf, hook);
+}
+
+/// the second span of a stage folded in three: the curl of the reconciled EMF and every phase
+/// before the correction, then the troubled-cell mark. returns the number of troubled interior
+/// cells; `fold_stage_from_correction` must follow.
+pub fn fold_stage_curl_through_mark<const D: usize, const DOF: usize, Mem, Sc, K>(
+    sim: &FieldStore<D, DOF, Mem, Sc>,
+    kernels: &K,
+    args: StageArgs,
+    hook: &mut impl FnMut(HookPoint),
+) -> u64
+where
+    Mem: MemorySpace,
+    Sc: Scalar + OrderedNumeric,
+    K: KernelSet<D, DOF, Mem, Sc> + ?Sized,
+{
+    fold_span(sim, kernels, args, StageSpan::FromStageCurlThroughMark, hook).1
 }
 
 /// the second span of a stage folded in two: the correction and every phase after it.
@@ -491,7 +548,7 @@ where
     // including the fofc retry.
     // the redo's normal-B input, captured before any phase runs. a stage folded in two
     // captures in its first span.
-    if fofc && span != StageSpan::FromCorrection {
+    if fofc && matches!(span, StageSpan::Whole | StageSpan::ThroughMark | StageSpan::ThroughStageEmf) {
         prof("snapshot_stage_faces", || kernels.snapshot_stage_faces(sim));
     }
 
@@ -499,23 +556,35 @@ where
     // takes it over, so the correction's flux reads are checked against the first span's writes.
     #[cfg(debug_assertions)]
     let audit = match span {
-        StageSpan::Whole | StageSpan::ThroughMark => StageWriteAudit::arm(sim),
-        StageSpan::FromCorrection => StageWriteAudit::resume(sim),
+        StageSpan::Whole | StageSpan::ThroughMark | StageSpan::ThroughStageEmf => StageWriteAudit::arm(sim),
+        StageSpan::FromCorrection | StageSpan::FromStageCurlThroughMark => StageWriteAudit::resume(sim),
     };
 
     let tag = stage_tag(args.stage, args.n_stages);
     let mut have = match span {
-        StageSpan::Whole | StageSpan::ThroughMark => FieldSet::CONS.or(FieldSet::PRIM),
-        StageSpan::FromCorrection => FieldSet::CONS
+        StageSpan::Whole | StageSpan::ThroughMark | StageSpan::ThroughStageEmf => FieldSet::CONS.or(FieldSet::PRIM),
+        StageSpan::FromCorrection | StageSpan::FromStageCurlThroughMark => FieldSet::CONS
             .or(FieldSet::PRIM)
             .or(FieldSet::FLUX)
             .or(FieldSet::USTAGE),
     };
     let mut reached_correction = false;
+    let mut reached_curl = false;
     for ph in STAGE_PIPELINE {
+        if ph.kind == PhaseKind::AxisEmf && span == StageSpan::ThroughStageEmf {
+            #[cfg(debug_assertions)]
+            std::mem::forget(audit);
+            return (StageOutcome::Accepted, 0);
+        }
+        if ph.kind == PhaseKind::StageCurl {
+            reached_curl = true;
+        }
+        if span == StageSpan::FromStageCurlThroughMark && !reached_curl {
+            continue;
+        }
         if ph.kind == PhaseKind::Fofc {
             reached_correction = true;
-            if span == StageSpan::ThroughMark {
+            if matches!(span, StageSpan::ThroughMark | StageSpan::FromStageCurlThroughMark) {
                 let troubled = if fofc { kernels.fofc_mark(sim) + raise_troubled(sim, args.stage) } else { 0 };
                 sim.workspace
                     .fofc_marked
@@ -565,9 +634,9 @@ where
             PhaseKind::Godunov => prof("godunov_stage", || {
                 kernels.godunov_stage(sim, args.dt, args.a0, args.ac)
             }),
-            PhaseKind::PostGodunov => {
-                prof("post_godunov", || kernels.post_godunov(sim, args.dt, tag))
-            }
+            PhaseKind::StageEmf => prof("stage_emf", || kernels.stage_emf(sim, args.dt, tag)),
+            PhaseKind::AxisEmf => prof("axis_emf", || kernels.axis_emf(sim)),
+            PhaseKind::StageCurl => prof("stage_curl", || kernels.stage_curl(sim, args.dt, tag)),
             PhaseKind::SourceApply => prof("source_apply", || {
                 kernels.source_apply(sim, args.ac * args.dt)
             }),
