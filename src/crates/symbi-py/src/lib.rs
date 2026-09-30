@@ -4947,14 +4947,13 @@ mod diagnostics_tests {
     }
 }
 
-/// the coarse->fine prolongation order: degree at least one above the interior
-/// reconstruction (pcm -> plm, plm -> ppm, ppm -> quartic), so refinement
-/// boundaries never drop a spatial order.
+/// the coarse->fine prolongation order: degree above the reach of the evolution kernel
+/// (plm -> ppm, ppm -> quartic), so refinement boundaries never drop a spatial order. pcm runs
+/// the plm kernel at a zero slope and carries its reach, so it takes the plm prolongation.
 fn prolong_order_for(reconstruction: &str) -> ProlongOrder {
     match reconstruction {
-        "pcm" => ProlongOrder::Plm,
         "ppm" => ProlongOrder::Quartic,
-        _ => ProlongOrder::Ppm, // plm (the default) -> ppm
+        _ => ProlongOrder::Ppm,
     }
 }
 
@@ -10633,8 +10632,9 @@ fn validate_launch_scope(cfg: &Config) -> Result<(), String> {
 }
 
 /// the refined launch's gated scope: 2D newtonian hydro or 2.5D newtonian MHD on a uniform
-/// cartesian grid with one refined patch of ratio two, plm reconstruction, the ideal gas, open
-/// boundaries, no non-ideal transport or excision. every other refined combination is named and
+/// cartesian grid with one refined patch of ratio two, the ideal gas, open boundaries; pcm, plm or
+/// ppm with its flattening, a constant viscosity, a resistivity, user sources and gradient walls
+/// where the outer scope admits them for the regime. every other refined combination is named and
 /// refused.
 fn validate_refined_launch_scope(cfg: &Config) -> Result<(), String> {
     let refused = |what: &str| Err(format!("{what} with mesh refinement is outside the distributed first release"));
@@ -10653,23 +10653,20 @@ fn validate_refined_launch_scope(cfg: &Config) -> Result<(), String> {
     if cfg.refinement_regions.len() != 1 {
         return refused(&format!("{} refined regions", cfg.refinement_regions.len()));
     }
-    if cfg.reconstruction_name != "plm" {
-        return refused(&format!("{} reconstruction", cfg.reconstruction_name));
-    }
     if cfg.eos_name != "ideal" {
         return refused(&format!("the {} equation of state", cfg.eos_name));
     }
-    if cfg.ppm_flatten_full > 0.0 || cfg.ppm_flatten_onset > 0.0 || cfg.wb_reconstruction {
-        return refused("a flattening or well-balanced reconstruction");
+    if cfg.wb_reconstruction {
+        return refused("a well-balanced reconstruction");
     }
     if cfg.boundaries.contains(&BoundaryType::Periodic) {
         return refused("a periodic boundary");
     }
-    if cfg.viscosity > 0.0 || cfg.resistivity > 0.0 || cfg.excision_radius > 0.0 {
-        return refused("viscosity, resistivity or excision");
+    if cfg.alpha > 0.0 {
+        return refused("an alpha viscosity");
     }
-    if !cfg.source_jsons.is_empty() || !cfg.gradient_bcs.is_empty() {
-        return refused("a user source or a gradient wall");
+    if cfg.excision_radius > 0.0 {
+        return refused("excision");
     }
     Ok(())
 }
@@ -10793,7 +10790,27 @@ fn run_refined_worker_process(
     match cfg.regime.as_str() {
         "newtonian" => {
             type Sim = SimDefault<Newtonian, 2, Cartesian, EosSelect<f64>>;
-            let kernels_of = |s: &Sim| s.substrate().theta(theta).with_solver(solver).expect("refined kernel set");
+            // the numerics the single hierarchy installs on every level: reconstruction, the ppm
+            // flatten, the eos, the solver, the viscosity, the user sources and the gradient walls
+            let kernels_of = |s: &Sim| {
+                let ks = s
+                    .substrate()
+                    .theta(theta)
+                    .reconstruction(build_recon(cfg))
+                    .ppm_flatten(cfg.ppm_flatten_onset, cfg.ppm_flatten_full)
+                    .with_eos(build_eos(cfg))
+                    .with_solver(solver)
+                    .expect("refined kernel set")
+                    .with_viscosity(cfg.viscosity);
+                let ks = attach_configured_sources(
+                    ks,
+                    &cfg.source_jsons,
+                    <Newtonian as Regime<f64, 2>>::SPEC,
+                    &state_law_of(cfg, <Newtonian as Regime<f64, 2>>::SPEC),
+                )
+                .expect("refined source attach");
+                attach_gradient_walls(ks, cfg, |ks, gbc| ks.with_gradient_boundary(gbc).0).expect("refined gradient wall")
+            };
             let mut tiles = Vec::with_capacity(layout.mine.len());
             for &flat in &layout.mine {
                 let (tile_lo, origin, m, bnd) = extents(flat);
@@ -10822,8 +10839,17 @@ fn run_refined_worker_process(
                 return Err(format!("mhd needs 3 staggered b-field generators, got {}", bufs.len()));
             }
             let ct = cfg.ct_method;
-            let kernels_of =
-                |s: &Sim| s.substrate().theta(theta).with_solver(solver).expect("refined kernel set").ct_method(ct);
+            // the numerics the single hierarchy installs on every level: the solver, the edge EMF,
+            // the viscosity and the resistivity
+            let kernels_of = |s: &Sim| {
+                s.substrate()
+                    .theta(theta)
+                    .with_solver(solver)
+                    .expect("refined kernel set")
+                    .ct_method(ct)
+                    .with_viscosity(cfg.viscosity)
+                    .with_resistivity(cfg.resistivity)
+            };
             let mut tiles = Vec::with_capacity(layout.mine.len());
             for &flat in &layout.mine {
                 let (tile_lo, origin, m, bnd) = extents(flat);
