@@ -4,7 +4,9 @@
 # a rotating magnetized disk on a genuine cylindrical (r, phi) grid — the
 # curvilinear sibling of nmhd_rotor.py. exercises the cylindrical r-phi
 # constrained-transport path (out-of-plane B_z is the cell-centered field).
-# planar_cylindrical => the (r, phi) disk plane.
+# planar_cylindrical => the (r, phi) disk plane. an optional in-plane field
+# B_r = b_r R_IN / r, B_phi = b_phi (divergence-free, zero by default) gives the
+# edge EMF E_z = v_phi B_r - v_r B_phi something to act on.
 # =============================================================================
 from functools import partial
 from typing import Annotated
@@ -31,6 +33,12 @@ class NewtonianRotorCyl(SimbiProblem):
     p0: Annotated[float, ProblemParam(1.0, description="ambient pressure")]
     bz: Annotated[
         float, ProblemParam(0.5, cli=True, description="uniform out-of-plane B_z")
+    ]
+    br: Annotated[
+        float, ProblemParam(0.0, cli=True, description="radial field b_r at R_IN, B_r = b_r R_IN / r")
+    ]
+    bphi: Annotated[
+        float, ProblemParam(0.0, cli=True, description="uniform azimuthal field B_phi")
     ]
 
     resolution: Annotated[
@@ -90,11 +98,19 @@ class NewtonianRotorCyl(SimbiProblem):
 
         def b_field(bn: str) -> StaggeredBFieldGenerator:
             nr, nphi, nk = self.resolution
+            (rmin, rmax) = self.bounds[0]
+            dr = (rmax - rmin) / nr
             for kk in range(nk + (bn == "bz")):
                 for jj in range(nphi + (bn == "by")):
                     for ii in range(nr + (bn == "bx")):
-                        # only the out-of-plane B_z is nonzero (cell-centered for r-phi).
-                        yield self.bz if bn == "bz" else 0.0
+                        if bn == "bx":
+                            # (1/r) d_r (r B_r) = 0 on every radial face
+                            yield self.br * R_IN / (rmin + ii * dr)
+                        elif bn == "by":
+                            yield self.bphi
+                        else:
+                            # the out-of-plane B_z is cell-centered for r-phi
+                            yield self.bz
 
         return (
             gas_state,
