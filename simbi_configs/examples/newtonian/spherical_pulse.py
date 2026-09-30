@@ -66,17 +66,22 @@ class SphericalPulse(SimbiProblem):
     def initial_primitive_state(self) -> InitialStateType:
         """a gaussian pulse at r = 1.5 shaded by cos(theta), with v_theta = 0.05 sin(2 theta).
         the primitive is (rho, v_r, v_theta, p), evaluated at the cell centers of the
-        log-radial, uniform-theta grid."""
+        radial grid (log or linear) and the uniform theta grid."""
 
         def gas_state() -> GasStateGenerator:
             nr, nt = self.resolution
             (r_lo, r_hi), (t_lo, t_hi) = self.bounds
             slope = math.log10(r_hi / r_lo) / nr
+            dr = (r_hi - r_lo) / nr
+            log_radial = self.x1_spacing == CellSpacing.LOG
             dt = (t_hi - t_lo) / nt
             for jj in range(nt):
                 theta = t_lo + (jj + 0.5) * dt
                 for ii in range(nr):
-                    r = math.sqrt(r_lo * 10.0 ** (ii * slope) * r_lo * 10.0 ** ((ii + 1) * slope))
+                    if log_radial:
+                        r = math.sqrt(r_lo * 10.0 ** (ii * slope) * r_lo * 10.0 ** ((ii + 1) * slope))
+                    else:
+                        r = r_lo + (ii + 0.5) * dr
                     b = 0.2 * math.exp(-(((r - 1.5) / 0.08) ** 2))
                     yield (
                         1.0 + b * (1.0 + 0.5 * math.cos(theta)),

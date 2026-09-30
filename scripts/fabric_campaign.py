@@ -191,6 +191,16 @@ CASES: tuple[Case, ...] = (
     Case("viscous_shear_imhd", "simbi_configs.examples.isothermal.viscous_shear_imhd", "ViscousShearImhd",
          (32, 32, 1), 8, ("full",), cuts=((16,), (16,)), restart_cuts=((10, 21), ()),
          trouble="trouble:3:0:15:15", magnetized=True, periodic=True, faults=("reject", "bad_cfl", "lost")),
+    # the constant-nu viscosity on the curvilinear grids and in 3d
+    Case("viscous_spherical_pulse", f"{N}.viscous_spherical_pulse", "ViscousSphericalPulse", (32, 32), 8, ("full",),
+         cuts=((16,), (16,)), restart_cuts=((10, 21), ()), trouble="trouble:3:1:15:31",
+         faults=("reject", "bad_cfl", "lost")),
+    Case("viscous_imhd_rotor_cyl", "simbi_configs.examples.isothermal.viscous_imhd_rotor_cyl",
+         "ViscousIsothermalRotorCyl", (32, 32, 1), 8, ("full",), cuts=((7,), (16,)), restart_cuts=((10, 21), ()),
+         env=AUDIT_ALL, magnetized=True, trouble="trouble:3:0:6:0", faults=("reject", "bad_cfl", "lost")),
+    Case("viscous_nmhd_orszag_tang_3d", f"{N}.viscous_nmhd_orszag_tang_3d", "ViscousNewtonianOrszagTang3D",
+         (16, 16, 16), 8, ("full",), cuts=((8,), (), (8,)), restart_cuts=((5, 11), (), ()),
+         trouble="trouble:3:0:7:3:7", magnetized=True, periodic=True, faults=("reject", "bad_cfl", "lost")),
     # the isothermal regimes in 3d: a three-axis shear, and the vortex with a z flow
     Case("isothermal_shear_3d", "simbi_configs.examples.isothermal.isothermal_shear_3d", "IsothermalShear3D",
          (16, 16, 16), 8, ("full",), cuts=((8,), (), (8,)), restart_cuts=((5, 11), (), ()),

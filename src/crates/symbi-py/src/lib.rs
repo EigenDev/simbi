@@ -10421,17 +10421,22 @@ fn ungated_launch_combination(cfg: &Config) -> Option<String> {
     if isothermal && (!cfg.boundaries.iter().all(gated_wall) || !cfg.gradient_bcs.is_empty()) {
         return Some(format!("a wall beyond periodic, reflecting, outflow and the pole with the {} regime", cfg.regime));
     }
-    // the constant-nu viscous transport is gated for newtonian hydro, and on the 2D cartesian
-    // chart for the isothermal and magnetized regimes; the alpha prescription needs a central
-    // body, refused ahead of this
+    // the constant-nu viscous transport is gated for newtonian and isothermal hydro and both
+    // magnetized regimes on the 2D and 3D cartesian grid and the 2D (r, phi) disk plane, and for
+    // newtonian and isothermal hydro on the 2D spherical (r, theta) grid; the alpha prescription
+    // needs a central body, refused ahead of this
     let viscous = cfg.viscosity != 0.0 || cfg.alpha != 0.0;
-    let gated_viscous = cfg.regime == "newtonian"
-        || (matches!(cfg.regime.as_str(), "isothermal" | "nmhd" | "imhd")
-            && cfg.coord_system == "cartesian"
-            && cfg.dims == 2
-            && cfg.alpha == 0.0);
+    let viscous_grid = cfg.coord_system == "cartesian"
+        || (cfg.coord_system == "cylindrical" && cfg.cyl_plane == CylPlane::RPhi && cfg.dims == 2)
+        || (cfg.coord_system == "spherical" && cfg.dims == 2 && !magnetized);
+    let gated_viscous = matches!(cfg.regime.as_str(), "newtonian" | "isothermal" | "nmhd" | "imhd")
+        && cfg.alpha == 0.0
+        && viscous_grid;
     if viscous && !gated_viscous {
-        return Some(format!("viscous transport with the {} regime", cfg.regime));
+        return Some(format!(
+            "viscous transport with the {} regime on a {}-dimensional {} grid",
+            cfg.regime, cfg.dims, cfg.coord_system
+        ));
     }
     None
 }
