@@ -18,9 +18,10 @@
 # gas, shown to differ, fresh and resumed. isothermal hydro (the drifting blob)
 # and isothermal MHD (the walled orszag-tang vortex, under contact and uct,
 # shown to differ), each with a fine box over the central half, fresh and
-# resumed. 3D: the refined spherical blast in newtonian hydro and the extruded
-# orszag-tang vortex in newtonian MHD (periodic, the fine box inside the domain,
-# under contact and uct), fresh on eight workers whose ragged cuts meet at a
+# resumed. 3D: the refined spherical blast in newtonian, relativistic and
+# isothermal hydro and the extruded orszag-tang vortex in newtonian,
+# relativistic and isothermal MHD (periodic, the fine box inside the domain,
+# under contact and uct, shown to differ), fresh on eight workers whose ragged cuts meet at a
 # corner inside the box and resumed onto them from two. a patch on a periodic face
 # and an alpha viscosity with refinement are refused by name.
 #
@@ -247,10 +248,37 @@ NMHD_3D = [
     "regime: Annotated[Regime, ProblemParam(Regime.NMHD, description='physics regime')]",
     "refinement_regions: Annotated[list[list[float]], ProblemParam([[0.25, 0.75, 0.25, 0.75, 0.25, 0.75]], description='r')]",
 ]
+UCT_3D = "ct_method: Annotated[CtMethod, ProblemParam(CtMethod.UCT, description='edge emf')]"
+# the isothermal closure keeps density and velocity: the pressure column of each state is dropped
+ISOTHERMAL_STATE = [
+    "sound_speed: Annotated[float, ProblemParam(1.0, description='isothermal sound speed')]",
+    "def initial_primitive_state(self):",
+    "    state = super().initial_primitive_state()",
+    "    gas, faces = (state[0], state[1:]) if isinstance(state, tuple) else (state, ())",
+    "    def isothermal():",
+    "        for row in gas():",
+    "            yield row[:-1]",
+    "    return (isothermal, *faces) if faces else isothermal",
+]
+BLAST_3D = ("simbi_configs.examples.newtonian.refined_blast_3d", "RefinedBlast3D")
+VORTEX_3D = ("simbi_configs.examples.newtonian.refined_mhd_3d", "RefinedMhd3D")
+INTERIOR_BOX_3D = "refinement_regions: Annotated[list[list[float]], ProblemParam([[0.25, 0.75, 0.25, 0.75, 0.25, 0.75]], description='r')]"
+
+
+def _regime(name: str) -> str:
+    return f"regime: Annotated[Regime, ProblemParam(Regime.{name}, description='physics regime')]"
+
+
 THREE_D = {
-    "hydro": (("simbi_configs.examples.newtonian.refined_blast_3d", "RefinedBlast3D"), None),
+    "hydro": (BLAST_3D, None),
+    "rhd": (BLAST_3D, [_regime("RHD")]),
+    "isothermal": (BLAST_3D, [_regime("ISOTHERMAL"), *ISOTHERMAL_STATE]),
+    "rmhd-contact": (VORTEX_3D, [INTERIOR_BOX_3D]),
+    "rmhd-uct": (VORTEX_3D, [INTERIOR_BOX_3D, UCT_3D]),
+    "imhd-contact": (VORTEX_3D, [_regime("IMHD"), INTERIOR_BOX_3D, *ISOTHERMAL_STATE]),
+    "imhd-uct": (VORTEX_3D, [_regime("IMHD"), INTERIOR_BOX_3D, UCT_3D, *ISOTHERMAL_STATE]),
     "nmhd-contact": (("simbi_configs.examples.newtonian.refined_mhd_3d", "RefinedMhd3D"), NMHD_3D),
-    "nmhd-uct": (("simbi_configs.examples.newtonian.refined_mhd_3d", "RefinedMhd3D"), NMHD_3D + ["ct_method: Annotated[CtMethod, ProblemParam(CtMethod.UCT, description='edge emf')]"]),
+    "nmhd-uct": (VORTEX_3D, NMHD_3D + [UCT_3D]),
 }
 
 
@@ -270,7 +298,7 @@ def test_a_3d_refined_launch_matches_fresh_and_resumed(tmp_path: Path, name: str
         monkeypatch.setenv("PYTHONPATH", os.pathsep.join([str(tmp_path), os.getcwd(), os.environ.get("PYTHONPATH", "")]))
         module, cls, script = stem, "Variant", str(tmp_path / f"{stem}.py")
     reference = _script_reference(module, cls, RESOLUTION_3D, tmp_path / "single", STEPS)
-    if name == "nmhd-uct":
+    if name.endswith("-uct"):
         contact = _script_reference(module, cls, RESOLUTION_3D, tmp_path / "contact", STEPS, fields="ct_method='contact'")
         assert _differs(reference, contact), "the edge EMF left the 3d refined run unchanged; the gate is vacuous"
     eight = _layout(tmp_path / "eight.toml", workers=8, cuts=CUTS_3D)
