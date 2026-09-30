@@ -10410,11 +10410,11 @@ fn ungated_launch_combination(cfg: &Config) -> Option<String> {
     if isothermal && cfg.coord_system != "cartesian" {
         return Some(format!("the {} regime on a {}-dimensional {} chart", cfg.regime, cfg.dims, cfg.coord_system));
     }
-    if isothermal && cfg.boundaries.iter().any(|b| *b != BoundaryType::Periodic) {
-        return Some(format!("a wall beyond periodic with the {} regime", cfg.regime));
-    }
-    if cfg.regime == "imhd" && cfg.resistivity != 0.0 {
-        return Some("resistivity with the imhd regime".to_string());
+    // the isothermal regimes are gated with periodic, reflecting and outflow walls; a gradient
+    // wall and every other wall kind stay ungated
+    let gated_wall = |b: &BoundaryType| matches!(b, BoundaryType::Periodic | BoundaryType::Reflect | BoundaryType::Outflow);
+    if isothermal && (!cfg.boundaries.iter().all(gated_wall) || !cfg.gradient_bcs.is_empty()) {
+        return Some(format!("a wall beyond periodic, reflecting and outflow with the {} regime", cfg.regime));
     }
     // the constant-nu viscous transport is gated for newtonian hydro, and on the 2D cartesian
     // chart for the isothermal and magnetized regimes; the alpha prescription needs a central
