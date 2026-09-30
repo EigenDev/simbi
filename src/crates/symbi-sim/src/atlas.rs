@@ -304,6 +304,10 @@ impl<const D: usize> FieldLayout<D> {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum ExchangePoint {
     Prime,
+    /// after the refined levels are seeded and primed: the primed root, whose covered cells and
+    /// faces now hold the restriction of the seeded fine level, reaches the neighbors' halos
+    /// before the first stage reads them
+    Primed,
     Stage(u8),
     /// inside stage `k`, between the troubled-cell mark and the correction: the flags cross
     /// the cuts so both tiles sharing a face take one flux there.
@@ -381,6 +385,7 @@ impl ExchangePoint {
     pub fn kind_code(self) -> u32 {
         let (kind, a, b): (u32, u32, u32) = match self {
             ExchangePoint::Prime => (0, 0, 0),
+            ExchangePoint::Primed => (18, 0, 0),
             ExchangePoint::Stage(k) => (1, k as u32, 0),
             ExchangePoint::Troubled(k) => (2, k as u32, 0),
             ExchangePoint::PostStep => (3, 0, 0),

@@ -537,6 +537,11 @@ where
                 h.prime();
             }
         }
+        // the primed root reaches the neighbors' halos: the priming restricted the seeded fine
+        // level into each tile's covered cells and faces after the prime exchange, and the first
+        // stage reads those cells across the cuts (an edge EMF differences the faces there). a
+        // resumed run exchanges its loaded root here as well, so every worker walks one table
+        root_point!(ExchangePoint::Primed, 0, 0);
         if cfg.perturb_fine_face_after == Some(0) {
             perturb_fine_face(tiles);
         }

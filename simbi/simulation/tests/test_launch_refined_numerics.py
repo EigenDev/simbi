@@ -20,7 +20,7 @@
 # shown to differ), each with a fine box over the central half, fresh and
 # resumed. 3D: the refined spherical blast in newtonian hydro and the extruded
 # orszag-tang vortex in newtonian MHD (periodic, the fine box inside the domain,
-# under contact), fresh on eight workers whose ragged cuts meet at a
+# under contact and uct), fresh on eight workers whose ragged cuts meet at a
 # corner inside the box and resumed onto them from two. a patch on a periodic face
 # and an alpha viscosity with refinement are refused by name.
 #
@@ -250,6 +250,7 @@ NMHD_3D = [
 THREE_D = {
     "hydro": (("simbi_configs.examples.newtonian.refined_blast_3d", "RefinedBlast3D"), None),
     "nmhd-contact": (("simbi_configs.examples.newtonian.refined_mhd_3d", "RefinedMhd3D"), NMHD_3D),
+    "nmhd-uct": (("simbi_configs.examples.newtonian.refined_mhd_3d", "RefinedMhd3D"), NMHD_3D + ["ct_method: Annotated[CtMethod, ProblemParam(CtMethod.UCT, description='edge emf')]"]),
 }
 
 
@@ -269,6 +270,9 @@ def test_a_3d_refined_launch_matches_fresh_and_resumed(tmp_path: Path, name: str
         monkeypatch.setenv("PYTHONPATH", os.pathsep.join([str(tmp_path), os.getcwd(), os.environ.get("PYTHONPATH", "")]))
         module, cls, script = stem, "Variant", str(tmp_path / f"{stem}.py")
     reference = _script_reference(module, cls, RESOLUTION_3D, tmp_path / "single", STEPS)
+    if name == "nmhd-uct":
+        contact = _script_reference(module, cls, RESOLUTION_3D, tmp_path / "contact", STEPS, fields="ct_method='contact'")
+        assert _differs(reference, contact), "the edge EMF left the 3d refined run unchanged; the gate is vacuous"
     eight = _layout(tmp_path / "eight.toml", workers=8, cuts=CUTS_3D)
     launched = _script_launch(script, RESOLUTION_3D, tmp_path / "eight", eight, STEPS, workers=8)
     _assert_same_levels(launched, reference, f"3d {name}: eight workers")
@@ -279,6 +283,35 @@ def test_a_3d_refined_launch_matches_fresh_and_resumed(tmp_path: Path, name: str
     assert 0 < written_at < STEPS
     resumed = _script_launch(script, RESOLUTION_3D, tmp_path / "resumed", eight, STEPS - written_at, workers=8, checkpoint=first)
     _assert_same_levels(resumed, reference, f"3d {name}: resumed onto eight workers")
+
+
+def test_the_primed_root_reaches_the_halos_before_the_first_stage(tmp_path: Path, monkeypatch) -> None:
+    # the priming restricts the seeded fine level into each tile's covered root cells and faces
+    # after the prime exchange; a uct edge EMF differences those faces across a cut in the first
+    # stage, so a halo left at its pre-restriction value flips the sign of a one-ulp jump there.
+    # one z cut through the box, every exchange audited, one step
+    (module, cls), lines = THREE_D["nmhd-uct"]
+    stem = "primed_uct"
+    (tmp_path / f"{stem}.py").write_text(
+        "from typing import Annotated\n"
+        "from simbi import ProblemParam\n"
+        "from simbi.types import CtMethod, Regime\n"
+        f"from {module} import {cls}\n\n\n"
+        f"class Variant({cls}):\n" + "\n".join(f"    {line}" for line in lines) + "\n"
+    )
+    monkeypatch.setenv("PYTHONPATH", os.pathsep.join([str(tmp_path), os.getcwd(), os.environ.get("PYTHONPATH", "")]))
+    script = str(tmp_path / f"{stem}.py")
+    reference = _script_reference(stem, "Variant", RESOLUTION_3D, tmp_path / "single", 1)
+    # the premise: the priming changes root faces within the halo band of the cut at z = 10
+    unrefined = _script_reference(stem, "Variant", RESOLUTION_3D, tmp_path / "unrefined", 1, fields="refinement_enabled=False")
+    initial = lambda out: sorted(out.glob("*000_000*.h5"))[0]
+    with h5py.File(initial(tmp_path / "single"), "r") as fa, h5py.File(initial(tmp_path / "unrefined"), "r") as fb:
+        magnetic = "level_0/partition_0/hydro/magnetic"
+        moved = [k for k in fa[magnetic] if not np.array_equal(fa[f"{magnetic}/{k}/data"][8:12], fb[f"{magnetic}/{k}/data"][8:12])]
+    assert moved, "the priming changed no root face near the cut; the gate is vacuous"
+    two = _layout(tmp_path / "two.toml", workers=2, cuts=[[], [], [10]])
+    launched = _script_launch(script, RESOLUTION_3D, tmp_path / "two", two, 1, workers=2, env={"SIMBI_FABRIC_AUDIT": "all"})
+    _assert_same_levels(launched, reference, "one z cut through the box, every exchange audited")
 
 
 def test_a_refined_patch_on_a_periodic_face_is_refused_by_name(tmp_path: Path) -> None:

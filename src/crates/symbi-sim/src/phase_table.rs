@@ -83,10 +83,11 @@ impl PhaseTable {
         }
         let mandatory = |point| Phase { point, skippable: false, init_only: false };
         let skippable = |point| Phase { point, skippable: true, init_only: false };
-        let mut phases = vec![
-            Phase { point: ExchangePoint::Prime, skippable: false, init_only: true },
-            Phase { point: ExchangePoint::Audit(AuditAt::Prime), skippable: true, init_only: true },
-        ];
+        let mut phases = vec![Phase { point: ExchangePoint::Prime, skippable: false, init_only: true }];
+        if substeps > 0 {
+            phases.push(Phase { point: ExchangePoint::Primed, skippable: false, init_only: true });
+        }
+        phases.push(Phase { point: ExchangePoint::Audit(AuditAt::Prime), skippable: true, init_only: true });
         for k in 0..stages {
             phases.push(skippable(ExchangePoint::Troubled(k)));
             phases.push(mandatory(ExchangePoint::Stage(k)));
@@ -240,8 +241,15 @@ mod tests {
         assert!(bytes(ExchangePoint::CorrectedFaces) < bytes(ExchangePoint::Restrict));
         assert!(bytes(ExchangePoint::Restrict) < bytes(ExchangePoint::PostStep));
         assert!(bytes(ExchangePoint::PostStep) < bytes(ExchangePoint::Rollback));
-        // 2 + 3 * 2 + 2 * (1 + 3 * 2 + 2) + 3 + 4
-        assert_eq!(t.len(), 33);
+        // the primed root crosses the cuts after the prime and before the prime audit, once
+        assert!(bytes(ExchangePoint::Prime) < bytes(ExchangePoint::Primed));
+        assert!(bytes(ExchangePoint::Primed) < bytes(ExchangePoint::Audit(AuditAt::Prime)));
+        let r = t.rules();
+        let b = |p| t.byte_of(p).unwrap() as usize;
+        assert!(r.init_only[b(ExchangePoint::Primed)] && !r.skippable[b(ExchangePoint::Primed)]);
+        assert_eq!(PhaseTable::flat(2).unwrap().byte_of(ExchangePoint::Primed), None, "a flat table primes no refined level");
+        // 3 + 3 * 2 + 2 * (1 + 3 * 2 + 2) + 3 + 4
+        assert_eq!(t.len(), 34);
         let flat = PhaseTable::flat(2).unwrap();
         assert_ne!(flat.digest(), t.digest());
         assert_eq!(PhaseTable::flat(2).unwrap().digest(), flat.digest());
