@@ -10057,6 +10057,20 @@ mod alpha_key_tests {
 
 fn validate_config_preflight(cfg: &Config) -> Result<(), String> {
     validate_gpu_request(cfg.n_gpus)?;
+    // the cartesian constrained-transport curl reads one uniform width per axis; on a mapped axis
+    // the staggered field would evolve on the uniform lattice while the gas moves on the mapped one
+    let spacings = [&cfg.x1_spacing, &cfg.x2_spacing, &cfg.x3_spacing];
+    if cfg.regime.contains("mhd")
+        && cfg.coord_system == "cartesian"
+        && cfg.dims >= 2
+        && spacings[..cfg.dims.min(3)].iter().any(|s| !s.eq_ignore_ascii_case("linear"))
+    {
+        return Err(format!(
+            "the {} regime on a non-uniform cartesian grid: the cartesian constrained-transport \
+             curl reads uniform widths; use linear spacing on every axis",
+            cfg.regime
+        ));
+    }
     // the axis placement rule runs here as well as at dispatch, so a misplaced or unsupported
     // axis face fails before a queue slot is spent.
     validate_axis_boundaries(cfg)?;
