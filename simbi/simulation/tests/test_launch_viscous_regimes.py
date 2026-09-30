@@ -6,13 +6,16 @@
 # (isothermal hydro, newtonian MHD and isothermal MHD under a uniform B_x), on four
 # workers cut along both axes against the single-grid run, bit for bit, fresh and
 # with the correction fired on a cell against both cuts; the viscosity is shown to
-# act, the inviscid launch differing from the viscous one.
+# act, the inviscid launch differing from the viscous one. a run checkpointed
+# halfway resumes to the uninterrupted single-grid state, on one worker and onto
+# three unevenly owned tiles from a four-worker checkpoint.
 #
 # run: pytest -m simulation simbi/simulation/tests/test_launch_viscous_regimes.py
 # =============================================================================
 
 from pathlib import Path
 
+import h5py
 import pytest
 
 from simbi.simulation.tests.test_launch import (
@@ -52,3 +55,24 @@ def test_a_viscous_launch_matches_the_single_grid_run(tmp_path: Path, name: str)
     _assert_flag_changed(clean, flagged)
     corrected = _script_launch(script, resolution, tmp_path / "corrected", four, STEPS, workers=4, env=inject)
     _assert_same_state(corrected, flagged, f"{name}: four workers, the correction against both cuts")
+
+
+@pytest.mark.parametrize("name", list(CASES))
+def test_a_viscous_launch_resumed_onto_another_partition_matches(tmp_path: Path, name: str) -> None:
+    module, cls, resolution = CASES[name]
+    script = module.replace(".", "/") + ".py"
+    planar = len(resolution) == 2
+    reference = _script_reference(module, cls, resolution, tmp_path / "single", STEPS)
+    one = _layout(tmp_path / "one.toml", workers=1, shape=(1, 1) if planar else (1, 1, 1))
+    partial_one = _script_launch(script, resolution, tmp_path / "half", one, STEPS // 2, workers=1)
+    with h5py.File(partial_one, "r") as f:
+        written_at = int(f["level_0"].attrs["iteration"])
+    assert 0 < written_at < STEPS
+    resumed_one = _script_launch(script, resolution, tmp_path / "resumed_one", one, STEPS - written_at, workers=1, checkpoint=partial_one)
+    _assert_same_state(resumed_one, reference, f"{name}: resumed on one worker against the uninterrupted run")
+    four = _layout(tmp_path / "four.toml", workers=4, shape=(2, 2) if planar else (2, 2, 1))
+    partial = _script_launch(script, resolution, tmp_path / "first", four, STEPS // 2, workers=4)
+    # a 2.5D magnetized problem partitions its two spatial axes
+    three = _layout(tmp_path / "three.toml", workers=3, cuts=[[10, 21], []])
+    resumed = _script_launch(script, resolution, tmp_path / "three", three, STEPS - written_at, workers=3, checkpoint=partial)
+    _assert_same_state(resumed, reference, f"{name}: resumed onto three uneven workers against the uninterrupted run")
