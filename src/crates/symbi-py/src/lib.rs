@@ -1027,16 +1027,27 @@ struct GradientBcSpec {
 /// read the per-variable coefficients off a python `Neumann`/`Robin` object (attributes `rho`,
 /// `velocity`, `pressure`). Neumann flattens to `[rho, vel.., pre]`; Robin flattens each variable's
 /// `(a, b, c)` triple in the same order.
-fn extract_gradient_spec(obj: &Bound<'_, PyAny>, kind: &str) -> PyResult<GradientBcSpec> {
+/// the flattened coefficients of a neumann or robin wall: rho, then exactly `n_vel` velocity
+/// entries, then pre. an omitted trailing velocity component takes the documented default, a zero
+/// gradient for neumann and the dirichlet triple `(1, 0, 0)` for robin; more components than the
+/// regime carries are refused by name.
+fn extract_gradient_spec(obj: &Bound<'_, PyAny>, kind: &str, n_vel: usize) -> PyResult<GradientBcSpec> {
     let rho = obj.getattr("rho")?;
     let velocity = obj.getattr("velocity")?;
     let pressure = obj.getattr("pressure")?;
+    let given = velocity.len()?;
+    if given > n_vel {
+        return Err(PyValueError::new_err(format!(
+            "a {kind} wall gives {given} velocity components; the regime carries {n_vel}"
+        )));
+    }
     let mut coeffs = Vec::new();
     if kind == "neumann" {
         coeffs.push(rho.extract::<f64>()?);
         for v in velocity.try_iter()? {
             coeffs.push(v?.extract::<f64>()?);
         }
+        coeffs.extend(std::iter::repeat_n(0.0, n_vel - given));
         coeffs.push(pressure.extract::<f64>()?);
     } else {
         let (a, b, c): (f64, f64, f64) = rho.extract()?;
@@ -1044,6 +1055,9 @@ fn extract_gradient_spec(obj: &Bound<'_, PyAny>, kind: &str) -> PyResult<Gradien
         for v in velocity.try_iter()? {
             let (a, b, c): (f64, f64, f64) = v?.extract()?;
             coeffs.extend_from_slice(&[a, b, c]);
+        }
+        for _ in given..n_vel {
+            coeffs.extend_from_slice(&[1.0, 0.0, 0.0]);
         }
         let (a, b, c): (f64, f64, f64) = pressure.extract()?;
         coeffs.extend_from_slice(&[a, b, c]);
@@ -1107,6 +1121,9 @@ fn parse_config(dict: &Bound<'_, PyDict>) -> PyResult<Config> {
     // gradient (Neumann / Robin) boundary coefficients in registry order; id == registration order,
     // so `Neumann(id)` / `Robin(id)` on a face matches `gradient_bcs[id]`.
     let mut gradient_bcs: Vec<GradientBcSpec> = Vec::new();
+    // the velocity components a primitive carries: three for a magnetized regime, one per
+    // spatial axis otherwise
+    let n_vel = if enum_str(dict, "regime")?.contains("mhd") { 3 } else { dims };
     for (face, obj) in bc_objs.try_iter()?.enumerate() {
         let obj = obj?;
         let s: String = match obj.getattr("value") {
@@ -1130,7 +1147,7 @@ fn parse_config(dict: &Bound<'_, PyDict>) -> PyResult<Config> {
                 boundaries.push(BoundaryType::Driven(id));
             }
             kind @ ("neumann" | "robin") => {
-                let spec = extract_gradient_spec(&obj, kind)?;
+                let spec = extract_gradient_spec(&obj, kind, n_vel)?;
                 let id = gradient_bcs.len() as u16;
                 gradient_bcs.push(spec);
                 boundaries.push(if kind == "neumann" {
@@ -10412,14 +10429,6 @@ fn ungated_launch_combination(cfg: &Config) -> Option<String> {
     let spherical_2d = cfg.coord_system == "spherical" && cfg.dims == 2 && cfg.regime == "isothermal";
     if isothermal && !(cfg.coord_system == "cartesian" || disk_plane || spherical_2d) {
         return Some(format!("the {} regime on a {}-dimensional {} chart", cfg.regime, cfg.dims, cfg.coord_system));
-    }
-    // the isothermal regimes are gated with periodic, reflecting and outflow walls and the
-    // spherical pole; a gradient wall and every other wall kind stay ungated
-    let gated_wall = |b: &BoundaryType| {
-        matches!(b, BoundaryType::Periodic | BoundaryType::Reflect | BoundaryType::Outflow | BoundaryType::Axis)
-    };
-    if isothermal && (!cfg.boundaries.iter().all(gated_wall) || !cfg.gradient_bcs.is_empty()) {
-        return Some(format!("a wall beyond periodic, reflecting, outflow and the pole with the {} regime", cfg.regime));
     }
     // the constant-nu viscous transport is gated for newtonian and isothermal hydro and both
     // magnetized regimes on the 2D and 3D cartesian grid and the 2D (r, phi) disk plane, and for

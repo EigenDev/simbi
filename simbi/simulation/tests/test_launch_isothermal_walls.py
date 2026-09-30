@@ -6,7 +6,8 @@
 # bit for bit, every staggered face included, fresh and with the correction fired
 # on a cell against both cuts or, behind a wall, on the cell where a cut meets it:
 # an isothermal channel (periodic along x, reflecting walls in y), an isothermal
-# overdensity drifting toward outflow walls, the isothermal orszag-tang vortex
+# overdensity drifting toward outflow walls, a spinning isothermal pulse in a box
+# with neumann and robin walls, the isothermal orszag-tang vortex
 # with outflow walls, and the isothermal vortex under an ohmic resistivity, shown
 # to act against the ideal launch.
 #
@@ -33,6 +34,7 @@ I = "simbi_configs.examples.isothermal."
 CASES = {
     "channel": (I + "isothermal_channel", "IsothermalChannel", (32, 32), "trouble:3:0:15:0", None),
     "outflow": (I + "isothermal_outflow_blob", "IsothermalOutflowBlob", (32, 32), "trouble:3:0:15:15", None),
+    "gradient": (I + "isothermal_gradient_box", "IsothermalGradientBox", (32, 32), "trouble:3:1:16:31", None),
     "imhd-walls": (I + "imhd_orszag_tang_walls", "IsothermalOrszagTangWalls", (32, 32, 1), "trouble:3:0:15:0", None),
     "imhd-resistive": (I + "resistive_imhd_orszag_tang", "ResistiveIsothermalOrszagTang", (32, 32, 1), "trouble:3:0:15:15", ["--eta", "0.0"]),
 }
