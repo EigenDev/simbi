@@ -2101,6 +2101,31 @@ fn configured_ito_order(
     }
 }
 
+/// seed a tile's passive scalar from the global initial dye: cell by cell, the tile's local cell
+/// maps to its global cell (`tile_lo` + local offset) and the conserved dye is rho * chi.
+fn seed_tile_dye<const D: usize, const DOF: usize, Mem: symbi::symbi_xpu::MemorySpace>(
+    store: &symbi_sim::state::FieldStore<D, DOF, Mem, f64>,
+    chi_ic: &[f64],
+    tile_lo: [usize; D],
+    n: [usize; D],
+) {
+    let ilo: [isize; D] = std::array::from_fn(|ax| store.geom.interior.spaces[ax].lo);
+    let cons_chi = store.fields.cons.chi_field().expect("cons chi");
+    let prim_chi = store.fields.prim.chi_field().expect("prim chi");
+    for c in store.geom.interior.iter() {
+        let mut lin = 0usize;
+        let mut stride = 1usize;
+        for ax in 0..D {
+            lin += (tile_lo[ax] + (c[ax] - ilo[ax]) as usize) * stride;
+            stride *= n[ax];
+        }
+        let chi = chi_ic[lin];
+        let rho = *store.fields.cons.den.view().at(c);
+        cons_chi.view_mut().set(c, rho * chi);
+        prim_chi.view_mut().set(c, chi);
+    }
+}
+
 /// install the configured censuses onto a store. lowering already happened at preflight, where
 /// a malformed registration is rejected before any grid is allocated; this is the step that makes
 /// the run actually carry them. omitting it leaves a census that validates, reports no error, and
@@ -6198,12 +6223,23 @@ macro_rules! build_and_run_hydro_decomposed_refined {
                         Prim::adiabatic(Density(row[0]), Tensor::new(std::array::from_fn(|k| row[1 + k])), Pressure(row[1 + $d]))
                     })
                     .build();
-                // the tile set carries the same non-ideal + excision knobs as the
-                // monolithic base — a tile set without them makes the whole decomposed
-                // run silently ideal/unexcised.
+                // the dye rides on the root; the hierarchy carries it onto the fine levels
+                let sim = if cfg.chi_ic.is_empty() {
+                    sim
+                } else {
+                    let sim = sim
+                        .with_passive_scalar()
+                        .map_err(|e| format!("tile {flat} dye allocation: {e:?}"))?;
+                    seed_tile_dye(&sim, &cfg.chi_ic, tile_lo, n);
+                    sim
+                };
+                // the tile set carries the same reconstruction, non-ideal and excision knobs as
+                // the monolithic base; a tile set without them runs a different scheme silently
                 let sub = sim
                     .substrate()
                     .theta(theta)
+                    .reconstruction(build_recon(cfg))
+                    .ppm_flatten(cfg.ppm_flatten_onset, cfg.ppm_flatten_full)
                     .with_solver(solver)
                     .map_err(|e| format!("tile {flat} substrate/solver: {e:?}"))?
                     .with_viscosity(cfg.viscosity)
@@ -6264,6 +6300,8 @@ macro_rules! build_and_run_hydro_decomposed_refined {
                     register(
                         s.substrate()
                             .theta(theta)
+                            .reconstruction(build_recon(cfg))
+                            .ppm_flatten(cfg.ppm_flatten_onset, cfg.ppm_flatten_full)
                             .with_solver(solver)
                             .expect("fine kernel set")
                             .with_viscosity(cfg.viscosity)
@@ -6493,25 +6531,7 @@ macro_rules! build_and_run_hydro_decomposed {
                     let sim = sim
                         .with_passive_scalar()
                         .map_err(|e| format!("tile {flat} dye allocation: {e:?}"))?;
-                    let ilo: [isize; $d] =
-                        std::array::from_fn(|ax| sim.geom.interior.spaces[ax].lo);
-                    {
-                        let cons_chi = sim.fields.cons.chi_field().expect("cons chi");
-                        let prim_chi = sim.fields.prim.chi_field().expect("prim chi");
-                        for c in sim.geom.interior.iter() {
-                            let mut lin = 0usize;
-                            let mut stride = 1usize;
-                            for ax in 0..$d {
-                                let g = tile_lo[ax] + (c[ax] - ilo[ax]) as usize;
-                                lin += g * stride;
-                                stride *= n[ax];
-                            }
-                            let chi_v = cfg.chi_ic[lin];
-                            let rho = *sim.fields.cons.den.view().at(c);
-                            cons_chi.view_mut().set(c, rho * chi_v);
-                            prim_chi.view_mut().set(c, chi_v);
-                        }
-                    }
+                    seed_tile_dye(&sim, &cfg.chi_ic, tile_lo, n);
                     sim
                 };
                 // attach the immersed bodies per tile (gravity + accretion sink). all tiles share the
@@ -8971,6 +8991,15 @@ fn dispatch_and_run(
     // attached.
     // the decomposed tile builders install the plain reconstruction; the balanced one has no
     // decomposed equivalence gate, so the combination is refused rather than run unbalanced.
+    // a census reduces over the whole grid; the tiled drivers carry no cross-tile census, so a
+    // configured one is refused rather than left unrecorded
+    if !cfg.census_jsons.is_empty() && cfg.n_gpus > 1 {
+        return Err(
+            "a census with gpus > 1 awaits a cross-tile census reduction; run on one device or \
+             drop the census"
+                .to_string(),
+        );
+    }
     if cfg.wb_reconstruction && cfg.n_gpus > 1 {
         return Err(
             "wb_reconstruction with gpus > 1 awaits a decomposed equivalence gate for the \
@@ -10553,6 +10582,10 @@ fn validate_launch_scope(cfg: &Config) -> Result<(), String> {
     }
     if cfg.dlogt > 0.0 {
         return refused("a logarithmic checkpoint cadence");
+    }
+    // the launched workers carry no cross-tile census reduction
+    if !cfg.census_jsons.is_empty() {
+        return refused("a census");
     }
     // a combination the launched tiles build as the single path does but that no distributed
     // gate has validated: refused by name, or run as experimental under an explicit opt-in.
