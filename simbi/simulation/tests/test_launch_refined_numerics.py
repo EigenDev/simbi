@@ -18,7 +18,10 @@
 # gas, shown to differ, fresh and resumed. isothermal hydro (the drifting blob)
 # and isothermal MHD (the walled orszag-tang vortex, under contact and uct,
 # shown to differ), each with a fine box over the central half, fresh and
-# resumed. a patch on a periodic face
+# resumed. 3D: the refined spherical blast in newtonian hydro and the extruded
+# orszag-tang vortex in newtonian MHD (periodic, the fine box inside the domain,
+# under contact), fresh on eight workers whose ragged cuts meet at a
+# corner inside the box and resumed onto them from two. a patch on a periodic face
 # and an alpha viscosity with refinement are refused by name.
 #
 # run: pytest -m simulation simbi/simulation/tests/test_launch_refined_numerics.py
@@ -234,6 +237,48 @@ def test_an_isothermal_refined_launch_matches_fresh_and_resumed(tmp_path: Path, 
     assert 0 < written_at < STEPS
     resumed = _script_launch(script, resolution, tmp_path / "resumed", four, STEPS - written_at, workers=4, checkpoint=first)
     _assert_same_levels(resumed, reference, f"{name}: resumed onto four workers")
+
+
+# the fine box spans root cells 6..18 on every axis of the 24^3 root; the cuts sit at least four
+# root cells from its faces and meet at a corner inside it
+RESOLUTION_3D = (24, 24, 24)
+CUTS_3D = [[11], [13], [10]]
+NMHD_3D = [
+    "regime: Annotated[Regime, ProblemParam(Regime.NMHD, description='physics regime')]",
+    "refinement_regions: Annotated[list[list[float]], ProblemParam([[0.25, 0.75, 0.25, 0.75, 0.25, 0.75]], description='r')]",
+]
+THREE_D = {
+    "hydro": (("simbi_configs.examples.newtonian.refined_blast_3d", "RefinedBlast3D"), None),
+    "nmhd-contact": (("simbi_configs.examples.newtonian.refined_mhd_3d", "RefinedMhd3D"), NMHD_3D),
+}
+
+
+@pytest.mark.parametrize("name", list(THREE_D))
+def test_a_3d_refined_launch_matches_fresh_and_resumed(tmp_path: Path, name: str, monkeypatch) -> None:
+    (module, cls), lines = THREE_D[name]
+    script = module.replace(".", "/") + ".py"
+    if lines is not None:
+        stem = "three_d_" + name.replace("-", "_")
+        (tmp_path / f"{stem}.py").write_text(
+            "from typing import Annotated\n"
+            "from simbi import ProblemParam\n"
+            "from simbi.types import CtMethod, Regime\n"
+            f"from {module} import {cls}\n\n\n"
+            f"class Variant({cls}):\n" + "\n".join(f"    {line}" for line in lines) + "\n"
+        )
+        monkeypatch.setenv("PYTHONPATH", os.pathsep.join([str(tmp_path), os.getcwd(), os.environ.get("PYTHONPATH", "")]))
+        module, cls, script = stem, "Variant", str(tmp_path / f"{stem}.py")
+    reference = _script_reference(module, cls, RESOLUTION_3D, tmp_path / "single", STEPS)
+    eight = _layout(tmp_path / "eight.toml", workers=8, cuts=CUTS_3D)
+    launched = _script_launch(script, RESOLUTION_3D, tmp_path / "eight", eight, STEPS, workers=8)
+    _assert_same_levels(launched, reference, f"3d {name}: eight workers")
+    two = _layout(tmp_path / "two.toml", workers=2, shape=(2, 1, 1))
+    first = _script_launch(script, RESOLUTION_3D, tmp_path / "first", two, STEPS // 2, workers=2)
+    with h5py.File(first, "r") as f:
+        written_at = int(f["level_0"].attrs["iteration"])
+    assert 0 < written_at < STEPS
+    resumed = _script_launch(script, RESOLUTION_3D, tmp_path / "resumed", eight, STEPS - written_at, workers=8, checkpoint=first)
+    _assert_same_levels(resumed, reference, f"3d {name}: resumed onto eight workers")
 
 
 def test_a_refined_patch_on_a_periodic_face_is_refused_by_name(tmp_path: Path) -> None:

@@ -10610,8 +10610,8 @@ fn validate_launch_scope(cfg: &Config) -> Result<(), String> {
     Ok(())
 }
 
-/// the refined launch's gated scope: 2D newtonian, relativistic or isothermal hydro or 2.5D
-/// newtonian, relativistic or isothermal MHD on a uniform cartesian grid with one refined patch of ratio two, open or periodic boundaries
+/// the refined launch's gated scope: newtonian, relativistic or isothermal hydro or MHD on a 2D
+/// (2.5D for MHD) or 3D uniform cartesian grid with one refined patch of ratio two, open or periodic boundaries
 /// with the patch clear of a periodic face; pcm, plm or
 /// ppm with its flattening, a constant viscosity, a resistivity, user sources and gradient walls
 /// where the outer scope admits them for the regime. every other refined combination is named and
@@ -10621,13 +10621,14 @@ fn validate_refined_launch_scope(cfg: &Config) -> Result<(), String> {
     if !matches!(cfg.regime.as_str(), "newtonian" | "rhd" | "isothermal" | "nmhd" | "imhd" | "rmhd") {
         return refused(&format!("the {} regime", cfg.regime));
     }
-    if cfg.dims != 2 {
+    if !matches!(cfg.dims, 2 | 3) {
         return refused(&format!("a {}-dimensional grid", cfg.dims));
     }
     if cfg.coord_system != "cartesian" {
         return refused(&format!("the {} chart", cfg.coord_system));
     }
-    if axis_maps::<2>(cfg).is_some() {
+    let mapped = if cfg.dims == 2 { axis_maps::<2>(cfg).is_some() } else { axis_maps::<3>(cfg).is_some() };
+    if mapped {
         return refused("a non-uniform spacing");
     }
     if cfg.refinement_regions.len() != 1 {
@@ -10638,13 +10639,9 @@ fn validate_refined_launch_scope(cfg: &Config) -> Result<(), String> {
     }
     // the root and seed plans carry the wrap of a periodic axis; the fine level, its registers and
     // its face stencils live inside the domain, so the patch keeps clear of a periodic face
-    let phys = boundaries_nd::<2>(&cfg.boundaries);
-    let patch = launch_patch(cfg)?;
-    for ax in 0..2 {
-        let periodic = phys.lo(ax) == BoundaryType::Periodic && phys.hi(ax) == BoundaryType::Periodic;
-        if periodic && (patch[ax].0 == 0 || patch[ax].1 >= cfg.n_cells[ax]) {
-            return refused(&format!("a refined patch on the periodic face of axis {ax}"));
-        }
+    let seam = if cfg.dims == 2 { patch_on_periodic_face::<2>(cfg)? } else { patch_on_periodic_face::<3>(cfg)? };
+    if let Some(ax) = seam {
+        return refused(&format!("a refined patch on the periodic face of axis {ax}"));
     }
     if cfg.alpha > 0.0 {
         return refused("an alpha viscosity");
@@ -10655,10 +10652,20 @@ fn validate_refined_launch_scope(cfg: &Config) -> Result<(), String> {
     Ok(())
 }
 
+/// the first periodic axis whose domain face the launch's refined patch reaches
+fn patch_on_periodic_face<const D: usize>(cfg: &Config) -> Result<Option<usize>, String> {
+    let phys = boundaries_nd::<D>(&cfg.boundaries);
+    let patch = launch_patch::<D>(cfg)?;
+    Ok((0..D).find(|&ax| {
+        let periodic = phys.lo(ax) == BoundaryType::Periodic && phys.hi(ax) == BoundaryType::Periodic;
+        periodic && (patch[ax].0 == 0 || patch[ax].1 >= cfg.n_cells[ax])
+    }))
+}
+
 /// the refined root patch of the launch's one region in root cells per axis, snapped as the
 /// hierarchy snaps a region to its parent's cells
-fn launch_patch(cfg: &Config) -> Result<[(usize, usize); 2], String> {
-    let regions = refinement_regions_nd::<2>(&cfg.refinement_regions)?;
+fn launch_patch<const D: usize>(cfg: &Config) -> Result<[(usize, usize); D], String> {
+    let regions = refinement_regions_nd::<D>(&cfg.refinement_regions)?;
     let r = &regions[0];
     let cell = |x: f64, ax: usize| ((x - cfg.x_lo[ax]) / cfg.dx[ax]).round();
     Ok(std::array::from_fn(|ax| (cell(r.x_lo[ax], ax) as usize, cell(r.x_hi[ax], ax) as usize)))
@@ -10666,20 +10673,20 @@ fn launch_patch(cfg: &Config) -> Result<[(usize, usize); 2], String> {
 
 /// the root tiling of a refined launch as this worker sees it: the partition, the owners of its
 /// tiles, the tiles this worker holds, and the refined patch in root cells
-struct RefinedLayout {
-    n: [usize; 2],
-    partition: symbi::sim::decomp::Partition<2>,
+struct RefinedLayout<const D: usize> {
+    n: [usize; D],
+    partition: symbi::sim::decomp::Partition<D>,
     owner: Vec<symbi_fabric::WorkerId>,
     placement: symbi_sim::atlas::Placement,
     me: symbi_fabric::WorkerId,
     mine: Vec<usize>,
-    patch: [(usize, usize); 2],
+    patch: [(usize, usize); D],
 }
 
-fn refined_layout(cfg: &Config, launch: &WorkerLaunch, cells: usize) -> Result<RefinedLayout, String> {
+fn refined_layout<const D: usize>(cfg: &Config, launch: &WorkerLaunch, cells: usize) -> Result<RefinedLayout<D>, String> {
     use symbi_fabric::WorkerId;
     use symbi_sim::atlas::{Placement, TileId};
-    let n: [usize; 2] = std::array::from_fn(|ax| cfg.n_cells[ax]);
+    let n: [usize; D] = std::array::from_fn(|ax| cfg.n_cells[ax]);
     let total: usize = n.iter().product();
     if cells != total {
         return Err(format!("prim_gen yielded {cells} cells, expected {total}"));
@@ -10696,7 +10703,7 @@ fn refined_layout(cfg: &Config, launch: &WorkerLaunch, cells: usize) -> Result<R
     if mine.is_empty() {
         return Err(format!("worker {} holds no tile", launch.worker));
     }
-    let patch = launch_patch(cfg)?;
+    let patch = launch_patch::<D>(cfg)?;
     Ok(RefinedLayout { n, partition, owner, placement, me, mine, patch })
 }
 
@@ -10705,27 +10712,28 @@ fn refined_layout(cfg: &Config, launch: &WorkerLaunch, cells: usize) -> Result<R
 /// face on a cut as a contributing register face), or the receiving register of the shell beside
 /// the patch; a magnetized tile carries the step-entry faces its neighbors' parent face stencils
 /// gather, and a refined one the stencil itself
-fn refined_tile<R, const DOF: usize, E, K>(
+fn refined_tile<R, const D: usize, const DOF: usize, E, K>(
     cfg: &Config,
-    layout: &RefinedLayout,
+    layout: &RefinedLayout<D>,
     flat: usize,
-    origin: [f64; 2],
-    m: [usize; 2],
-    sim: SimDefaultGeneric<R, 2, DOF, Cartesian, E>,
-    kernels_of: impl Fn(&SimDefaultGeneric<R, 2, DOF, Cartesian, E>) -> K,
-) -> Result<Hierarchy<R, 2, DOF, Cartesian, E, DefaultSpace, DefaultMemory, K>, String>
+    origin: [f64; D],
+    m: [usize; D],
+    sim: SimDefaultGeneric<R, D, DOF, Cartesian, E>,
+    kernels_of: impl Fn(&SimDefaultGeneric<R, D, DOF, Cartesian, E>) -> K,
+) -> Result<Hierarchy<R, D, DOF, Cartesian, E, DefaultSpace, DefaultMemory, K>, String>
 where
-    R: Regime<f64, 2> + Copy,
-    E: symbi_hydro::eos::EosFor<f64, <R as Regime<f64, 2>>::Energy> + Copy + Send + Sync,
-    K: KernelSet<2, DOF, DefaultMemory, f64>,
+    R: Regime<f64, D> + Copy,
+    Cartesian: Metric<f64, D>,
+    E: symbi_hydro::eos::EosFor<f64, <R as Regime<f64, D>>::Energy> + Copy + Send + Sync,
+    K: KernelSet<D, DOF, DefaultMemory, f64>,
 {
     use symbi::sim::refinement::launched::receiving_faces_of_tile;
     use symbi_sim::atlas::TileId;
-    let regions = refinement_regions_nd::<2>(&cfg.refinement_regions)?;
-    let maps: [symbi_geometry::AxisMap; 2] =
+    let regions = refinement_regions_nd::<D>(&cfg.refinement_regions)?;
+    let maps: [symbi_geometry::AxisMap; D] =
         std::array::from_fn(|ax| symbi_geometry::AxisMap::Uniform { start: origin[ax], dx: cfg.dx[ax] });
     let sub = kernels_of(&sim);
-    let clipped = clip_regions_to_tile::<2>(&regions, origin, m, &maps);
+    let clipped = clip_regions_to_tile::<D>(&regions, origin, m, &maps);
     let mut h = if clipped.is_empty() {
         let h = Hierarchy::single(sim, sub);
         match receiving_faces_of_tile(&layout.partition, layout.patch, TileId(flat as u32)) {
@@ -10745,9 +10753,8 @@ where
 }
 
 /// evolve this worker's refined hierarchies through the fabric, the tiles built per regime:
-/// newtonian, relativistic or isothermal hydro, or newtonian, relativistic or isothermal MHD on
-/// the 2.5D plane with each tile seeded from its slice of
-/// the global staggered faces
+/// newtonian, relativistic or isothermal hydro, or newtonian, relativistic or isothermal MHD with
+/// each tile seeded from its slice of the global staggered faces, on a 2D or 3D grid
 fn run_refined_worker_process(
     cfg: &Config,
     prims: &[Vec<f64>],
@@ -10757,211 +10764,221 @@ fn run_refined_worker_process(
     drained: std::time::Duration,
 ) -> Result<(), String> {
     use symbi::sim::decomp::unflatten;
+    // the arms of one grid dimension
+    macro_rules! refined_worker_of_dims {
+        ($d:literal) => {{
     let build_clock = std::time::Instant::now();
-    let layout = refined_layout(cfg, launch, prims.len())?;
-    let n = layout.n;
-    let counts = layout.partition.counts();
-    let phys = boundaries_nd::<2>(&cfg.boundaries);
-    let theta = build_theta(cfg);
-    let solver = cfg.solver;
-    let dx: [f64; 2] = std::array::from_fn(|ax| cfg.dx[ax]);
-    let extents = |flat: usize| {
-        let tc = unflatten(flat, counts);
-        let ext = layout.partition.tile_extents(tc);
-        let tile_lo: [usize; 2] = std::array::from_fn(|ax| ext[ax].0);
-        let m: [usize; 2] = std::array::from_fn(|ax| ext[ax].1);
-        (tile_lo, tile_origin::<2>(cfg, tile_lo), m, tile_boundaries(&phys, tc, counts))
-    };
-    // the refined tiles of a gas regime (newtonian or relativistic hydro): each level installs
-    // the numerics the single hierarchy installs
-    macro_rules! refined_gas {
-        ($regime:ident) => {{
-            type Sim = SimDefault<$regime, 2, Cartesian, EosSelect<f64>>;
-            // the numerics the single hierarchy installs on every level: reconstruction, the ppm
-            // flatten, the eos, the solver, the viscosity, the user sources and the gradient walls
-            let kernels_of = |s: &Sim| {
-                let ks = s
-                    .substrate()
-                    .theta(theta)
-                    .reconstruction(build_recon(cfg))
-                    .ppm_flatten(cfg.ppm_flatten_onset, cfg.ppm_flatten_full)
-                    .with_eos(build_eos(cfg))
-                    .with_solver(solver)
-                    .expect("refined kernel set")
-                    .with_viscosity(cfg.viscosity);
-                let ks = attach_configured_sources(
-                    ks,
-                    &cfg.source_jsons,
-                    <$regime as Regime<f64, 2>>::SPEC,
-                    &state_law_of(cfg, <$regime as Regime<f64, 2>>::SPEC),
-                )
-                .expect("refined source attach");
-                attach_gradient_walls(ks, cfg, |ks, gbc| ks.with_gradient_boundary(gbc).0).expect("refined gradient wall")
+            let layout = refined_layout::<$d>(cfg, launch, prims.len())?;
+            let n = layout.n;
+            let counts = layout.partition.counts();
+            let phys = boundaries_nd::<$d>(&cfg.boundaries);
+            let theta = build_theta(cfg);
+            let solver = cfg.solver;
+            let dx: [f64; $d] = std::array::from_fn(|ax| cfg.dx[ax]);
+            let extents = |flat: usize| {
+                let tc = unflatten(flat, counts);
+                let ext = layout.partition.tile_extents(tc);
+                let tile_lo: [usize; $d] = std::array::from_fn(|ax| ext[ax].0);
+                let m: [usize; $d] = std::array::from_fn(|ax| ext[ax].1);
+                (tile_lo, tile_origin::<$d>(cfg, tile_lo), m, tile_boundaries(&phys, tc, counts))
             };
-            let mut tiles = Vec::with_capacity(layout.mine.len());
-            for &flat in &layout.mine {
-                let (tile_lo, origin, m, bnd) = extents(flat);
-                let sim = Sim::build($regime, host_eos(cfg), Cartesian)
-                    .cells(m)
-                    .ghosts(ghost_width(cfg))
-                    .origin(origin)
-                    .spacing(dx)
-                    .boundaries(bnd)
-                    .cfl(cfg.cfl)
-                    .timestepping(cfg.timestepping)
-                    .allocate()
-                    .map_err(|e| format!("tile {flat} allocate: {e:?}"))?
-                    .set_initial_indexed(|idx, _x| {
-                        let row = &prims[global_lin::<2>(&tile_lo, &idx, &n)];
-                        Prim::adiabatic(Density(row[0]), Tensor::new([row[1], row[2]]), Pressure(row[3]))
-                    })
-                    .build();
-                tiles.push(refined_tile(cfg, &layout, flat, origin, m, sim, kernels_of)?);
+            // the refined tiles of a gas regime (newtonian or relativistic hydro): each level installs
+            // the numerics the single hierarchy installs
+            macro_rules! refined_gas {
+                ($regime:ident) => {{
+                    type Sim = SimDefault<$regime, $d, Cartesian, EosSelect<f64>>;
+                    // the numerics the single hierarchy installs on every level: reconstruction, the ppm
+                    // flatten, the eos, the solver, the viscosity, the user sources and the gradient walls
+                    let kernels_of = |s: &Sim| {
+                        let ks = s
+                            .substrate()
+                            .theta(theta)
+                            .reconstruction(build_recon(cfg))
+                            .ppm_flatten(cfg.ppm_flatten_onset, cfg.ppm_flatten_full)
+                            .with_eos(build_eos(cfg))
+                            .with_solver(solver)
+                            .expect("refined kernel set")
+                            .with_viscosity(cfg.viscosity);
+                        let ks = attach_configured_sources(
+                            ks,
+                            &cfg.source_jsons,
+                            <$regime as Regime<f64, $d>>::SPEC,
+                            &state_law_of(cfg, <$regime as Regime<f64, $d>>::SPEC),
+                        )
+                        .expect("refined source attach");
+                        attach_gradient_walls(ks, cfg, |ks, gbc| ks.with_gradient_boundary(gbc).0).expect("refined gradient wall")
+                    };
+                    let mut tiles = Vec::with_capacity(layout.mine.len());
+                    for &flat in &layout.mine {
+                        let (tile_lo, origin, m, bnd) = extents(flat);
+                        let sim = Sim::build($regime, host_eos(cfg), Cartesian)
+                            .cells(m)
+                            .ghosts(ghost_width(cfg))
+                            .origin(origin)
+                            .spacing(dx)
+                            .boundaries(bnd)
+                            .cfl(cfg.cfl)
+                            .timestepping(cfg.timestepping)
+                            .allocate()
+                            .map_err(|e| format!("tile {flat} allocate: {e:?}"))?
+                            .set_initial_indexed(|idx, _x| {
+                                let row = &prims[global_lin::<$d>(&tile_lo, &idx, &n)];
+                                Prim::adiabatic(Density(row[0]), Tensor::new(std::array::from_fn(|k| row[1 + k])), Pressure(row[1 + $d]))
+                            })
+                            .build();
+                        tiles.push(refined_tile(cfg, &layout, flat, origin, m, sim, kernels_of)?);
+                    }
+                    refined_session(cfg, launch, fault, drained, build_clock, &layout, tiles)
+                }};
             }
-            refined_session(cfg, launch, fault, drained, build_clock, &layout, tiles)
+            // the refined tiles of a magnetized regime on the 2.5D plane (newtonian or relativistic MHD),
+            // each seeded from its slice of the global staggered faces
+            macro_rules! refined_mhd {
+                ($regime:ident) => {{
+                    type Sim = SimDefaultGeneric<$regime, $d, 3, Cartesian, EosSelect<f64>>;
+                    if bufs.len() < 3 {
+                        return Err(format!("mhd needs 3 staggered b-field generators, got {}", bufs.len()));
+                    }
+                    let ct = cfg.ct_method;
+                    // the numerics the single hierarchy installs on every level: the solver, the edge EMF,
+                    // the viscosity and the resistivity
+                    let kernels_of = |s: &Sim| {
+                        s.substrate()
+                            .theta(theta)
+                            .with_solver(solver)
+                            .expect("refined kernel set")
+                            .ct_method(ct)
+                            .with_viscosity(cfg.viscosity)
+                            .with_resistivity(cfg.resistivity)
+                    };
+                    let mut tiles = Vec::with_capacity(layout.mine.len());
+                    for &flat in &layout.mine {
+                        let (tile_lo, origin, m, bnd) = extents(flat);
+                        let tile_faces: Vec<Vec<f64>> = (0..$d).map(|d| tile_face_buffer::<$d>(&bufs[d], n, m, tile_lo, d)).collect();
+                        // the rollback snapshot restores every level's faces when a step is rejected
+                        let sim = Sim::build($regime, host_eos(cfg), Cartesian)
+                            .cells(m)
+                            .ghosts(ghost_width(cfg))
+                            .origin(origin)
+                            .spacing(dx)
+                            .boundaries(bnd)
+                            .cfl(cfg.cfl)
+                            .timestepping(cfg.timestepping)
+                            .allocate()
+                            .map_err(|e| format!("tile {flat} allocate: {e:?}"))?
+                            .set_initial_indexed(|idx, _x| {
+                                let lin = global_lin::<$d>(&tile_lo, &idx, &n);
+                                let row = &prims[lin];
+                                let gidx: [isize; $d] = std::array::from_fn(|ax| tile_lo[ax] as isize + idx[ax]);
+                                let mag: [f64; 3] = std::array::from_fn(|k| if k < $d { face_avg_cell_b::<$d>(&bufs[k], k, gidx, n) } else { bufs[k][lin] });
+                                MhdPrim::new(Prim::adiabatic(Density(row[0]), Tensor::new([row[1], row[2], row[3]]), Pressure(row[4])), Tensor::new(mag))
+                            })
+                            .seed_faces_indexed(&tile_faces)
+                            .build()
+                            .with_rollback_snapshot()
+                            .map_err(|e| format!("tile {flat} rollback snapshot: {e:?}"))?;
+                        tiles.push(refined_tile(cfg, &layout, flat, origin, m, sim, kernels_of)?);
+                    }
+                    refined_session(cfg, launch, fault, drained, build_clock, &layout, tiles)
+                }};
+            }
+            match cfg.regime.as_str() {
+                "newtonian" => refined_gas!(Newtonian),
+                "rhd" => refined_gas!(Rhd),
+                "nmhd" => refined_mhd!(NewtonianMhd),
+                "rmhd" => refined_mhd!(Rmhd),
+                "isothermal" => {
+                    type Sim = SimDefault<IsoNewtonian, $d, Cartesian, Isothermal<f64>>;
+                    // the numerics the single isothermal hierarchy installs on every level: the limiter,
+                    // the viscosity, the user sources and the gradient walls; one sound speed per run
+                    let kernels_of = |s: &Sim| {
+                        let ks = s.substrate().theta(theta).with_viscosity(cfg.viscosity);
+                        let ks = attach_configured_sources(
+                            ks,
+                            &cfg.source_jsons,
+                            <IsoNewtonian as Regime<f64, $d>>::SPEC,
+                            &state_law_of(cfg, <IsoNewtonian as Regime<f64, $d>>::SPEC),
+                        )
+                        .expect("refined source attach");
+                        attach_gradient_walls(ks, cfg, |ks, gbc| ks.with_gradient_boundary(gbc).0).expect("refined gradient wall")
+                    };
+                    let mut tiles = Vec::with_capacity(layout.mine.len());
+                    for &flat in &layout.mine {
+                        let (tile_lo, origin, m, bnd) = extents(flat);
+                        let sim = Sim::build(IsoNewtonian, Isothermal { cs: cfg.cs }, Cartesian)
+                            .cells(m)
+                            .ghosts(ghost_width(cfg))
+                            .origin(origin)
+                            .spacing(dx)
+                            .boundaries(bnd)
+                            .cfl(cfg.cfl)
+                            .timestepping(cfg.timestepping)
+                            .allocate()
+                            .map_err(|e| format!("tile {flat} allocate: {e:?}"))?
+                            .set_initial_indexed(|idx, _x| {
+                                let row = &prims[global_lin::<$d>(&tile_lo, &idx, &n)];
+                                PrimG::<f64, $d, IsoModel>::isothermal(Density(row[0]), Tensor::new(std::array::from_fn(|k| row[1 + k])))
+                            })
+                            .build();
+                        tiles.push(refined_tile(cfg, &layout, flat, origin, m, sim, kernels_of)?);
+                    }
+                    refined_session(cfg, launch, fault, drained, build_clock, &layout, tiles)
+                }
+                "imhd" => {
+                    type Sim = SimDefaultGeneric<IsothermalMhd, $d, 3, Cartesian, Isothermal<f64>>;
+                    if bufs.len() < 3 {
+                        return Err(format!("imhd needs 3 staggered b-field generators, got {}", bufs.len()));
+                    }
+                    let ct = cfg.ct_method;
+                    // the numerics the single hierarchy installs on every level: the solver, the edge EMF,
+                    // the viscosity and the resistivity
+                    let kernels_of = |s: &Sim| {
+                        s.substrate()
+                            .theta(theta)
+                            .with_solver(solver)
+                            .expect("refined kernel set")
+                            .ct_method(ct)
+                            .with_viscosity(cfg.viscosity)
+                            .with_resistivity(cfg.resistivity)
+                    };
+                    let mut tiles = Vec::with_capacity(layout.mine.len());
+                    for &flat in &layout.mine {
+                        let (tile_lo, origin, m, bnd) = extents(flat);
+                        let tile_faces: Vec<Vec<f64>> = (0..$d).map(|d| tile_face_buffer::<$d>(&bufs[d], n, m, tile_lo, d)).collect();
+                        // the rollback snapshot restores every level's faces when a step is rejected
+                        let sim = Sim::build(IsothermalMhd, Isothermal { cs: cfg.cs }, Cartesian)
+                            .cells(m)
+                            .ghosts(ghost_width(cfg))
+                            .origin(origin)
+                            .spacing(dx)
+                            .boundaries(bnd)
+                            .cfl(cfg.cfl)
+                            .timestepping(cfg.timestepping)
+                            .allocate()
+                            .map_err(|e| format!("tile {flat} allocate: {e:?}"))?
+                            .set_initial_indexed(|idx, _x| {
+                                let lin = global_lin::<$d>(&tile_lo, &idx, &n);
+                                let row = &prims[lin];
+                                let gidx: [isize; $d] = std::array::from_fn(|ax| tile_lo[ax] as isize + idx[ax]);
+                                let mag: [f64; 3] = std::array::from_fn(|k| if k < $d { face_avg_cell_b::<$d>(&bufs[k], k, gidx, n) } else { bufs[k][lin] });
+                                MhdPrimG::<f64, 3, IsoModel>::new(PrimG::isothermal(Density(row[0]), Tensor::new([row[1], row[2], row[3]])), Tensor::new(mag))
+                            })
+                            .seed_faces_indexed(&tile_faces)
+                            .build()
+                            .with_rollback_snapshot()
+                            .map_err(|e| format!("tile {flat} rollback snapshot: {e:?}"))?;
+                        tiles.push(refined_tile(cfg, &layout, flat, origin, m, sim, kernels_of)?);
+                    }
+                    refined_session(cfg, launch, fault, drained, build_clock, &layout, tiles)
+                }
+                other => Err(format!("the {other} regime with mesh refinement is outside the distributed first release")),
+            }
         }};
     }
-    // the refined tiles of a magnetized regime on the 2.5D plane (newtonian or relativistic MHD),
-    // each seeded from its slice of the global staggered faces
-    macro_rules! refined_mhd {
-        ($regime:ident) => {{
-            type Sim = SimDefaultGeneric<$regime, 2, 3, Cartesian, EosSelect<f64>>;
-            if bufs.len() < 3 {
-                return Err(format!("mhd needs 3 staggered b-field generators, got {}", bufs.len()));
-            }
-            let ct = cfg.ct_method;
-            // the numerics the single hierarchy installs on every level: the solver, the edge EMF,
-            // the viscosity and the resistivity
-            let kernels_of = |s: &Sim| {
-                s.substrate()
-                    .theta(theta)
-                    .with_solver(solver)
-                    .expect("refined kernel set")
-                    .ct_method(ct)
-                    .with_viscosity(cfg.viscosity)
-                    .with_resistivity(cfg.resistivity)
-            };
-            let mut tiles = Vec::with_capacity(layout.mine.len());
-            for &flat in &layout.mine {
-                let (tile_lo, origin, m, bnd) = extents(flat);
-                let tile_faces: Vec<Vec<f64>> = (0..2).map(|d| tile_face_buffer::<2>(&bufs[d], n, m, tile_lo, d)).collect();
-                // the rollback snapshot restores every level's faces when a step is rejected
-                let sim = Sim::build($regime, host_eos(cfg), Cartesian)
-                    .cells(m)
-                    .ghosts(ghost_width(cfg))
-                    .origin(origin)
-                    .spacing(dx)
-                    .boundaries(bnd)
-                    .cfl(cfg.cfl)
-                    .timestepping(cfg.timestepping)
-                    .allocate()
-                    .map_err(|e| format!("tile {flat} allocate: {e:?}"))?
-                    .set_initial_indexed(|idx, _x| {
-                        let lin = global_lin::<2>(&tile_lo, &idx, &n);
-                        let row = &prims[lin];
-                        let gidx: [isize; 2] = std::array::from_fn(|ax| tile_lo[ax] as isize + idx[ax]);
-                        let mag: [f64; 3] = std::array::from_fn(|k| if k < 2 { face_avg_cell_b::<2>(&bufs[k], k, gidx, n) } else { bufs[k][lin] });
-                        MhdPrim::new(Prim::adiabatic(Density(row[0]), Tensor::new([row[1], row[2], row[3]]), Pressure(row[4])), Tensor::new(mag))
-                    })
-                    .seed_faces_indexed(&tile_faces)
-                    .build()
-                    .with_rollback_snapshot()
-                    .map_err(|e| format!("tile {flat} rollback snapshot: {e:?}"))?;
-                tiles.push(refined_tile(cfg, &layout, flat, origin, m, sim, kernels_of)?);
-            }
-            refined_session(cfg, launch, fault, drained, build_clock, &layout, tiles)
-        }};
-    }
-    match cfg.regime.as_str() {
-        "newtonian" => refined_gas!(Newtonian),
-        "rhd" => refined_gas!(Rhd),
-        "nmhd" => refined_mhd!(NewtonianMhd),
-        "rmhd" => refined_mhd!(Rmhd),
-        "isothermal" => {
-            type Sim = SimDefault<IsoNewtonian, 2, Cartesian, Isothermal<f64>>;
-            // the numerics the single isothermal hierarchy installs on every level: the limiter,
-            // the viscosity, the user sources and the gradient walls; one sound speed per run
-            let kernels_of = |s: &Sim| {
-                let ks = s.substrate().theta(theta).with_viscosity(cfg.viscosity);
-                let ks = attach_configured_sources(
-                    ks,
-                    &cfg.source_jsons,
-                    <IsoNewtonian as Regime<f64, 2>>::SPEC,
-                    &state_law_of(cfg, <IsoNewtonian as Regime<f64, 2>>::SPEC),
-                )
-                .expect("refined source attach");
-                attach_gradient_walls(ks, cfg, |ks, gbc| ks.with_gradient_boundary(gbc).0).expect("refined gradient wall")
-            };
-            let mut tiles = Vec::with_capacity(layout.mine.len());
-            for &flat in &layout.mine {
-                let (tile_lo, origin, m, bnd) = extents(flat);
-                let sim = Sim::build(IsoNewtonian, Isothermal { cs: cfg.cs }, Cartesian)
-                    .cells(m)
-                    .ghosts(ghost_width(cfg))
-                    .origin(origin)
-                    .spacing(dx)
-                    .boundaries(bnd)
-                    .cfl(cfg.cfl)
-                    .timestepping(cfg.timestepping)
-                    .allocate()
-                    .map_err(|e| format!("tile {flat} allocate: {e:?}"))?
-                    .set_initial_indexed(|idx, _x| {
-                        let row = &prims[global_lin::<2>(&tile_lo, &idx, &n)];
-                        PrimG::<f64, 2, IsoModel>::isothermal(Density(row[0]), Tensor::new([row[1], row[2]]))
-                    })
-                    .build();
-                tiles.push(refined_tile(cfg, &layout, flat, origin, m, sim, kernels_of)?);
-            }
-            refined_session(cfg, launch, fault, drained, build_clock, &layout, tiles)
-        }
-        "imhd" => {
-            type Sim = SimDefaultGeneric<IsothermalMhd, 2, 3, Cartesian, Isothermal<f64>>;
-            if bufs.len() < 3 {
-                return Err(format!("imhd needs 3 staggered b-field generators, got {}", bufs.len()));
-            }
-            let ct = cfg.ct_method;
-            // the numerics the single hierarchy installs on every level: the solver, the edge EMF,
-            // the viscosity and the resistivity
-            let kernels_of = |s: &Sim| {
-                s.substrate()
-                    .theta(theta)
-                    .with_solver(solver)
-                    .expect("refined kernel set")
-                    .ct_method(ct)
-                    .with_viscosity(cfg.viscosity)
-                    .with_resistivity(cfg.resistivity)
-            };
-            let mut tiles = Vec::with_capacity(layout.mine.len());
-            for &flat in &layout.mine {
-                let (tile_lo, origin, m, bnd) = extents(flat);
-                let tile_faces: Vec<Vec<f64>> = (0..2).map(|d| tile_face_buffer::<2>(&bufs[d], n, m, tile_lo, d)).collect();
-                // the rollback snapshot restores every level's faces when a step is rejected
-                let sim = Sim::build(IsothermalMhd, Isothermal { cs: cfg.cs }, Cartesian)
-                    .cells(m)
-                    .ghosts(ghost_width(cfg))
-                    .origin(origin)
-                    .spacing(dx)
-                    .boundaries(bnd)
-                    .cfl(cfg.cfl)
-                    .timestepping(cfg.timestepping)
-                    .allocate()
-                    .map_err(|e| format!("tile {flat} allocate: {e:?}"))?
-                    .set_initial_indexed(|idx, _x| {
-                        let lin = global_lin::<2>(&tile_lo, &idx, &n);
-                        let row = &prims[lin];
-                        let gidx: [isize; 2] = std::array::from_fn(|ax| tile_lo[ax] as isize + idx[ax]);
-                        let mag: [f64; 3] = std::array::from_fn(|k| if k < 2 { face_avg_cell_b::<2>(&bufs[k], k, gidx, n) } else { bufs[k][lin] });
-                        MhdPrimG::<f64, 3, IsoModel>::new(PrimG::isothermal(Density(row[0]), Tensor::new([row[1], row[2], row[3]])), Tensor::new(mag))
-                    })
-                    .seed_faces_indexed(&tile_faces)
-                    .build()
-                    .with_rollback_snapshot()
-                    .map_err(|e| format!("tile {flat} rollback snapshot: {e:?}"))?;
-                tiles.push(refined_tile(cfg, &layout, flat, origin, m, sim, kernels_of)?);
-            }
-            refined_session(cfg, launch, fault, drained, build_clock, &layout, tiles)
-        }
-        other => Err(format!("the {other} regime with mesh refinement is outside the distributed first release")),
+    match cfg.dims {
+        2 => refined_worker_of_dims!(2),
+        3 => refined_worker_of_dims!(3),
+        d => Err(format!("a {d}-dimensional grid with mesh refinement is outside the distributed first release")),
     }
 }
 
@@ -10970,19 +10987,20 @@ fn run_refined_worker_process(
 /// for a magnetized run the EMF contributions, the interface faces, the corrected faces and the
 /// two temporal levels of the parent face stencil; the refined transaction with the checkpoints
 /// of both levels at the linear cadence, a final checkpoint, and a restart onto any partition
-fn refined_session<R, const DOF: usize, E, K>(
+fn refined_session<R, const D: usize, const DOF: usize, E, K>(
     cfg: &Config,
     launch: &WorkerLaunch,
     fault: LaunchFault,
     drained: std::time::Duration,
     build_clock: std::time::Instant,
-    layout: &RefinedLayout,
-    mut tiles: Vec<Hierarchy<R, 2, DOF, Cartesian, E, DefaultSpace, DefaultMemory, K>>,
+    layout: &RefinedLayout<D>,
+    mut tiles: Vec<Hierarchy<R, D, DOF, Cartesian, E, DefaultSpace, DefaultMemory, K>>,
 ) -> Result<(), String>
 where
-    R: Regime<f64, 2> + Copy,
-    E: symbi_hydro::eos::EosFor<f64, <R as Regime<f64, 2>>::Energy> + Copy + Send + Sync,
-    K: KernelSet<2, DOF, DefaultMemory, f64>,
+    R: Regime<f64, D> + Copy,
+    Cartesian: Metric<f64, D>,
+    E: symbi_hydro::eos::EosFor<f64, <R as Regime<f64, D>>::Energy> + Copy + Send + Sync,
+    K: KernelSet<D, DOF, DefaultMemory, f64>,
 {
     use symbi::sim::decomp::{FinePartition, LocalCopy, flatten, plan_cons_schema, plan_schema, unflatten};
     use symbi::sim::refinement::launched::{
@@ -11031,10 +11049,10 @@ where
     let cons_schema = plan_cons_schema(root_store);
     let open = symbi::sim::decomp::Topology::open();
     // the root level wraps a periodic axis across its seam; the fine level lies inside the domain
-    let wrap = chart_topology(cfg, &boundaries_nd::<2>(&cfg.boundaries), counts);
+    let wrap = chart_topology(cfg, &boundaries_nd::<D>(&cfg.boundaries), counts);
     let root_plan = ExchangePlan::compile(partition, &wrap, &schema, ng).map_err(|e| e.to_string())?;
     let seed_plan = ExchangePlan::compile(partition, &wrap, &cons_schema, ng).map_err(|e| e.to_string())?;
-    let fine_lo = |t: TileId| -> [isize; 2] {
+    let fine_lo = |t: TileId| -> [isize; D] {
         let tc = unflatten(t.0 as usize, fine_counts);
         let root_ext = partition.tile_extents(fine_partition.root_tile_of(tc));
         std::array::from_fn(|a| (2 * patch[a].0.saturating_sub(root_ext[a].0)) as isize)
@@ -11043,7 +11061,7 @@ where
         ExchangePlan::compile_shifted(&fine_partition.partition, &open, &schema, ng + 1, &fine_lo).map_err(|e| e.to_string())?;
     // the register components: the conserved gas fields and, on a magnetized plane, the
     // out-of-plane cell field
-    let n_comp = cons_schema.len() + if magnetized { DOF - 2 } else { 0 };
+    let n_comp = cons_schema.len() + if magnetized { DOF - D } else { 0 };
     let flux_plan = ExchangePlan::flux_contributions(partition, &open, patch, ng, n_comp).map_err(|e| e.to_string())?;
     let mut digests = vec![root_plan.digest, seed_plan.digest, fine_plan.digest, flux_plan.digest];
     let magnetized_plans = if magnetized {
@@ -11052,7 +11070,7 @@ where
         let corrected = ExchangePlan::corrected_faces(partition, &open, patch, ng).map_err(|e| e.to_string())?;
         // every refined tile's stencil boxes in whole-grid face indices, derived from the
         // partition and the patch
-        let mut boxes: Vec<Option<Vec<[Span; 2]>>> = Vec::with_capacity(n_root);
+        let mut boxes: Vec<Option<Vec<[Span; D]>>> = Vec::with_capacity(n_root);
         for f in 0..n_root {
             let ext = partition.tile_extents(unflatten(f, counts));
             let tile = match face_stencil_boxes_of_tile(partition, patch, TileId(f as u32)) {
@@ -11078,14 +11096,14 @@ where
     let stages = cfg.timestepping.stages().len() as u8;
     let table = PhaseTable::refined(stages, 2, stages).map_err(|e| e.to_string())?;
     // each plan takes the fabric ids after the last one's
-    fn placed<'a>(
-        plan: &'a ExchangePlan<2>,
+    fn placed<'a, const D2: usize>(
+        plan: &'a ExchangePlan<D2>,
         placement: &'a Placement,
         me: WorkerId,
         table: &PhaseTable,
         role: PlanRole,
         offset: &mut u32,
-    ) -> PlanExchange<'a, 2> {
+    ) -> PlanExchange<'a, D2> {
         let p = PlanExchange::new(plan, placement, me, table.clone()).with_role(role, *offset);
         *offset += p.lens().len() as u32;
         p
@@ -11117,7 +11135,7 @@ where
         h.finish()
     };
     let budget = launch.staging_cells.max(1);
-    let credit = block_credit_for(budget, 2);
+    let credit = block_credit_for(budget, D);
     let bind: std::net::IpAddr = launch.bind.parse().map_err(|e| format!("bind address '{}': {e}", launch.bind))?;
     let rendezvous = Rendezvous {
         me,
@@ -11139,7 +11157,7 @@ where
         startup: std::time::Duration::from_secs(120),
     };
     let deadline = std::time::Duration::from_secs(600);
-    let mut all: Vec<&PlanExchange<'_, 2>> = vec![&root, &seed, &fine];
+    let mut all: Vec<&PlanExchange<'_, D>> = vec![&root, &seed, &fine];
     all.extend(flux.as_ref());
     all.extend(emf.as_ref());
     all.extend(faces.as_ref());
@@ -11175,7 +11193,7 @@ where
         root_devices: &root_devices,
         fine_devices: &fine_devices,
     };
-    let root_grid = decomposed_grid::<2>(cfg, ng);
+    let root_grid = decomposed_grid::<D>(cfg, ng);
     let grids = RefinedGrids::of(n, root_grid.x_lo, root_grid.dx, ng, patch);
     let restart = cfg.restart_path.is_some();
     if let Some(path) = cfg.restart_path.as_deref() {
@@ -11184,7 +11202,7 @@ where
     let identity = PhysicsIdentity::of(&tiles[0].levels[0].state);
     let refined_cfg = RefinedConfig {
         base: WorkerConfig {
-            regime: RegimeKind::of::<f64, 2, R>(),
+            regime: RegimeKind::of::<f64, D, R>(),
             timestepping: cfg.timestepping,
             start_time: cfg.start_time,
             t_final: cfg.t_final,
@@ -11200,11 +11218,11 @@ where
         perturb_fine_face_after: None,
         clock_fault: None,
     };
-    let slabs: Vec<Vec<usize>> = (0..2).map(|ax| (0..counts[ax]).map(|i| partition.tile_range(ax, i).1).collect()).collect();
+    let slabs: Vec<Vec<usize>> = (0..D).map(|ax| (0..counts[ax]).map(|i| partition.tile_range(ax, i).1).collect()).collect();
     let mut reporter = (me == WorkerId(0)).then(|| DecomposedReporter::new(cfg, total as u64, &counts, &slabs));
     let cp_dt = if cfg.checkpoint_interval > 0.0 { cfg.checkpoint_interval * cfg.time_unit } else { f64::INFINITY };
     let cp_width = checkpoint_time_width(cfg);
-    let write = |tiles: &[Hierarchy<R, 2, DOF, Cartesian, E, DefaultSpace, DefaultMemory, K>], fabric: &mut symbi_fabric::Fabric<_>, path: &str, cp_index: u64, accepted: u64| -> Result<(), WorkerError> {
+    let write = |tiles: &[Hierarchy<R, D, DOF, Cartesian, E, DefaultSpace, DefaultMemory, K>], fabric: &mut symbi_fabric::Fabric<_>, path: &str, cp_index: u64, accepted: u64| -> Result<(), WorkerError> {
         let extras = checkpoint_metadata(cfg, cp_index);
         let req = CheckpointRequest {
             path,
