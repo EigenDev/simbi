@@ -608,7 +608,7 @@ def test_a_magnetized_launch_refuses_the_numerics_its_substrate_has_no_door_for(
     layout = _layout(tmp_path / "two.toml", workers=2, shape=(2, 1))
     # a synge equation of state is refused by the problem's own validation before the launch
     # scope sees it, so the reconstruction request is the one that reaches the scope
-    for flags, reason in [(["--reconstruction", "ppm"], "ppm reconstruction with the nmhd regime")]:
+    for flags, reason in [(["--reconstruction", "ppm"], "ppm reconstruction with the nmhd regime on the cartesian grid")]:
         out = tmp_path / reason.split()[0]
         cmd = _mhd_launch_command(out, layout, 1) + flags
         done = subprocess.run(cmd, capture_output=True, text=True, timeout=600)

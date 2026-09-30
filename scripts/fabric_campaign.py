@@ -226,6 +226,12 @@ CASES: tuple[Case, ...] = (
     Case("imhd_spherical_field", "simbi_configs.examples.isothermal.imhd_spherical_field", "IsothermalSphericalField",
          (32, 32, 1), 8, ("full",), cuts=((16,), (16,)), restart_cuts=((10, 21), ()), env=AUDIT_ALL,
          magnetized=True, trouble="trouble:3:1:15:31", faults=("reject", "bad_cfl", "lost")),
+    # first-order space (the plm kernel at a zero slope) under newtonian MHD; a first-order redo
+    # equals the pcm update, so the case carries no correction arm
+    Case("nmhd_orszag_tang_pcm", f"{N}.nmhd_orszag_tang", "NewtonianOrszagTang", (32, 32, 1), 8, ("full",),
+         cuts=((16,), (16,)), restart_cuts=((10, 21), ()), env=AUDIT_ALL, magnetized=True, div_b=True,
+         periodic=True, flags=("--reconstruction", "pcm"), fields="reconstruction='pcm'",
+         faults=("reject", "bad_cfl", "lost")),
     # the constant-nu viscosity on the curvilinear grids and in 3d
     Case("viscous_spherical_pulse", f"{N}.viscous_spherical_pulse", "ViscousSphericalPulse", (32, 32), 8, ("full",),
          cuts=((16,), (16,)), restart_cuts=((10, 21), ()), trouble="trouble:3:1:15:31",

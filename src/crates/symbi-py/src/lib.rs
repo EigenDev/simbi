@@ -10448,23 +10448,8 @@ fn grid_name(cfg: &Config) -> String {
 }
 
 fn ungated_launch_combination(cfg: &Config) -> Option<String> {
-    let magnetized = matches!(cfg.regime.as_str(), "nmhd" | "imhd");
-    let spacings = [&cfg.x1_spacing, &cfg.x2_spacing, &cfg.x3_spacing];
-    // geometric spacing is gated for newtonian hydro on the cartesian chart
-    if spacings[..cfg.dims].iter().any(|s| s.eq_ignore_ascii_case("geometric"))
-        && !(cfg.regime == "newtonian" && cfg.coord_system == "cartesian")
-    {
-        return Some(format!("geometric spacing with the {} regime on the {} chart", cfg.regime, cfg.coord_system));
-    }
-    // the synge perfect gas is gated for relativistic hydro
-    if !magnetized && cfg.eos_name != "ideal" && !(cfg.regime == "rhd" && cfg.eos_name == "synge") {
-        return Some(format!("the {} equation of state", cfg.eos_name));
-    }
     if cfg.wb_reconstruction {
         return Some("the balanced reconstruction".to_string());
-    }
-    if cfg.regime != "newtonian" && cfg.reconstruction_name != "plm" {
-        return Some(format!("{} reconstruction with the {} regime", cfg.reconstruction_name, cfg.regime));
     }
     if !gated_grid(cfg) {
         return Some(format!("the {} regime on the {}", cfg.regime, grid_name(cfg)));
@@ -10480,13 +10465,15 @@ fn validate_launch_scope(cfg: &Config) -> Result<(), String> {
     if !matches!(cfg.regime.as_str(), "newtonian" | "rhd" | "isothermal" | "nmhd" | "imhd") {
         return refused(&format!("the {} regime", cfg.regime));
     }
-    // the magnetized substrate installs the limiter, the solver and the edge EMF and has no
-    // door for a reconstruction, a flattening or an equation of state; a request for one is
+    // ppm is baked for newtonian hydro on the flat cartesian grid alone; the other launched tile
+    // builders install plm (or pcm at a zero slope) and would run a ppm request as plm
+    if cfg.reconstruction_name == "ppm" && (cfg.regime != "newtonian" || cfg.coord_system != "cartesian") {
+        return refused(&format!("ppm reconstruction with the {} regime on the {} grid", cfg.regime, cfg.coord_system));
+    }
+    // the magnetized substrate installs the limiter (plm, or pcm at a zero slope), the solver and
+    // the edge EMF and has no door for a flattening or an equation of state; a request for one is
     // refused here so a comparison never appears to exercise a setting the run ignores
     if cfg.regime == "nmhd" {
-        if cfg.reconstruction_name != "plm" {
-            return refused(&format!("{} reconstruction with the nmhd regime", cfg.reconstruction_name));
-        }
         if cfg.ppm_flatten_full > 0.0 || cfg.ppm_flatten_onset > 0.0 {
             return refused("ppm flattening with the nmhd regime");
         }
