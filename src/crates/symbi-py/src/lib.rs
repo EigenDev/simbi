@@ -11361,7 +11361,12 @@ where
     let mut reporter = (me == WorkerId(0)).then(|| DecomposedReporter::new(cfg, total as u64, &counts, &slabs));
     let cp_dt = if cfg.checkpoint_interval > 0.0 { cfg.checkpoint_interval * cfg.time_unit } else { f64::INFINITY };
     let cp_width = checkpoint_time_width(cfg);
+    // the last accepted step whose state an audit certified: the final checkpoint after a cadence
+    // write of the same step reuses that certification, its audit epoch being spent
+    let certified = std::cell::Cell::new(None::<u64>);
     let write = |tiles: &[Hierarchy<R, D, DOF, Cartesian, E, DefaultSpace, DefaultMemory, K>], fabric: &mut symbi_fabric::Fabric<_>, path: &str, cp_index: u64, accepted: u64| -> Result<(), WorkerError> {
+        let audit = certified.get() != Some(accepted);
+        certified.set(Some(accepted));
         let extras = checkpoint_metadata(cfg, cp_index);
         let req = CheckpointRequest {
             path,
@@ -11372,7 +11377,7 @@ where
             duplicate_first_block: false,
             vote_no: false,
         };
-        refined_checkpoint(tiles, &held, &plans, &grids, &identity, &req, fabric, accepted)
+        refined_checkpoint(tiles, &held, &plans, &grids, &identity, &req, fabric, accepted, audit)
     };
     let mut next_cp = cfg.start_time + cp_dt;
     let mut cp_index = cfg.checkpoint_index + 1;
@@ -11987,12 +11992,23 @@ where
     // and certified by the prime audit, or the one that completed a step. returns the audit's
     // and the checkpoint's own wall times apart.
     let audit_total = std::cell::Cell::new((0u64, symbi_sim::plan_exchange::AuditCost::default()));
+    // the last step whose state an audit certified: a second checkpoint of the same step (the
+    // final one after a cadence write) reuses that certification, its audit epoch being spent
+    let certified = std::cell::Cell::new(None::<u64>);
     let write = |sh: &[&symbi_sim::state::FieldStore<D, DOF, DefaultMemory, f64>],
                  fabric: &mut Fabric<_>,
                  path: &str,
                  cp_index: u64,
                  basis: AuditBasis|
      -> Result<f64, String> {
+        let basis = match basis {
+            AuditBasis::AfterStep(step) if certified.get() == Some(step) => AuditBasis::Certified(step),
+            AuditBasis::AfterStep(step) => {
+                certified.set(Some(step));
+                basis
+            }
+            other => other,
+        };
         let level = LevelTiles {
             tiles: sh
                 .iter()

@@ -496,6 +496,10 @@ pub enum AuditBasis {
     /// the state that completed step `k`. an audit runs first, at an epoch that sorts after
     /// every exchange of step `k` and before the next step's.
     AfterStep(u64),
+    /// the state that completed step `k`, which an `AfterStep(k)` audit already certified for an
+    /// earlier checkpoint of the same step: nothing has touched a face field since, and the audit
+    /// epoch of step `k` is spent. no second audit runs.
+    Certified(u64),
 }
 
 impl AuditBasis {

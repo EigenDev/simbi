@@ -605,7 +605,7 @@ fn run_worker(arm: &Arm, me: WorkerId, out: PathBuf) -> Result<(), WorkerError> 
                 vote_no: false,
             };
             let identity = PhysicsIdentity::of(&tiles[0].levels[0].state);
-            refined_checkpoint(tiles, &held, &plans, &grids, &identity, &req, fabric, accepted)?;
+            refined_checkpoint(tiles, &held, &plans, &grids, &identity, &req, fabric, accepted, true)?;
         }
         Ok(ControlFlow::Continue(()))
     })?;

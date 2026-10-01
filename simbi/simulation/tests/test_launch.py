@@ -800,3 +800,24 @@ def test_a_launch_with_user_sources_matches_the_single_grid_run(tmp_path: Path) 
     assert len(launched) == 1
     _assert_same_state(launched[0], references[0], "two workers with user sources")
 
+
+
+def test_a_final_checkpoint_after_a_cadence_checkpoint_of_the_same_step_is_published(tmp_path: Path) -> None:
+    """an MHD launch writing a checkpoint every step: the cadence checkpoint of the last step
+    audits the shared faces, and the final checkpoint of that same step reuses the certification
+    (its audit epoch is spent) in place of a second audit the fabric refuses; every worker exits
+    zero and the final file equals the single-grid run."""
+    layout = _layout(tmp_path / "two.toml", workers=2, shape=(2, 1))
+    cmd = _mhd_launch_command(tmp_path / "two", layout, MHD_STEPS)
+    cmd[cmd.index("--checkpoint-interval") + 1] = "1e-9"
+    done = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
+    assert done.returncode == 0, f"launch failed:\nstdout:\n{done.stdout}\nstderr:\n{done.stderr}"
+    exits = {int(w): int(c) for w, c in EXIT.findall(done.stdout)}
+    assert sorted(exits) == [0, 1] and all(c == 0 for c in exits.values()), f"worker exit codes {exits}"
+    finals = sorted((tmp_path / "two").glob("*final*.h5"))
+    assert len(finals) == 1, f"no final checkpoint was published: {sorted(p.name for p in (tmp_path / 'two').glob('*'))}"
+    cadence = [p for p in (tmp_path / "two").glob("*.h5") if "final" not in p.name]
+    with h5py.File(finals[0], "r") as f:
+        last = int(f["level_0"].attrs["iteration"])
+    assert any(int(h5py.File(p, "r")["level_0"].attrs["iteration"]) == last for p in cadence), "no cadence checkpoint shares the last step; the gate is vacuous"
+    _assert_same_state(finals[0], _mhd_reference(tmp_path / "single", MHD_STEPS), "two workers, a checkpoint every step")

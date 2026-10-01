@@ -1422,8 +1422,9 @@ impl<const D: usize> RefinedGrids<D> {
     }
 }
 
-/// write one checkpoint of both levels across every worker after `accepted` accepted steps:
-/// the root's shared faces are audited at the checkpoint epoch, the fine level's clock is
+/// write one checkpoint of every level across every worker after `accepted` accepted steps:
+/// the shared faces are audited at the checkpoint epoch unless `audit` is off (a second
+/// checkpoint of a step an earlier one certified), each refined level's clock is
 /// agreed from the workers holding fine tiles, and every worker streams its owned blocks of
 /// both levels to the coordinator, which publishes the file when every block arrived once
 #[allow(clippy::too_many_arguments)]
@@ -1436,6 +1437,7 @@ pub fn refined_checkpoint<R, const D: usize, const DOF: usize, M, E, S, Mem, K, 
     req: &CheckpointRequest<'_>,
     fabric: &mut Fabric<L>,
     accepted: u64,
+    audit: bool,
 ) -> Result<(), WorkerError>
 where
     R: Regime<f64, D> + Copy,
@@ -1451,7 +1453,7 @@ where
     // primed state was certified by the prime audit after initialization
     let depth = 2 + plans.nested.len();
     let audited = plans.root.has_audits() || plans.fine.has_audits() || plans.nested.iter().any(|p| p.state.has_audits());
-    if audited && accepted > 0 {
+    if audited && accepted > 0 && audit {
         let mut root_lists: Vec<Vec<&Field<f64, D, Mem>>> = (0..held.n_root).map(|_| Vec::new()).collect();
         for (k, h) in tiles.iter().enumerate() {
             root_lists[held.root_ids[k].0 as usize] = plan_fields(&h.levels[0].state);
