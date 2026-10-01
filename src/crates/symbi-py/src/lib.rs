@@ -9001,6 +9001,14 @@ fn dispatch_and_run(
     // decomposed equivalence gate, so the combination is refused rather than run unbalanced.
     // a census reduces over the whole grid; the tiled drivers carry no cross-tile census, so a
     // configured one is refused rather than left unrecorded
+    // the tiled drivers install no equilibrium prescription and step no magnetic slip body: both
+    // are refused by name rather than run without them
+    if cfg.n_gpus > 1 && cfg.equilibrium_json.is_some() {
+        return Err("an equilibrium prescription with gpus > 1 awaits its tiled residual; run it on one device".to_string());
+    }
+    if cfg.n_gpus > 1 && cfg.bodies.iter().any(|b| b.magnetic_slip.is_some()) {
+        return Err("a magnetic slip body with gpus > 1 awaits its tiled slip step; run it on one device".to_string());
+    }
     if !cfg.census_jsons.is_empty() && cfg.n_gpus > 1 {
         return Err(
             "a census with gpus > 1 awaits a cross-tile census reduction; run on one device or \
