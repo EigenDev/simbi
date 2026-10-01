@@ -2147,6 +2147,54 @@ fn configured_ito_order(
     }
 }
 
+/// lay the declared perturbation over `$target` (a sim or a hierarchy) at its own cell centers: a
+/// delta on density, each velocity component and, on an energy regime, the pressure. a fresh start
+/// only; a restart restores the state wholesale. yields whether a perturbation was laid.
+macro_rules! lay_perturbation {
+    ($target:expr, $cfg:expr, $dof:literal, $has_energy:expr) => {{
+        let cfg: &Config = $cfg;
+        match cfg.perturbation_json.as_ref().filter(|_| cfg.restart_path.is_none()) {
+            None => false,
+            Some(declared) => {
+                let cfg_p = symbi_source_compile::EquilibriumConfig::from_json(declared)
+                    .map_err(|e| format!("perturbation parse: {e}"))?;
+                let expression = cfg_p
+                    .to_expression()
+                    .map_err(|e| format!("perturbation lower: {e:?}"))?;
+                let has_energy: bool = $has_energy;
+                let expected = 1 + $dof + usize::from(has_energy);
+                if cfg_p.outputs.len() != expected {
+                    return Err(format!(
+                        "perturbation_expressions supplies {} component(s); this run needs \
+                         {expected} — density, {} velocity component(s){}",
+                        cfg_p.outputs.len(),
+                        $dof,
+                        if has_energy { ", and pressure" } else { "" }
+                    ));
+                }
+                $target.perturb_cells(|x, p| {
+                    let at = |aa: usize| x.get(aa).copied().unwrap_or(0.0);
+                    let d = expression.eval(at(0), at(1), at(2), 0.0);
+                    let mut p = p;
+                    p = p.with_rho(Density(p.rho() + d[0]));
+                    for ax in 0..$dof {
+                        p.vel_mut()[ax] += d[1 + ax];
+                    }
+                    // an energy-free regime's slot discards whatever it is handed, so the
+                    // pressure delta needs no branch: it is a no-op there by construction.
+                    {
+                        use symbi_hydro::energy::EnergySlot;
+                        let dp = d.get(1 + $dof).copied().unwrap_or(0.0);
+                        p = p.with_pre(p.pre().add(EnergySlot::from_scalar(dp)));
+                    }
+                    p
+                });
+                true
+            }
+        }
+    }};
+}
+
 /// a tile's sim with the passive scalar allocated and seeded from the global dye (an undyed run
 /// passes the sim through)
 macro_rules! with_tile_dye {
@@ -5306,16 +5354,6 @@ macro_rules! build_and_run_hydro {
         // spherical swirl (the azimuthal momentum lifted onto a 2D (r, theta) grid).
         type Sim = SimDefaultGeneric<$regime_ty, $d, $dof, $geom_ty, EosSelect<f64>>;
 
-        // the declared perturbation is a per-cell primitive delta, so it is chart- and
-        // regime-generic; what it cannot reach is the decomposed build, whose tiles each
-        // hold their own hierarchy. refused rather than silently dropped.
-        if cfg.perturbation_json.is_some() && cfg.n_gpus > 1 {
-            return Err(
-                "perturbation_expressions is not wired for the decomposed (multi-gpu) \
-                 build"
-                    .to_string(),
-            );
-        }
 
         // gpus>1 -> the decomposed multi-gpu path (validated separately above by
         // validate_gpu_request); gpus<=1 -> the single-device path below, bit-identical.
@@ -5587,46 +5625,11 @@ macro_rules! build_and_run_hydro {
         }
 
         // the declared perturbation, laid over the base state at every level's own cell
-        // centers: a delta on each primitive component. the cell generator fills only the
-        // root, so fine levels otherwise hold nothing the root cannot represent. skipped on
-        // restart, where the checkpoint restore replaces the state wholesale.
-        if cfg.restart_path.is_none() {
-            if let Some(ref declared) = cfg.perturbation_json {
-                let cfg_p = symbi_source_compile::EquilibriumConfig::from_json(declared)
-                    .map_err(|e| format!("perturbation parse: {e}"))?;
-                let expression = cfg_p
-                    .to_expression()
-                    .map_err(|e| format!("perturbation lower: {e:?}"))?;
-                let has_energy = hier.levels[0].state.fields.cons.has_energy();
-                let expected = 1 + $dof + usize::from(has_energy);
-                if cfg_p.outputs.len() != expected {
-                    return Err(format!(
-                        "perturbation_expressions supplies {} component(s); this run needs \
-                         {expected} — density, {} velocity component(s){}",
-                        cfg_p.outputs.len(),
-                        $dof,
-                        if has_energy { ", and pressure" } else { "" }
-                    ));
-                }
-                hier.perturb_cells(|x, p| {
-                    let at = |aa: usize| x.get(aa).copied().unwrap_or(0.0);
-                    let d = expression.eval(at(0), at(1), at(2), 0.0);
-                    let mut p = p;
-                    p = p.with_rho(Density(p.rho() + d[0]));
-                    for ax in 0..$dof {
-                        p.vel_mut()[ax] += d[1 + ax];
-                    }
-                    // an energy-free regime's slot discards whatever it is handed, so the
-                    // pressure delta needs no branch: it is a no-op there by construction.
-                    {
-                        use symbi_hydro::energy::EnergySlot;
-                        let dp = d.get(1 + $dof).copied().unwrap_or(0.0);
-                        p = p.with_pre(p.pre().add(EnergySlot::from_scalar(dp)));
-                    }
-                    p
-                });
-                hier.sync_perturbed();
-            }
+        // centers: the cell generator fills only the root, so fine levels otherwise hold nothing
+        // the root cannot represent
+        let has_energy = hier.levels[0].state.fields.cons.has_energy();
+        if lay_perturbation!(hier, cfg, $dof, has_energy) {
+            hier.sync_perturbed();
         }
         run_loop(&mut hier, cfg).map_err(|e| e.to_string())
     }};
@@ -5761,6 +5764,11 @@ where
     }
     // t=start initial condition. every device finishes its seeding before the staging reads.
     if cfg.checkpoint_index == 0 || cfg.start_time == 0.0 {
+        // the builders seed the conserved state; the initial checkpoint publishes the primitives
+        // the march starts from, recovered on every tile as the single grid's priming does
+        for (k, (s, kern)) in tiles.iter().enumerate() {
+            symbi::symbi_xpu::with_device(devices[k], || kern.c2p(&**s));
+        }
         symbi::sim::decomp::drain_devices::<Mem>(&devices);
         let sh: Vec<_> = tiles.iter().map(|(s, _)| &**s).collect();
         let tag = cadence.tag(cfg, cp_width, cfg.start_time, cfg.checkpoint_index);
@@ -6440,6 +6448,12 @@ macro_rules! build_and_run_hydro_decomposed_refined {
             )
             .map_err(|e| format!("decomposed fine seed: {e:?}"))?;
             for (k, h) in tiles.iter_mut().enumerate() {
+                // the declared perturbation over the seeded levels at their own cell centers,
+                // the covered coarse cells re-restricted, as the single hierarchy lays it
+                let has_energy = h.levels[0].state.fields.cons.has_energy();
+                if lay_perturbation!(h, cfg, $d, has_energy) {
+                    symbi::symbi_xpu::with_device(devices[k], || h.sync_perturbed());
+                }
                 symbi::symbi_xpu::with_device(devices[k], || h.prime());
             }
         }
@@ -6640,6 +6654,9 @@ macro_rules! build_and_run_hydro_decomposed {
                 // clock + mesh motion per tile: every tile carries the identical a(t) law and
                 // the decomposed loop advances them in lockstep with the shared dt.
                 attach_motion(&mut sim, cfg)?;
+                // the declared perturbation at the tile's own cell centers, the single grid's
+                let has_energy = sim.fields.cons.has_energy();
+                lay_perturbation!(sim, cfg, $dof, has_energy);
                 // the reconstruction and its flatten as the single-grid build installs them:
                 // a tile left on the default reconstruction runs plm under a ppm request.
                 let sub = sim
@@ -8019,11 +8036,6 @@ macro_rules! build_and_run_iso_decomposed {
         if cfg.locally_isothermal {
             return Err("gpus>1 does not yet support locally-isothermal cs(x); set gpus=1 or use globally isothermal".to_string());
         }
-        // the declared perturbation is applied to the single-grid hierarchy alone, as on the
-        // energy-regime path; refused rather than silently dropped
-        if cfg.perturbation_json.is_some() {
-            return Err("perturbation_expressions is not wired for the decomposed (multi-gpu) build".to_string());
-        }
         let n: [usize; $d] = std::array::from_fn(|ax| cfg.n_cells[ax]);
         let total: usize = n.iter().product();
         if prims.len() != total {
@@ -8101,6 +8113,8 @@ macro_rules! build_and_run_iso_decomposed {
                 // the decomposed loop advances them in lockstep with the shared dt.
                 let mut sim = sim;
                 attach_motion(&mut sim, cfg)?;
+                // the declared perturbation at the tile's own cell centers, the single grid's
+                lay_perturbation!(sim, cfg, $d, false);
                 let sim = sim;
                 let sub = sim
                     .substrate()
@@ -8453,38 +8467,10 @@ macro_rules! build_and_run_iso {
             }
         }
 
-        // the declared perturbation at every level's own cell centers (see the adiabatic
-        // build): an energy-free regime's pressure slot discards its delta, so the same
-        // component contract reads one entry shorter here.
-        if cfg.restart_path.is_none() {
-            if let Some(ref declared) = cfg.perturbation_json {
-                let cfg_p = symbi_source_compile::EquilibriumConfig::from_json(declared)
-                    .map_err(|e| format!("perturbation parse: {e}"))?;
-                let expression = cfg_p
-                    .to_expression()
-                    .map_err(|e| format!("perturbation lower: {e:?}"))?;
-                if cfg_p.outputs.len() != 1 + $d {
-                    return Err(format!(
-                        "perturbation_expressions supplies {} component(s); an isothermal \
-                         {}-dimensional run needs {} — density and {} velocity component(s)",
-                        cfg_p.outputs.len(),
-                        $d,
-                        1 + $d,
-                        $d
-                    ));
-                }
-                hier.perturb_cells(|x, p| {
-                    let at = |aa: usize| x.get(aa).copied().unwrap_or(0.0);
-                    let d = expression.eval(at(0), at(1), at(2), 0.0);
-                    let mut p = p;
-                    p = p.with_rho(Density(p.rho() + d[0]));
-                    for ax in 0..$d {
-                        p.vel_mut()[ax] += d[1 + ax];
-                    }
-                    p
-                });
-                hier.sync_perturbed();
-            }
+        // the declared perturbation at every level's own cell centers, the isothermal gas
+        // carrying no pressure delta
+        if lay_perturbation!(hier, cfg, $d, false) {
+            hier.sync_perturbed();
         }
 
         run_loop(&mut hier, cfg).map_err(|e| e.to_string())
@@ -10737,9 +10723,6 @@ fn validate_launch_scope(cfg: &Config) -> Result<(), String> {
             cfg.regime
         ));
     }
-    if cfg.perturbation_json.is_some() {
-        return refused("a perturbation expression");
-    }
     if cfg.equilibrium_json.is_some() {
         return refused("an equilibrium prescription");
     }
@@ -11001,7 +10984,14 @@ fn run_refined_worker_process(
                         let sim = with_tile_dye!(sim, cfg, tile_lo, n, flat);
                         tiles.push(refined_tile(cfg, &layout, flat, origin, m, sim, kernels_of)?);
                     }
-                    refined_session(cfg, launch, fault, drained, build_clock, &layout, tiles)
+                    refined_session(cfg, launch, fault, drained, build_clock, &layout, tiles, |h| {
+                        // the declared perturbation over the seeded levels, as the single hierarchy lays it
+                        let has_energy = h.levels[0].state.fields.cons.has_energy();
+                        if lay_perturbation!(h, cfg, $d, has_energy) {
+                            h.sync_perturbed();
+                        }
+                        Ok(())
+                    })
                 }};
             }
             // the refined tiles of a magnetized regime on the 2.5D plane (newtonian or relativistic MHD),
@@ -11054,7 +11044,7 @@ fn run_refined_worker_process(
                             .map_err(|e| format!("tile {flat} rollback snapshot: {e:?}"))?;
                         tiles.push(refined_tile(cfg, &layout, flat, origin, m, sim, kernels_of)?);
                     }
-                    refined_session(cfg, launch, fault, drained, build_clock, &layout, tiles)
+                    refined_session(cfg, launch, fault, drained, build_clock, &layout, tiles, |_| Ok(()))
                 }};
             }
             match cfg.regime.as_str() {
@@ -11100,7 +11090,13 @@ fn run_refined_worker_process(
                         let sim = with_tile_dye!(sim, cfg, tile_lo, n, flat);
                         tiles.push(refined_tile(cfg, &layout, flat, origin, m, sim, kernels_of)?);
                     }
-                    refined_session(cfg, launch, fault, drained, build_clock, &layout, tiles)
+                    refined_session(cfg, launch, fault, drained, build_clock, &layout, tiles, |h| {
+                        // the declared perturbation over the seeded levels, as the single hierarchy lays it
+                        if lay_perturbation!(h, cfg, $d, false) {
+                            h.sync_perturbed();
+                        }
+                        Ok(())
+                    })
                 }
                 "imhd" => {
                     type Sim = SimDefaultGeneric<IsothermalMhd, $d, 3, Cartesian, Isothermal<f64>>;
@@ -11149,7 +11145,7 @@ fn run_refined_worker_process(
                             .map_err(|e| format!("tile {flat} rollback snapshot: {e:?}"))?;
                         tiles.push(refined_tile(cfg, &layout, flat, origin, m, sim, kernels_of)?);
                     }
-                    refined_session(cfg, launch, fault, drained, build_clock, &layout, tiles)
+                    refined_session(cfg, launch, fault, drained, build_clock, &layout, tiles, |_| Ok(()))
                 }
                 other => Err(format!("the {other} regime with mesh refinement is outside the distributed first release")),
             }
@@ -11167,6 +11163,7 @@ fn run_refined_worker_process(
 /// for a magnetized run the EMF contributions, the interface faces, the corrected faces and the
 /// two temporal levels of the parent face stencil; the refined transaction with the checkpoints
 /// of both levels at the linear cadence, a final checkpoint, and a restart onto any partition
+#[allow(clippy::too_many_arguments)]
 fn refined_session<R, const D: usize, const DOF: usize, E, K>(
     cfg: &Config,
     launch: &WorkerLaunch,
@@ -11175,6 +11172,7 @@ fn refined_session<R, const D: usize, const DOF: usize, E, K>(
     build_clock: std::time::Instant,
     layout: &RefinedLayout<D>,
     mut tiles: Vec<Hierarchy<R, D, DOF, Cartesian, E, DefaultSpace, DefaultMemory, K>>,
+    on_seeded: impl FnMut(&mut Hierarchy<R, D, DOF, Cartesian, E, DefaultSpace, DefaultMemory, K>) -> Result<(), String>,
 ) -> Result<(), String>
 where
     R: Regime<f64, D> + Copy,
@@ -11595,7 +11593,7 @@ where
     if me == WorkerId(0) {
         announce_retry_guard(&tiles[0].levels[0].state);
     }
-    let outcome = evolve_refined_worker(&mut tiles, &held, &plans, &LocalCopy, &mut fabric, &refined_cfg, |accepted, time, tiles, fabric| {
+    let outcome = evolve_refined_worker(&mut tiles, &held, &plans, &LocalCopy, &mut fabric, &refined_cfg, on_seeded, |accepted, time, tiles, fabric| {
         if accepted == 0 {
             if write_initial {
                 let tag = cadence.tag(cfg, cp_width, cfg.start_time, cfg.checkpoint_index);
@@ -11787,6 +11785,9 @@ fn run_worker_process(
                 // the dye on this tile, indexed from the global dye by the tile's global cells;
                 // the halo exchange moves prim.chi across the cuts
                 let sim = with_tile_dye!(sim, cfg, tile_lo, n, flat);
+                // the declared perturbation at the tile's own cell centers, the single grid's
+                let has_energy = sim.fields.cons.has_energy();
+                lay_perturbation!(sim, cfg, $d, has_energy);
                 // the numerics the single path installs: reconstruction, the ppm flatten, the
                 // well-balanced reconstruction, the eos, and the solver
                 let sub = sim
@@ -11968,6 +11969,8 @@ fn run_worker_process(
                 // the dye on this tile, indexed from the global dye by the tile's global cells;
                 // the halo exchange moves prim.chi across the cuts
                 let sim = with_tile_dye!(sim, cfg, tile_lo, n, flat);
+                // the declared perturbation at the tile's own cell centers, the single grid's
+                lay_perturbation!(sim, cfg, $d, false);
                 // the numerics the single isothermal path installs: the limiter, then the
                 // user sources; the closure is globally isothermal, one sound speed per run
                 let sub = sim
@@ -12267,6 +12270,12 @@ where
     let outcome: Result<(u64, f64), String> = (|| {
         if cfg.checkpoint_index == 0 || cfg.start_time == 0.0 {
             let sh: Vec<&symbi_sim::state::FieldStore<D, DOF, DefaultMemory, f64>> = stores.iter().map(|s| &**s).collect();
+            // the builders seed the conserved state; the initial checkpoint publishes the
+            // primitives the march starts from, recovered on every held tile as the single
+            // grid's priming does (a recovery touches no face)
+            for (s, k) in sh.iter().zip(&kernels) {
+                k.c2p(s);
+            }
             let tag = cadence.tag(cfg, cp_width, cfg.start_time, cfg.checkpoint_index);
             let path = checkpoint_name(cfg, &tag);
             // before the march: the prime audit certified this state and nothing has touched

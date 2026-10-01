@@ -187,17 +187,19 @@ where
 }
 
 /// evolve this worker's hierarchies from the configured start until the final time or
-/// the step bound. `on_step` runs once on the primed state with zero accepted steps, then after
+/// the step bound. on a fresh start `on_seeded` edits each hierarchy once every level is seeded
+/// and before the priming. `on_step` runs once on the primed state with zero accepted steps, then after
 /// every accepted step with the count of accepted steps, the time, the tiles and the fabric; a
 /// checkpoint written there (`refined_checkpoint`) holds that state.
 #[allow(clippy::too_many_arguments)]
-pub fn evolve_refined_worker<R, const D: usize, const DOF: usize, M, E, S, Mem, K, T, L, F>(
+pub fn evolve_refined_worker<R, const D: usize, const DOF: usize, M, E, S, Mem, K, T, L, F, G>(
     tiles: &mut [Hierarchy<R, D, DOF, M, E, S, Mem, K>],
     held: &Held<'_>,
     plans: &RefinedPlans<'_, D>,
     transport: &T,
     fabric: &mut Fabric<L>,
     cfg: &RefinedConfig,
+    mut on_seeded: G,
     mut on_step: F,
 ) -> Result<WorkerReport, WorkerError>
 where
@@ -210,6 +212,7 @@ where
     T: HaloTransport,
     L: Link,
     F: FnMut(u64, f64, &[Hierarchy<R, D, DOF, M, E, S, Mem, K>], &mut Fabric<L>) -> Result<ControlFlow<()>, WorkerError>,
+    G: FnMut(&mut Hierarchy<R, D, DOF, M, E, S, Mem, K>) -> Result<(), String>,
 {
     let n = tiles.len();
     assert_eq!(n, held.root_ids.len(), "tiles/root ids length mismatch");
@@ -688,7 +691,10 @@ where
                     }
                 }
             }
+            // a fresh start lays its initial-state edits (a declared perturbation) over every
+            // seeded level before the priming fills and certifies them
             for h in tiles.iter_mut() {
+                on_seeded(h).map_err(|e| fail(fabric, WorkerError::Refused(e)))?;
                 h.prime();
             }
         }

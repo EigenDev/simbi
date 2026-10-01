@@ -9,8 +9,10 @@
 #   reassociation bound of its cross-tile force sum);
 # - neumann and robin walls, on the isothermal and the adiabatic tiles alike:
 #   two tiles reach the single grid's state bit for bit;
-# - a declared perturbation on isothermal tiles, and a locally isothermal
-#   closure on isothermal MHD tiles, refused by name before any output.
+# - a locally isothermal closure on isothermal MHD tiles, refused by name
+#   before any output.
+# a declared perturbation on isothermal tiles is gated with the other drivers
+# in test_tiled_perturbation.
 # every arm runs as a fresh process, the tiled ones as host tiles on a cpu
 # build. the isothermal wind-tunnel and rubble arms are the adiabatic examples
 # with the pressure dropped from their rows and their inflow.
@@ -84,15 +86,6 @@ class DyedChannel(IsothermalChannel):
                     yield 1.0 if ii < ni // 2 else 0.0
 
         return dye()
-
-
-class PerturbedChannel(IsothermalChannel):
-    @computed_field
-    @property
-    def perturbation_expressions(self) -> dict:
-        graph = expr.ExprGraph()
-        outputs = [expr.constant(1e-3, graph), expr.constant(0.0, graph), expr.constant(0.0, graph)]
-        return graph.compile(outputs).serialize_equilibrium(dim=2)
 
 
 class LocallyIsothermalOrszagTang(IsothermalOrszagTang):
@@ -203,7 +196,6 @@ def test_tiles_carry_neumann_and_robin_walls(tmp_path: Path, variants: Path, pro
 @pytest.mark.parametrize(
     ("problem", "resolution", "reason"),
     [
-        ("PerturbedChannel", (32, 32), "perturbation_expressions is not wired for the decomposed"),
         ("LocallyIsothermalOrszagTang", (32, 32, 1), "locally-isothermal cs(x) for isothermal MHD"),
     ],
 )
