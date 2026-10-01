@@ -2415,6 +2415,13 @@ fn spawn_decomposed_continuous_injection<const D: usize, const DOF: usize, M: Me
     Ok(count)
 }
 
+/// the user clamp `dt = min(dt, max_dt)` (0 disables), the single grid's `Hierarchy::clamp_dt`.
+/// every tile carries the run's clamp; `min` is exact, so clamping the minimum over the tiles and
+/// the remaining time equals the single grid's clamp-then-final-time order bit for bit
+pub fn clamp_user_dt(dt: f64, max_dt: f64) -> f64 {
+    if max_dt > 0.0 { dt.min(max_dt) } else { dt }
+}
+
 #[allow(clippy::too_many_arguments)]
 pub fn evolve_decomposed<const D: usize, const DOF: usize, M, K, T, F>(
     stores: &mut [&mut FieldStore<D, DOF, M, f64>],
@@ -2594,7 +2601,7 @@ where
                 (0..n).map(|i| symbi_xpu::with_device(devices[i], || kernels[i].cfl(sh[i])));
             let dt = crate::driver::select_timestep(candidates, t_final - t, iter, t)
                 .unwrap_or_else(|err| panic!("{}", err.detail));
-            dt
+            clamp_user_dt(dt, sh[0].max_dt)
         };
         // homologous mesh motion: each stage's dispatches bind geometry / grid-velocity
         // scalars from the tile's motion state, which must hold a(t) at the stage's

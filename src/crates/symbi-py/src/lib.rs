@@ -5699,9 +5699,11 @@ where
 
     // pin every tile's physical clock to the start time (nonzero on restart): the decomposed
     // loop advances these per step, and the checkpoint writer records the gather target's
-    // clock — synced from tile 0 before every write below.
+    // clock — synced from tile 0 before every write below. every tile carries the user
+    // timestep clamp the march applies.
     for (s, _) in tiles.iter_mut() {
         s.time = cfg.start_time;
+        s.max_dt = cfg.max_dt;
     }
     if cfg.n_tracers > 0 {
         reporter.milestone(&format!(
@@ -6227,9 +6229,11 @@ macro_rules! build_and_run_hydro_decomposed_refined {
                     })
                     .build();
                 // the physical clock starts at start_time on the root, and the hierarchy built
-                // from it starts every fine level there, as on the single hierarchy
+                // from it starts every fine level there, as on the single hierarchy; the root
+                // carries the user timestep clamp the hierarchy applies
                 let mut sim = sim;
                 sim.time = cfg.start_time;
+                sim.max_dt = cfg.max_dt;
                 // the dye rides on the root; the hierarchy carries it onto the fine levels
                 let sim = if cfg.chi_ic.is_empty() {
                     sim
@@ -10760,9 +10764,11 @@ where
     let maps: [symbi_geometry::AxisMap; D] =
         std::array::from_fn(|ax| symbi_geometry::AxisMap::Uniform { start: origin[ax], dx: cfg.dx[ax] });
     // the physical clock starts at start_time on the root, and the hierarchy built from it
-    // starts every fine level there, as on the single hierarchy
+    // starts every fine level there, as on the single hierarchy; the root carries the user
+    // timestep clamp the hierarchy applies
     let mut sim = sim;
     sim.time = cfg.start_time;
+    sim.max_dt = cfg.max_dt;
     let sub = kernels_of(&sim);
     let clipped = clip_regions_to_tile::<D>(&regions, origin, m, &maps);
     let mut h = if clipped.is_empty() {
@@ -11596,6 +11602,7 @@ fn run_worker_process(
             }
             for (sim, _) in $tiles.iter_mut() {
                 sim.time = cfg.start_time;
+                sim.max_dt = cfg.max_dt;
             }
             let built = build_clock.elapsed();
             worker_session::<$regime_ty, _, _, _, $d, $dof>(

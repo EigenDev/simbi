@@ -743,6 +743,7 @@ where
         timing.collectives += clock.elapsed();
         let mut dt = select_timestep([f64::from_bits(global)], cfg.t_final - t, iter, t)
             .map_err(|e| fail(fabric, WorkerError::Numerics(e.detail)))?;
+        dt = crate::decomp::clamp_user_dt(dt, shared!()[0].max_dt);
         if let Some((at, bits)) = cfg.injection.cap_dt_at {
             if at == iter {
                 dt = dt.min(f64::from_bits(bits));
