@@ -1991,6 +1991,24 @@ fn tile_boundaries<const D: usize>(
     }))
 }
 
+/// the driven (dynamic) boundary prescriptions in registry order, `Driven(id)` naming the id-th:
+/// each lowered against the run's regime and handed to `register` with its parameters
+fn attach_driven_boundaries<K>(
+    mut ks: K,
+    cfg: &Config,
+    spec: &symbi_hydro::regime_spec::RegimeSpec,
+    register: impl Fn(K, symbi_source_compile::expr_bridge::BoundaryPrescription, Vec<f64>) -> K,
+) -> Result<K, String> {
+    for json in &cfg.driven_exprs {
+        let bcfg = symbi_source_compile::SourceConfig::from_json(json)
+            .map_err(|e| format!("boundary expression parse: {e}"))?;
+        let built = symbi_source_compile::expr_bridge::build_boundary_dag(&bcfg, spec)
+            .map_err(|e| format!("boundary expression lower: {e}"))?;
+        ks = register(ks, built, bcfg.params.clone());
+    }
+    Ok(ks)
+}
+
 /// register the configured neumann / robin walls on a tile's kernel set in registry order, so
 /// the `Neumann(id)` / `Robin(id)` faces of the tile name the same coefficients as on the single
 /// grid. a tile away from the wall carries no such face and the table stays unread.
@@ -10722,9 +10740,6 @@ fn validate_launch_scope(cfg: &Config) -> Result<(), String> {
     if cfg.perturbation_json.is_some() {
         return refused("a perturbation expression");
     }
-    if !cfg.driven_exprs.is_empty() {
-        return refused("a driven boundary");
-    }
     if cfg.equilibrium_json.is_some() {
         return refused("an equilibrium prescription");
     }
@@ -10961,6 +10976,7 @@ fn run_refined_worker_process(
                             &state_law_of(cfg, <$regime as Regime<f64, $d>>::SPEC),
                         )
                         .expect("refined source attach");
+                        let ks = attach_driven_boundaries(ks, cfg, <$regime as Regime<f64, $d>>::SPEC, |ks, built, params| ks.with_driven_boundary(built, params).0).expect("refined driven boundary");
                         attach_gradient_walls(ks, cfg, |ks, gbc| ks.with_gradient_boundary(gbc).0).expect("refined gradient wall")
                     };
                     let mut tiles = Vec::with_capacity(layout.mine.len());
@@ -11000,13 +11016,15 @@ fn run_refined_worker_process(
                     // the numerics the single hierarchy installs on every level: the solver, the edge EMF,
                     // the viscosity and the resistivity
                     let kernels_of = |s: &Sim| {
-                        s.substrate()
+                        let ks = s.substrate()
                             .theta(theta)
                             .with_solver(solver)
                             .expect("refined kernel set")
                             .ct_method(ct)
                             .with_viscosity(cfg.viscosity).with_alpha(cfg.alpha)
-                            .with_resistivity(cfg.resistivity)
+                            .with_resistivity(cfg.resistivity);
+                        attach_driven_boundaries(ks, cfg, <$regime as Regime<f64, $d>>::SPEC, |ks, built, params| ks.with_driven_boundary(built, params).0)
+                            .expect("refined driven boundary")
                     };
                     let mut tiles = Vec::with_capacity(layout.mine.len());
                     for &flat in &layout.mine {
@@ -11057,6 +11075,7 @@ fn run_refined_worker_process(
                             &state_law_of(cfg, <IsoNewtonian as Regime<f64, $d>>::SPEC),
                         )
                         .expect("refined source attach");
+                        let ks = attach_driven_boundaries(ks, cfg, <IsoNewtonian as Regime<f64, $d>>::SPEC, |ks, built, params| ks.with_driven_boundary(built, params).0).expect("refined driven boundary");
                         attach_gradient_walls(ks, cfg, |ks, gbc| ks.with_gradient_boundary(gbc).0).expect("refined gradient wall")
                     };
                     let mut tiles = Vec::with_capacity(layout.mine.len());
@@ -11092,13 +11111,15 @@ fn run_refined_worker_process(
                     // the numerics the single hierarchy installs on every level: the solver, the edge EMF,
                     // the viscosity and the resistivity
                     let kernels_of = |s: &Sim| {
-                        s.substrate()
+                        let ks = s.substrate()
                             .theta(theta)
                             .with_solver(solver)
                             .expect("refined kernel set")
                             .ct_method(ct)
                             .with_viscosity(cfg.viscosity).with_alpha(cfg.alpha)
-                            .with_resistivity(cfg.resistivity)
+                            .with_resistivity(cfg.resistivity);
+                        attach_driven_boundaries(ks, cfg, <IsothermalMhd as Regime<f64, $d>>::SPEC, |ks, built, params| ks.with_driven_boundary(built, params).0)
+                            .expect("refined driven boundary")
                     };
                     let mut tiles = Vec::with_capacity(layout.mine.len());
                     for &flat in &layout.mine {
@@ -11788,6 +11809,7 @@ fn run_worker_process(
                     &state_law_of(cfg, <$regime_ty as Regime<f64, $d>>::SPEC),
                 )?;
                 let sub = attach_gradient_walls(sub, cfg, |sub, gbc| sub.with_gradient_boundary(gbc).0)?;
+                let sub = attach_driven_boundaries(sub, cfg, <$regime_ty as Regime<f64, $d>>::SPEC, |sub, built, params| sub.with_driven_boundary(built, params).0)?;
                 tiles.push((sim, sub));
             }
             session_over!($regime_ty, $d, tiles)
@@ -11848,6 +11870,7 @@ fn run_worker_process(
                     .with_viscosity(cfg.viscosity).with_alpha(cfg.alpha)
                     .with_resistivity(cfg.resistivity)
                     .ct_method(ct);
+                let sub = attach_driven_boundaries(sub, cfg, <NewtonianMhd as Regime<f64, $d>>::SPEC, |sub, built, params| sub.with_driven_boundary(built, params).0)?;
                 tiles.push((sim, sub));
             }
             session_over!(NewtonianMhd, 3, tiles)
@@ -11908,6 +11931,7 @@ fn run_worker_process(
                     .with_viscosity(cfg.viscosity).with_alpha(cfg.alpha)
                     .with_resistivity(cfg.resistivity)
                     .ct_method(ct);
+                let sub = attach_driven_boundaries(sub, cfg, <Rmhd as Regime<f64, $d>>::SPEC, |sub, built, params| sub.with_driven_boundary(built, params).0)?;
                 tiles.push((sim, sub));
             }
             session_over!(Rmhd, 3, tiles)
@@ -11958,6 +11982,7 @@ fn run_worker_process(
                     &state_law_of(cfg, <IsoNewtonian as Regime<f64, $d>>::SPEC),
                 )?;
                 let sub = attach_gradient_walls(sub, cfg, |sub, gbc| sub.with_gradient_boundary(gbc).0)?;
+                let sub = attach_driven_boundaries(sub, cfg, <IsoNewtonian as Regime<f64, $d>>::SPEC, |sub, built, params| sub.with_driven_boundary(built, params).0)?;
                 tiles.push((sim, sub));
             }
             session_over!(IsoNewtonian, $d, tiles)
@@ -12014,6 +12039,7 @@ fn run_worker_process(
                     .with_viscosity(cfg.viscosity).with_alpha(cfg.alpha)
                     .with_resistivity(cfg.resistivity)
                     .ct_method(ct);
+                let sub = attach_driven_boundaries(sub, cfg, <IsothermalMhd as Regime<f64, $d>>::SPEC, |sub, built, params| sub.with_driven_boundary(built, params).0)?;
                 tiles.push((sim, sub));
             }
             session_over!(IsothermalMhd, 3, tiles)
