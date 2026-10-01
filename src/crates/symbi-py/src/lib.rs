@@ -10649,9 +10649,6 @@ fn validate_refined_launch_scope(cfg: &Config) -> Result<(), String> {
     if cfg.refinement_regions.is_empty() {
         return refused("no refined region");
     }
-    if depth > 2 && matches!(cfg.regime.as_str(), "nmhd" | "imhd" | "rmhd") {
-        return refused(&format!("the {} regime with {depth} levels, the root included,", cfg.regime));
-    }
     // the phase table of every level's subcycle fits the wire byte up to an implementation depth;
     // a deeper run is refused here, before any session is built, never truncated
     let stages = cfg.timestepping.stages().len() as u8;
@@ -10773,6 +10770,7 @@ where
             .map_err(|e| format!("tile {flat} refinement build: {e:?}"))?
     };
     h.enable_face_stencil().map_err(|e| format!("tile {flat} face stencil: {e:?}"))?;
+    h.enable_nested_face_stencils(1 + regions.len()).map_err(|e| format!("tile {flat} nested face stencils: {e:?}"))?;
     Ok(h)
 }
 
@@ -11191,8 +11189,45 @@ where
                 .map_err(|e| e.to_string())
         })
         .collect::<Result<_, _>>()?;
-    for (state, seed) in nested_state_plans.iter().zip(&nested_seed_plans) {
+    // a magnetized nested level reads its parent's faces past a tile's face lattice from a stencil
+    // gathered on the parent's partition: the boxes of the level's patch on every parent tile, in
+    // whole-parent-level face indices, the parent partition's outer edges its coarse-fine boundary
+    let nested_stencil_plans: Vec<Option<ExchangePlan<D>>> = (0..nested_parts.len())
+        .map(|i| {
+            if !magnetized {
+                return Ok(None);
+            }
+            let (parent_part, frames) =
+                if i == 0 { (&fine_partition.partition, &fine_frames) } else { (&nested_parts[i - 1].partition, &nested_frames[i - 1]) };
+            let rel = nested_parts[i].patch;
+            let parent_counts = parent_part.counts();
+            let mut boxes: Vec<Option<Vec<[Span; D]>>> = Vec::with_capacity(parent_part.n_tiles());
+            for t in 0..parent_part.n_tiles() {
+                let ext = parent_part.tile_extents(unflatten(t, parent_counts));
+                let tile = match symbi::sim::refinement::launched::face_stencil_boxes_of_level_tile(parent_part, rel, TileId(t as u32), false) {
+                    None => None,
+                    Some(components) => Some(
+                        components
+                            .iter()
+                            .map(|d| {
+                                let d = d.as_ref().ok_or_else(|| format!("level {}: a face component without a stencil box", i + 2))?;
+                                Ok(std::array::from_fn(|a| Span { lo: d.spaces[a].lo + ext[a].0 as isize, hi: d.spaces[a].hi + ext[a].0 as isize }))
+                            })
+                            .collect::<Result<Vec<_>, String>>()?,
+                    ),
+                };
+                boxes.push(tile);
+            }
+            ExchangePlan::face_stencil_shifted(parent_part, &open, &boxes, ng + 1, &|t: TileId| frames[t.0 as usize])
+                .map(Some)
+                .map_err(|e| e.to_string())
+        })
+        .collect::<Result<_, String>>()?;
+    for ((state, seed), stencil) in nested_state_plans.iter().zip(&nested_seed_plans).zip(&nested_stencil_plans) {
         digests.extend([state.digest, seed.digest]);
+        if let Some(stencil) = stencil {
+            digests.push(stencil.digest);
+        }
     }
     // each held root tile's tile on every nested level, when the level reaches it
     let nested_ids: Vec<Vec<Option<TileId>>> = (0..nested_parts.len())
@@ -11231,14 +11266,6 @@ where
     let fine = next(&fine_plan, &fine_placement, PlanRole::Fine);
     let transported = flux_plan.transfers().count() > 0;
     let flux = transported.then(|| next(&flux_plan, placement, PlanRole::FluxContribution));
-    let mut nested_plans = Vec::with_capacity(nested_state_plans.len());
-    for i in 0..nested_state_plans.len() {
-        let level = (i + 2) as u8;
-        let parent_placement = if i == 0 { &fine_placement } else { &nested_placements[i - 1] };
-        let state = next(&nested_state_plans[i], &nested_placements[i], PlanRole::Nested { level });
-        let seed = next(&nested_seed_plans[i], parent_placement, PlanRole::NestedSeed { level });
-        nested_plans.push(NestedPlans { state, seed });
-    }
     let (emf, faces, corrected, stencil) = match magnetized_plans.as_ref() {
         Some((emf, faces, corrected, stencil)) => {
             let emf = transported.then(|| next(emf, placement, PlanRole::EmfContribution));
@@ -11250,6 +11277,21 @@ where
         }
         None => (None, None, None, None),
     };
+    // the nested levels' plans take the ids after every plan of the first refined level, the
+    // order every worker lists the plans in
+    let mut nested_plans = Vec::with_capacity(nested_state_plans.len());
+    for i in 0..nested_state_plans.len() {
+        let level = (i + 2) as u8;
+        let parent_placement = if i == 0 { &fine_placement } else { &nested_placements[i - 1] };
+        let state = next(&nested_state_plans[i], &nested_placements[i], PlanRole::Nested { level });
+        let seed = next(&nested_seed_plans[i], parent_placement, PlanRole::NestedSeed { level });
+        let stencil = nested_stencil_plans[i].as_ref().map(|plan| {
+            let old = next(plan, parent_placement, PlanRole::NestedFaceStencil { level });
+            let new = next(plan, parent_placement, PlanRole::NestedFaceStencil { level });
+            (old, new)
+        });
+        nested_plans.push(NestedPlans { state, seed, stencil });
+    }
     let plan_digest = {
         let mut h = Fnv::new();
         for d in digests {
@@ -11291,6 +11333,9 @@ where
     }
     for level in &nested_plans {
         all.extend([&level.state, &level.seed]);
+        if let Some((old, new)) = level.stencil.as_ref() {
+            all.extend([old, new]);
+        }
     }
     let max_payload = (all.iter().flat_map(|p| p.lens()).max().unwrap_or(0) * 8).max(credit as usize);
     let built = build_clock.elapsed();

@@ -26,8 +26,10 @@
 # and an alpha viscosity with refinement are refused by name. nested levels:
 # the refined blast with a second box inside the first, every level compared,
 # fresh on two and on four ragged workers and resumed onto four from two; a
-# depth whose phase table overflows the wire byte and nested MHD are refused by
-# name before any session is built. a late rejection on the deepest level (the
+# depth whose phase table overflows the wire byte is refused by name before any
+# session is built. nested MHD under contact and uct: each nested level's face
+# halo prolongation reads its parent's faces from a stencil gathered across the
+# parent's cuts at the parent's last stage, same gates. a late rejection on the deepest level (the
 # last stage of its last substep in a root step, after every earlier substep of
 # that step completed) rolls every worker back, those holding no tile of that
 # level included: every published checkpoint equals the clean run capped to the
@@ -439,6 +441,7 @@ def _nested_module(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, base: tuple[
     (tmp_path / "nested.py").write_text(
         "from typing import Annotated\n"
         "from simbi import ProblemParam\n"
+        "from simbi.types import CtMethod\n"
         f"from {module} import {cls}\n\n\n"
         f"class Nested({cls}):\n" + "\n".join(f"    {line}" for line in lines) + "\n"
     )
@@ -446,9 +449,23 @@ def _nested_module(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, base: tuple[
     return "nested", "Nested", str(tmp_path / "nested.py")
 
 
-def test_nested_levels_on_a_refined_launch_match_fresh_and_resumed(tmp_path: Path, monkeypatch) -> None:
-    module, cls, script = _nested_module(tmp_path, monkeypatch)
+# the nested arms: hydro, and MHD under both edge EMFs (each nested level's face prolongation
+# reading its parent's faces from a stencil gathered across the parent's cuts)
+NESTED_ARMS = {
+    "hydro": (HYDRO, []),
+    "mhd-contact": (MHD, []),
+    "mhd-uct": (MHD, [UCT_3D]),
+}
+
+
+@pytest.mark.parametrize("arm", list(NESTED_ARMS))
+def test_nested_levels_on_a_refined_launch_match_fresh_and_resumed(tmp_path: Path, monkeypatch, arm: str) -> None:
+    base, extra = NESTED_ARMS[arm]
+    module, cls, script = _nested_module(tmp_path, monkeypatch, base=base, extra=extra)
     reference = _script_reference(module, cls, RESOLUTION, tmp_path / "single", STEPS)
+    if arm == "mhd-uct":
+        contact = _script_reference(module, cls, RESOLUTION, tmp_path / "contact", STEPS, fields="ct_method='contact'")
+        assert _differs(reference, contact), "the edge EMF left the nested run unchanged; the gate is vacuous"
     for tag, workers, kwargs in [("two", 2, {"shape": (2, 1)}), ("four", 4, {"cuts": [[15], [17]]})]:
         layout = _layout(tmp_path / f"{tag}.toml", workers=workers, **kwargs)
         launched = _script_launch(script, RESOLUTION, tmp_path / tag, layout, STEPS, workers=workers)
@@ -488,11 +505,6 @@ def test_a_depth_past_the_phase_byte_is_refused_by_name(tmp_path: Path, monkeypa
     _refused_launch(tmp_path, script, "6 levels, the root included (phase table of")
 
 
-def test_nested_mhd_on_a_refined_launch_is_refused_by_name(tmp_path: Path, monkeypatch) -> None:
-    _, _, script = _nested_module(tmp_path, monkeypatch, base=MHD)
-    _refused_launch(tmp_path, script, "the nmhd regime with 3 levels, the root included, with mesh refinement is outside the distributed first release")
-
-
 # the deepest box spans root cells 16..20 on both axes, inside the root tile above both cuts at 12:
 # three of the four workers hold no tile of level 2
 LATE_LINES = [
@@ -506,9 +518,14 @@ LATE_REJECTION = f"reject_level:3:{LATE_STEP}:2:3:1"
 REJECTIONS = re.compile(r"SIMBI launch: worker=\d+/\d+ steps=\d+ rejections=(\d+)")
 
 
-def _per_step_launch(script: str, out: Path, layout: Path, workers: int, inject: str | None) -> tuple[dict[int, Path], set[int]]:
-    """the run with a checkpoint after every step, by iteration, and every worker's rejection count"""
-    cmd = [sys.executable, "-m", "simbi.cli", "launch", script, "--layout", str(layout), "--max-steps", str(STEPS),
+
+
+def _per_step_launch(script: str, out: Path, layout: Path, workers: int, inject: str | None, steps: int = STEPS) -> tuple[dict[int, Path], set[int]]:
+    """the run with a checkpoint at every step's time, by iteration, the final file under the key
+    -1, and every worker's rejection count. checkpoints are named by their time to three decimals,
+    so two steps whose times round alike publish one file: the iterations a run keeps depend on its
+    timesteps, and a comparison takes those both runs kept"""
+    cmd = [sys.executable, "-m", "simbi.cli", "launch", script, "--layout", str(layout), "--max-steps", str(steps),
            "--resolution", ",".join(str(r) for r in RESOLUTION), "--data-directory", str(out), "--checkpoint-interval", "1e-9"]
     env = dict(os.environ)
     env.pop("SIMBI_LAUNCH_EXPERIMENTAL", None)
@@ -518,46 +535,60 @@ def _per_step_launch(script: str, out: Path, layout: Path, workers: int, inject:
     assert done.returncode == 0, f"launch failed:\nstdout:\n{done.stdout}\nstderr:\n{done.stderr}"
     files: dict[int, Path] = {}
     for path in out.glob("*.h5"):
+        if "final" in path.name:
+            files[-1] = path
+            continue
         with h5py.File(path, "r") as f:
-            iteration = int(f["level_0"].attrs["iteration"])
-        assert iteration not in files or "final" in path.name or "final" in files[iteration].name, f"two checkpoints of iteration {iteration}"
-        files.setdefault(iteration, path)
+            files[int(f["level_0"].attrs["iteration"])] = path
+    assert -1 in files, "no final checkpoint was published"
     return files, {int(r) for r in REJECTIONS.findall(done.stderr)}
 
 
-def test_a_late_rejection_on_the_deepest_level_rolls_every_worker_back(tmp_path: Path, monkeypatch) -> None:
-    _, _, script = _nested_module(tmp_path, monkeypatch, extra=LATE_LINES)
+def _assert_same_published(a: Path, b: Path, label: str) -> None:
+    xs, ys = _all_levels(a), _all_levels(b)
+    assert xs.keys() == ys.keys(), f"{label}: dataset sets differ"
+    for name, x in xs.items():
+        np.testing.assert_array_equal(x, ys[name], err_msg=f"{label}: {name}")
+    with h5py.File(a, "r") as fa, h5py.File(b, "r") as fb:
+        for level in (k for k in fa if k.startswith("level_")):
+            assert fa[level].attrs["dt"] == fb[level].attrs["dt"], f"{label}: {level} dt"
+
+
+@pytest.mark.parametrize("arm", list(NESTED_ARMS))
+def test_a_late_rejection_on_the_deepest_level_rolls_every_worker_back(tmp_path: Path, monkeypatch, arm: str) -> None:
+    base, extra = NESTED_ARMS[arm]
+    _, _, script = _nested_module(tmp_path, monkeypatch, base=base, extra=LATE_LINES + extra)
     four = _layout(tmp_path / "four.toml", workers=4, cuts=[[12], [12]])
-    rejecting, counts = _per_step_launch(script, tmp_path / "rejecting", four, 4, LATE_REJECTION)
+    # the rejected step's accepted timestep, from the run stopped right after it
+    stopped, counts = _per_step_launch(script, tmp_path / "stopped", four, 4, LATE_REJECTION, steps=LATE_STEP + 1)
     assert counts == {1}, f"the deepest-level rejection was not counted once on every worker: {counts}"
-    with h5py.File(rejecting[LATE_STEP + 1], "r") as f:
+    with h5py.File(stopped[-1], "r") as f:
+        assert int(f["level_0"].attrs["iteration"]) == LATE_STEP + 1
         accepted = float(f["level_0"].attrs["dt"])
         assert "level_2" in f, "the rejecting run wrote no second refined level"
-    bits = np.float64(accepted).view(np.uint64)
-    capped, capped_counts = _per_step_launch(script, tmp_path / "capped", four, 4, f"cap:{LATE_STEP}:{int(bits)}")
+    cap = f"cap:{LATE_STEP}:{int(np.float64(accepted).view(np.uint64))}"
+    # the cap touches the capped step's timestep alone: stopped right after it, the capped control
+    # took exactly the cap, below the clean timestep, and equals the rejecting run there
+    capped_stop, capped_counts = _per_step_launch(script, tmp_path / "capped_stop", four, 4, cap, steps=LATE_STEP + 1)
+    clean_stop, _ = _per_step_launch(script, tmp_path / "clean_stop", four, 4, None, steps=LATE_STEP + 1)
     assert capped_counts == {0}, "the capped control rejected a step"
-    clean, _ = _per_step_launch(script, tmp_path / "clean", four, 4, None)
-    assert _differs(clean[STEPS], capped[STEPS]), "the cap left the run unchanged; the rejection never reduced the timestep"
-    # the cap touches the capped step's timestep alone: the runs agree through that step's start,
-    # and that step takes exactly the capped timestep, below the clean run's
-    # the cadence is in time, so the runs publish the iterations their clocks reach; the
-    # comparison takes those both runs published before the capped step, and the step after it
-    # is published by all three
-    assert all(LATE_STEP + 1 in run for run in (rejecting, capped, clean)), "a run published no checkpoint after the capped step"
-    before = [i for i in sorted(clean) if i <= LATE_STEP and i in capped]
-    assert 1 in before, f"no published iteration after the first step precedes the capped one: {before}"
-    for iteration in before:
-        xs, ys = _all_levels(clean[iteration]), _all_levels(capped[iteration])
-        assert xs.keys() == ys.keys() and all(np.array_equal(x, ys[k]) for k, x in xs.items()), f"the cap changed iteration {iteration}"
-    with h5py.File(clean[LATE_STEP + 1], "r") as fc, h5py.File(capped[LATE_STEP + 1], "r") as fp:
+    with h5py.File(capped_stop[-1], "r") as fp, h5py.File(clean_stop[-1], "r") as fc:
         assert float(fp["level_0"].attrs["dt"]) == accepted, "the capped step took another timestep than the cap"
         assert accepted < float(fc["level_0"].attrs["dt"]), "the cap is no smaller than the clean timestep"
-    assert sorted(rejecting) == sorted(capped), f"published iterations differ: {sorted(rejecting)} against {sorted(capped)}"
-    for iteration in sorted(rejecting):
-        xs, ys = _all_levels(rejecting[iteration]), _all_levels(capped[iteration])
-        assert xs.keys() == ys.keys(), f"iteration {iteration}: dataset sets differ"
-        for name, x in xs.items():
-            np.testing.assert_array_equal(x, ys[name], err_msg=f"iteration {iteration}: {name}")
-        with h5py.File(rejecting[iteration], "r") as fa, h5py.File(capped[iteration], "r") as fb:
-            for level in (k for k in fa if k.startswith("level_")):
-                assert fa[level].attrs["dt"] == fb[level].attrs["dt"], f"iteration {iteration}: {level} dt"
+    _assert_same_published(stopped[-1], capped_stop[-1], "stopped after the rejected step")
+    # the full runs: every checkpoint both published, and the final one
+    rejecting, counts = _per_step_launch(script, tmp_path / "rejecting", four, 4, LATE_REJECTION)
+    assert counts == {1}, f"the deepest-level rejection was not counted once on every worker: {counts}"
+    capped, capped_counts = _per_step_launch(script, tmp_path / "capped", four, 4, cap)
+    clean, _ = _per_step_launch(script, tmp_path / "clean", four, 4, None)
+    assert capped_counts == {0}, "the capped control rejected a step"
+    assert _differs(clean[-1], capped[-1]), "the cap left the run unchanged; the rejection never reduced the timestep"
+    shared = sorted(set(rejecting) & set(capped))
+    assert -1 in shared and any(i > LATE_STEP for i in shared), f"the runs share no checkpoint after the rejected step: {shared}"
+    for iteration in shared:
+        _assert_same_published(rejecting[iteration], capped[iteration], f"iteration {iteration}")
+    # before the capped step, the cap leaves the run alone
+    before = [i for i in sorted(set(clean) & set(capped)) if 0 <= i <= LATE_STEP]
+    assert before, "no checkpoint before the capped step was published by both controls"
+    for iteration in before:
+        _assert_same_published(clean[iteration], capped[iteration], f"the cap changed iteration {iteration}")

@@ -372,6 +372,10 @@ where
     /// face stencil of a neighbor's fine level gathers; held on every tile of a run whose
     /// fine levels read that stencil
     face_entry: Option<Vec<Field<f64, NDIM, Mem>>>,
+    /// per refined level that parents a finer level of the run, its faces at its current
+    /// substep's start: the old-time source of the finer level's parent face stencil, kept on
+    /// every tile holding the level whether or not the tile holds the finer one
+    level_face_entry: Vec<Option<Vec<Field<f64, NDIM, Mem>>>>,
     /// set while `prime` builds the initial state: the fine face halo is left to the first
     /// substep's prolongation, whose parent face stencil is gathered after the root stages
     priming: bool,
@@ -1161,6 +1165,7 @@ where
             forced_fine_rejection: None,
             forced_level_rejection: None,
             face_entry: None,
+            level_face_entry: Vec::new(),
             priming: false,
             balance_aware_transfer: None,
         }
@@ -1637,6 +1642,7 @@ where
             forced_fine_rejection: None,
             forced_level_rejection: None,
             face_entry: None,
+            level_face_entry: Vec::new(),
             priming: false,
             balance_aware_transfer: None,
         })
@@ -2312,8 +2318,85 @@ where
     /// the parent faces the fine level's coarse-fine face halo reads, per component, in the
     /// parent's index space
     pub fn face_stencil_boxes(&self) -> [Option<Domain<NDIM>>; NDIM] {
-        let fine = &self.levels[1];
+        self.face_stencil_boxes_of(1)
+    }
+
+    /// the parent faces refined level `level`'s coarse-fine face halo reads, per component, in
+    /// the parent's index space
+    pub fn face_stencil_boxes_of(&self, level: usize) -> [Option<Domain<NDIM>>; NDIM] {
+        let fine = &self.levels[level];
         face_stencil_boxes(&fine.state.geom.interior, &Self::prolonged_face_boundaries(fine))
+    }
+
+    /// the parent face stencils of the nested levels of a run of `run_levels` levels: every
+    /// refined level this tile holds below the first reads its parent's faces from a stencil the
+    /// driver gathers, and every level this tile holds that parents a level of the run keeps its
+    /// faces at each substep's start as the old time level of the finer level's stencils. the
+    /// first refined level's stencil and the root's attempt-entry faces come from
+    /// `enable_face_stencil`
+    pub fn enable_nested_face_stencils(&mut self, run_levels: usize) -> symbi_xpu::Result<()> {
+        if self.levels[0].state.fields.mhd.is_none() {
+            return Ok(());
+        }
+        self.level_face_entry = (0..self.levels.len()).map(|_| None).collect();
+        for level in 1..self.levels.len() {
+            if level + 1 < run_levels {
+                let mhd = self.levels[level].state.fields.mhd.as_ref().expect("a magnetized level");
+                let mut entry = Vec::with_capacity(NDIM);
+                for d in 0..NDIM {
+                    entry.push(Field::zeros(mhd.bface[d].domain())?);
+                }
+                self.level_face_entry[level] = Some(entry);
+            }
+        }
+        for level in 2..self.levels.len() {
+            let boxes = self.face_stencil_boxes_of(level);
+            if boxes.iter().all(Option::is_none) {
+                continue;
+            }
+            let mut old = Vec::with_capacity(NDIM);
+            let mut new = Vec::with_capacity(NDIM);
+            for b in &boxes {
+                let b = b.as_ref().expect("a face halo reads every component");
+                old.push(Field::zeros(b)?);
+                new.push(Field::zeros(b)?);
+            }
+            self.levels[level].face_stencil = Some(FaceStencil { old, new, filled: std::cell::Cell::new(false) });
+        }
+        Ok(())
+    }
+
+    /// keep refined level `level`'s faces at its substep's start, the old time level of the next
+    /// level's stencil, and invalidate that stencil until the driver gathers it after the stages
+    pub fn snapshot_level_faces(&self, level: usize) {
+        if let (Some(Some(entry)), Some(mhd)) =
+            (self.level_face_entry.get(level), self.levels.get(level).and_then(|l| l.state.fields.mhd.as_ref()))
+        {
+            for d in 0..NDIM {
+                copy_field(&mhd.bface[d], &entry[d]);
+            }
+        }
+        if let Some(stencil) = self.levels.get(level + 1).and_then(|l| l.face_stencil.as_ref()) {
+            stencil.filled.set(false);
+        }
+    }
+
+    /// refined level `level`'s faces at its substep's start, the old-time source of a neighbor's
+    /// stencil of the level below
+    pub fn level_face_entry(&self, level: usize) -> Option<&[Field<f64, NDIM, Mem>]> {
+        self.level_face_entry.get(level).and_then(|e| e.as_deref())
+    }
+
+    /// refined level `level`'s parent face stencil
+    pub fn face_stencil_of(&self, level: usize) -> Option<&FaceStencil<NDIM, Mem>> {
+        self.levels.get(level).and_then(|l| l.face_stencil.as_ref())
+    }
+
+    /// refined level `level`'s stencil holds the gathered parent faces of the current substep
+    pub fn mark_face_stencil_filled_of(&self, level: usize) {
+        if let Some(stencil) = self.face_stencil_of(level) {
+            stencil.filled.set(true);
+        }
     }
 
     /// read the fine level's coarse-fine face halo from a parent face stencil the driver
@@ -2374,8 +2457,10 @@ where
     }
 
     pub fn restore_attempt_entry(&self) {
-        if let Some(stencil) = self.face_stencil() {
-            stencil.filled.set(false);
+        for level in self.levels.iter().skip(1) {
+            if let Some(stencil) = level.face_stencil.as_ref() {
+                stencil.filled.set(false);
+            }
         }
         for level in self.levels.iter().skip(1) {
             if let Some(entry) = level.attempt_entry.as_ref() {

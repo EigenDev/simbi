@@ -84,6 +84,10 @@ pub struct NestedPlans<'p, const D: usize> {
     pub state: PlanExchange<'p, D>,
     /// the parent level's conserved halos at the level's seed
     pub seed: PlanExchange<'p, D>,
+    /// the level's parent face stencils at the parent substep's start and after its stages,
+    /// gathered at the parent's last stage point: two instances of one plan on the parent's
+    /// partition, present on a magnetized run
+    pub stencil: Option<(PlanExchange<'p, D>, PlanExchange<'p, D>)>,
 }
 
 /// the tiles of one nested level this worker holds, parallel over the held root tiles
@@ -292,13 +296,14 @@ where
         }
         refuse_transported_registers(tiles).map_err(|e| fail(fabric, e))?;
         let magnetized = tiles.iter().any(|h| h.levels[0].state.fields.mhd.is_some());
-        if magnetized && depth > 2 {
+        if magnetized && plans.nested.iter().any(|n| n.stencil.is_none()) {
             return Err(fail(
                 fabric,
-                WorkerError::Refused(format!(
-                    "a magnetized run of {depth} refined levels is outside the launched refinement: a nested \
-                     level's face prolongation needs its parent's face stencil across the cuts"
-                )),
+                WorkerError::Refused(
+                    "a magnetized nested level without its parent face stencil is outside the launched refinement: \
+                     its face prolongation reads parent faces past a tile's face lattice"
+                        .into(),
+                ),
             ));
         }
         if magnetized
@@ -378,6 +383,36 @@ where
                 }
             }
             lists
+        }};
+    }
+    // the stencil of nested level `$level` from its parent level's faces: the old time level from
+    // the parent's faces at its substep's start, the new one from its faces after the stages; the
+    // sources and destinations indexed by the parent level's tile id
+    macro_rules! nested_stencil_lists {
+        ($level:expr) => {{
+            let level: usize = $level;
+            let parent = level - 1;
+            let n = held.level_tiles(parent);
+            let mut old_src: Vec<Vec<&Field<f64, D, Mem>>> = (0..n).map(|_| Vec::new()).collect();
+            let mut new_src: Vec<Vec<&Field<f64, D, Mem>>> = (0..n).map(|_| Vec::new()).collect();
+            let mut old_dst: Vec<Vec<&Field<f64, D, Mem>>> = (0..n).map(|_| Vec::new()).collect();
+            let mut new_dst: Vec<Vec<&Field<f64, D, Mem>>> = (0..n).map(|_| Vec::new()).collect();
+            for (k, h) in tiles.iter().enumerate() {
+                if let Some(id) = held.level_ids(parent)[k] {
+                    let t = id.0 as usize;
+                    if let Some(entry) = h.level_face_entry(parent) {
+                        old_src[t] = entry.iter().collect();
+                    }
+                    if let Some(mhd) = h.levels[parent].state.fields.mhd.as_ref() {
+                        new_src[t] = mhd.bface.b.iter().collect();
+                    }
+                    if let Some(stencil) = h.face_stencil_of(level) {
+                        old_dst[t] = stencil.old.iter().collect();
+                        new_dst[t] = stencil.new.iter().collect();
+                    }
+                }
+            }
+            (old_src, new_src, old_dst, new_dst)
         }};
     }
     macro_rules! root_point {
@@ -508,7 +543,18 @@ where
             let point = ExchangePoint::Fine { substep: $sub as u8, point: FinePoint::Stage($stage as u8) };
             let fields = fine_fields!();
             let flux_fields = flux_fields!();
+            // the last fine stage also gathers the level-2 parent face stencils of a nested run
+            let nested_stencil = plans.nested.first().and_then(|n| n.stencil.as_ref()).filter(|_| $stage + 1 == nstages);
+            let (old_src, new_src, old_dst, new_dst) = if nested_stencil.is_some() {
+                nested_stencil_lists!(2)
+            } else {
+                (Vec::new(), Vec::new(), Vec::new(), Vec::new())
+            };
             let mut parts = vec![PlanPart { plan: &plans.fine, fields: &fields, devices: held.fine_devices, fault: None, dst_fields: None }];
+            if let Some((old, new)) = nested_stencil {
+                parts.push(PlanPart { plan: old, fields: &old_src, devices: held.fine_devices, fault: None, dst_fields: Some(&old_dst) });
+                parts.push(PlanPart { plan: new, fields: &new_src, devices: held.fine_devices, fault: None, dst_fields: Some(&new_dst) });
+            }
             if let Some(flux) = plans.flux.as_ref() {
                 let fault = cfg.contribution_fault.and_then(|(at_step, at_sub, at_stage, fault)| {
                     ($attempt == 0 && (at_step, at_sub, at_stage) == ($step, $sub as u8, $stage)).then_some(fault)
@@ -520,6 +566,11 @@ where
             for &k in &refined {
                 let h = &tiles[k];
                 with_device(fine_dev(k), || h.levels[1].kernels.ghost_fill(&h.levels[1].state));
+            }
+            if nested_stencil.is_some() {
+                for h in tiles.iter() {
+                    h.mark_face_stencil_filled_of(2);
+                }
             }
             if plans.flux.is_some() {
                 for (k, h) in tiles.iter().enumerate() {
@@ -832,7 +883,12 @@ where
                     }
                     fine_point!(ExchangePoint::Fine { substep: sub as u8, point: FinePoint::Prolong }, iter, attempt);
                     for &k in &refined {
-                        with_device(fine_dev(k), || tiles[k].level_step_begin(1, fine_dt));
+                        with_device(fine_dev(k), || {
+                            tiles[k].level_step_begin(1, fine_dt);
+                            // the fine faces at the substep's start, the old time level of the
+                            // nested level's stencil
+                            tiles[k].snapshot_level_faces(1);
+                        });
                     }
                     for jj in 0..nstages {
                         let marks: Vec<StageMark> = refined
@@ -1172,7 +1228,10 @@ where
         }
         exchange(tiles, fabric, timing, at(FinePoint::Prolong))?;
         for (r, &k) in mine.iter().enumerate() {
-            with_device(dev(r), || tiles[k].level_step_begin(level, level_dt));
+            with_device(dev(r), || {
+                tiles[k].level_step_begin(level, level_dt);
+                tiles[k].snapshot_level_faces(level);
+            });
         }
         for jj in 0..cx.nstages {
             let marks: Vec<StageMark> = mine
@@ -1195,7 +1254,48 @@ where
             if vote_retry(fabric, retry, deadline, timing)? {
                 return Ok(true);
             }
-            exchange(tiles, fabric, timing, at(FinePoint::Stage(jj as u8)))?;
+            let child_stencil = cx.plans.nested.get(level - 1).and_then(|n| n.stencil.as_ref()).filter(|_| jj + 1 == cx.nstages);
+            if let Some((old, new)) = child_stencil {
+                // the last stage also gathers the next level's parent face stencils from this
+                // level's faces at the substep's start and after its stages
+                let n = plan.plan().n_tiles();
+                let mut state: Vec<Vec<&Field<f64, D, Mem>>> = (0..n).map(|_| Vec::new()).collect();
+                let mut old_src: Vec<Vec<&Field<f64, D, Mem>>> = (0..n).map(|_| Vec::new()).collect();
+                let mut new_src: Vec<Vec<&Field<f64, D, Mem>>> = (0..n).map(|_| Vec::new()).collect();
+                let mut old_dst: Vec<Vec<&Field<f64, D, Mem>>> = (0..n).map(|_| Vec::new()).collect();
+                let mut new_dst: Vec<Vec<&Field<f64, D, Mem>>> = (0..n).map(|_| Vec::new()).collect();
+                for (r, &k) in mine.iter().enumerate() {
+                    let t = ids[r].0 as usize;
+                    let h = &tiles[k];
+                    state[t] = plan_fields(&h.levels[level].state);
+                    if let Some(entry) = h.level_face_entry(level) {
+                        old_src[t] = entry.iter().collect();
+                    }
+                    if let Some(mhd) = h.levels[level].state.fields.mhd.as_ref() {
+                        new_src[t] = mhd.bface.b.iter().collect();
+                    }
+                    if let Some(stencil) = h.face_stencil_of(level + 1) {
+                        old_dst[t] = stencil.old.iter().collect();
+                        new_dst[t] = stencil.new.iter().collect();
+                    }
+                }
+                let parts = [
+                    PlanPart { plan, fields: &state, devices, fault: None, dst_fields: None },
+                    PlanPart { plan: old, fields: &old_src, devices, fault: None, dst_fields: Some(&old_dst) },
+                    PlanPart { plan: new, fields: &new_src, devices, fault: None, dst_fields: Some(&new_dst) },
+                ];
+                exchange_point_plans(&parts, cx.transport, fabric, at(FinePoint::Stage(jj as u8)), step, attempt, deadline, &mut timing.exchange)
+                    .map_err(|e| fail(fabric, e.into()))?;
+                for (r, &k) in mine.iter().enumerate() {
+                    let h = &tiles[k];
+                    with_device(dev(r), || {
+                        h.levels[level].kernels.ghost_fill(&h.levels[level].state);
+                        h.mark_face_stencil_filled_of(level + 1);
+                    });
+                }
+            } else {
+                exchange(tiles, fabric, timing, at(FinePoint::Stage(jj as u8)))?;
+            }
             audit(tiles, fabric, report, at(FinePoint::Audit(jj as u8)))?;
         }
         for (r, &k) in mine.iter().enumerate() {
@@ -1587,6 +1687,18 @@ pub fn face_stencil_boxes_of_tile<const D: usize>(
     patch: [(usize, usize); D],
     tile: TileId,
 ) -> Option<[Option<symbi_algebra::Domain<D>>; D]> {
+    face_stencil_boxes_of_level_tile(partition, patch, tile, true)
+}
+
+/// `face_stencil_boxes_of_tile` on the partition of any level: `edges_physical` says whether the
+/// partition's outer edges are the domain's walls (the root) or its patch's coarse-fine boundary (a
+/// refined level parenting a nested one)
+pub fn face_stencil_boxes_of_level_tile<const D: usize>(
+    partition: &symbi_sim::decomp::Partition<D>,
+    patch: [(usize, usize); D],
+    tile: TileId,
+    edges_physical: bool,
+) -> Option<[Option<symbi_algebra::Domain<D>>; D]> {
     use symbi_algebra::{Domain, Space};
     use symbi_sim::state::{Boundaries, BoundaryType, axis_name};
     let counts = partition.counts();
@@ -1609,7 +1721,7 @@ pub fn face_stencil_boxes_of_tile<const D: usize>(
                 // a coarse-fine side, or a cut the patch continues across: the face halo comes
                 // from the root lattice by prolongation, or from the fine exchange
                 if at_tile_edge && continues { BoundaryType::Outflow } else { BoundaryType::CoarseFine }
-            } else if tile_is_domain_edge {
+            } else if tile_is_domain_edge && edges_physical {
                 BoundaryType::Outflow
             } else {
                 // the patch's real face on a cut: a coarse-fine side

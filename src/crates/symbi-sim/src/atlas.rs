@@ -1048,10 +1048,27 @@ impl<const D: usize> ExchangePlan<D> {
         boxes: &[Option<Vec<[Span; D]>>],
         ng: usize,
     ) -> Result<Self, PlanError> {
+        Self::face_stencil_shifted(partition, topology, boxes, ng, &|_| [0; D])
+    }
+
+    /// `face_stencil` for tiles whose stores index their cells from `interior_lo(tile)` in place
+    /// of zero: a nested level's parent, whose tiles live in their own parents' index frames.
+    /// the boxes stay in whole-level face indices; sources and destinations land in each tile's
+    /// own frame
+    pub fn face_stencil_shifted(
+        partition: &Partition<D>,
+        topology: &Topology<D>,
+        boxes: &[Option<Vec<[Span; D]>>],
+        ng: usize,
+        interior_lo: &dyn Fn(TileId) -> [isize; D],
+    ) -> Result<Self, PlanError> {
         let counts = partition.counts();
         let n_tiles = partition.n_tiles();
         assert_eq!(boxes.len(), n_tiles, "one stencil entry per tile");
-        let tiles: Vec<TileLayout<D>> = (0..n_tiles).map(|t| TileLayout::of_partition(partition, TileId(t as u32), ng)).collect();
+        let tiles: Vec<TileLayout<D>> = (0..n_tiles)
+            .map(|t| TileLayout::of_partition(partition, TileId(t as u32), ng).shifted(interior_lo(TileId(t as u32))))
+            .collect();
+        let frames: Vec<[isize; D]> = (0..n_tiles).map(|t| interior_lo(TileId(t as u32))).collect();
         let mut schema = FieldSchema::new();
         for d in 0..D {
             schema = schema.face(&format!("stencil{d}"), d as u8);
@@ -1061,14 +1078,15 @@ impl<const D: usize> ExchangePlan<D> {
         let mut fields: Vec<Vec<FieldLayout<D>>> = (0..n_tiles)
             .map(|t| (0..D).map(|d| FieldLayout::of(&tiles[t], FieldKind::Face(d as u8))).collect())
             .collect();
-        let local = |g: &[Span; D], ext: &[(usize, usize); D]| -> [Span; D] {
-            std::array::from_fn(|a| Span { lo: g[a].lo - ext[a].0 as isize, hi: g[a].hi - ext[a].0 as isize })
+        let local = |g: &[Span; D], t: usize| -> [Span; D] {
+            let (ext, frame) = (&exts[t], &frames[t]);
+            std::array::from_fn(|a| Span { lo: g[a].lo - ext[a].0 as isize + frame[a], hi: g[a].hi - ext[a].0 as isize + frame[a] })
         };
         let mut axes: Vec<AxisPhase<D>> = (0..D).map(|ax| AxisPhase { axis: ax as u8, transfers: Vec::new() }).collect();
         for (dst, entry) in boxes.iter().enumerate() {
             let Some(entry) = entry else { continue };
             for (d, gbox) in entry.iter().enumerate() {
-                let lbox = local(gbox, &exts[dst]);
+                let lbox = local(gbox, dst);
                 let f = &mut fields[dst][d];
                 f.allocated = std::array::from_fn(|a| Span {
                     lo: f.allocated[a].lo.min(lbox[a].lo),
@@ -1087,8 +1105,8 @@ impl<const D: usize> ExchangePlan<D> {
                         continue;
                     }
                     covered += volume(&piece);
-                    let src_region = local(&piece, ext);
-                    let dst_region = local(&piece, &exts[dst]);
+                    let src_region = local(&piece, src);
+                    let dst_region = local(&piece, dst);
                     axes[d].transfers.push(Transfer {
                         id: TransferId(0),
                         axis: d as u8,

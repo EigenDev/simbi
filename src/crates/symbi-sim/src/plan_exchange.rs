@@ -52,6 +52,9 @@ pub enum PlanRole {
     Nested { level: u8 },
     /// the conserved halos of level `level - 1` at the seed of nested level `level`
     NestedSeed { level: u8 },
+    /// nested level `level`'s parent face stencil gathered from the faces' owners on the parent's
+    /// partition: every transfer moves at the parent's last stage point of each of its substeps
+    NestedFaceStencil { level: u8 },
 }
 
 /// a fault injected into one plan's staging at one point, for the gates of the
@@ -157,6 +160,14 @@ impl<'p, const D: usize> PlanExchange<'p, D> {
             },
             PlanRole::NestedSeed { level } => {
                 point == ExchangePoint::Seed { level } && self.plan.moves_at(t, ExchangePoint::Prime)
+            }
+            PlanRole::NestedFaceStencil { level } => {
+                let last = self.table.fine_stages().saturating_sub(1);
+                match point {
+                    ExchangePoint::Fine { point: FinePoint::Stage(k), .. } => level == 2 && k == last,
+                    ExchangePoint::Nested { level: l, point: FinePoint::Stage(k), .. } => l + 1 == level && k == last,
+                    _ => false,
+                }
             }
             PlanRole::FluxContribution => matches!(point, ExchangePoint::Fine { point: FinePoint::Stage(_), .. }),
             PlanRole::EmfContribution => matches!(point, ExchangePoint::Fine { point: FinePoint::PostTail, .. }),
