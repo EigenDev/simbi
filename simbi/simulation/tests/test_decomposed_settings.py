@@ -4,8 +4,9 @@
 # the settings a decomposed hydro run must honor or refuse. a viscous run on
 # two devices equals the viscous single-grid run and differs from the inviscid
 # one; an excised relativistic run on two devices equals the excised
-# single-grid run at the decomposition's roundoff bound; the balanced
-# reconstruction on several devices is refused by name. every arm runs as a
+# single-grid run at the decomposition's roundoff bound; the synge perfect gas
+# on two devices equals the synge single-grid run and differs from the ideal
+# gas; the balanced reconstruction on several devices is refused by name. every arm runs as a
 # fresh process through the public command, the decomposed ones as host tiles
 # on a cpu build.
 # =============================================================================
@@ -23,6 +24,7 @@ pytestmark = pytest.mark.simulation
 VISCOUS = "simbi_configs/examples/newtonian/viscous_shear.py"
 BONDI = "simbi_configs/examples/grhd/gr_bondi_cartesian.py"
 KH = "simbi_configs/examples/newtonian/kh.py"
+SYNGE = "simbi_configs/examples/srhd/synge_blast.py"
 
 
 def _command(script: str, out: Path, ngpus: int, flags: list[str]) -> list[str]:
@@ -67,6 +69,16 @@ def test_an_excised_run_on_two_devices_is_excised(tmp_path: Path) -> None:
     scale = max(np.abs(one).max(), np.abs(two).max())
     worst = np.abs(one - two).max()
     assert worst <= 1e-12 * scale, f"excised densities differ by {worst:.3e} against scale {scale:.3e}"
+
+
+def test_the_synge_gas_on_two_devices_is_the_synge_gas(tmp_path: Path) -> None:
+    base = ["--resolution", "32,32", "--end-time", "0.02"]
+    synge_1, steps_1 = _density(_run(SYNGE, tmp_path / "s1", 1, base))
+    ideal_1, _ = _density(_run(SYNGE, tmp_path / "i1", 1, base + ["--eos", "ideal", "--adiabatic-index", "1.4"]))
+    assert np.abs(synge_1 - ideal_1).max() > 0.0, "the closure does not act on this setup; the gate is vacuous"
+    synge_2, steps_2 = _density(_run(SYNGE, tmp_path / "s2", 2, base))
+    assert steps_2 == steps_1
+    np.testing.assert_array_equal(synge_2, synge_1)
 
 
 def test_the_balanced_reconstruction_on_several_devices_is_refused(tmp_path: Path) -> None:

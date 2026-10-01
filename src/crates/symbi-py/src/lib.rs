@@ -6334,6 +6334,7 @@ macro_rules! build_and_run_hydro_decomposed_refined {
                     .theta(theta)
                     .reconstruction(build_recon(cfg))
                     .ppm_flatten(cfg.ppm_flatten_onset, cfg.ppm_flatten_full)
+                    .with_eos(build_eos(cfg))
                     .with_solver(solver)
                     .map_err(|e| format!("tile {flat} substrate/solver: {e:?}"))?
                     .with_viscosity(cfg.viscosity).with_alpha(cfg.alpha)
@@ -6396,6 +6397,7 @@ macro_rules! build_and_run_hydro_decomposed_refined {
                             .theta(theta)
                             .reconstruction(build_recon(cfg))
                             .ppm_flatten(cfg.ppm_flatten_onset, cfg.ppm_flatten_full)
+                            .with_eos(build_eos(cfg))
                             .with_solver(solver)
                             .expect("fine kernel set")
                             .with_viscosity(cfg.viscosity).with_alpha(cfg.alpha)
@@ -6664,6 +6666,7 @@ macro_rules! build_and_run_hydro_decomposed {
                     .theta(theta)
                     .reconstruction(build_recon(cfg))
                     .ppm_flatten(cfg.ppm_flatten_onset, cfg.ppm_flatten_full)
+                    .with_eos(build_eos(cfg))
                     .with_solver(solver)
                     .map_err(|e| format!("tile {flat} substrate/solver: {e:?}"))?
                     // the transport and excision settings the single-grid build installs; the
@@ -9161,11 +9164,6 @@ fn dispatch_and_run(
                 "eos = 'synge' requires a flat (minkowski) spacetime; got '{}'",
                 cfg.spacetime
             ));
-        }
-        if cfg.n_gpus > 1 {
-            return Err(
-                "eos = 'synge' with gpus > 1 awaits the decomposed equivalence gate".to_string(),
-            );
         }
     }
     match cfg.regime.as_str() {
