@@ -46,7 +46,9 @@ def bounded_processes():
     bounded, and a gate that passes the bound fails with its processes killed."""
     with ProcessGuard(limit=16) as guard:
         yield guard
-    assert not guard.tripped, f"the test started more than {guard.limit} processes (peak {guard.peak})"
+    assert not guard.tripped, (
+        f"the test started more than {guard.limit} processes (peak {guard.peak}):\n" + "\n".join(guard.report)
+    )
     assert not [p for p in descendants(os.getpid())], "the test left processes behind"
 
 RESOLUTION = (32, 32)

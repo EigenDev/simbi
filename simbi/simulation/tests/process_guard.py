@@ -48,6 +48,8 @@ class ProcessGuard:
         self.period = period
         self.peak = 0
         self.tripped = False
+        # the processes found when the bound was passed, one `pid ppid command` line each
+        self.report: list[str] = []
         self._stop = threading.Event()
         self._thread = threading.Thread(target=self._watch, daemon=True)
 
@@ -57,6 +59,12 @@ class ProcessGuard:
             self.peak = max(self.peak, len(found))
             if len(found) > self.limit:
                 self.tripped = True
+                listing = subprocess.run(
+                    ["ps", "-o", "pid=,ppid=,stat=,command="] + [arg for pid in found for arg in ("-p", str(pid))],
+                    capture_output=True,
+                    text=True,
+                )
+                self.report = [line[:200] for line in listing.stdout.splitlines()]
                 for pid in found:
                     try:
                         os.kill(pid, signal.SIGKILL)
