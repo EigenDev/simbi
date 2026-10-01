@@ -1946,15 +1946,13 @@ fn step_bodies_decomposed<const D: usize, const DOF: usize, M: MemorySpace>(
         };
         for d in im.diagnostics.consolidate() {
             match global.iter_mut().find(|g| g.idx == d.idx) {
-                Some(g) => {
-                    g.force_delta = g.force_delta + d.force_delta;
-                    g.torque_delta = g.torque_delta + d.torque_delta;
-                    g.mass_delta += d.mass_delta;
-                }
+                Some(g) => *g += d,
                 None => global.push(d),
             }
         }
     }
+    // the per-step exchange series at the step's end time, the clock the single grid books it at
+    let time = stores.first().map_or(0.0, |s| crate::driver::advance_clock(s.time, s.iteration, dt).0);
     for s in stores.iter_mut() {
         let Some(im) = s.immersed.as_mut() else {
             continue;
@@ -1977,6 +1975,7 @@ fn step_bodies_decomposed<const D: usize, const DOF: usize, M: MemorySpace>(
             }
             sys.advance(&mut im.bodies, dt, &external);
         }
+        im.history.push(time, dt, &global);
         im.diagnostics.reset();
     }
 }

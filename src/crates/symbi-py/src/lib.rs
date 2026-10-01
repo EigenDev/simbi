@@ -5984,6 +5984,19 @@ where
     // the checkpoint schedule the single grid walks
     let mut cadence = CheckpointCadence::of(cfg);
     let cp_width = checkpoint_time_width(cfg);
+    // body diagnostics at their own cadence, from the finest bodies, as the single hierarchy
+    // records them: every tile's finest bodies carry the cross-tile-summed reaction
+    let diag_path = if cfg.diagnostic_interval > 0.0 && !cfg.bodies.is_empty() {
+        Some(format!("{}diagnostics.dat", cfg.data_dir))
+    } else {
+        None
+    };
+    let diag_interval = (cfg.diagnostic_interval * cfg.time_unit).max(f64::MIN_POSITIVE);
+    let diag_plan = diag_path.as_ref().map(|dp| {
+        plan_diagnostics(last_diagnostics_time(dp), cfg.start_time, diag_interval)
+            .unwrap_or_else(|detail| panic!("{detail}"))
+    });
+    let mut next_diag = diag_plan.as_ref().map_or(diag_interval, |p| p.next);
 
     // per refined level: the sub-grid of the tiles carrying it, each tile's offset on the level's
     // global grid, and that grid. a tile's level-l interior starts at 2^l times its root offset
@@ -6094,6 +6107,14 @@ where
         }
     }
 
+    if let Some(dp) = &diag_path {
+        if diag_plan.as_ref().is_some_and(|p| p.write_initial) {
+            if let Some(im) = tiles[0].levels.last().and_then(|l| l.state.immersed.as_ref()) {
+                let _ = append_diagnostics(dp, cfg.start_time, &im.bodies);
+            }
+        }
+    }
+
     let cp_error: std::cell::RefCell<Option<String>> = std::cell::RefCell::new(None);
     let guard = retry_guard_of(cfg);
     let exclusion = retry_exclusion_of(cfg);
@@ -6132,6 +6153,13 @@ where
                     }
                 }
                 cadence.advance(time);
+            }
+            if let Some(dp) = &diag_path {
+                if diagnostics_due(time, &mut next_diag, diag_interval) {
+                    if let Some(im) = tiles[0].levels.last().and_then(|l| l.state.immersed.as_ref()) {
+                        let _ = append_diagnostics(dp, time, &im.bodies);
+                    }
+                }
             }
             std::ops::ControlFlow::Continue(())
         },

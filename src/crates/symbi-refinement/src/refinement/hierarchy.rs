@@ -6027,16 +6027,18 @@ where
             for i in 0..n {
                 for d in tiles[i].take_body_deltas() {
                     match global.iter_mut().find(|g| g.idx == d.idx) {
-                        Some(g) => {
-                            g.force_delta = g.force_delta + d.force_delta;
-                            g.torque_delta = g.torque_delta + d.torque_delta;
-                            g.mass_delta += d.mass_delta;
-                        }
+                        Some(g) => *g += d,
                         None => global.push(d),
                     }
                 }
             }
-            let t_now = t + gdt;
+            // the run's finest clock, advanced through its own substeps: the clock the single
+            // hierarchy books its body history at, identical on every tile carrying that level
+            let depth = tiles.iter().map(|h| h.levels.len()).max().unwrap_or(1);
+            let t_now = tiles
+                .iter()
+                .find(|h| h.levels.len() == depth)
+                .map_or(t + gdt, |h| h.levels[depth - 1].state.time);
             let any_refined = tiles.iter().any(|h| h.levels.len() > 1);
             for i in 0..n {
                 symbi_xpu::with_device(devices[i], || {
