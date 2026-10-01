@@ -1025,6 +1025,11 @@ where
             if let (Some(cn), Some(fn_nrg)) = (cc.nrg_field(), fc.nrg_field()) {
                 prolong_field(cn, &zero, fn_nrg, &region, order, 0.0);
             }
+            // the conserved dye rho*chi, prolonged like the mass it rides on, so the fine level
+            // starts with the dye its parent holds and restricts it back unchanged
+            if let (Some(cchi), Some(fchi)) = (cc.chi_field(), fc.chi_field()) {
+                prolong_field(cchi, &zero, fchi, &region, order, 0.0);
+            }
             // the isothermal closure's cs^2(x): prolonged over the fine interior and a band of two
             // ghost cells, the band the fine flux, drain, and viscous stencils read across the
             // coarse-fine boundary, clipped to the cells the parent's allocation can supply, then
@@ -1104,6 +1109,9 @@ where
                     }
                     if let (Some(cn), Some(fn_nrg)) = (cc.nrg_field(), fc.nrg_field()) {
                         prolong_field(cn, &zero, fn_nrg, &cell, ProlongOrder::Pcm, 0.0);
+                    }
+                    if let (Some(cchi), Some(fchi)) = (cc.chi_field(), fc.chi_field()) {
+                        prolong_field(cchi, &zero, fchi, &cell, ProlongOrder::Pcm, 0.0);
                     }
                 }
                 reseeded += flagged.len();

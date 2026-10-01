@@ -154,9 +154,9 @@ impl From<FabricError> for WorkerError {
 }
 
 /// the first-release scope: 2D and 3D newtonian and relativistic hydro and MHD,
-/// adiabatic or globally isothermal, on the cartesian, spherical and cylindrical charts of a
-/// flat spacetime, in host memory, on a static mesh, without dye, bodies, tracers, or
-/// excision.
+/// adiabatic or globally isothermal, with or without a passive scalar, on the cartesian,
+/// spherical and cylindrical charts of a flat spacetime, in host memory, on a static mesh,
+/// without bodies, tracers, or excision.
 pub fn refuse<const D: usize, const DOF: usize, M: MemorySpace, K: KernelSet<D, DOF, M, f64>>(
     stores: &[&FieldStore<D, DOF, M, f64>],
     kernels: &[&K],
@@ -175,11 +175,6 @@ pub fn refuse<const D: usize, const DOF: usize, M: MemorySpace, K: KernelSet<D, 
             Some(format!("the {:?} spacetime", store.geom.spacetime))
         } else if kernel.isothermal_closure_varies(store) {
             Some("a locally isothermal closure".to_string())
-        } else if store.has_passive_scalar()
-            || store.fields.prim.chi.is_some()
-            || store.fields.cons.chi.is_some()
-        {
-            Some("a passive scalar".to_string())
         } else if store.immersed.is_some() {
             Some("an immersed body".to_string())
         } else if store.tracers.is_some() || store.continuous_tracers.is_some() {

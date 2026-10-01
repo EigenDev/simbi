@@ -1851,6 +1851,18 @@ fn sub_bool(body: &Bound<'_, PyDict>, group: &str, key: &str, default: bool) -> 
         .unwrap_or(default)
 }
 
+/// the passive-scalar generator as one flat cell-centered buffer in the prim order (None or an
+/// empty generator: an undyed run)
+fn drain_dye(chi_field: Option<&Bound<'_, PyAny>>) -> PyResult<Vec<f64>> {
+    let mut vals = Vec::new();
+    if let Some(chi_field) = chi_field.filter(|f| !f.is_none()) {
+        for v in chi_field.try_iter()? {
+            vals.push(v?.extract::<f64>()?);
+        }
+    }
+    Ok(vals)
+}
+
 /// drain a python primitive-generator into a flat per-cell buffer. each yielded
 /// tuple is a hydro primitive row `(rho, v1, .., vD, pre)` of length `2 + D`,
 /// in axis-0-fastest order (x inner) — matching both the python generators and
@@ -2115,6 +2127,23 @@ fn configured_ito_order(
             "tracer_scheme must be one of discrete, ito2, or ito3; got '{scheme}'"
         )),
     }
+}
+
+/// a tile's sim with the passive scalar allocated and seeded from the global dye (an undyed run
+/// passes the sim through)
+macro_rules! with_tile_dye {
+    ($sim:expr, $cfg:expr, $tile_lo:expr, $n:expr, $flat:expr) => {{
+        let sim = $sim;
+        if $cfg.chi_ic.is_empty() {
+            sim
+        } else {
+            let sim = sim
+                .with_passive_scalar()
+                .map_err(|e| format!("tile {} dye allocation: {e:?}", $flat))?;
+            seed_tile_dye(&sim, &$cfg.chi_ic, $tile_lo, $n);
+            sim
+        }
+    }};
 }
 
 /// seed a tile's passive scalar from the global initial dye: cell by cell, the tile's local cell
@@ -8021,15 +8050,7 @@ macro_rules! build_and_run_iso_decomposed {
                 };
                 // the dye on this tile, indexed from the global dye by the tile's global cells;
                 // the halo exchange moves prim.chi across the cuts
-                let sim = if cfg.chi_ic.is_empty() {
-                    sim
-                } else {
-                    let sim = sim
-                        .with_passive_scalar()
-                        .map_err(|e| format!("tile {flat} dye allocation: {e:?}"))?;
-                    seed_tile_dye(&sim, &cfg.chi_ic, tile_lo, n);
-                    sim
-                };
+                let sim = with_tile_dye!(sim, cfg, tile_lo, n, flat);
                 // clock + mesh motion per tile: every tile carries the identical a(t) law and
                 // the decomposed loop advances them in lockstep with the shared dt.
                 let mut sim = sim;
@@ -8727,6 +8748,62 @@ fn polar_seam_of<const D: usize, const DOF: usize, Mem: MemorySpace>(
     })
 }
 
+/// the passive scalar a run admits: newtonian or isothermal gas on a cartesian chart, and a
+/// driven face prescribing the injected fluid's dye. every driver checks it before seeding.
+fn validate_passive_scalar(cfg: &Config) -> Result<(), String> {
+    if cfg.chi_ic.is_empty() {
+        return Ok(());
+    }
+    // the conserved dye is a slot on the conserved state, orthogonal to the energy slot:
+    // `D_chi = rho chi` involves no energy, so newtonian and isothermal carry one alike. the
+    // relativistic and MHD regimes have no dye transport wired.
+    if !matches!(cfg.regime.as_str(), "newtonian" | "isothermal") {
+        return Err(format!(
+            "passive_scalar is wired for the newtonian and isothermal regimes; got '{}'",
+            cfg.regime
+        ));
+    }
+    if cfg.coord_system != "cartesian" {
+        return Err(format!(
+            "passive_scalar requires a cartesian chart; got '{}'",
+            cfg.coord_system
+        ));
+    }
+    // every grid feature carries the dye now. gpus > 1 seeds it per tile and the halo exchange
+    // moves prim.chi across cuts; refinement allocates fine-level slots, prolongs the
+    // concentration onto coarse-fine ghosts, restricts it back, and refluxes the materialized
+    // interface dye flux alongside mass; immersed bodies drain it by the same factor as the
+    // density; and a homologously expanding mesh dilutes `D_chi` exactly as it dilutes `rho`,
+    // leaving the concentration invariant.
+    // gradient (neumann / robin) faces carry the dye at zero normal derivative, the scalar
+    // reading of the per-variable prescription the registry holds for the prim state.
+    //
+    // a driven face has to say more than that. it prescribes the state of fluid entering the
+    // domain, and the dye of that fluid is independent of everything inside, so no local rule
+    // recovers it. a prescription that stops at the prim state leaves the dye ghost band on
+    // that face written by nobody, which reads downstream as clean inflow rather than as a
+    // missing boundary condition. require the extra output instead.
+    for (id, json) in cfg.driven_exprs.iter().enumerate() {
+        let bcfg = symbi_source_compile::SourceConfig::from_json(json)
+            .map_err(|e| format!("driven boundary {id}: expression parse: {e}"))?;
+        let spec = if cfg.regime == "isothermal" {
+            &symbi_hydro::regime_spec::ISO_NEWTONIAN_SPEC
+        } else {
+            &symbi_hydro::regime_spec::NEWTONIAN_SPEC
+        };
+        let want = symbi_source_compile::expr_bridge::boundary_prim_arity(spec, bcfg.dim) + 1;
+        if bcfg.outputs.len() != want {
+            return Err(format!(
+                "driven boundary {id} prescribes {} outputs, but a run carrying a passive \
+                 scalar needs {want}: the full prim state plus a trailing dye concentration \
+                 for the injected fluid",
+                bcfg.outputs.len(),
+            ));
+        }
+    }
+    Ok(())
+}
+
 /// runtime dispatch on the config tags -> a monomorphized sim. hydro regimes
 /// (newtonian/rhd/isothermal) x cartesian (+ curvilinear for adiabatic) x 1/2/3d;
 /// the mhd regimes (rmhd/nmhd/imhd) x cartesian x 1/2/3d.
@@ -8845,59 +8922,9 @@ fn dispatch_and_run(
             ));
         }
     }
-    // the passive scalar (dye) rides the uni-grid cartesian newtonian path: the chi
-    // kernels are baked cartesian, the drain/wall
-    // every unwired combination fails loud — a silently undyed or wrongly-dyed run reads as
-    // valid science.
-    if !cfg.chi_ic.is_empty() {
-        // the conserved dye is a slot on the conserved state, orthogonal to the energy slot:
-        // `D_chi = rho chi` involves no energy, so newtonian and isothermal carry one alike. the
-        // relativistic and MHD regimes have no dye transport wired.
-        if !matches!(cfg.regime.as_str(), "newtonian" | "isothermal") {
-            return Err(format!(
-                "passive_scalar is wired for the newtonian and isothermal regimes; got '{}'",
-                cfg.regime
-            ));
-        }
-        if cfg.coord_system != "cartesian" {
-            return Err(format!(
-                "passive_scalar requires a cartesian chart; got '{}'",
-                cfg.coord_system
-            ));
-        }
-        // every grid feature carries the dye now. gpus > 1 seeds it per tile and the halo exchange
-        // moves prim.chi across cuts; refinement allocates fine-level slots, prolongs the
-        // concentration onto coarse-fine ghosts, restricts it back, and refluxes the materialized
-        // interface dye flux alongside mass; immersed bodies drain it by the same factor as the
-        // density; and a homologously expanding mesh dilutes `D_chi` exactly as it dilutes `rho`,
-        // leaving the concentration invariant.
-        // gradient (neumann / robin) faces carry the dye at zero normal derivative, the scalar
-        // reading of the per-variable prescription the registry holds for the prim state.
-        //
-        // a driven face has to say more than that. it prescribes the state of fluid entering the
-        // domain, and the dye of that fluid is independent of everything inside, so no local rule
-        // recovers it. a prescription that stops at the prim state leaves the dye ghost band on
-        // that face written by nobody, which reads downstream as clean inflow rather than as a
-        // missing boundary condition. require the extra output instead.
-        for (id, json) in cfg.driven_exprs.iter().enumerate() {
-            let bcfg = symbi_source_compile::SourceConfig::from_json(json)
-                .map_err(|e| format!("driven boundary {id}: expression parse: {e}"))?;
-            let spec = if cfg.regime == "isothermal" {
-                &symbi_hydro::regime_spec::ISO_NEWTONIAN_SPEC
-            } else {
-                &symbi_hydro::regime_spec::NEWTONIAN_SPEC
-            };
-            let want = symbi_source_compile::expr_bridge::boundary_prim_arity(spec, bcfg.dim) + 1;
-            if bcfg.outputs.len() != want {
-                return Err(format!(
-                    "driven boundary {id} prescribes {} outputs, but a run carrying a passive \
-                     scalar needs {want}: the full prim state plus a trailing dye concentration \
-                     for the injected fluid",
-                    bcfg.outputs.len(),
-                ));
-            }
-        }
-    }
+    // the passive scalar: the chi kernels are baked cartesian, and every unwired combination
+    // fails loud, since a silently undyed or wrongly dyed run reads as valid science
+    validate_passive_scalar(cfg)?;
     // mass-transport tracers consume the accepted finite-volume density flux.
     // curvilinear decomposition and mesh motion still require explicit
     // material-volume geometry in the decomposed driver.
@@ -10071,15 +10098,7 @@ fn run_simulation(
     );
     // drain the passive-scalar generator (None = undyed). one flat cell-centered
     // buffer; the per-arm seeding checks the count against the interior.
-    if let Some(chi_field) = chi_field {
-        if !chi_field.is_none() {
-            let mut vals = Vec::new();
-            for v in chi_field.try_iter()? {
-                vals.push(v?.extract::<f64>()?);
-            }
-            cfg.chi_ic = vals;
-        }
-    }
+    cfg.chi_ic = drain_dye(chi_field)?;
     if let Some(cohort_field) = cohort_field {
         if !cohort_field.is_none() {
             let mut vals = Vec::new();
@@ -10663,9 +10682,8 @@ fn validate_launch_scope(cfg: &Config) -> Result<(), String> {
     if cfg.n_tracers > 0 {
         return refused("a tracer population");
     }
-    if !cfg.chi_ic.is_empty() {
-        return refused("a passive scalar");
-    }
+    // the dye rides the launched gas and isothermal tiles under the single grid's admission
+    validate_passive_scalar(cfg)?;
     if cfg.alpha > 0.0 && matches!(cfg.regime.as_str(), "newtonian" | "nmhd") {
         return refused(&format!(
             "alpha-disk viscosity on the {} regime (its stability bound multiplies whole-grid \
@@ -10789,6 +10807,9 @@ fn refined_layout<const D: usize>(cfg: &Config, launch: &WorkerLaunch, cells: us
     let total: usize = n.iter().product();
     if cells != total {
         return Err(format!("prim_gen yielded {cells} cells, expected {total}"));
+    }
+    if !cfg.chi_ic.is_empty() && cfg.chi_ic.len() != total {
+        return Err(format!("passive_scalar yielded {} values for {total} interior cells", cfg.chi_ic.len()));
     }
     let partition = tile_partition(n, cfg)?;
     let n_root = partition.n_tiles();
@@ -10932,6 +10953,8 @@ fn run_refined_worker_process(
                                 Prim::adiabatic(Density(row[0]), Tensor::new(std::array::from_fn(|k| row[1 + k])), Pressure(row[1 + $d]))
                             })
                             .build();
+                        // the dye on the root; the hierarchy carries it onto the fine levels
+                        let sim = with_tile_dye!(sim, cfg, tile_lo, n, flat);
                         tiles.push(refined_tile(cfg, &layout, flat, origin, m, sim, kernels_of)?);
                     }
                     refined_session(cfg, launch, fault, drained, build_clock, &layout, tiles)
@@ -11026,6 +11049,8 @@ fn run_refined_worker_process(
                                 PrimG::<f64, $d, IsoModel>::isothermal(Density(row[0]), Tensor::new(std::array::from_fn(|k| row[1 + k])))
                             })
                             .build();
+                        // the dye on the root; the hierarchy carries it onto the fine levels
+                        let sim = with_tile_dye!(sim, cfg, tile_lo, n, flat);
                         tiles.push(refined_tile(cfg, &layout, flat, origin, m, sim, kernels_of)?);
                     }
                     refined_session(cfg, launch, fault, drained, build_clock, &layout, tiles)
@@ -11622,6 +11647,9 @@ fn run_worker_process(
     if prims.len() != total {
         return Err(format!("prim_gen yielded {} cells, expected {total}", prims.len()));
     }
+    if !cfg.chi_ic.is_empty() && cfg.chi_ic.len() != total {
+        return Err(format!("passive_scalar yielded {} values for {total} interior cells", cfg.chi_ic.len()));
+    }
     let build_clock = std::time::Instant::now();
     let partition = tile_partition(n, cfg)?;
     let counts = partition.counts();
@@ -11707,6 +11735,9 @@ fn run_worker_process(
                         Prim::adiabatic(Density(row[0]), Tensor::new(std::array::from_fn(|k| row[1 + k])), Pressure(row[1 + $d]))
                     })
                     .build();
+                // the dye on this tile, indexed from the global dye by the tile's global cells;
+                // the halo exchange moves prim.chi across the cuts
+                let sim = with_tile_dye!(sim, cfg, tile_lo, n, flat);
                 // the numerics the single path installs: reconstruction, the ppm flatten, the
                 // well-balanced reconstruction, the eos, and the solver
                 let sub = sim
@@ -11882,6 +11913,9 @@ fn run_worker_process(
                         PrimG::<f64, $d, IsoModel>::isothermal(Density(row[0]), Tensor::new(std::array::from_fn(|k| row[1 + k])))
                     })
                     .build();
+                // the dye on this tile, indexed from the global dye by the tile's global cells;
+                // the halo exchange moves prim.chi across the cuts
+                let sim = with_tile_dye!(sim, cfg, tile_lo, n, flat);
                 // the numerics the single isothermal path installs: the limiter, then the
                 // user sources; the closure is globally isothermal, one sound speed per run
                 let sub = sim
@@ -12522,12 +12556,14 @@ mod canon_tests {
 /// leaves it to the rendezvous file), the bind address and advertised host, and the checkpoint
 /// block size in cells.
 #[pyfunction]
+#[pyo3(signature = (prim_gen, staggered_bfields, sim_info, launch, chi_field=None))]
 fn launch_worker(
     py: Python<'_>,
     prim_gen: &Bound<'_, PyAny>,
     staggered_bfields: &Bound<'_, PyAny>,
     sim_info: &Bound<'_, PyDict>,
     launch: &Bound<'_, PyDict>,
+    chi_field: Option<&Bound<'_, PyAny>>,
 ) -> PyResult<()> {
     let mut cfg = parse_config(sim_info)?;
     validate_config_preflight(&cfg).map_err(PyValueError::new_err)?;
@@ -12567,6 +12603,7 @@ fn launch_worker(
     let drain_clock = std::time::Instant::now();
     let prims = drain_prims(prim_gen)?;
     let bufs = if matches!(cfg.regime.as_str(), "nmhd" | "imhd" | "rmhd") { drain_bfields(staggered_bfields)? } else { Vec::new() };
+    cfg.chi_ic = drain_dye(chi_field)?;
     let drained = drain_clock.elapsed();
     py.detach(|| run_worker_process(&cfg, &prims, &bufs, &params, drained))
         .map_err(PyRuntimeError::new_err)

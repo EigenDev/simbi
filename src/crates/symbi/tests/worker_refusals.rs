@@ -2,10 +2,11 @@
 // worker_refusals.rs
 //
 // the distributed loop's first-release scope, enforced at entry: 2D cartesian
-// adiabatic newtonian hydro in host memory on a static mesh, inviscid, without
-// a passive scalar. each gate builds a store or kernel set that leaves the
-// scope by one property and shows the loop refuses it before any step, naming
-// the property, on a single worker over the in-process link.
+// adiabatic newtonian hydro in host memory on a static mesh, with or without a
+// passive scalar. each gate builds a store or kernel set that leaves the scope
+// by one property and shows the loop refuses it before any step, naming the
+// property, on a single worker over the in-process link; the admitted
+// properties (a constant viscosity, a dye) march to their end.
 //
 // run: cargo test -p symbi --test worker_refusals
 // =============================================================================
@@ -19,7 +20,6 @@ use symbi::sim::substrate_seam::{RegimeKind, WithViscosity};
 use symbi_algebra::Tensor;
 use symbi_fabric::{Loopback, SessionId, WorkerId};
 use symbi_geometry::{Cartesian, Spacetime};
-use symbi_grid::Field;
 use symbi_hydro::eos::IdealGas;
 use symbi_hydro::newtonian::Newtonian;
 use symbi_hydro::quantity::{Density, Pressure};
@@ -225,16 +225,15 @@ fn a_locally_isothermal_closure_is_refused_and_a_global_one_admitted() {
     refused(plan_run(&mut sim, &kern), "a locally isothermal closure");
 }
 
+/// a dyed run is admitted: the exchange schema carries the concentration across the cuts, and
+/// the worker marches the dyed state to its end
 #[test]
-fn a_passive_scalar_is_refused() {
-    let mut sim = sim2();
+fn a_passive_scalar_is_admitted() {
+    let undyed = plan_schema(&*sim2()).len();
+    let mut sim = sim2().with_passive_scalar().expect("dye allocation");
+    assert_eq!(plan_schema(&*sim).len(), undyed + 1, "the exchange schema carries the dye");
     let kern = Kern2::new(1.4, 0.4, &sim.geom.allocated);
-    sim.fields.prim.chi = Some(Field::zeros(&sim.geom.allocated).unwrap());
-    sim.fields.cons.chi = Some(Field::zeros(&sim.geom.allocated).unwrap());
-    refused(
-        run2(&mut sim, &kern, RegimeKind::Newtonian),
-        "passive scalar",
-    );
+    run2(&mut sim, &kern, RegimeKind::Newtonian).expect("a passive scalar is admitted");
 }
 
 /// the viscous transport is a post-step operation that leaves the halos as current as the

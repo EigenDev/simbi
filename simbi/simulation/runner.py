@@ -929,6 +929,7 @@ def launch_worker(
     backend.launch_worker(
         prim_gen=prim_iterator,
         staggered_bfields=bfield_iterators,
+        chi_field=problem.passive_scalar(),
         sim_info=exec_dict,
         launch={
             "worker": int(worker),

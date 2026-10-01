@@ -522,8 +522,9 @@ pub fn plan_fields<const D: usize, const DOF: usize, M: MemorySpace>(
 }
 
 /// the conserved cell fields a fine level's seed prolongs from: density, momentum, energy
-/// when present. a plan over `plan_cons_schema` moves them across the cuts at the prime, the
-/// one exchange of conserved halos a run makes.
+/// when present, and the conserved dye when the run carries one. a plan over
+/// `plan_cons_schema` moves them across the cuts at the prime, the one exchange of conserved
+/// halos a run makes.
 pub fn plan_cons_fields<const D: usize, const DOF: usize, M: MemorySpace>(
     store: &FieldStore<D, DOF, M>,
 ) -> Vec<&Field<f64, D, M>> {
@@ -532,6 +533,9 @@ pub fn plan_cons_fields<const D: usize, const DOF: usize, M: MemorySpace>(
     fields.extend(cons.mom.iter());
     if let Some(nrg) = cons.nrg_field() {
         fields.push(nrg);
+    }
+    if let Some(chi) = cons.chi_field() {
+        fields.push(chi);
     }
     fields
 }
@@ -546,6 +550,9 @@ pub fn plan_cons_schema<const D: usize, const DOF: usize, M: MemorySpace>(
     }
     if store.fields.cons.has_energy() {
         schema = schema.cell("nrg");
+    }
+    if store.fields.cons.chi.is_some() {
+        schema = schema.cell("chi");
     }
     debug_assert_eq!(schema.len(), plan_cons_fields(store).len());
     schema
