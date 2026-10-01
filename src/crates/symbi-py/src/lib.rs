@@ -6613,6 +6613,10 @@ macro_rules! build_and_run_hydro_decomposed {
                     }
                     sub
                 };
+                // the gradient (neumann / robin) walls in registry order, as the single grid
+                // registers them: an edge tile's exterior faces carry their ids from the
+                // physical-boundary copy
+                let sub = attach_gradient_walls(sub, cfg, |sub, gbc| sub.with_gradient_boundary(gbc).0)?;
                 Ok((sim, sub))
             })?;
             tiles.push(built);
@@ -7553,6 +7557,11 @@ macro_rules! build_and_run_imhd_decomposed {
         if cfg.refinement_enabled {
             return Err("gpus>1 does not yet support mesh refinement; set gpus=1 or disable refinement".to_string());
         }
+        // the per-cell sound speed cs^2(x) = p(x)/rho(x) is derived on the single-grid state
+        // alone; the tiles would march on the uniform cs and ignore the pressure column
+        if cfg.locally_isothermal {
+            return Err("gpus>1 does not yet support locally-isothermal cs(x) for isothermal MHD; set gpus=1 or use globally isothermal".to_string());
+        }
 
         let n: [usize; $d] = std::array::from_fn(|ax| cfg.n_cells[ax]);
         let total: usize = n.iter().product();
@@ -7935,10 +7944,21 @@ macro_rules! build_and_run_iso_decomposed {
         if cfg.locally_isothermal {
             return Err("gpus>1 does not yet support locally-isothermal cs(x); set gpus=1 or use globally isothermal".to_string());
         }
+        // the declared perturbation is applied to the single-grid hierarchy alone, as on the
+        // energy-regime path; refused rather than silently dropped
+        if cfg.perturbation_json.is_some() {
+            return Err("perturbation_expressions is not wired for the decomposed (multi-gpu) build".to_string());
+        }
         let n: [usize; $d] = std::array::from_fn(|ax| cfg.n_cells[ax]);
         let total: usize = n.iter().product();
         if prims.len() != total {
             return Err(format!("prim_gen yielded {} cells, expected {total}", prims.len()));
+        }
+        if !cfg.chi_ic.is_empty() && cfg.chi_ic.len() != total {
+            return Err(format!(
+                "passive_scalar yielded {} values for {total} interior cells",
+                cfg.chi_ic.len()
+            ));
         }
         let partition = tile_partition(n, cfg)?;
         let counts = partition.counts();
@@ -7991,10 +8011,24 @@ macro_rules! build_and_run_iso_decomposed {
                 // decomposed loop sums the backward feedback across tiles + advances the prescribed
                 // binary orbit identically.
 
-                let sim = if cfg.bodies.is_empty() {
+                // gravity / accretion sinks plus bonded fragments and shaped walls, attached per
+                // tile at their global positions, as the energy-regime tiles attach them
+                let has_any_body = !cfg.bodies.is_empty() || cfg.bonded_assembly.is_some();
+                let sim = if !has_any_body {
                     sim
                 } else {
-                    sim.with_bodies(build_bodies_and_horizon::<$d>(cfg))
+                    attach_bodies_and_fragments!(sim, cfg, $d)
+                };
+                // the dye on this tile, indexed from the global dye by the tile's global cells;
+                // the halo exchange moves prim.chi across the cuts
+                let sim = if cfg.chi_ic.is_empty() {
+                    sim
+                } else {
+                    let sim = sim
+                        .with_passive_scalar()
+                        .map_err(|e| format!("tile {flat} dye allocation: {e:?}"))?;
+                    seed_tile_dye(&sim, &cfg.chi_ic, tile_lo, n);
+                    sim
                 };
                 // clock + mesh motion per tile: every tile carries the identical a(t) law and
                 // the decomposed loop advances them in lockstep with the shared dt.
@@ -8033,6 +8067,10 @@ macro_rules! build_and_run_iso_decomposed {
                     }
                     sub
                 };
+                // the gradient (neumann / robin) walls in registry order, as the single grid
+                // registers them: an edge tile's exterior faces carry their ids from the
+                // physical-boundary copy
+                let sub = attach_gradient_walls(sub, cfg, |sub, gbc| sub.with_gradient_boundary(gbc).0)?;
                 Ok((sim, sub))
             })?;
             tiles.push(built);
@@ -8121,18 +8159,23 @@ macro_rules! build_and_run_iso {
         let sim = if !has_any_body || cfg.refinement_enabled {
             sim
         } else {
-            let mut coll = build_bodies_and_horizon::<$d>(cfg);
-            let mut shapes = build_body_shapes(&cfg.bodies);
-            let physics = cfg.bonded_assembly.as_ref().map(|asm| {
-                let (with_frags, physics) = append_fragments::<$d>(coll.clone(), &mut shapes, asm);
-                coll = with_frags;
-                physics
-            });
-            let mut sim = sim.with_bodies(coll);
-            sim.attach_body_shapes(shapes);
-            if let Some(physics) = physics {
-                sim.attach_fragment_physics(physics);
+            attach_bodies_and_fragments!(sim, cfg, $d)
+        };
+        // seed the passive scalar (dye): cons.chi = rho*chi and the primitive concentration over
+        // the interior, as on the energy-regime path; the isothermal kernel set transports it
+        let sim = if cfg.chi_ic.is_empty() {
+            sim
+        } else {
+            if cfg.chi_ic.len() != total {
+                return Err(format!(
+                    "passive_scalar yielded {} values for {total} interior cells",
+                    cfg.chi_ic.len()
+                ));
             }
+            let sim = sim
+                .with_passive_scalar()
+                .map_err(|e| format!("passive-scalar allocation: {e:?}"))?;
+            seed_tile_dye(&sim, &cfg.chi_ic, [0; $d], n);
             sim
         };
         let sim = {
@@ -8839,10 +8882,12 @@ fn dispatch_and_run(
         for (id, json) in cfg.driven_exprs.iter().enumerate() {
             let bcfg = symbi_source_compile::SourceConfig::from_json(json)
                 .map_err(|e| format!("driven boundary {id}: expression parse: {e}"))?;
-            let want = symbi_source_compile::expr_bridge::boundary_prim_arity(
-                &symbi_hydro::regime_spec::NEWTONIAN_SPEC,
-                bcfg.dim,
-            ) + 1;
+            let spec = if cfg.regime == "isothermal" {
+                &symbi_hydro::regime_spec::ISO_NEWTONIAN_SPEC
+            } else {
+                &symbi_hydro::regime_spec::NEWTONIAN_SPEC
+            };
+            let want = symbi_source_compile::expr_bridge::boundary_prim_arity(spec, bcfg.dim) + 1;
             if bcfg.outputs.len() != want {
                 return Err(format!(
                     "driven boundary {id} prescribes {} outputs, but a run carrying a passive \
