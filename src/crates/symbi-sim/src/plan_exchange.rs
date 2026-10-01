@@ -46,6 +46,12 @@ pub enum PlanRole {
     /// a refined tile's parent face stencil gathered from the faces' owners: every transfer
     /// moves at the last root stage point, after the root stages and before the fine subcycle
     FaceStencil,
+    /// the state of nested level `level >= 2`: its state, bands and audits at its own points,
+    /// its state after the primed restriction, after the restriction of the level below it,
+    /// and at the rollback
+    Nested { level: u8 },
+    /// the conserved halos of level `level - 1` at the seed of nested level `level`
+    NestedSeed { level: u8 },
 }
 
 /// a fault injected into one plan's staging at one point, for the gates of the
@@ -121,6 +127,10 @@ impl<'p, const D: usize> PlanExchange<'p, D> {
                     self.plan.moves_at(t, as_root)
                 }
                 ExchangePoint::Rollback => self.plan.moves_at(t, ExchangePoint::Rollback),
+                // the primed fine state, and the fine state after a nested level restricted into it
+                ExchangePoint::Primed | ExchangePoint::NestedRestrict { level: 1, .. } => {
+                    self.plan.moves_at(t, ExchangePoint::Stage(0))
+                }
                 // the fine level's shared faces are audited with the root's after the prime and
                 // before a checkpoint
                 ExchangePoint::Audit(AuditAt::Prime) | ExchangePoint::Audit(AuditAt::Checkpoint) => {
@@ -128,6 +138,26 @@ impl<'p, const D: usize> PlanExchange<'p, D> {
                 }
                 _ => false,
             },
+            PlanRole::Nested { level } => match point {
+                ExchangePoint::Nested { level: l, point: fine, .. } if l == level => {
+                    let as_root = match fine {
+                        FinePoint::Prolong | FinePoint::Stage(_) | FinePoint::PostTail => ExchangePoint::Stage(0),
+                        FinePoint::Troubled(_) => ExchangePoint::Troubled(0),
+                        FinePoint::Audit(_) | FinePoint::AuditTail => ExchangePoint::Audit(AuditAt::Prime),
+                    };
+                    self.plan.moves_at(t, as_root)
+                }
+                ExchangePoint::NestedRestrict { level: l, .. } if l == level => self.plan.moves_at(t, ExchangePoint::Stage(0)),
+                ExchangePoint::Primed => self.plan.moves_at(t, ExchangePoint::Stage(0)),
+                ExchangePoint::Rollback => self.plan.moves_at(t, ExchangePoint::Rollback),
+                ExchangePoint::Audit(AuditAt::Prime) | ExchangePoint::Audit(AuditAt::Checkpoint) => {
+                    self.plan.moves_at(t, point)
+                }
+                _ => false,
+            },
+            PlanRole::NestedSeed { level } => {
+                point == ExchangePoint::Seed { level } && self.plan.moves_at(t, ExchangePoint::Prime)
+            }
             PlanRole::FluxContribution => matches!(point, ExchangePoint::Fine { point: FinePoint::Stage(_), .. }),
             PlanRole::EmfContribution => matches!(point, ExchangePoint::Fine { point: FinePoint::PostTail, .. }),
             PlanRole::InterfaceFace => matches!(
@@ -143,6 +173,7 @@ impl<'p, const D: usize> PlanExchange<'p, D> {
     fn troubled_point(&self) -> ExchangePoint {
         match self.role {
             PlanRole::Fine => ExchangePoint::Fine { substep: 0, point: FinePoint::Troubled(0) },
+            PlanRole::Nested { level } => ExchangePoint::Nested { level, path: 0, point: FinePoint::Troubled(0) },
             _ => ExchangePoint::Troubled(0),
         }
     }

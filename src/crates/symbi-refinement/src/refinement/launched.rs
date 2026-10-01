@@ -71,6 +71,28 @@ pub struct RefinedPlans<'p, const D: usize> {
     /// stages, gathered at the last root stage point: two instances of one face-stencil plan,
     /// present on every magnetized refined run
     pub stencil: Option<(PlanExchange<'p, D>, PlanExchange<'p, D>)>,
+    /// the plans of every nested level, the level `l` at `l - 2`: absent on a run of one
+    /// refined level
+    pub nested: Vec<NestedPlans<'p, D>>,
+}
+
+/// the plans of one nested refined level (two or deeper): its patch faces lie off every cut,
+/// so its register corrections stay on the tile holding both sides
+pub struct NestedPlans<'p, const D: usize> {
+    /// the level's state at its own points, after the priming, after the restriction of the
+    /// level below it, and at the rollback
+    pub state: PlanExchange<'p, D>,
+    /// the parent level's conserved halos at the level's seed
+    pub seed: PlanExchange<'p, D>,
+}
+
+/// the tiles of one nested level this worker holds, parallel over the held root tiles
+pub struct NestedHeld {
+    /// the level's tile under each held root tile, when the level reaches it
+    pub ids: Vec<Option<TileId>>,
+    pub n: usize,
+    /// the device of every tile of the level's plan, by tile id
+    pub devices: Vec<i32>,
 }
 
 /// the tiles this worker holds: parallel over the held root tiles
@@ -84,6 +106,23 @@ pub struct Held<'a> {
     pub root_devices: &'a [i32],
     /// the device of every fine tile of the plan, by fine tile id
     pub fine_devices: &'a [i32],
+    /// the tiles of every nested level, the level `l` at `l - 2`
+    pub nested: &'a [NestedHeld],
+}
+
+impl Held<'_> {
+    /// the tile ids of refined level `level >= 1`, parallel over the held root tiles
+    fn level_ids(&self, level: usize) -> &[Option<TileId>] {
+        if level == 1 { self.fine_ids } else { &self.nested[level - 2].ids }
+    }
+
+    fn level_tiles(&self, level: usize) -> usize {
+        if level == 1 { self.n_fine } else { self.nested[level - 2].n }
+    }
+
+    fn level_devices(&self, level: usize) -> &[i32] {
+        if level == 1 { self.fine_devices } else { &self.nested[level - 2].devices }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -190,31 +229,49 @@ where
     if let Some((old, new)) = plans.stencil.as_ref() {
         assert_eq!((old.role(), new.role()), (PlanRole::FaceStencil, PlanRole::FaceStencil));
     }
+    for (i, nested) in plans.nested.iter().enumerate() {
+        let level = (i + 2) as u8;
+        assert_eq!((nested.state.role(), nested.seed.role()), (PlanRole::Nested { level }, PlanRole::NestedSeed { level }));
+    }
+    assert_eq!(held.nested.len(), plans.nested.len(), "one held level per nested plan");
+    // the levels of the session: the root, the fine level, and every nested one
+    let depth = 2 + plans.nested.len();
     let base = &cfg.base;
     let deadline = base.deadline;
     let stages = base.timestepping.stages();
     let nstages = stages.len();
     let table = plans.root.table();
-    if table.stages() as usize != nstages || table.substeps() as usize != RATIO || table.fine_stages() as usize != nstages
+    if table.stages() as usize != nstages
+        || table.substeps() as usize != RATIO
+        || table.fine_stages() as usize != nstages
+        || table.depth() as usize != depth
     {
         return Err(fail(
             fabric,
             WorkerError::Refused(format!(
-                "the session's phase table holds {} root stages, {} substeps of {} stages; this worker \
-                 runs {nstages} stages with {RATIO} substeps",
+                "the session's phase table holds {} root stages, {} substeps of {} stages over {} levels; \
+                 this worker runs {nstages} stages with {RATIO} substeps over {depth} levels",
                 table.stages(),
                 table.substeps(),
-                table.fine_stages()
+                table.fine_stages(),
+                table.depth()
             )),
         ));
     }
     for h in tiles.iter() {
-        if h.levels.len() > 2 {
+        if h.levels.len() > depth {
             return Err(fail(
                 fabric,
-                WorkerError::Refused("a hierarchy deeper than one fine level is outside the launched refinement".into()),
+                WorkerError::Refused(format!(
+                    "a hierarchy of {} levels in a session of {depth} levels is outside the launched refinement",
+                    h.levels.len()
+                )),
             ));
         }
+    }
+    // the finest-level physics belongs to the session's finest level, whichever levels a tile holds
+    for h in tiles.iter_mut() {
+        h.set_run_levels(depth);
     }
     let root_dev = |k: usize| held.root_devices[held.root_ids[k].0 as usize];
     let fine_dev = |k: usize| held.fine_devices[held.fine_ids[k].expect("a refined tile").0 as usize];
@@ -235,6 +292,15 @@ where
         }
         refuse_transported_registers(tiles).map_err(|e| fail(fabric, e))?;
         let magnetized = tiles.iter().any(|h| h.levels[0].state.fields.mhd.is_some());
+        if magnetized && depth > 2 {
+            return Err(fail(
+                fabric,
+                WorkerError::Refused(format!(
+                    "a magnetized run of {depth} refined levels is outside the launched refinement: a nested \
+                     level's face prolongation needs its parent's face stencil across the cuts"
+                )),
+            ));
+        }
         if magnetized
             && (plans.stencil.is_none()
                 || refined.iter().any(|&k| tiles[k].face_stencil().is_none())
@@ -297,6 +363,19 @@ where
             let mut lists: Vec<Vec<&Field<f64, D, Mem>>> = (0..held.n_fine).map(|_| Vec::new()).collect();
             for &k in &refined {
                 lists[held.fine_ids[k].unwrap().0 as usize] = plan_fields(&tiles[k].levels[1].state);
+            }
+            lists
+        }};
+    }
+    // the state or the conserved fields of refined level `level`, by that level's tile id
+    macro_rules! level_fields {
+        ($level:expr, $of:ident) => {{
+            let level: usize = $level;
+            let mut lists: Vec<Vec<&Field<f64, D, Mem>>> = (0..held.level_tiles(level)).map(|_| Vec::new()).collect();
+            for (k, h) in tiles.iter().enumerate() {
+                if let Some(id) = held.level_ids(level)[k] {
+                    lists[id.0 as usize] = $of(&h.levels[level].state);
+                }
             }
             lists
         }};
@@ -457,10 +536,15 @@ where
     // the shared faces of both levels in one audit phase
     macro_rules! audit_levels {
         ($point:expr, $step:expr, $attempt:expr) => {{
-            if plans.root.has_audits() || plans.fine.has_audits() {
+            if plans.root.has_audits() || plans.fine.has_audits() || plans.nested.iter().any(|p| p.state.has_audits()) {
                 let root_lists = root_fields!();
                 let fine_lists = fine_fields!();
-                let cost = audit_plans(&[(&plans.root, &root_lists[..]), (&plans.fine, &fine_lists[..])], fabric, $point, $step, $attempt, deadline)
+                let nested_lists: Vec<_> = (2..depth).map(|level| level_fields!(level, plan_fields)).collect();
+                let mut audits = vec![(&plans.root, &root_lists[..]), (&plans.fine, &fine_lists[..])];
+                for (i, nested) in plans.nested.iter().enumerate() {
+                    audits.push((&nested.state, &nested_lists[i][..]));
+                }
+                let cost = audit_plans(&audits, fabric, $point, $step, $attempt, deadline)
                     .map_err(|e| match e {
                         AuditError::Fabric(e) => fail(fabric, WorkerError::Fabric(e)),
                         AuditError::Mismatch(m) => fail(fabric, WorkerError::Interface(m)),
@@ -530,8 +614,28 @@ where
             }
         } else {
             for &k in &refined {
-                with_device(fine_dev(k), || tiles[k].seed_fine_from_coarse())
+                with_device(fine_dev(k), || tiles[k].seed_level_from_parent(1))
                     .map_err(|e| fail(fabric, WorkerError::Numerics(format!("fine seed: {e:?}"))))?;
+            }
+            // each nested level seeds from its parent once the parent's conserved halos crossed
+            // the parent's cuts
+            for level in 2..depth {
+                let parent = level_fields!(level - 1, plan_cons_fields);
+                let part = PlanPart {
+                    plan: &plans.nested[level - 2].seed,
+                    fields: &parent,
+                    devices: held.level_devices(level - 1),
+                    fault: None,
+                    dst_fields: None,
+                };
+                exchange_point_plans(&[part], transport, fabric, ExchangePoint::Seed { level: level as u8 }, 0, 0, deadline, &mut timing.exchange)
+                    .map_err(|e| fail(fabric, e.into()))?;
+                for (k, h) in tiles.iter().enumerate() {
+                    if let Some(id) = held.level_ids(level)[k] {
+                        with_device(held.level_devices(level)[id.0 as usize], || h.seed_level_from_parent(level))
+                            .map_err(|e| fail(fabric, WorkerError::Numerics(format!("level {level} seed: {e:?}"))))?;
+                    }
+                }
             }
             for h in tiles.iter_mut() {
                 h.prime();
@@ -541,7 +645,25 @@ where
         // level into each tile's covered cells and faces after the prime exchange, and the first
         // stage reads those cells across the cuts (an edge EMF differences the faces there). a
         // resumed run exchanges its loaded root here as well, so every worker walks one table
-        root_point!(ExchangePoint::Primed, 0, 0);
+        {
+            let prims = root_fields!();
+            let fine = fine_fields!();
+            let nested: Vec<_> = (2..depth).map(|level| level_fields!(level, plan_fields)).collect();
+            let mut parts = vec![
+                PlanPart { plan: &plans.root, fields: &prims, devices: held.root_devices, fault: None, dst_fields: None },
+                PlanPart { plan: &plans.fine, fields: &fine, devices: held.fine_devices, fault: None, dst_fields: None },
+            ];
+            for (i, level) in plans.nested.iter().enumerate() {
+                parts.push(PlanPart { plan: &level.state, fields: &nested[i], devices: held.level_devices(i + 2), fault: None, dst_fields: None });
+            }
+            exchange_point_plans(&parts, transport, fabric, ExchangePoint::Primed, 0, 0, deadline, &mut timing.exchange)
+                .map_err(|e| fail(fabric, e.into()))?;
+            for (k, h) in tiles.iter().enumerate() {
+                for level in &h.levels {
+                    with_device(root_dev(k), || level.kernels.ghost_fill(&level.state));
+                }
+            }
+        }
         if cfg.perturb_fine_face_after == Some(0) {
             perturb_fine_face(tiles);
         }
@@ -733,7 +855,7 @@ where
                             }
                         }
                         let cut_trouble = fine_level_trouble(
-                            tiles, &refined, &plans.fine, &fine_ids, held.fine_devices, troubled,
+                            tiles, 1, &refined, &plans.fine, &fine_ids, held.fine_devices, troubled,
                             ExchangePoint::Fine { substep: sub as u8, point: FinePoint::Troubled(jj as u8) },
                             iter, attempt, transport, fabric, deadline, &mut timing, &mut report.fine_troubled_exchanges,
                         )?;
@@ -756,8 +878,39 @@ where
                     // the fine tail on the globally finest level, then its recovery and halo
                     // refresh at the post-tail point before any later reader
                     let mut retry = false;
-                    for &k in &refined {
-                        retry |= with_device(fine_dev(k), || tiles[k].level_step_tail(1, fine_dt, alpha));
+                    if depth > 2 {
+                        // the fine tail around the nested subcycle: the nested levels advance across
+                        // their own tiles, restrict into the fine level, and its halos carry the
+                        // restriction before the tail completes
+                        for &k in &refined {
+                            with_device(fine_dev(k), || tiles[k].level_tail_pre(1, fine_dt));
+                        }
+                        let nested = NestedStep { held, plans, transport, deadline, nstages, depth, audit_every: base.audit_every_point, step: iter, attempt };
+                        if nested_subcycle(tiles, &nested, fabric, &mut timing, &mut report, 2, sub as u8, fine_dt)? {
+                            rejected = true;
+                            break 'subcycle;
+                        }
+                        for (k, h) in tiles.iter_mut().enumerate() {
+                            if h.levels.len() > 2 {
+                                with_device(fine_dev(k), || h.level_restrict_reflux(1, alpha));
+                            }
+                        }
+                        {
+                            let fine = fine_fields!();
+                            let part = PlanPart { plan: &plans.fine, fields: &fine, devices: held.fine_devices, fault: None, dst_fields: None };
+                            exchange_point_plans(&[part], transport, fabric, ExchangePoint::NestedRestrict { level: 1, path: sub as u8 }, iter, attempt, deadline, &mut timing.exchange)
+                                .map_err(|e| fail(fabric, e.into()))?;
+                        }
+                        for &k in &refined {
+                            with_device(fine_dev(k), || {
+                                tiles[k].levels[1].kernels.ghost_fill(&tiles[k].levels[1].state);
+                                tiles[k].level_tail_post(1, fine_dt);
+                            });
+                        }
+                    } else {
+                        for &k in &refined {
+                            retry |= with_device(fine_dev(k), || tiles[k].level_step_tail(1, fine_dt, alpha));
+                        }
                     }
                     if vote_retry(fabric, retry, deadline, &mut timing)? {
                         rejected = true;
@@ -850,17 +1003,20 @@ where
             {
                 let prims = root_fields!();
                 let fine = fine_fields!();
-                let parts = [
+                let nested: Vec<_> = (2..depth).map(|level| level_fields!(level, plan_fields)).collect();
+                let mut parts = vec![
                     PlanPart { plan: &plans.root, fields: &prims, devices: held.root_devices, fault: None, dst_fields: None },
                     PlanPart { plan: &plans.fine, fields: &fine, devices: held.fine_devices, fault: None, dst_fields: None },
                 ];
+                for (i, level) in plans.nested.iter().enumerate() {
+                    parts.push(PlanPart { plan: &level.state, fields: &nested[i], devices: held.level_devices(i + 2), fault: None, dst_fields: None });
+                }
                 exchange_point_plans(&parts, transport, fabric, ExchangePoint::Rollback, iter, attempt, deadline, &mut timing.exchange)
                     .map_err(|e| fail(fabric, e.into()))?;
             }
             for (k, h) in tiles.iter().enumerate() {
-                with_device(root_dev(k), || h.levels[0].kernels.ghost_fill(&h.levels[0].state));
-                if h.levels.len() > 1 {
-                    with_device(root_dev(k), || h.levels[1].kernels.ghost_fill(&h.levels[1].state));
+                for level in &h.levels {
+                    with_device(root_dev(k), || level.kernels.ghost_fill(&level.state));
                 }
             }
             if base.audit_every_point {
@@ -919,6 +1075,150 @@ where
     report.troubled_cells = accepted.troubled_cells.total;
     report.frozen_cells = accepted.frozen_cells.total;
     Ok(report)
+}
+
+/// what a nested subcycle reads of its session: the held tiles, the plans, the transport and
+/// the scheme, for one attempt of one root step
+struct NestedStep<'a, 'p, const D: usize, T> {
+    held: &'a Held<'a>,
+    plans: &'a RefinedPlans<'p, D>,
+    transport: &'a T,
+    deadline: Duration,
+    nstages: usize,
+    depth: usize,
+    audit_every: bool,
+    step: u64,
+    attempt: u16,
+}
+
+/// the subcycle of nested level `level >= 2` across its tiles within one step `dt` of its parent's
+/// substep `parent_path`: each of the ratio substeps prolongs the coarse-fine ghosts at the
+/// substep's time fraction, runs the stages with the troubled marks crossing the cuts, the tail
+/// ahead of the level below, that level's subcycle with its restriction into this one and this
+/// level's exchange after it, and the tail after it, then the post-tail exchange. the patch faces
+/// of a nested level lie off every cut, so its register corrections stay on the tile holding both
+/// sides. returns whether some worker rejected the step
+#[allow(clippy::too_many_arguments)]
+fn nested_subcycle<R, const D: usize, const DOF: usize, M, E, S, Mem, K, T, L>(
+    tiles: &mut [Hierarchy<R, D, DOF, M, E, S, Mem, K>],
+    cx: &NestedStep<'_, '_, D, T>,
+    fabric: &mut Fabric<L>,
+    timing: &mut WorkerTiming,
+    report: &mut WorkerReport,
+    level: usize,
+    parent_path: u8,
+    dt: f64,
+) -> Result<bool, WorkerError>
+where
+    R: Regime<f64, D> + Copy,
+    M: Metric<f64, D> + Copy + Send + Sync,
+    E: symbi_hydro::eos::EosFor<f64, <R as Regime<f64, D>>::Energy> + Copy + Send + Sync,
+    S: ExecutionSpace,
+    Mem: MemorySpace + Sync,
+    K: KernelSet<D, DOF, Mem, f64>,
+    T: HaloTransport,
+    L: Link,
+{
+    let (step, attempt, deadline) = (cx.step, cx.attempt, cx.deadline);
+    let plan = &cx.plans.nested[level - 2].state;
+    let devices = cx.held.level_devices(level);
+    let ids_by_root = cx.held.level_ids(level);
+    let mine: Vec<usize> = (0..tiles.len()).filter(|&k| ids_by_root[k].is_some()).collect();
+    let ids: Vec<TileId> = mine.iter().map(|&k| ids_by_root[k].expect("a tile of the level")).collect();
+    let dev = |r: usize| devices[ids[r].0 as usize];
+    let level_dt = dt / RATIO as f64;
+    // the level's state at one of its points, then its physical ghosts
+    let exchange = |tiles: &[Hierarchy<R, D, DOF, M, E, S, Mem, K>], fabric: &mut Fabric<L>, timing: &mut WorkerTiming, point: ExchangePoint| {
+        let mut lists: Vec<Vec<&Field<f64, D, Mem>>> = (0..plan.plan().n_tiles()).map(|_| Vec::new()).collect();
+        for (r, &k) in mine.iter().enumerate() {
+            lists[ids[r].0 as usize] = plan_fields(&tiles[k].levels[level].state);
+        }
+        let part = PlanPart { plan, fields: &lists, devices, fault: None, dst_fields: None };
+        exchange_point_plans(&[part], cx.transport, fabric, point, step, attempt, deadline, &mut timing.exchange)
+            .map_err(|e| fail(fabric, e.into()))?;
+        for (r, &k) in mine.iter().enumerate() {
+            let l = &tiles[k].levels[level];
+            with_device(dev(r), || l.kernels.ghost_fill(&l.state));
+        }
+        Ok::<(), WorkerError>(())
+    };
+    let audit = |tiles: &[Hierarchy<R, D, DOF, M, E, S, Mem, K>], fabric: &mut Fabric<L>, report: &mut WorkerReport, point: ExchangePoint| {
+        if !(cx.audit_every && plan.has_audits()) {
+            return Ok::<(), WorkerError>(());
+        }
+        let mut lists: Vec<Vec<&Field<f64, D, Mem>>> = (0..plan.plan().n_tiles()).map(|_| Vec::new()).collect();
+        for (r, &k) in mine.iter().enumerate() {
+            lists[ids[r].0 as usize] = plan_fields(&tiles[k].levels[level].state);
+        }
+        let cost = plan.audit_at(&lists, fabric, point, step, attempt, deadline).map_err(|e| match e {
+            AuditError::Fabric(e) => fail(fabric, WorkerError::Fabric(e)),
+            AuditError::Mismatch(m) => fail(fabric, WorkerError::Interface(m)),
+        })?;
+        report.audits += 1;
+        report.audit_cost.faces += cost.faces;
+        report.audit_cost.wire_bytes += cost.wire_bytes;
+        report.audit_cost.elapsed += cost.elapsed;
+        Ok(())
+    };
+    for sub in 0..RATIO {
+        let path = (parent_path as usize * RATIO + sub) as u8;
+        let alpha = sub as f64 / RATIO as f64;
+        let at = |point| ExchangePoint::Nested { level: level as u8, path, point };
+        for (r, &k) in mine.iter().enumerate() {
+            with_device(dev(r), || {
+                tiles[k].prolong_cf(level, alpha);
+                tiles[k].levels[level].kernels.ghost_fill(&tiles[k].levels[level].state);
+            });
+        }
+        exchange(tiles, fabric, timing, at(FinePoint::Prolong))?;
+        for (r, &k) in mine.iter().enumerate() {
+            with_device(dev(r), || tiles[k].level_step_begin(level, level_dt));
+        }
+        for jj in 0..cx.nstages {
+            let marks: Vec<StageMark> = mine
+                .iter()
+                .enumerate()
+                .map(|(r, &k)| with_device(dev(r), || tiles[k].level_stage_through_mark(level, jj, level_dt, alpha)))
+                .collect();
+            let troubled: u64 = marks.iter().map(|m| m.troubled).sum();
+            let cut_trouble = fine_level_trouble(
+                tiles, level, &mine, plan, &ids, devices, troubled, at(FinePoint::Troubled(jj as u8)),
+                step, attempt, cx.transport, fabric, deadline, timing, &mut report.fine_troubled_exchanges,
+            )?;
+            let mut retry = false;
+            for (r, &k) in mine.iter().enumerate() {
+                report.fine_neighbor_corrections += u64::from(cut_trouble[r] && marks[r].troubled == 0);
+                retry |= with_device(dev(r), || {
+                    tiles[k].level_stage_from_correction(level, jj, level_dt, alpha, cut_trouble[r], marks[r].receipt_start)
+                });
+            }
+            if vote_retry(fabric, retry, deadline, timing)? {
+                return Ok(true);
+            }
+            exchange(tiles, fabric, timing, at(FinePoint::Stage(jj as u8)))?;
+            audit(tiles, fabric, report, at(FinePoint::Audit(jj as u8)))?;
+        }
+        for (r, &k) in mine.iter().enumerate() {
+            with_device(dev(r), || tiles[k].level_tail_pre(level, level_dt));
+        }
+        if level + 1 < cx.depth {
+            if nested_subcycle(tiles, cx, fabric, timing, report, level + 1, path, level_dt)? {
+                return Ok(true);
+            }
+            for (r, &k) in mine.iter().enumerate() {
+                if tiles[k].levels.len() > level + 1 {
+                    with_device(dev(r), || tiles[k].level_restrict_reflux(level, alpha));
+                }
+            }
+            exchange(tiles, fabric, timing, ExchangePoint::NestedRestrict { level: level as u8, path })?;
+        }
+        for (r, &k) in mine.iter().enumerate() {
+            with_device(dev(r), || tiles[k].level_tail_post(level, level_dt));
+        }
+        exchange(tiles, fabric, timing, at(FinePoint::PostTail))?;
+        audit(tiles, fabric, report, at(FinePoint::AuditTail))?;
+    }
+    Ok(false)
 }
 
 /// the collective retry vote of one stage: true when any worker rejects
@@ -996,6 +1296,7 @@ where
 #[allow(clippy::too_many_arguments)]
 fn fine_level_trouble<R, const D: usize, const DOF: usize, M, E, S, Mem, K, T, L>(
     tiles: &[Hierarchy<R, D, DOF, M, E, S, Mem, K>],
+    level: usize,
     refined: &[usize],
     plan: &PlanExchange<'_, D>,
     fine_ids: &[TileId],
@@ -1032,13 +1333,13 @@ where
     *exchanges += 1;
     let mut lists: Vec<Vec<&Field<f64, D, Mem>>> = (0..plan.plan().n_tiles()).map(|_| Vec::new()).collect();
     for (r, &k) in refined.iter().enumerate() {
-        lists[fine_ids[r].0 as usize] = plan_fields(&tiles[k].levels[1].state);
+        lists[fine_ids[r].0 as usize] = plan_fields(&tiles[k].levels[level].state);
     }
     let part = PlanPart { plan, fields: &lists, devices, fault: None, dst_fields: None };
     exchange_point_plans(&[part], transport, fabric, point, step, attempt, deadline, &mut timing.exchange)
         .map_err(|e| fail(fabric, e.into()))?;
     for (r, &k) in refined.iter().enumerate() {
-        let l = &tiles[k].levels[1];
+        let l = &tiles[k].levels[level];
         cut_trouble[r] = with_device(devices[fine_ids[r].0 as usize], || {
             plan.trouble_regions(fine_ids[r]).iter().any(|region| l.kernels.fofc_flags_in(&l.state, region) > 0)
         });
@@ -1077,6 +1378,8 @@ where
 pub struct RefinedGrids<const D: usize> {
     pub root: GlobalGrid<D>,
     pub fine: GlobalGrid<D>,
+    /// the grid of every nested level, the level `l` at `l - 2`
+    pub nested: Vec<GlobalGrid<D>>,
 }
 
 impl<const D: usize> RefinedGrids<D> {
@@ -1093,7 +1396,29 @@ impl<const D: usize> RefinedGrids<D> {
                 dx: std::array::from_fn(|a| dx[a] / RATIO as f64),
                 maps: None,
             },
+            nested: Vec::new(),
         }
+    }
+
+    /// these grids with nested level `fine.len() + 2` over `cells` of that level, its first cell
+    /// at whole-level index `interior_lo`
+    pub fn with_nested(mut self, cells: [usize; D], interior_lo: [isize; D]) -> Self {
+        let parent = self.nested.last().unwrap_or(&self.fine);
+        let level = GlobalGrid {
+            cells,
+            interior_lo,
+            ng: parent.ng,
+            x_lo: parent.x_lo,
+            dx: std::array::from_fn(|a| parent.dx[a] / RATIO as f64),
+            maps: None,
+        };
+        self.nested.push(level);
+        self
+    }
+
+    /// the grid of refined level `level >= 1`
+    pub fn level(&self, level: usize) -> &GlobalGrid<D> {
+        if level == 1 { &self.fine } else { &self.nested[level - 2] }
     }
 }
 
@@ -1124,17 +1449,31 @@ where
     let checkpoint_err = |e: String| WorkerError::Checkpoint(e);
     // the shared faces of both levels at the checkpoint epoch of the last accepted step; the
     // primed state was certified by the prime audit after initialization
-    if (plans.root.has_audits() || plans.fine.has_audits()) && accepted > 0 {
+    let depth = 2 + plans.nested.len();
+    let audited = plans.root.has_audits() || plans.fine.has_audits() || plans.nested.iter().any(|p| p.state.has_audits());
+    if audited && accepted > 0 {
         let mut root_lists: Vec<Vec<&Field<f64, D, Mem>>> = (0..held.n_root).map(|_| Vec::new()).collect();
-        let mut fine_lists: Vec<Vec<&Field<f64, D, Mem>>> = (0..held.n_fine).map(|_| Vec::new()).collect();
         for (k, h) in tiles.iter().enumerate() {
             root_lists[held.root_ids[k].0 as usize] = plan_fields(&h.levels[0].state);
-            if let Some(id) = held.fine_ids[k] {
-                fine_lists[id.0 as usize] = plan_fields(&h.levels[1].state);
-            }
+        }
+        // every refined level's lists, by that level's tile id
+        let level_lists: Vec<Vec<Vec<&Field<f64, D, Mem>>>> = (1..depth)
+            .map(|level| {
+                let mut lists: Vec<Vec<&Field<f64, D, Mem>>> = (0..held.level_tiles(level)).map(|_| Vec::new()).collect();
+                for (k, h) in tiles.iter().enumerate() {
+                    if let Some(id) = held.level_ids(level)[k] {
+                        lists[id.0 as usize] = plan_fields(&h.levels[level].state);
+                    }
+                }
+                lists
+            })
+            .collect();
+        let mut audits: Vec<(&PlanExchange<'_, D>, &[Vec<&Field<f64, D, Mem>>])> = vec![(&plans.root, &root_lists[..]), (&plans.fine, &level_lists[0][..])];
+        for (i, nested) in plans.nested.iter().enumerate() {
+            audits.push((&nested.state, &level_lists[i + 1][..]));
         }
         audit_plans(
-            &[(&plans.root, &root_lists[..]), (&plans.fine, &fine_lists[..])],
+            &audits,
             fabric,
             ExchangePoint::Audit(AuditAt::Checkpoint),
             accepted - 1,
@@ -1146,43 +1485,47 @@ where
             AuditError::Mismatch(m) => WorkerError::Interface(m),
         })?;
     }
-    let (fine_time, fine_dt, fine_iteration) = agree_fine_clock(tiles, fabric, req.deadline)?;
     let root_tiles: Vec<TileView<'_, D, DOF, Mem>> = tiles
         .iter()
         .zip(held.root_ids)
         .map(|(h, id)| TileView { state: &h.levels[0].state, offset: plans.root.plan().tiles[id.0 as usize].offset })
         .collect();
-    let mut fine_ids = Vec::new();
-    let fine_tiles: Vec<TileView<'_, D, DOF, Mem>> = tiles
-        .iter()
-        .zip(held.fine_ids)
-        .filter_map(|(h, id)| id.map(|id| (h, id)))
-        .map(|(h, id)| {
-            fine_ids.push(id);
-            let layout = &plans.fine.plan().tiles[id.0 as usize];
-            TileView {
-                state: &h.levels[1].state,
-                offset: std::array::from_fn(|a| grids.fine.interior_lo[a] + layout.offset[a]),
-            }
-        })
-        .collect();
-    let levels = [
-        LevelTiles { tiles: root_tiles, grid: grids.root.clone(), header: None },
-        LevelTiles {
-            tiles: fine_tiles,
-            grid: grids.fine.clone(),
-            header: Some(LevelHeader {
-                template: &tiles[0].levels[0].state,
-                time: fine_time,
-                dt: fine_dt,
-                iteration: fine_iteration,
-            }),
-        },
-    ];
-    let level_plans = [
-        LevelPlan { plan: plans.root.plan(), placement: plans.root.placement(), origin: [0; D], tile_ids: held.root_ids },
-        LevelPlan { plan: plans.fine.plan(), placement: plans.fine.placement(), origin: grids.fine.interior_lo, tile_ids: &fine_ids },
-    ];
+    let mut levels = vec![LevelTiles { tiles: root_tiles, grid: grids.root.clone(), header: None }];
+    let mut ids_by_level: Vec<Vec<TileId>> = Vec::with_capacity(depth - 1);
+    for level in 1..depth {
+        // every refined level's clock, agreed from the workers holding its tiles
+        let (time, dt, iteration) = agree_fine_clock(tiles, level, fabric, req.deadline)?;
+        let plan = if level == 1 { &plans.fine } else { &plans.nested[level - 2].state };
+        let grid = grids.level(level);
+        let mut ids = Vec::new();
+        let level_tiles: Vec<TileView<'_, D, DOF, Mem>> = tiles
+            .iter()
+            .zip(held.level_ids(level))
+            .filter_map(|(h, id)| id.map(|id| (h, id)))
+            .map(|(h, id)| {
+                ids.push(id);
+                let layout = &plan.plan().tiles[id.0 as usize];
+                TileView { state: &h.levels[level].state, offset: std::array::from_fn(|a| grid.interior_lo[a] + layout.offset[a]) }
+            })
+            .collect();
+        ids_by_level.push(ids);
+        levels.push(LevelTiles {
+            tiles: level_tiles,
+            grid: grid.clone(),
+            header: Some(LevelHeader { template: &tiles[0].levels[0].state, time, dt, iteration }),
+        });
+    }
+    let mut level_plans =
+        vec![LevelPlan { plan: plans.root.plan(), placement: plans.root.placement(), origin: [0; D], tile_ids: held.root_ids }];
+    for level in 1..depth {
+        let plan = if level == 1 { &plans.fine } else { &plans.nested[level - 2].state };
+        level_plans.push(LevelPlan {
+            plan: plan.plan(),
+            placement: plan.placement(),
+            origin: grids.level(level).interior_lo,
+            tile_ids: &ids_by_level[level - 1],
+        });
+    }
     distributed_checkpoint_levels::<R, D, DOF, Mem, L>(fabric, &level_plans, identity, &levels, req)
         .map_err(|e| checkpoint_err(format!("{e}")))
 }
@@ -1206,19 +1549,24 @@ where
     K: KernelSet<D, DOF, Mem, f64>,
 {
     let err = |e: symbi_sim::checkpoint::IoError| WorkerError::Checkpoint(format!("{path}: {e}"));
+    let depth = 2 + plans.nested.len();
     let stored = checkpoint_level_count(path).map_err(err)?;
-    if stored != 2 {
+    if stored != depth {
         return Err(WorkerError::Refused(format!(
-            "{path} carries {stored} level(s); a refined session restarts from a checkpoint of its two levels"
+            "{path} carries {stored} level(s); a refined session restarts from a checkpoint of its {depth} levels"
         )));
     }
     for (k, h) in tiles.iter_mut().enumerate() {
         let root_offset = plans.root.plan().tiles[held.root_ids[k].0 as usize].offset;
         load_partitioned_level(&mut h.levels[0].state, path, 0, root_offset, &grids.root).map_err(err)?;
-        if let Some(id) = held.fine_ids[k] {
-            let layout = &plans.fine.plan().tiles[id.0 as usize];
-            let offset: [isize; D] = std::array::from_fn(|a| grids.fine.interior_lo[a] + layout.offset[a]);
-            load_partitioned_level(&mut h.levels[1].state, path, 1, offset, &grids.fine).map_err(err)?;
+        for level in 1..depth {
+            if let Some(id) = held.level_ids(level)[k] {
+                let plan = if level == 1 { &plans.fine } else { &plans.nested[level - 2].state };
+                let grid = grids.level(level);
+                let layout = &plan.plan().tiles[id.0 as usize];
+                let offset: [isize; D] = std::array::from_fn(|a| grid.interior_lo[a] + layout.offset[a]);
+                load_partitioned_level(&mut h.levels[level].state, path, level, offset, grid).map_err(err)?;
+            }
         }
     }
     Ok(())
@@ -1319,6 +1667,7 @@ pub fn receiving_faces_of_tile<const D: usize>(
 /// the checkpoint on any disagreement, or when no worker holds a fine tile
 fn agree_fine_clock<R, const D: usize, const DOF: usize, M, E, S, Mem, K, L>(
     tiles: &[Hierarchy<R, D, DOF, M, E, S, Mem, K>],
+    level: usize,
     fabric: &mut Fabric<L>,
     deadline: Duration,
 ) -> Result<(f64, f64, u64), WorkerError>
@@ -1333,9 +1682,9 @@ where
 {
     let clocks: Vec<[u64; 3]> = tiles
         .iter()
-        .filter(|h| h.levels.len() > 1)
+        .filter(|h| h.levels.len() > level)
         .map(|h| {
-            let s = &h.levels[1].state;
+            let s = &h.levels[level].state;
             [s.time.to_bits(), s.dt.to_bits(), s.iteration]
         })
         .collect();
@@ -1343,7 +1692,7 @@ where
     let locally_agreed = clocks.iter().all(|c| Some(*c) == mine);
     let holders = fabric.collective(OpKind::Any, u64::from(mine.is_some()), deadline)?;
     if holders == 0 {
-        return Err(WorkerError::Checkpoint("no worker holds a tile of the fine level; the checkpoint has no fine clock".into()));
+        return Err(WorkerError::Checkpoint(format!("no worker holds a tile of level {level}; the checkpoint has no clock for it")));
     }
     let mut agreed = [0u64; 3];
     for (w, word) in agreed.iter_mut().enumerate() {
@@ -1358,7 +1707,7 @@ where
     let differs = !locally_agreed || mine.is_some_and(|c| c != agreed);
     if fabric.collective(OpKind::Any, u64::from(differs), deadline)? != 0 {
         return Err(WorkerError::Checkpoint(format!(
-            "the fine level's clock differs across its tiles (this worker's tiles agree: {locally_agreed}; \
+            "the clock of level {level} differs across its tiles (this worker's tiles agree: {locally_agreed}; \
              time, dt, iteration here {:?}, agreed {:?}); no checkpoint is written",
             mine.map(|c| (f64::from_bits(c[0]), f64::from_bits(c[1]), c[2])),
             (f64::from_bits(agreed[0]), f64::from_bits(agreed[1]), agreed[2]),

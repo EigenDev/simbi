@@ -550,7 +550,7 @@ fn run_worker(arm: &Arm, me: WorkerId, out: PathBuf) -> Result<(), WorkerError> 
     // the block credit the handshake agreed, which a checkpoint's blocks are sent under
     let mut fabric = fabric_for(&all, link, session).with_block_credit(4096);
     let stencil = stencil_old.zip(stencil_new);
-    let plans = RefinedPlans { root, seed, fine, flux, emf, faces, corrected, stencil };
+    let plans = RefinedPlans { root, seed, fine, flux, emf, faces, corrected, stencil, nested: Vec::new() };
     let cfg = RefinedConfig {
         base: WorkerConfig {
             regime: RegimeKind::of::<f64, 2, NewtonianMhd>(),
@@ -581,6 +581,7 @@ fn run_worker(arm: &Arm, me: WorkerId, out: PathBuf) -> Result<(), WorkerError> 
         n_fine,
         root_devices: &root_devices,
         fine_devices: &fine_devices,
+        nested: &[],
     };
     let grids = RefinedGrids::of([N, N], [0.0, 0.0], [DX; 2], arm.ng, arm.patch);
     let mut cfg = cfg;

@@ -365,6 +365,9 @@ where
     /// a pending forced rejection at (root step, fine substep, fine stage), consumed when it
     /// fires
     forced_fine_rejection: Option<(u64, u8, usize)>,
+    /// a forced rejection on any refined level: (root step, level, substep of the level within
+    /// the root step, stage)
+    forced_level_rejection: Option<(u64, usize, u64, usize)>,
     /// the root's staggered faces at the root attempt's entry, the old time level the parent
     /// face stencil of a neighbor's fine level gathers; held on every tile of a run whose
     /// fine levels read that stencil
@@ -1156,6 +1159,7 @@ where
             equilibrium_mask_radius: None,
             prev_dt_cfl: 0.0,
             forced_fine_rejection: None,
+            forced_level_rejection: None,
             face_entry: None,
             priming: false,
             balance_aware_transfer: None,
@@ -1631,6 +1635,7 @@ where
             equilibrium_mask_radius: None,
             prev_dt_cfl: 0.0,
             forced_fine_rejection: None,
+            forced_level_rejection: None,
             face_entry: None,
             priming: false,
             balance_aware_transfer: None,
@@ -2265,9 +2270,17 @@ where
         self.forced_fine_rejection = Some((step, substep, stage));
     }
 
+    /// reject the stage `stage` of the substep `substep` of refined level `level` within root step
+    /// `step` once, the substeps of the level numbered from zero across the whole root step (a
+    /// level `l` takes `2^l` of them): the attempt that reaches it requests a retry as a failed
+    /// recovery would, and the retry runs clean. a test facility for the rollback of every driver
+    pub fn reject_level_once_at(&mut self, step: u64, level: usize, substep: u64, stage: usize) {
+        self.forced_level_rejection = Some((step, level, substep, stage));
+    }
+
     /// whether a forced fine rejection is still pending
     pub fn forced_fine_rejection_pending(&self) -> bool {
-        self.forced_fine_rejection.is_some()
+        self.forced_fine_rejection.is_some() || self.forced_level_rejection.is_some()
     }
 
     /// keep every finer level's conserved state at the root attempt's entry in a buffer of
@@ -3035,6 +3048,15 @@ where
             let here = (self.levels[0].state.iteration, substep, ii);
             if self.forced_fine_rejection == Some(here) {
                 self.forced_fine_rejection = None;
+                return true;
+            }
+        }
+        if let Some((step, at_level, substep, stage)) = self.forced_level_rejection {
+            // the level's substeps since the root step began: its clock counts every substep it took
+            let root = self.levels[0].state.iteration;
+            let taken = self.levels[level].state.iteration.wrapping_sub(root * (RATIO as u64).pow(level as u32));
+            if (step, at_level, substep, stage) == (root, level, taken, ii) {
+                self.forced_level_rejection = None;
                 return true;
             }
         }

@@ -541,7 +541,7 @@ fn run_worker(arm: &Arm, me: WorkerId, out: PathBuf) -> Result<(), WorkerError> 
     let (link, session) = connect(&r, max_payload.max(4096))?;
     // the block credit the handshake agreed, which a checkpoint's blocks are sent under
     let mut fabric = fabric_for(&all, link, session).with_block_credit(4096);
-    let plans = RefinedPlans { root, seed, fine, flux, emf: None, faces: None, corrected: None, stencil: None };
+    let plans = RefinedPlans { root, seed, fine, flux, emf: None, faces: None, corrected: None, stencil: None, nested: Vec::new() };
     let cfg = RefinedConfig {
         base: WorkerConfig {
             regime: RegimeKind::of::<f64, 2, Newtonian>(),
@@ -569,6 +569,7 @@ fn run_worker(arm: &Arm, me: WorkerId, out: PathBuf) -> Result<(), WorkerError> 
         n_fine,
         root_devices: &root_devices,
         fine_devices: &fine_devices,
+        nested: &[],
     };
     let grids = RefinedGrids::of([N, N], [0.0, 0.0], [DX; 2], arm.ng, arm.patch);
     let mut cfg = cfg;
@@ -1383,7 +1384,7 @@ fn a_fine_clock_disagreement_ends_the_run_before_publication() {
             assert!(o.records.is_empty(), "{tag}: worker {w} published its state");
         }
         assert!(
-            outcomes.iter().any(|o| o.stderr.contains("the fine level's clock differs")),
+            outcomes.iter().any(|o| o.stderr.contains("the clock of level 1 differs")),
             "{tag}: no worker named the fine clock:\n{}",
             outcomes.iter().map(|o| o.stderr.clone()).collect::<Vec<_>>().join("\n---\n")
         );

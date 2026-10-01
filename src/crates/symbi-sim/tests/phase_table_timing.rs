@@ -46,11 +46,18 @@ fn moving(point: ExchangePoint) -> Vec<(TransferId, WorkerId, WorkerId)> {
         | ExchangePoint::PostStep
         | ExchangePoint::Rollback
         | ExchangePoint::Restrict => vec![(t(0), A, B), (t(1), B, A), (t(2), B, C), (t(3), C, B)],
+        // the primed root and the primed fine level, before the prime audit
+        ExchangePoint::Primed => vec![(t(0), A, B), (t(1), B, A), (t(2), B, C), (t(3), C, B), (t(4), A, B), (t(5), B, A)],
         ExchangePoint::Troubled(_) => vec![(t(6), A, B), (t(7), B, A)],
         ExchangePoint::Fine { point: FinePoint::Prolong | FinePoint::Stage(_) | FinePoint::PostTail, .. } => {
             vec![(t(4), A, B), (t(5), B, A)]
         }
-        ExchangePoint::Audit(_) | ExchangePoint::Fine { .. } | ExchangePoint::CorrectedFaces => vec![],
+        ExchangePoint::Audit(_)
+        | ExchangePoint::Fine { .. }
+        | ExchangePoint::CorrectedFaces
+        | ExchangePoint::Nested { .. }
+        | ExchangePoint::NestedRestrict { .. }
+        | ExchangePoint::Seed { .. } => vec![],
     }
 }
 

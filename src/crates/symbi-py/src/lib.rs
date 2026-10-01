@@ -10421,7 +10421,10 @@ struct WorkerLaunch {
 /// node would, `face:WORKER:STEP` moves one of that worker's shared-face copies by a unit in
 /// the last place after that step so the next audit names it. `trouble:STEP:STAGE:I:J[:K]` names a global cell and no worker: whichever worker
 /// holds the cell raises its troubled flag at that stage, so the same value drives a run on
-/// any partition. unset, every worker runs clean.
+/// any partition. `reject_level:WORKER:STEP:LEVEL:SUBSTEP:STAGE` rejects a stage of a refined
+/// level on that worker's tiles holding the level, the substeps counted across the root step.
+/// `cap:STEP:BITS` caps the agreed timestep of that step at the f64 of those bits on every
+/// worker, the clean control of a rejection. unset, every worker runs clean.
 #[derive(Default)]
 struct LaunchFault {
     injection: symbi_sim::worker::Injection,
@@ -10429,6 +10432,8 @@ struct LaunchFault {
     /// after this step, this worker's opening copy of one shared face is moved by one unit in
     /// the last place: the next interface audit must name it
     perturb_face_after: Option<u64>,
+    /// a rejection of a refined level's stage on this worker's tiles: (step, level, substep, stage)
+    level_rejection: Option<(u64, usize, u64, usize)>,
 }
 
 impl LaunchFault {
@@ -10444,6 +10449,11 @@ impl LaunchFault {
                 .ok_or_else(|| format!("SIMBI_FABRIC_INJECT='{spec}': field {i} is not a number"))
         };
         let mut fault = Self::default();
+        if parts[0] == "cap" {
+            // cap:STEP:BITS, on every worker alike
+            fault.injection.cap_dt_at = Some((number(1)?, number(2)?));
+            return Ok(fault);
+        }
         if parts[0] == "trouble" {
             // trouble:STEP:STAGE:I:J[:K], the third cell index absent on a plane
             let k = if parts.len() > 5 { number(5)? as isize } else { 0 };
@@ -10456,12 +10466,15 @@ impl LaunchFault {
         }
         if number(1)? as usize != me {
             match parts[0] {
-                "reject" | "bad_cfl" | "exit" | "face" => return Ok(fault),
+                "reject" | "reject_level" | "bad_cfl" | "exit" | "face" => return Ok(fault),
                 other => return Err(format!("SIMBI_FABRIC_INJECT: unknown fault '{other}'")),
             }
         }
         match parts[0] {
             "reject" => fault.injection.reject_at = vec![(number(2)?, number(3)? as usize)],
+            "reject_level" => {
+                fault.level_rejection = Some((number(2)?, number(3)? as usize, number(4)?, number(5)? as usize))
+            }
             "bad_cfl" => fault.injection.invalid_cfl_at = Some(number(2)?),
             "exit" => fault.exit_after = Some(number(2)?),
             "face" => fault.perturb_face_after = Some(number(2)?),
@@ -10611,8 +10624,9 @@ fn validate_launch_scope(cfg: &Config) -> Result<(), String> {
 }
 
 /// the refined launch's gated scope: newtonian, relativistic or isothermal hydro or MHD on a 2D
-/// (2.5D for MHD) or 3D uniform cartesian grid with one refined patch of ratio two, open or periodic boundaries
-/// with the patch clear of a periodic face; pcm, plm or
+/// (2.5D for MHD) or 3D uniform cartesian grid, hydro with nested refined levels up to the depth
+/// the phase table's wire byte holds and MHD with one, every level of ratio two; open or periodic
+/// boundaries with the patch clear of a periodic face; pcm, plm or
 /// ppm with its flattening, a constant viscosity, a resistivity, user sources and gradient walls
 /// where the outer scope admits them for the regime. every other refined combination is named and
 /// refused.
@@ -10631,8 +10645,18 @@ fn validate_refined_launch_scope(cfg: &Config) -> Result<(), String> {
     if mapped {
         return refused("a non-uniform spacing");
     }
-    if cfg.refinement_regions.len() != 1 {
-        return refused(&format!("{} refined regions", cfg.refinement_regions.len()));
+    let depth = 1 + cfg.refinement_regions.len();
+    if cfg.refinement_regions.is_empty() {
+        return refused("no refined region");
+    }
+    if depth > 2 && matches!(cfg.regime.as_str(), "nmhd" | "imhd" | "rmhd") {
+        return refused(&format!("the {} regime with {depth} levels, the root included,", cfg.regime));
+    }
+    // the phase table of every level's subcycle fits the wire byte up to an implementation depth;
+    // a deeper run is refused here, before any session is built, never truncated
+    let stages = cfg.timestepping.stages().len() as u8;
+    if let Err(e) = symbi_sim::phase_table::PhaseTable::nested(stages, 2, depth as u8) {
+        return refused(&format!("{depth} levels, the root included ({e}),"));
     }
     if cfg.wb_reconstruction {
         return refused("a well-balanced reconstruction");
@@ -11004,8 +11028,8 @@ where
 {
     use symbi::sim::decomp::{FinePartition, LocalCopy, flatten, plan_cons_schema, plan_schema, unflatten};
     use symbi::sim::refinement::launched::{
-        Held, RefinedConfig, RefinedGrids, RefinedPlans, evolve_refined_worker, face_stencil_boxes_of_tile, load_refined_tiles,
-        refined_checkpoint,
+        Held, NestedHeld, NestedPlans, RefinedConfig, RefinedGrids, RefinedPlans, evolve_refined_worker, face_stencil_boxes_of_tile,
+        load_refined_tiles, refined_checkpoint,
     };
     use symbi_fabric::rendezvous::{Identity, Rendezvous, connect};
     use symbi_fabric::{Fnv, WorkerId};
@@ -11019,6 +11043,11 @@ where
 
     let RefinedLayout { n, partition, owner, placement, me, mine, patch } = layout;
     let (n, patch, me) = (*n, *patch, *me);
+    if let Some((step, level, substep, stage)) = fault.level_rejection {
+        for h in tiles.iter_mut().filter(|h| h.levels.len() > level) {
+            h.reject_level_once_at(step, level, substep, stage);
+        }
+    }
     let counts = partition.counts();
     let n_root = partition.n_tiles();
     let total: usize = n.iter().product();
@@ -11093,8 +11122,95 @@ where
     } else {
         None
     };
+    // the nested levels: each refines its parent level over its region, its tiles cut where the
+    // parent's cuts cross the region and owned by the worker owning the root tile beneath; every
+    // worker derives every level's tiles, owners and index frames from the partition alone
+    let regions = refinement_regions_nd::<D>(&cfg.refinement_regions)?;
+    let depth = 1 + regions.len();
+    let fine_frames: Vec<[isize; D]> = (0..n_fine).map(|t| fine_lo(TileId(t as u32))).collect();
+    let fine_roots: Vec<usize> =
+        (0..n_fine).map(|t| flatten(fine_partition.root_tile_of(unflatten(t, fine_counts)), counts)).collect();
+    // per nested level: its partition, each tile's index frame, its root tile, its grid origin
+    let mut nested_parts: Vec<FinePartition<D>> = Vec::new();
+    let mut nested_frames: Vec<Vec<[isize; D]>> = Vec::new();
+    let mut nested_roots: Vec<Vec<usize>> = Vec::new();
+    let mut nested_origins: Vec<[isize; D]> = Vec::new();
+    let mut parent_origin: [isize; D] = std::array::from_fn(|a| (2 * patch[a].0) as isize);
+    for level in 2..depth {
+        let (parent_part, parent_frames, parent_roots) = if level == 2 {
+            (&fine_partition.partition, &fine_frames, &fine_roots)
+        } else {
+            (&nested_parts[level - 3].partition, &nested_frames[level - 3], &nested_roots[level - 3])
+        };
+        let r = &regions[level - 1];
+        let scale = (1u64 << (level - 1)) as f64;
+        let cell = |x: f64, a: usize| ((x - cfg.x_lo[a]) / (cfg.dx[a] / scale)).round() as isize;
+        let mut rel = [(0usize, 0usize); D];
+        for a in 0..D {
+            let (lo, hi) = (cell(r.x_lo[a], a) - parent_origin[a], cell(r.x_hi[a], a) - parent_origin[a]);
+            if lo < 0 || hi <= lo {
+                return Err(format!("refinement region {} lies outside its parent level on axis {a}", level - 1));
+            }
+            rel[a] = (lo as usize, hi as usize);
+        }
+        let part = FinePartition::of(parent_part, rel, 2)?;
+        let level_counts = part.partition.counts();
+        let parent_counts = parent_part.counts();
+        let mut frames = Vec::with_capacity(part.partition.n_tiles());
+        let mut roots = Vec::with_capacity(part.partition.n_tiles());
+        for t in 0..part.partition.n_tiles() {
+            let parent_tc = part.root_tile_of(unflatten(t, level_counts));
+            let parent = flatten(parent_tc, parent_counts);
+            let ext = parent_part.tile_extents(parent_tc);
+            frames.push(std::array::from_fn(|a| 2 * (parent_frames[parent][a] + rel[a].0.saturating_sub(ext[a].0) as isize)));
+            roots.push(parent_roots[parent]);
+        }
+        let origin: [isize; D] = std::array::from_fn(|a| 2 * (parent_origin[a] + rel[a].0 as isize));
+        nested_parts.push(part);
+        nested_frames.push(frames);
+        nested_roots.push(roots);
+        nested_origins.push(origin);
+        parent_origin = origin;
+    }
+    let nested_placements: Vec<Placement> = nested_roots
+        .iter()
+        .map(|roots| Placement::with_idle_workers(launch.workers as u32, roots.iter().map(|&r| owner[r]).collect()))
+        .collect::<Result<_, _>>()?;
+    let nested_state_plans: Vec<ExchangePlan<D>> = (0..nested_parts.len())
+        .map(|i| {
+            let frames = &nested_frames[i];
+            ExchangePlan::compile_shifted(&nested_parts[i].partition, &open, &schema, ng + 1, &|t: TileId| frames[t.0 as usize])
+                .map_err(|e| e.to_string())
+        })
+        .collect::<Result<_, _>>()?;
+    let nested_seed_plans: Vec<ExchangePlan<D>> = (0..nested_parts.len())
+        .map(|i| {
+            let (parent_part, frames) =
+                if i == 0 { (&fine_partition.partition, &fine_frames) } else { (&nested_parts[i - 1].partition, &nested_frames[i - 1]) };
+            ExchangePlan::compile_shifted(parent_part, &open, &cons_schema, ng + 1, &|t: TileId| frames[t.0 as usize])
+                .map_err(|e| e.to_string())
+        })
+        .collect::<Result<_, _>>()?;
+    for (state, seed) in nested_state_plans.iter().zip(&nested_seed_plans) {
+        digests.extend([state.digest, seed.digest]);
+    }
+    // each held root tile's tile on every nested level, when the level reaches it
+    let nested_ids: Vec<Vec<Option<TileId>>> = (0..nested_parts.len())
+        .map(|i| {
+            mine.iter()
+                .map(|&f| (0..nested_roots[i].len()).find(|&t| nested_roots[i][t] == f).map(|t| TileId(t as u32)))
+                .collect()
+        })
+        .collect();
+    for (k, h) in tiles.iter().enumerate() {
+        for (i, ids) in nested_ids.iter().enumerate() {
+            if (h.levels.len() > i + 2) != ids[k].is_some() {
+                return Err(format!("tile {}: the hierarchy and the partition of level {} disagree on its tile", mine[k], i + 2));
+            }
+        }
+    }
     let stages = cfg.timestepping.stages().len() as u8;
-    let table = PhaseTable::refined(stages, 2, stages).map_err(|e| e.to_string())?;
+    let table = PhaseTable::nested(stages, 2, depth as u8).map_err(|e| format!("{depth} refinement levels: {e}"))?;
     // each plan takes the fabric ids after the last one's
     fn placed<'a, const D2: usize>(
         plan: &'a ExchangePlan<D2>,
@@ -11115,6 +11231,14 @@ where
     let fine = next(&fine_plan, &fine_placement, PlanRole::Fine);
     let transported = flux_plan.transfers().count() > 0;
     let flux = transported.then(|| next(&flux_plan, placement, PlanRole::FluxContribution));
+    let mut nested_plans = Vec::with_capacity(nested_state_plans.len());
+    for i in 0..nested_state_plans.len() {
+        let level = (i + 2) as u8;
+        let parent_placement = if i == 0 { &fine_placement } else { &nested_placements[i - 1] };
+        let state = next(&nested_state_plans[i], &nested_placements[i], PlanRole::Nested { level });
+        let seed = next(&nested_seed_plans[i], parent_placement, PlanRole::NestedSeed { level });
+        nested_plans.push(NestedPlans { state, seed });
+    }
     let (emf, faces, corrected, stencil) = match magnetized_plans.as_ref() {
         Some((emf, faces, corrected, stencil)) => {
             let emf = transported.then(|| next(emf, placement, PlanRole::EmfContribution));
@@ -11165,6 +11289,9 @@ where
     if let Some((old, new)) = stencil.as_ref() {
         all.extend([old, new]);
     }
+    for level in &nested_plans {
+        all.extend([&level.state, &level.seed]);
+    }
     let max_payload = (all.iter().flat_map(|p| p.lens()).max().unwrap_or(0) * 8).max(credit as usize);
     let built = build_clock.elapsed();
     let connect_clock = std::time::Instant::now();
@@ -11182,9 +11309,17 @@ where
         let _ = std::io::stderr().write_all(line.as_bytes());
     }
     let mut fabric = fabric_for(&all, link, session).with_block_credit(credit);
-    let plans = RefinedPlans { root, seed, fine, flux, emf, faces, corrected, stencil };
+    let plans = RefinedPlans { root, seed, fine, flux, emf, faces, corrected, stencil, nested: nested_plans };
     let root_devices = vec![0i32; n_root];
     let fine_devices = vec![0i32; n_fine];
+    let nested_held: Vec<NestedHeld> = nested_ids
+        .into_iter()
+        .zip(&nested_parts)
+        .map(|(ids, part)| {
+            let n = part.partition.n_tiles();
+            NestedHeld { ids, n, devices: vec![0i32; n] }
+        })
+        .collect();
     let held = Held {
         root_ids: &root_ids,
         fine_ids: &fine_ids,
@@ -11192,9 +11327,13 @@ where
         n_fine,
         root_devices: &root_devices,
         fine_devices: &fine_devices,
+        nested: &nested_held,
     };
     let root_grid = decomposed_grid::<D>(cfg, ng);
-    let grids = RefinedGrids::of(n, root_grid.x_lo, root_grid.dx, ng, patch);
+    let mut grids = RefinedGrids::of(n, root_grid.x_lo, root_grid.dx, ng, patch);
+    for (part, origin) in nested_parts.iter().zip(&nested_origins) {
+        grids = grids.with_nested(part.partition.n_cells(), *origin);
+    }
     let restart = cfg.restart_path.is_some();
     if let Some(path) = cfg.restart_path.as_deref() {
         load_refined_tiles(&mut tiles, &held, &plans, &grids, path).map_err(|e| e.to_string())?;

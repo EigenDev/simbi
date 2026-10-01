@@ -331,6 +331,16 @@ pub enum ExchangePoint {
     /// restricted covered cells before the next step's prolongation snapshot and the
     /// checkpoint read them
     Restrict,
+    /// one point of one substep of a nested refined level `level >= 2`: `path` numbers the
+    /// substep along the subcycles of every level above it (`path = parent_path * 2 + s`);
+    /// that level's plan moves here
+    Nested { level: u8, path: u8, point: FinePoint },
+    /// after the restriction of level `level + 1` into level `level` within the substep
+    /// `path` of level `level`: that level's halos carry the restricted covered cells
+    NestedRestrict { level: u8, path: u8 },
+    /// at initialization, before level `level >= 2` is seeded by prolongation: the conserved
+    /// halos of level `level - 1` cross its cuts
+    Seed { level: u8 },
 }
 
 /// the points of one fine substep, in order
@@ -364,7 +374,9 @@ impl ExchangePoint {
     pub fn is_troubled(self) -> bool {
         matches!(
             self,
-            ExchangePoint::Troubled(_) | ExchangePoint::Fine { point: FinePoint::Troubled(_), .. }
+            ExchangePoint::Troubled(_)
+                | ExchangePoint::Fine { point: FinePoint::Troubled(_), .. }
+                | ExchangePoint::Nested { point: FinePoint::Troubled(_), .. }
         )
     }
 
@@ -372,13 +384,18 @@ impl ExchangePoint {
     pub fn is_audit(self) -> bool {
         matches!(
             self,
-            ExchangePoint::Audit(_) | ExchangePoint::Fine { point: FinePoint::Audit(_) | FinePoint::AuditTail, .. }
+            ExchangePoint::Audit(_)
+                | ExchangePoint::Fine { point: FinePoint::Audit(_) | FinePoint::AuditTail, .. }
+                | ExchangePoint::Nested { point: FinePoint::Audit(_) | FinePoint::AuditTail, .. }
         )
     }
 
-    /// whether this point belongs to the fine level
+    /// whether this point belongs to a refined level
     pub fn is_fine(self) -> bool {
-        matches!(self, ExchangePoint::Fine { .. })
+        matches!(
+            self,
+            ExchangePoint::Fine { .. } | ExchangePoint::Nested { .. } | ExchangePoint::NestedRestrict { .. } | ExchangePoint::Seed { .. }
+        )
     }
 
     /// a stable code of the point's kind and indices for the phase table's digest
@@ -405,6 +422,20 @@ impl ExchangePoint {
                 FinePoint::PostTail => (15, substep as u32, 0),
                 FinePoint::AuditTail => (16, substep as u32, 0),
             },
+            // the level in the high bits of `a`, the path in its low five
+            ExchangePoint::Nested { level, path, point } => {
+                let a = (level as u32) << 5 | path as u32;
+                match point {
+                    FinePoint::Prolong => (19, a, 0),
+                    FinePoint::Troubled(k) => (20, a, k as u32),
+                    FinePoint::Stage(k) => (21, a, k as u32),
+                    FinePoint::Audit(k) => (22, a, k as u32),
+                    FinePoint::PostTail => (23, a, 0),
+                    FinePoint::AuditTail => (24, a, 0),
+                }
+            }
+            ExchangePoint::NestedRestrict { level, path } => (25, (level as u32) << 5 | path as u32, 0),
+            ExchangePoint::Seed { level } => (26, level as u32, 0),
         };
         kind << 16 | a << 8 | b
     }
@@ -1166,7 +1197,11 @@ impl<const D: usize> ExchangePlan<D> {
             FieldKind::CellBand(_)
         );
         match point {
-            ExchangePoint::Fine { .. } | ExchangePoint::CorrectedFaces => false,
+            ExchangePoint::Fine { .. }
+            | ExchangePoint::CorrectedFaces
+            | ExchangePoint::Nested { .. }
+            | ExchangePoint::NestedRestrict { .. }
+            | ExchangePoint::Seed { .. } => false,
             ExchangePoint::Audit(_) => transfer.audit,
             ExchangePoint::Troubled(_) => banded,
             _ => !banded && !transfer.audit,
