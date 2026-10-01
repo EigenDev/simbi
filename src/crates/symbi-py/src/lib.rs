@@ -2244,6 +2244,76 @@ fn checkpoints_at_or_before(
     fired
 }
 
+/// the checkpoint schedule every driver walks, single grid, host tiles and launched workers
+/// alike. a log cadence (`dlogt > 0` over a positive anchor, `checkpoint_log_anchor` or else the
+/// start time) lands the k-th checkpoint at anchor*10^(k*dlogt); a linear one at k*interval from
+/// time zero, so a resumed run walks the fresh run's boundaries. a restart skips every boundary
+/// at or before its clock, so its first write lands on the next future one and reuses no index.
+/// a log run names its files by index, zero-padded to the projected count; a linear one by time.
+#[derive(Debug, Clone)]
+struct CheckpointCadence {
+    log: bool,
+    anchor: f64,
+    dlogt: f64,
+    interval: f64,
+    fired: u64,
+    next: f64,
+    /// the index of the next file written
+    index: u64,
+    idx_width: usize,
+}
+
+impl CheckpointCadence {
+    fn of(cfg: &Config) -> Self {
+        let interval = if cfg.checkpoint_interval > 0.0 { cfg.checkpoint_interval * cfg.time_unit } else { f64::INFINITY };
+        let anchor = if cfg.checkpoint_log_anchor > 0.0 { cfg.checkpoint_log_anchor } else { cfg.start_time };
+        let log = cfg.dlogt > 0.0 && anchor > 0.0;
+        let mut cadence = Self { log, anchor, dlogt: cfg.dlogt, interval, fired: 0, next: f64::INFINITY, index: cfg.checkpoint_index + 1, idx_width: 0 };
+        cadence.fired = checkpoints_at_or_before(cfg.checkpoint_index > 0, cfg.start_time, |k| cadence.boundary(k));
+        cadence.next = cadence.boundary(cadence.fired);
+        // `ceil(log10(max_index + 1))` digits: robust at a power-of-ten boundary; an overshoot only
+        // widens later names, every reader sorting numerically
+        if log {
+            let projected = (cfg.t_final / anchor).log10() / cfg.dlogt + cfg.checkpoint_index as f64;
+            cadence.idx_width = ((projected.max(1.0) + 1.0).log10().ceil() as usize).max(1);
+        }
+        cadence
+    }
+
+    /// the (k+1)-th scheduled checkpoint time
+    fn boundary(&self, k: u64) -> f64 {
+        if self.log {
+            self.anchor * 10f64.powf((k + 1) as f64 * self.dlogt)
+        } else if self.interval.is_finite() {
+            (k + 1) as f64 * self.interval
+        } else {
+            f64::INFINITY
+        }
+    }
+
+    /// a scheduled checkpoint is due at `time`
+    fn due(&self, time: f64) -> bool {
+        self.next.is_finite() && time_at_or_after(time, self.next)
+    }
+
+    /// the name tag of a file written at `time` under index `index`
+    fn tag(&self, cfg: &Config, time_width: usize, time: f64, index: u64) -> String {
+        checkpoint_tag(cfg, self.idx_width, time_width, time, index)
+    }
+
+    /// after the scheduled write at `time`: the next index, and the schedule advanced past every
+    /// boundary the step crossed, one write covering them all
+    fn advance(&mut self, time: f64) {
+        self.index += 1;
+        self.fired += 1;
+        self.next = self.boundary(self.fired);
+        while self.due(time) {
+            self.fired += 1;
+            self.next = self.boundary(self.fired);
+        }
+    }
+}
+
 #[cfg(test)]
 mod checkpoint_schedule_tests {
     use super::{checkpoints_at_or_before, time_at_or_after};
@@ -2370,63 +2440,9 @@ where
     // is the code-unit spacing, so `checkpoint_interval = 0.1` with a binary's
     // orbital `time_unit` means "every 0.1 orbits". default time_unit = 1.0 keeps
     // the cadence in code units, unchanged for ordinary runs.
-    let cp_interval = if cfg.checkpoint_interval > 0.0 {
-        cfg.checkpoint_interval * cfg.time_unit
-    } else {
-        f64::INFINITY
-    };
-    // logarithmic checkpoint spacing: when dlogt > 0 (the python config enabled
-    // log_checkpoints over a positive start_time), the k-th checkpoint lands at
-    // start_time*10^(k*dlogt) in code units — dense early, sparse late, the right
-    // cadence for a run spanning many decades in time (a relativistic wind from a
-    // tiny inner radius out to a huge one). otherwise the cadence is linear at
-    // cp_interval. `cp_at(fired)` returns the (fired+1)-th scheduled checkpoint time.
-    // the log cadence is anchored at checkpoint_log_anchor (a fixed reference, e.g., the inner
-    // light-crossing) so the schedule is identical across a fresh run and a restart whose clock
-    // resumes at the checkpoint time; anchoring on start_time would shift it. unset (0) -> start_time (they coincide).
-    let cp_anchor = if cfg.checkpoint_log_anchor > 0.0 {
-        cfg.checkpoint_log_anchor
-    } else {
-        cfg.start_time
-    };
-    let cp_log = cfg.dlogt > 0.0 && cp_anchor > 0.0;
-    let cp_tstart = cp_anchor;
-    let cp_dlogt = cfg.dlogt;
-    let cp_at = move |fired: u64| -> f64 {
-        if cp_log {
-            cp_tstart * 10f64.powf((fired + 1) as f64 * cp_dlogt)
-        } else if cp_interval.is_finite() {
-            (fired + 1) as f64 * cp_interval
-        } else {
-            f64::INFINITY
-        }
-    };
-    // on a restart the clock resumes mid-schedule at start_time; skip every boundary already at or
-    // before it so the first write lands on the next future boundary and reuses no index. seeding
-    // cp_fired at 0 would re-dump the resumed checkpoint (a duplicate file, every later index shifted
-    // by one) whenever cp_at is anchored at a fixed checkpoint_log_anchor below the resume clock. a
-    // restart is signalled by a nonzero loaded checkpoint_index; a fresh run skips nothing.
-    let mut cp_fired: u64 =
-        checkpoints_at_or_before(cfg.checkpoint_index > 0, cfg.start_time, &cp_at);
-    let mut next_cp = cp_at(cp_fired);
-    let mut cp_index: u64 = cfg.checkpoint_index + 1;
-    // log-spaced runs are named by the monotonic index: the fixed-3-decimal
-    // time name (`000_790`) collides at small times (0.0001 and 0.0002 both round to
-    // `000_000`, silently overwriting the dense early dumps a log run produces). the physical
-    // time lives in metadata/time, which every reader uses. size the zero-pad width to the
-    // projected checkpoint count (+ any restart offset) so names always sort lexicographically.
-    let cp_idx_width: usize = if cp_log {
-        // size the zero-pad tightly to the projected highest index (count + any restart offset).
-        // `ceil(log10(max_index + 1))` is the digit count and is robust at the power-of-10 boundary
-        // (a projection of 99.99 still yields 2, and exactly 1000 yields 4) so the digit-count boundary stays
-        // clear of the run's own last checkpoint. an overshoot extends the width gracefully (format! only
-        // pads or grows: width is a floor, so 99 -> 100); only a raw `ls` sees a cosmetic width jump there,
-        // since every reader sorts numerically (metadata/time, viz extract_timestep).
-        let projected = (cfg.t_final / cp_tstart).log10() / cp_dlogt + cfg.checkpoint_index as f64;
-        ((projected.max(1.0) + 1.0).log10().ceil() as usize).max(1)
-    } else {
-        0
-    };
+    // the checkpoint schedule: log or linear, a restart skipping the boundaries already behind it
+    let mut cadence = CheckpointCadence::of(cfg);
+    let cp_idx_width = cadence.idx_width;
 
     // the live monitor. dynamic mode self-detects a tty (clearing redraw on a
     // terminal, plain appended frames when piped to a file). the row tracks the
@@ -2630,11 +2646,11 @@ where
             let states: Vec<&_> = h.levels.iter().map(|l| &l.state).collect();
             let path = checkpoint_name(
                 cfg,
-                &checkpoint_tag(cfg, cp_idx_width, cp_width, time, cp_index),
+                &cadence.tag(cfg, cp_width, time, cadence.index),
             );
             let t_io = std::time::Instant::now();
             let res =
-                write_hierarchy_checkpoint(&states, &path, &checkpoint_metadata(cfg, cp_index));
+                write_hierarchy_checkpoint(&states, &path, &checkpoint_metadata(cfg, cadence.index));
             io_secs.set(io_secs.get() + t_io.elapsed().as_secs_f64());
             match res {
                 Ok(_) => table.post_success(&format!(
@@ -2643,7 +2659,7 @@ where
                 )),
                 Err(e) => table.post_error(&format!("manual checkpoint failed: {e:?}")),
             }
-            cp_index += 1;
+            cadence.index += 1;
             dirty = true;
         }
 
@@ -2657,7 +2673,7 @@ where
             let restart =
                 checkpoint_name(cfg, checkpoint_status_tag(CheckpointOutcome::Interrupted));
             let _ =
-                write_hierarchy_checkpoint(&states, &restart, &checkpoint_metadata(cfg, cp_index));
+                write_hierarchy_checkpoint(&states, &restart, &checkpoint_metadata(cfg, cadence.index));
             let reason = if user_quit {
                 "quit".to_string()
             } else {
@@ -2678,7 +2694,7 @@ where
             let states: Vec<&_> = h.levels.iter().map(|l| &l.state).collect();
             let crashed = checkpoint_name(cfg, checkpoint_status_tag(CheckpointOutcome::Crashed));
             let _ =
-                write_hierarchy_checkpoint(&states, &crashed, &checkpoint_metadata(cfg, cp_index));
+                write_hierarchy_checkpoint(&states, &crashed, &checkpoint_metadata(cfg, cadence.index));
             table.post_error(&format!(
                 "crashed at {} (step {}) — state checkpoint {crashed}",
                 fmt_time_msg(cfg, c.time),
@@ -2690,36 +2706,30 @@ where
         // message board cadence: checkpoints fire on the time schedule. a single
         // large dt can cross multiple interval boundaries (e.g., a cold-medium CFL
         // step, or a coarse cadence); write exactly one checkpoint for the current
-        // state and advance next_cp past every boundary it crossed. the skipped
+        // state and advance the schedule past every boundary it crossed. the skipped
         // intermediate states were never computed, and the file name is keyed by
         // the current time — looping would just re-write the same file N times and
         // spam the board with identical entries.
-        if time_at_or_after(time, next_cp) && next_cp.is_finite() {
+        if cadence.due(time) {
             let states: Vec<&_> = h.levels.iter().map(|l| &l.state).collect();
             let path = checkpoint_name(
                 cfg,
-                &checkpoint_tag(cfg, cp_idx_width, cp_width, time, cp_index),
+                &cadence.tag(cfg, cp_width, time, cadence.index),
             );
             let t_io = std::time::Instant::now();
             let res = symbi_sim::driver::prof("checkpoint_io", || {
-                write_hierarchy_checkpoint(&states, &path, &checkpoint_metadata(cfg, cp_index))
+                write_hierarchy_checkpoint(&states, &path, &checkpoint_metadata(cfg, cadence.index))
             });
             io_secs.set(io_secs.get() + t_io.elapsed().as_secs_f64());
             match res {
                 Ok(_) => {
                     table.post_success(&format!("checkpoint {path}  ({})", fmt_time_msg(cfg, time)))
                 }
-                Err(e) => table.post_error(&format!("checkpoint {cp_index:04} failed: {e:?}")),
+                Err(e) => table.post_error(&format!("checkpoint {:04} failed: {e:?}", cadence.index)),
             }
-            cp_index += 1;
-            cp_fired += 1;
-            next_cp = cp_at(cp_fired);
             // advance past every boundary this step crossed (log or linear) so a
             // single large dt yields one write covering all of them.
-            while time_at_or_after(time, next_cp) && next_cp.is_finite() {
-                cp_fired += 1;
-                next_cp = cp_at(cp_fired);
-            }
+            cadence.advance(time);
             dirty = true;
         }
 
@@ -3015,7 +3025,7 @@ where
     if !final_finite {
         let states: Vec<&_> = hier.levels.iter().map(|level| &level.state).collect();
         let crashed = checkpoint_name(cfg, checkpoint_status_tag(CheckpointOutcome::Crashed));
-        write_hierarchy_checkpoint(&states, &crashed, &checkpoint_metadata(cfg, cp_index))?;
+        write_hierarchy_checkpoint(&states, &crashed, &checkpoint_metadata(cfg, cadence.index))?;
         screen.leave();
         table.set_dynamic(false);
         let summary = format!(
@@ -3032,7 +3042,7 @@ where
     let final_path = checkpoint_name(cfg, checkpoint_status_tag(CheckpointOutcome::Completed));
     let t_io = std::time::Instant::now();
     symbi_sim::driver::prof("checkpoint_io", || {
-        write_hierarchy_checkpoint(&states, &final_path, &checkpoint_metadata(cfg, cp_index))
+        write_hierarchy_checkpoint(&states, &final_path, &checkpoint_metadata(cfg, cadence.index))
     })?;
     io_secs.set(io_secs.get() + t_io.elapsed().as_secs_f64());
     let wall = start.elapsed().as_secs_f64();
@@ -5664,11 +5674,8 @@ where
     #[cfg(not(feature = "gpu"))]
     let transport = symbi::sim::decomp::LocalCopy;
 
-    let cp_dt = if cfg.checkpoint_interval > 0.0 {
-        cfg.checkpoint_interval * cfg.time_unit
-    } else {
-        f64::INFINITY
-    };
+    // the checkpoint schedule the single grid walks
+    let mut cadence = CheckpointCadence::of(cfg);
     let cp_width = checkpoint_time_width(cfg);
 
     // body diagnostics: a separate user-defined cadence (natural units), only when the run has
@@ -5707,7 +5714,7 @@ where
     if cfg.checkpoint_index == 0 || cfg.start_time == 0.0 {
         symbi::sim::decomp::drain_devices::<Mem>(&devices);
         let sh: Vec<_> = tiles.iter().map(|(s, _)| &**s).collect();
-        let tag = checkpoint_tag(cfg, 0, cp_width, cfg.start_time, cfg.checkpoint_index);
+        let tag = cadence.tag(cfg, cp_width, cfg.start_time, cfg.checkpoint_index);
         let path = checkpoint_name(cfg, &tag);
         match write_tiles(&sh, &path, cfg.checkpoint_index) {
             Ok(io) => reporter.checkpoint_written(cfg, &path, cfg.start_time, io),
@@ -5729,8 +5736,6 @@ where
         }
     }
 
-    let mut next_cp = cfg.start_time + cp_dt;
-    let mut cp_index = cfg.checkpoint_index + 1;
     let cp_error: std::cell::RefCell<Option<String>> = std::cell::RefCell::new(None);
     let diagnostics = {
         // the decomposed loop owns the tiles by `&mut` (the per-step immersed-body bookkeeping
@@ -5786,20 +5791,23 @@ where
             &transport,
             |iter, time, sh| {
                 reporter.progress(iter, time);
-                if time + f64::EPSILON >= next_cp {
-                    let tag = checkpoint_tag(cfg, 0, cp_width, time, cp_index);
+                // bounded march: stop after `max_steps` root iterations (0 = unbounded), ahead of
+                // the cadence and the diagnostics as on the single grid; the final snapshot
+                // records the step that ends the march.
+                if cfg.max_steps > 0 && iter >= cfg.max_steps {
+                    return std::ops::ControlFlow::Break(());
+                }
+                if cadence.due(time) {
+                    let tag = cadence.tag(cfg, cp_width, time, cadence.index);
                     let path = checkpoint_name(cfg, &tag);
-                    match write_tiles(sh, &path, cp_index) {
+                    match write_tiles(sh, &path, cadence.index) {
                         Ok(io) => reporter.checkpoint_written(cfg, &path, time, io),
                         Err(msg) => {
                             *cp_error.borrow_mut() = Some(msg);
                             return std::ops::ControlFlow::Break(());
                         }
                     }
-                    while next_cp <= time {
-                        next_cp += cp_dt;
-                    }
-                    cp_index += 1;
+                    cadence.advance(time);
                 }
                 // body diagnostics at their own cadence: any tile's bodies carry the global
                 // (cross-tile-summed) force/torque/accreted-mass after step_bodies_decomposed.
@@ -5809,11 +5817,6 @@ where
                             let _ = append_diagnostics(dp, time, &im.bodies);
                         }
                     }
-                }
-                // bounded march: stop after `max_steps` root iterations (0 = unbounded), as the
-                // single-grid run does; the final snapshot still follows.
-                if cfg.max_steps > 0 && iter >= cfg.max_steps {
-                    return std::ops::ControlFlow::Break(());
                 }
                 std::ops::ControlFlow::Continue(())
             },
@@ -5830,7 +5833,7 @@ where
     let final_path = checkpoint_name(cfg, checkpoint_status_tag(CheckpointOutcome::Completed));
     let (iter, time) = (tiles[0].0.iteration, tiles[0].0.time);
     let sh: Vec<_> = tiles.iter().map(|(s, _)| &**s).collect();
-    match write_tiles(&sh, &final_path, cp_index) {
+    match write_tiles(&sh, &final_path, cadence.index) {
         Ok(io) => {
             reporter.checkpoint_written(cfg, &final_path, time, io);
             reporter.finish(iter, time, &final_path);
@@ -5947,11 +5950,8 @@ where
     #[cfg(not(feature = "gpu"))]
     let transport = symbi::sim::decomp::LocalCopy;
 
-    let cp_dt = if cfg.checkpoint_interval > 0.0 {
-        cfg.checkpoint_interval * cfg.time_unit
-    } else {
-        f64::INFINITY
-    };
+    // the checkpoint schedule the single grid walks
+    let mut cadence = CheckpointCadence::of(cfg);
     let cp_width = checkpoint_time_width(cfg);
 
     // per refined level: the sub-grid of the tiles carrying it, each tile's offset on the level's
@@ -6052,7 +6052,7 @@ where
     // t=start initial condition. every device finishes its seeding before the staging reads.
     if cfg.checkpoint_index == 0 || cfg.start_time == 0.0 {
         symbi::sim::decomp::drain_devices::<Mem>(&devices);
-        let tag = checkpoint_tag(cfg, 0, cp_width, cfg.start_time, cfg.checkpoint_index);
+        let tag = cadence.tag(cfg, cp_width, cfg.start_time, cfg.checkpoint_index);
         let path = checkpoint_name(cfg, &tag);
         match write_cp(&tiles, &path, cfg.checkpoint_index) {
             Ok(io) => reporter.checkpoint_written(cfg, &path, cfg.start_time, io),
@@ -6063,8 +6063,6 @@ where
         }
     }
 
-    let mut next_cp = cfg.start_time + cp_dt;
-    let mut cp_index = cfg.checkpoint_index + 1;
     let cp_error: std::cell::RefCell<Option<String>> = std::cell::RefCell::new(None);
     let guard = retry_guard_of(cfg);
     let exclusion = retry_exclusion_of(cfg);
@@ -6087,23 +6085,22 @@ where
         1,
         |iter, time, tiles| {
             reporter.progress(iter, time);
-            if time + f64::EPSILON >= next_cp {
-                let tag = checkpoint_tag(cfg, 0, cp_width, time, cp_index);
+            // bounded march: stop after `max_steps` root iterations (0 = unbounded), ahead of the
+            // cadence as on the single grid; the final snapshot records the step that ends it.
+            if cfg.max_steps > 0 && iter >= cfg.max_steps {
+                return std::ops::ControlFlow::Break(());
+            }
+            if cadence.due(time) {
+                let tag = cadence.tag(cfg, cp_width, time, cadence.index);
                 let path = checkpoint_name(cfg, &tag);
-                match write_cp(tiles, &path, cp_index) {
+                match write_cp(tiles, &path, cadence.index) {
                     Ok(io) => reporter.checkpoint_written(cfg, &path, time, io),
                     Err(e) => {
                         *cp_error.borrow_mut() = Some(e);
                         return std::ops::ControlFlow::Break(());
                     }
                 }
-                while next_cp <= time {
-                    next_cp += cp_dt;
-                }
-                cp_index += 1;
-            }
-            if cfg.max_steps > 0 && iter >= cfg.max_steps {
-                return std::ops::ControlFlow::Break(());
+                cadence.advance(time);
             }
             std::ops::ControlFlow::Continue(())
         },
@@ -6116,7 +6113,7 @@ where
     // canonical final snapshot, after every device drained.
     symbi::sim::decomp::drain_devices::<Mem>(&devices);
     let final_path = checkpoint_name(cfg, checkpoint_status_tag(CheckpointOutcome::Completed));
-    match write_cp(&tiles, &final_path, cp_index) {
+    match write_cp(&tiles, &final_path, cadence.index) {
         Ok(io) => {
             let root = &tiles[0].levels[0].state;
             let (iter, time) = (root.iteration, root.time);
@@ -6229,6 +6226,10 @@ macro_rules! build_and_run_hydro_decomposed_refined {
                         Prim::adiabatic(Density(row[0]), Tensor::new(std::array::from_fn(|k| row[1 + k])), Pressure(row[1 + $d]))
                     })
                     .build();
+                // the physical clock starts at start_time on the root, and the hierarchy built
+                // from it starts every fine level there, as on the single hierarchy
+                let mut sim = sim;
+                sim.time = cfg.start_time;
                 // the dye rides on the root; the hierarchy carries it onto the fine levels
                 let sim = if cfg.chi_ic.is_empty() {
                     sim
@@ -10609,9 +10610,6 @@ fn validate_launch_scope(cfg: &Config) -> Result<(), String> {
     if cfg.equilibrium_json.is_some() {
         return refused("an equilibrium prescription");
     }
-    if cfg.dlogt > 0.0 {
-        return refused("a logarithmic checkpoint cadence");
-    }
     // the launched workers carry no cross-tile census reduction
     if !cfg.census_jsons.is_empty() {
         return refused("a census");
@@ -10761,6 +10759,10 @@ where
     let regions = refinement_regions_nd::<D>(&cfg.refinement_regions)?;
     let maps: [symbi_geometry::AxisMap; D] =
         std::array::from_fn(|ax| symbi_geometry::AxisMap::Uniform { start: origin[ax], dx: cfg.dx[ax] });
+    // the physical clock starts at start_time on the root, and the hierarchy built from it
+    // starts every fine level there, as on the single hierarchy
+    let mut sim = sim;
+    sim.time = cfg.start_time;
     let sub = kernels_of(&sim);
     let clipped = clip_regions_to_tile::<D>(&regions, origin, m, &maps);
     let mut h = if clipped.is_empty() {
@@ -11412,7 +11414,8 @@ where
     };
     let slabs: Vec<Vec<usize>> = (0..D).map(|ax| (0..counts[ax]).map(|i| partition.tile_range(ax, i).1).collect()).collect();
     let mut reporter = (me == WorkerId(0)).then(|| DecomposedReporter::new(cfg, total as u64, &counts, &slabs));
-    let cp_dt = if cfg.checkpoint_interval > 0.0 { cfg.checkpoint_interval * cfg.time_unit } else { f64::INFINITY };
+    // the checkpoint schedule the single grid walks
+    let mut cadence = CheckpointCadence::of(cfg);
     let cp_width = checkpoint_time_width(cfg);
     // the last accepted step whose state an audit certified: the final checkpoint after a cadence
     // write of the same step reuses that certification, its audit epoch being spent
@@ -11432,8 +11435,6 @@ where
         };
         refined_checkpoint(tiles, &held, &plans, &grids, &identity, &req, fabric, accepted, audit)
     };
-    let mut next_cp = cfg.start_time + cp_dt;
-    let mut cp_index = cfg.checkpoint_index + 1;
     let write_initial = !restart && (cfg.checkpoint_index == 0 || cfg.start_time == 0.0);
     let guard = retry_guard_of(cfg);
     let exclusion = retry_exclusion_of(cfg);
@@ -11449,7 +11450,7 @@ where
     let outcome = evolve_refined_worker(&mut tiles, &held, &plans, &LocalCopy, &mut fabric, &refined_cfg, |accepted, time, tiles, fabric| {
         if accepted == 0 {
             if write_initial {
-                let tag = checkpoint_tag(cfg, 0, cp_width, cfg.start_time, cfg.checkpoint_index);
+                let tag = cadence.tag(cfg, cp_width, cfg.start_time, cfg.checkpoint_index);
                 let path = checkpoint_name(cfg, &tag);
                 write(tiles, fabric, &path, cfg.checkpoint_index, 0)?;
                 if let Some(r) = reporter.as_mut() {
@@ -11464,23 +11465,25 @@ where
         if let Some(r) = reporter.as_mut() {
             r.progress(accepted, time);
         }
-        if time + f64::EPSILON >= next_cp {
-            let tag = checkpoint_tag(cfg, 0, cp_width, time, cp_index);
+        // the step that exhausts the march's `max_steps` budget publishes through the final
+        // snapshot alone, as on the single grid
+        if cfg.max_steps > 0 && accepted >= cfg.max_steps {
+            return Ok(std::ops::ControlFlow::Continue(()));
+        }
+        if cadence.due(time) {
+            let tag = cadence.tag(cfg, cp_width, time, cadence.index);
             let path = checkpoint_name(cfg, &tag);
-            write(tiles, fabric, &path, cp_index, accepted)?;
+            write(tiles, fabric, &path, cadence.index, accepted)?;
             if let Some(r) = reporter.as_mut() {
                 r.checkpoint_written(cfg, &path, time, 0.0);
             }
-            while next_cp <= time {
-                next_cp += cp_dt;
-            }
-            cp_index += 1;
+            cadence.advance(time);
         }
         Ok(std::ops::ControlFlow::Continue(()))
     });
     let result: Result<(u64, f64), String> = outcome.map_err(|e| e.to_string()).and_then(|report| {
         let final_path = checkpoint_name(cfg, checkpoint_status_tag(CheckpointOutcome::Completed));
-        write(&tiles, &mut fabric, &final_path, cp_index, report.steps).map_err(|e| e.to_string())?;
+        write(&tiles, &mut fabric, &final_path, cadence.index, report.steps).map_err(|e| e.to_string())?;
         if let Some(r) = reporter.as_mut() {
             r.checkpoint_written(cfg, &final_path, report.time, 0.0);
         }
@@ -12031,11 +12034,8 @@ where
     } else {
         None
     };
-    let cp_dt = if cfg.checkpoint_interval > 0.0 {
-        cfg.checkpoint_interval * cfg.time_unit
-    } else {
-        f64::INFINITY
-    };
+    // the checkpoint schedule the single grid walks
+    let mut cadence = CheckpointCadence::of(cfg);
     let cp_width = checkpoint_time_width(cfg);
     let extras_of = |cp_index: u64| checkpoint_metadata(cfg, cp_index);
 
@@ -12104,7 +12104,7 @@ where
     let outcome: Result<(u64, f64), String> = (|| {
         if cfg.checkpoint_index == 0 || cfg.start_time == 0.0 {
             let sh: Vec<&symbi_sim::state::FieldStore<D, DOF, DefaultMemory, f64>> = stores.iter().map(|s| &**s).collect();
-            let tag = checkpoint_tag(cfg, 0, cp_width, cfg.start_time, cfg.checkpoint_index);
+            let tag = cadence.tag(cfg, cp_width, cfg.start_time, cfg.checkpoint_index);
             let path = checkpoint_name(cfg, &tag);
             // before the march: the prime audit certified this state and nothing has touched
             // a face since
@@ -12113,8 +12113,6 @@ where
                 r.checkpoint_written(cfg, &path, cfg.start_time, io);
             }
         }
-        let mut next_cp = cfg.start_time + cp_dt;
-        let mut cp_index = cfg.checkpoint_index + 1;
         let worker_cfg = WorkerConfig {
             regime: RegimeKind::of::<f64, D, R>(),
             timestepping: cfg.timestepping,
@@ -12164,18 +12162,20 @@ where
                 if let Some(r) = reporter.as_mut() {
                     r.progress(iter, time);
                 }
-                if time + f64::EPSILON >= next_cp {
-                    let tag = checkpoint_tag(cfg, 0, cp_width, time, cp_index);
+                // the step that exhausts the march's `max_steps` budget publishes through the
+                // final snapshot alone, as on the single grid
+                if cfg.max_steps > 0 && iter >= cfg.max_steps {
+                    return Ok(std::ops::ControlFlow::Continue(()));
+                }
+                if cadence.due(time) {
+                    let tag = cadence.tag(cfg, cp_width, time, cadence.index);
                     let path = checkpoint_name(cfg, &tag);
                     // the state completed step `iter`, whose exchanges ran under step index iter - 1
-                    let io = write(sh, fabric, &path, cp_index, AuditBasis::AfterStep(iter - 1)).map_err(WorkerError::Checkpoint)?;
+                    let io = write(sh, fabric, &path, cadence.index, AuditBasis::AfterStep(iter - 1)).map_err(WorkerError::Checkpoint)?;
                     if let Some(r) = reporter.as_mut() {
                         r.checkpoint_written(cfg, &path, time, io);
                     }
-                    while next_cp <= time {
-                        next_cp += cp_dt;
-                    }
-                    cp_index += 1;
+                    cadence.advance(time);
                 }
                 Ok(std::ops::ControlFlow::Continue(()))
             },
@@ -12187,7 +12187,7 @@ where
             &sh,
             &mut fabric,
             &final_path,
-            cp_index,
+            cadence.index,
             report.steps.checked_sub(1).map_or(AuditBasis::Primed, AuditBasis::AfterStep),
         )?;
         if let Some(r) = reporter.as_mut() {
