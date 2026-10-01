@@ -5405,7 +5405,7 @@ macro_rules! build_and_run_hydro {
             .with_eos(build_eos(cfg))
             .with_solver(cfg.solver)
             .map_err(|e| format!("substrate/solver: {e:?}"))?
-            .with_viscosity(cfg.viscosity)
+            .with_viscosity(cfg.viscosity).with_alpha(cfg.alpha)
             .with_resistivity(cfg.resistivity)
             .with_excision(
                 cfg.excision_radius,
@@ -5467,7 +5467,7 @@ macro_rules! build_and_run_hydro {
                 .with_eos(build_eos(cfg))
                 .with_solver(solver)
                 .expect("fine-level kernel set")
-                .with_viscosity(cfg.viscosity)
+                .with_viscosity(cfg.viscosity).with_alpha(cfg.alpha)
                 .with_resistivity(cfg.resistivity);
             // register the same driven-boundary DAGs on each fine level, in Driven-id order: a
             // fine level flush against a driven physical face inherits `Driven(id)` there (an
@@ -6253,7 +6253,7 @@ macro_rules! build_and_run_hydro_decomposed_refined {
                     .ppm_flatten(cfg.ppm_flatten_onset, cfg.ppm_flatten_full)
                     .with_solver(solver)
                     .map_err(|e| format!("tile {flat} substrate/solver: {e:?}"))?
-                    .with_viscosity(cfg.viscosity)
+                    .with_viscosity(cfg.viscosity).with_alpha(cfg.alpha)
                     .with_resistivity(cfg.resistivity)
                     .with_excision(
                         cfg.excision_radius,
@@ -6315,7 +6315,7 @@ macro_rules! build_and_run_hydro_decomposed_refined {
                             .ppm_flatten(cfg.ppm_flatten_onset, cfg.ppm_flatten_full)
                             .with_solver(solver)
                             .expect("fine kernel set")
-                            .with_viscosity(cfg.viscosity)
+                            .with_viscosity(cfg.viscosity).with_alpha(cfg.alpha)
                             .with_resistivity(cfg.resistivity),
                     )
                 };
@@ -6412,7 +6412,7 @@ macro_rules! build_and_run_hydro_decomposed_refined {
                     .theta(theta)
                     .with_solver(solver)
                     .expect("fine kernel set")
-                    .with_viscosity(cfg.viscosity)
+                    .with_viscosity(cfg.viscosity).with_alpha(cfg.alpha)
                     .with_resistivity(cfg.resistivity)
             };
             let gh = Hierarchy::with_refinement(groot, gsub, &regions, prolong, make)
@@ -6576,7 +6576,7 @@ macro_rules! build_and_run_hydro_decomposed {
                     .map_err(|e| format!("tile {flat} substrate/solver: {e:?}"))?
                     // the transport and excision settings the single-grid build installs; the
                     // decomposed march drives the viscous pass and the excision sweeps per tile.
-                    .with_viscosity(cfg.viscosity)
+                    .with_viscosity(cfg.viscosity).with_alpha(cfg.alpha)
                     .with_resistivity(cfg.resistivity)
                     .with_excision(
                         cfg.excision_radius,
@@ -7075,7 +7075,7 @@ macro_rules! build_and_run_mhd {
             .with_solver(cfg.solver)
             .map_err(|e| format!("substrate/solver: {e:?}"))?
             .ct_method(cfg.ct_method)
-            .with_viscosity(cfg.viscosity)
+            .with_viscosity(cfg.viscosity).with_alpha(cfg.alpha)
             .with_resistivity(cfg.resistivity)
             .with_excision(
                 cfg.excision_radius,
@@ -7124,7 +7124,7 @@ macro_rules! build_and_run_mhd {
                 .with_solver(solver)
                 .expect("fine-level kernel set")
                 .ct_method(cfg.ct_method)
-                .with_viscosity(cfg.viscosity)
+                .with_viscosity(cfg.viscosity).with_alpha(cfg.alpha)
                 .with_resistivity(cfg.resistivity);
             for json in &cfg.driven_exprs {
                 let bcfg = symbi_source_compile::SourceConfig::from_json(json)
@@ -7266,7 +7266,7 @@ macro_rules! build_and_run_imhd {
             .with_solver(cfg.solver)
             .map_err(|e| format!("substrate/solver: {e:?}"))?
             .ct_method(cfg.ct_method)
-            .with_viscosity(cfg.viscosity)
+            .with_viscosity(cfg.viscosity).with_alpha(cfg.alpha)
             .with_resistivity(cfg.resistivity);
         // attach a user source. iso MHD has no energy -> momentum-only force/relax,
         // raw den/mom (raw->nrg rejected); B is CT-evolved. single-grid only.
@@ -7310,7 +7310,7 @@ macro_rules! build_and_run_imhd {
                 .with_solver(solver)
                 .expect("fine-level kernel set")
                 .ct_method(cfg.ct_method)
-                .with_viscosity(cfg.viscosity)
+                .with_viscosity(cfg.viscosity).with_alpha(cfg.alpha)
                 .with_resistivity(cfg.resistivity);
             for json in &cfg.driven_exprs {
                 let bcfg = symbi_source_compile::SourceConfig::from_json(json)
@@ -7441,7 +7441,7 @@ macro_rules! build_and_run_mhd_decomposed {
                     .with_solver(solver)
                     .map_err(|e| format!("tile {flat} substrate/solver: {e:?}"))?
                     .ct_method(ct)
-                    .with_viscosity(cfg.viscosity)
+                    .with_viscosity(cfg.viscosity).with_alpha(cfg.alpha)
                     .with_resistivity(cfg.resistivity)
                     .with_excision(
                         cfg.excision_radius,
@@ -7642,7 +7642,7 @@ macro_rules! build_and_run_imhd_decomposed {
                     .with_solver(solver)
                     .map_err(|e| format!("tile {flat} substrate/solver: {e:?}"))?
                     .ct_method(ct)
-                    .with_viscosity(cfg.viscosity)
+                    .with_viscosity(cfg.viscosity).with_alpha(cfg.alpha)
                     .with_resistivity(cfg.resistivity)
                     .with_excision(
                         cfg.excision_radius,
@@ -8921,6 +8921,14 @@ fn dispatch_and_run(
         ));
     }
     alpha_key_verdict(&cfg.regime, cfg.bare_alpha_key, cfg.alpha)?;
+    // the alpha law reads the local sound speed from the pressure, which isothermal MHD carries
+    // no field for; isothermal hydro reads the constant cs
+    if cfg.regime == "imhd" && cfg.alpha != 0.0 {
+        return Err(format!(
+            "alpha-disk viscosity on the imhd regime: the configured viscosity_alpha = {} reads the              local sound speed from a pressure isothermal MHD does not carry; use a constant              viscosity",
+            cfg.alpha
+        ));
+    }
     if viscous_regime && (cfg.viscosity > 0.0 || cfg.alpha > 0.0) {
         // the shear operator is a face-centered stencil over at least two grid axes; there is no
         // 1d instance (a single-axis shear has no transverse gradient to diffuse).
@@ -9058,6 +9066,14 @@ fn dispatch_and_run(
     }
     if cfg.n_gpus > 1 && cfg.bodies.iter().any(|b| b.magnetic_slip.is_some()) {
         return Err("a magnetic slip body with gpus > 1 awaits its tiled slip step; run it on one device".to_string());
+    }
+    if cfg.n_gpus > 1 && cfg.alpha > 0.0 && matches!(cfg.regime.as_str(), "newtonian" | "nmhd") {
+        return Err(format!(
+            "alpha-disk viscosity on the {} regime with several devices: its stability bound \
+                 multiplies the largest p/rho by the slowest orbit, each maximized over the whole \
+                 grid, which a tile's own maxima do not reproduce; run it on one device",
+            cfg.regime
+        ));
     }
     if !cfg.census_jsons.is_empty() && cfg.n_gpus > 1 {
         return Err(
@@ -10650,6 +10666,13 @@ fn validate_launch_scope(cfg: &Config) -> Result<(), String> {
     if !cfg.chi_ic.is_empty() {
         return refused("a passive scalar");
     }
+    if cfg.alpha > 0.0 && matches!(cfg.regime.as_str(), "newtonian" | "nmhd") {
+        return refused(&format!(
+            "alpha-disk viscosity on the {} regime (its stability bound multiplies whole-grid \
+             maxima a tile does not hold)",
+            cfg.regime
+        ));
+    }
     if cfg.perturbation_json.is_some() {
         return refused("a perturbation expression");
     }
@@ -10881,7 +10904,7 @@ fn run_refined_worker_process(
                             .with_eos(build_eos(cfg))
                             .with_solver(solver)
                             .expect("refined kernel set")
-                            .with_viscosity(cfg.viscosity);
+                            .with_viscosity(cfg.viscosity).with_alpha(cfg.alpha);
                         let ks = attach_configured_sources(
                             ks,
                             &cfg.source_jsons,
@@ -10931,7 +10954,7 @@ fn run_refined_worker_process(
                             .with_solver(solver)
                             .expect("refined kernel set")
                             .ct_method(ct)
-                            .with_viscosity(cfg.viscosity)
+                            .with_viscosity(cfg.viscosity).with_alpha(cfg.alpha)
                             .with_resistivity(cfg.resistivity)
                     };
                     let mut tiles = Vec::with_capacity(layout.mine.len());
@@ -10975,7 +10998,7 @@ fn run_refined_worker_process(
                     // the numerics the single isothermal hierarchy installs on every level: the limiter,
                     // the viscosity, the user sources and the gradient walls; one sound speed per run
                     let kernels_of = |s: &Sim| {
-                        let ks = s.substrate().theta(theta).with_viscosity(cfg.viscosity);
+                        let ks = s.substrate().theta(theta).with_viscosity(cfg.viscosity).with_alpha(cfg.alpha);
                         let ks = attach_configured_sources(
                             ks,
                             &cfg.source_jsons,
@@ -11021,7 +11044,7 @@ fn run_refined_worker_process(
                             .with_solver(solver)
                             .expect("refined kernel set")
                             .ct_method(ct)
-                            .with_viscosity(cfg.viscosity)
+                            .with_viscosity(cfg.viscosity).with_alpha(cfg.alpha)
                             .with_resistivity(cfg.resistivity)
                     };
                     let mut tiles = Vec::with_capacity(layout.mine.len());
@@ -11763,7 +11786,7 @@ fn run_worker_process(
                     .theta(theta)
                     .with_solver(solver)
                     .map_err(|e| format!("tile {flat} substrate/solver: {e:?}"))?
-                    .with_viscosity(cfg.viscosity)
+                    .with_viscosity(cfg.viscosity).with_alpha(cfg.alpha)
                     .with_resistivity(cfg.resistivity)
                     .ct_method(ct);
                 tiles.push((sim, sub));
@@ -11823,7 +11846,7 @@ fn run_worker_process(
                     .theta(theta)
                     .with_solver(solver)
                     .map_err(|e| format!("tile {flat} substrate/solver: {e:?}"))?
-                    .with_viscosity(cfg.viscosity)
+                    .with_viscosity(cfg.viscosity).with_alpha(cfg.alpha)
                     .with_resistivity(cfg.resistivity)
                     .ct_method(ct);
                 tiles.push((sim, sub));
@@ -11926,7 +11949,7 @@ fn run_worker_process(
                     .theta(theta)
                     .with_solver(solver)
                     .map_err(|e| format!("tile {flat} substrate/solver: {e:?}"))?
-                    .with_viscosity(cfg.viscosity)
+                    .with_viscosity(cfg.viscosity).with_alpha(cfg.alpha)
                     .with_resistivity(cfg.resistivity)
                     .ct_method(ct);
                 tiles.push((sim, sub));

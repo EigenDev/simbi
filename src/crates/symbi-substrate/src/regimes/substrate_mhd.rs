@@ -778,9 +778,10 @@ where
             crate::regimes::refuse_viscosity(R::SPEC.name, "alpha", alpha);
         }
         // nu = alpha (gamma p/rho)/Omega_K with the local sound speed — energy
-        // regimes only (iso MHD has no pressure field to read cs^2 from).
+        // regimes only (iso MHD has no pressure field to read cs^2 from); a zero alpha
+        // installs nothing on either
         assert!(
-            R::SPEC.has_energy,
+            alpha == 0.0 || R::SPEC.has_energy,
             "alpha viscosity on MHD needs the energy regime (local cs^2 = gamma p/rho); \
              iso MHD has no pressure field — use constant-nu with_viscosity"
         );
