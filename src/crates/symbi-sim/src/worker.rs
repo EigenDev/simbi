@@ -154,9 +154,9 @@ impl From<FabricError> for WorkerError {
 }
 
 /// the first-release scope: 2D and 3D newtonian and relativistic hydro and MHD,
-/// adiabatic or globally isothermal, with or without a passive scalar, on the cartesian,
-/// spherical and cylindrical charts of a flat spacetime, in host memory, on a static mesh,
-/// without bodies, tracers, or excision.
+/// adiabatic or globally isothermal, with or without a passive scalar and immersed bodies, on
+/// the cartesian, spherical and cylindrical charts of a flat spacetime, in host memory, on a
+/// static mesh, without horizon bodies, tracers, or excision.
 pub fn refuse<const D: usize, const DOF: usize, M: MemorySpace, K: KernelSet<D, DOF, M, f64>>(
     stores: &[&FieldStore<D, DOF, M, f64>],
     kernels: &[&K],
@@ -175,8 +175,8 @@ pub fn refuse<const D: usize, const DOF: usize, M: MemorySpace, K: KernelSet<D, 
             Some(format!("the {:?} spacetime", store.geom.spacetime))
         } else if kernel.isothermal_closure_varies(store) {
             Some("a locally isothermal closure".to_string())
-        } else if store.immersed.is_some() {
-            Some("an immersed body".to_string())
+        } else if crate::driver::horizon_request(store).is_some() {
+            Some("a horizon body".to_string())
         } else if store.tracers.is_some() || store.continuous_tracers.is_some() {
             Some("a tracer population".to_string())
         } else if store.motion_law.is_some() {
@@ -386,6 +386,144 @@ where
             with_device(self.devices[self.tiles[k].0 as usize], || self.kernels[k].ghost_fill(store));
         }
     }
+}
+
+/// the words one body's delta travels in: force, normal force, torque, then the accreted mass,
+/// the previous step's mass, the accreted energy and the exported slip heat
+const fn body_delta_words(d: usize) -> usize {
+    2 * d + 7
+}
+
+fn encode_body_delta<const D: usize>(delta: &symbi_ib::BodyDelta<f64, D>, out: &mut Vec<u64>) {
+    out.extend((0..D).map(|ax| delta.force_delta[ax].to_bits()));
+    out.extend((0..D).map(|ax| delta.force_normal_delta[ax].to_bits()));
+    out.extend((0..3).map(|ax| delta.torque_delta[ax].to_bits()));
+    for v in [delta.mass_delta, delta.prev_mass_delta, delta.energy_delta, delta.slip_heat_delta] {
+        out.push(v.to_bits());
+    }
+}
+
+fn decode_body_delta<const D: usize>(idx: usize, words: &[u64]) -> symbi_ib::BodyDelta<f64, D> {
+    let at = |k: usize| f64::from_bits(words[k]);
+    let mut delta = symbi_ib::BodyDelta::new(idx);
+    delta.force_delta = symbi_algebra::Tensor::new(std::array::from_fn(|ax| at(ax)));
+    delta.force_normal_delta = symbi_algebra::Tensor::new(std::array::from_fn(|ax| at(D + ax)));
+    delta.torque_delta = symbi_algebra::Tensor::new(std::array::from_fn(|ax| at(2 * D + ax)));
+    delta.mass_delta = at(2 * D + 3);
+    delta.prev_mass_delta = at(2 * D + 4);
+    delta.energy_delta = at(2 * D + 5);
+    delta.slip_heat_delta = at(2 * D + 6);
+    delta
+}
+
+/// the per-step immersed-body bookkeeping on the held tiles, after the accepted step's post-step
+/// recipe, in the order the in-process tiles keep: the wall relaxation's Alfven stiffness takes
+/// the largest value of any tile; each tile's surface operations rescale its conserved state, its
+/// primitives and ghost band are recovered and the cut halos carry the drained gas; each tile
+/// reduces its feedback partials; every tile's partials cross the workers in one assembled
+/// vector and are summed in flat tile order, the order the in-process tiles sum them in; and the
+/// global delta is applied to every held tile's bodies alike
+#[allow(clippy::too_many_arguments)]
+fn body_step<const D: usize, const DOF: usize, M, K, T, L>(
+    exchange: &PlanExchange<'_, D>,
+    tiles: &[TileId],
+    stores: &mut [&mut FieldStore<D, DOF, M, f64>],
+    kernels: &[&K],
+    n_tiles: usize,
+    devices: &[i32],
+    transport: &T,
+    fabric: &mut Fabric<L>,
+    dt: f64,
+    step: u64,
+    attempt: u16,
+    deadline: Duration,
+    spent: &mut Duration,
+) -> Result<(), WorkerError>
+where
+    M: MemorySpace,
+    K: KernelSet<D, DOF, M, f64>,
+    T: HaloTransport,
+    L: Link,
+{
+    let dev = |k: usize| devices[tiles[k].0 as usize];
+    {
+        let sh: Vec<&FieldStore<D, DOF, M, f64>> = stores.iter().map(|s| &**s).collect();
+        // the largest Alfven stiffness of any tile (zero off MHD), on every tile
+        let local: Vec<(u64, u64)> = sh
+            .iter()
+            .enumerate()
+            .map(|(k, s)| (tiles[k].0 as u64, crate::state::local_c_a2_max(*s).to_bits()))
+            .collect();
+        let assembled = fabric.assemble(n_tiles as u64, &local, deadline)?;
+        let mut c_a2 = 0.0_f64;
+        for (tile, bits) in assembled.iter().enumerate() {
+            if *bits == symbi_fabric::ABSENT {
+                return Err(WorkerError::Numerics(format!("no worker supplied tile {tile}'s Alfven stiffness")));
+            }
+            c_a2 = c_a2.max(f64::from_bits(*bits));
+        }
+        for s in &sh {
+            if let Some(im) = s.immersed.as_ref() {
+                im.set_c_a2_override(c_a2);
+            }
+        }
+        // the bodies are the same on every tile, so every worker takes the same branch
+        let penalizes = sh.iter().any(|s| s.immersed.as_ref().is_some_and(|im| im.bodies.penalizes()));
+        for k in 0..sh.len() {
+            with_device(dev(k), || {
+                kernels[k].penalize(sh[k], dt);
+                if penalizes {
+                    kernels[k].c2p(sh[k]);
+                    kernels[k].ghost_fill(sh[k]);
+                }
+            });
+        }
+        if penalizes {
+            exchange_point(
+                exchange, tiles, &sh, n_tiles, devices, transport, fabric, ExchangePoint::PostBody, step, attempt,
+                deadline, spent,
+            )?;
+            flip_polar_bands(exchange, tiles, &sh, kernels, devices);
+            for k in 0..sh.len() {
+                with_device(dev(k), || kernels[k].ghost_fill(sh[k]));
+            }
+        }
+        for k in 0..sh.len() {
+            if sh[k].immersed.as_ref().is_some_and(|im| im.bodies.needs_feedback()) {
+                with_device(dev(k), || kernels[k].body_feedback(sh[k], dt));
+            }
+        }
+    }
+    // every tile's partials, in flat tile order
+    let n_bodies = stores.iter().find_map(|s| s.immersed.as_ref().map(|im| im.bodies.len())).unwrap_or(0);
+    let words = body_delta_words(D);
+    let per_tile = n_bodies * words;
+    let mut entries: Vec<(u64, u64)> = Vec::with_capacity(stores.len() * per_tile);
+    for (k, s) in stores.iter().enumerate() {
+        let Some(im) = s.immersed.as_ref() else {
+            continue;
+        };
+        let mut encoded = Vec::with_capacity(per_tile);
+        for delta in im.diagnostics.consolidate() {
+            encode_body_delta(&delta, &mut encoded);
+        }
+        let base = tiles[k].0 as u64 * per_tile as u64;
+        entries.extend(encoded.into_iter().enumerate().map(|(i, bits)| (base + i as u64, bits)));
+    }
+    let assembled = fabric.assemble((n_tiles * per_tile) as u64, &entries, deadline)?;
+    let mut tile_deltas = Vec::with_capacity(n_tiles);
+    for tile in 0..n_tiles {
+        let block = &assembled[tile * per_tile..(tile + 1) * per_tile];
+        if block.contains(&symbi_fabric::ABSENT) {
+            return Err(WorkerError::Numerics(format!(
+                "tile {tile}'s body feedback is missing from the assembled vector (or holds the absent bits)"
+            )));
+        }
+        tile_deltas.push((0..n_bodies).map(|b| decode_body_delta::<D>(b, &block[b * words..(b + 1) * words])).collect::<Vec<_>>());
+    }
+    let global = crate::decomp::merge_body_deltas(tile_deltas);
+    crate::decomp::apply_global_body_step(stores, &global, dt);
+    Ok(())
 }
 
 /// negate the odd components of every polar ghost band this worker holds, after an antipodal
@@ -1024,6 +1162,13 @@ where
             if let Err(e) = folded {
                 return Err(fail(fabric, WorkerError::Numerics(e.to_string())));
             }
+        }
+        if stores.iter().any(|s| s.immersed.is_some()) {
+            body_step(
+                exchange, tiles, stores, kernels, n_tiles, devices, transport, fabric, dt, iter, attempt, deadline,
+                &mut timing.exchange,
+            )
+            .map_err(|e| fail(fabric, e))?;
         }
         for s in stores.iter_mut() {
             advance_state_clock(&mut **s, dt);

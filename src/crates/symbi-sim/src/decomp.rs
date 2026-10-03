@@ -1938,26 +1938,47 @@ fn step_bodies_decomposed<const D: usize, const DOF: usize, M: MemorySpace>(
     stores: &mut [&mut FieldStore<D, DOF, M, f64>],
     dt: f64,
 ) {
-    use symbi_ib::{BodyDelta, apply_body_deltas};
-    let mut global: Vec<BodyDelta<f64, D>> = Vec::new();
-    for s in stores.iter() {
-        let Some(im) = s.immersed.as_ref() else {
-            continue;
-        };
-        for d in im.diagnostics.consolidate() {
+    let global = merge_body_deltas(
+        stores.iter().filter_map(|s| s.immersed.as_ref().map(|im| im.diagnostics.consolidate())),
+    );
+    apply_global_body_step(stores, &global, dt);
+}
+
+/// the global per-body delta from each tile's consolidated partials, in flat tile order: the first
+/// tile's delta stands as given and every later tile's partial is added to it, the summation order
+/// every driver of the tiles reproduces
+pub fn merge_body_deltas<const D: usize>(
+    per_tile: impl IntoIterator<Item = Vec<symbi_ib::BodyDelta<f64, D>>>,
+) -> Vec<symbi_ib::BodyDelta<f64, D>> {
+    let mut global: Vec<symbi_ib::BodyDelta<f64, D>> = Vec::new();
+    for deltas in per_tile {
+        for d in deltas {
             match global.iter_mut().find(|g| g.idx == d.idx) {
                 Some(g) => *g += d,
                 None => global.push(d),
             }
         }
     }
+    global
+}
+
+/// apply the global per-body delta to every held tile's bodies: the prescribed advance, the
+/// bonded fragments' subcycle under the summed fluid loads, the per-step history at the step's end
+/// time, and the reset of each accumulator. identical input on every tile keeps the bodies in
+/// lockstep.
+pub fn apply_global_body_step<const D: usize, const DOF: usize, M: MemorySpace>(
+    stores: &mut [&mut FieldStore<D, DOF, M, f64>],
+    global: &[symbi_ib::BodyDelta<f64, D>],
+    dt: f64,
+) {
+    use symbi_ib::apply_body_deltas;
     // the per-step exchange series at the step's end time, the clock the single grid books it at
     let time = stores.first().map_or(0.0, |s| crate::driver::advance_clock(s.time, s.iteration, dt).0);
     for s in stores.iter_mut() {
         let Some(im) = s.immersed.as_mut() else {
             continue;
         };
-        apply_body_deltas(&mut im.bodies, &global, dt);
+        apply_body_deltas(&mut im.bodies, global, dt);
         // bonded fragments: the cross-tile-summed fluid loads drive the dem subcycle (bonds +
         // contact + mutual gravity + gas drag), replicated identically on every tile. the bodies
         // and the summed external loads are identical on every tile, so the fragment motion is
@@ -1967,7 +1988,7 @@ fn step_bodies_decomposed<const D: usize, const DOF: usize, M: MemorySpace>(
         if let Some(sys) = im.fragment_physics.as_mut() {
             let n_src = im.bodies.source_count();
             let mut external = vec![symbi_ib::ExternalLoad::zero(); im.bodies.len()];
-            for d in &global {
+            for d in global {
                 if d.idx >= n_src && d.idx < external.len() {
                     external[d.idx].force = d.force_delta;
                     external[d.idx].torque = d.torque_delta;
@@ -1975,7 +1996,7 @@ fn step_bodies_decomposed<const D: usize, const DOF: usize, M: MemorySpace>(
             }
             sys.advance(&mut im.bodies, dt, &external);
         }
-        im.history.push(time, dt, &global);
+        im.history.push(time, dt, global);
         im.diagnostics.reset();
     }
 }

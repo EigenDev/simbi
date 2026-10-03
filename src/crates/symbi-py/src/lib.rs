@@ -10711,8 +10711,15 @@ fn validate_launch_scope(cfg: &Config) -> Result<(), String> {
     if cfg.mesh_motion {
         return refused("mesh motion");
     }
-    if !cfg.bodies.is_empty() || cfg.bonded_assembly.is_some() {
-        return refused("an immersed body");
+    // the flat gas and isothermal workers carry immersed bodies; the refined and magnetized
+    // worker builders attach none yet
+    if (!cfg.bodies.is_empty() || cfg.bonded_assembly.is_some())
+        && (cfg.refinement_enabled || matches!(cfg.regime.as_str(), "nmhd" | "imhd" | "rmhd"))
+    {
+        return refused(&format!(
+            "an immersed body with {}",
+            if cfg.refinement_enabled { "mesh refinement".to_string() } else { format!("the {} regime", cfg.regime) }
+        ));
     }
     if cfg.n_tracers > 0 {
         return refused("a tracer population");
@@ -11792,6 +11799,13 @@ fn run_worker_process(
                 // the dye on this tile, indexed from the global dye by the tile's global cells;
                 // the halo exchange moves prim.chi across the cuts
                 let sim = with_tile_dye!(sim, cfg, tile_lo, n, flat);
+                // gravity / accretion sinks plus bonded fragments and shaped walls, every tile
+                // holding the whole set at their global positions
+                let sim = if cfg.bodies.is_empty() && cfg.bonded_assembly.is_none() {
+                    sim
+                } else {
+                    attach_bodies_and_fragments!(sim, cfg, $d)
+                };
                 // the declared perturbation at the tile's own cell centers, the single grid's
                 let has_energy = sim.fields.cons.has_energy();
                 lay_perturbation!(sim, cfg, $d, has_energy);
@@ -11976,6 +11990,13 @@ fn run_worker_process(
                 // the dye on this tile, indexed from the global dye by the tile's global cells;
                 // the halo exchange moves prim.chi across the cuts
                 let sim = with_tile_dye!(sim, cfg, tile_lo, n, flat);
+                // gravity / accretion sinks plus bonded fragments and shaped walls, every tile
+                // holding the whole set at their global positions
+                let sim = if cfg.bodies.is_empty() && cfg.bonded_assembly.is_none() {
+                    sim
+                } else {
+                    attach_bodies_and_fragments!(sim, cfg, $d)
+                };
                 // the declared perturbation at the tile's own cell centers, the single grid's
                 lay_perturbation!(sim, cfg, $d, false);
                 // the numerics the single isothermal path installs: the limiter, then the
@@ -12274,6 +12295,19 @@ where
         stores.push(&mut **s);
         kernels.push(&*k);
     }
+    // the body diagnostics, on the coordinator alone: every worker's bodies are the same, at the
+    // cadence the single grid keeps
+    let diag_path = if me == WorkerId(0) && cfg.diagnostic_interval > 0.0 && !cfg.bodies.is_empty() {
+        Some(format!("{}diagnostics.dat", cfg.data_dir))
+    } else {
+        None
+    };
+    let diag_interval = (cfg.diagnostic_interval * cfg.time_unit).max(f64::MIN_POSITIVE);
+    let diag_plan = diag_path.as_ref().map(|dp| {
+        plan_diagnostics(last_diagnostics_time(dp), cfg.start_time, diag_interval)
+            .unwrap_or_else(|detail| panic!("{detail}"))
+    });
+    let mut next_diag = diag_plan.as_ref().map_or(diag_interval, |p| p.next);
     let outcome: Result<(u64, f64), String> = (|| {
         if cfg.checkpoint_index == 0 || cfg.start_time == 0.0 {
             let sh: Vec<&symbi_sim::state::FieldStore<D, DOF, DefaultMemory, f64>> = stores.iter().map(|s| &**s).collect();
@@ -12290,6 +12324,14 @@ where
             let io = write(&sh, &mut fabric, &path, cfg.checkpoint_index, AuditBasis::Primed)?;
             if let Some(r) = reporter.as_mut() {
                 r.checkpoint_written(cfg, &path, cfg.start_time, io);
+            }
+        }
+        // the start-time body diagnostics row on a fresh file (or a tail behind the resume clock)
+        if let Some(dp) = &diag_path {
+            if diag_plan.as_ref().is_some_and(|p| p.write_initial) {
+                if let Some(im) = stores[0].immersed.as_ref() {
+                    let _ = append_diagnostics(dp, cfg.start_time, &im.bodies);
+                }
             }
         }
         let worker_cfg = WorkerConfig {
@@ -12355,6 +12397,13 @@ where
                         r.checkpoint_written(cfg, &path, time, io);
                     }
                     cadence.advance(time);
+                }
+                if let Some(dp) = &diag_path {
+                    if diagnostics_due(time, &mut next_diag, diag_interval) {
+                        if let Some(im) = sh[0].immersed.as_ref() {
+                            let _ = append_diagnostics(dp, time, &im.bodies);
+                        }
+                    }
                 }
                 Ok(std::ops::ControlFlow::Continue(()))
             },

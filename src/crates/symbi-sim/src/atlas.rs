@@ -315,6 +315,10 @@ pub enum ExchangePoint {
     /// after the accepted step's post-step operations recovered the primitives: the cut halos
     /// carry them before the next step's first reader and the checkpoint
     PostStep,
+    /// after the immersed bodies' surface operations rescaled the conserved state and the
+    /// primitives were recovered from it: the cut halos carry the drained gas before the next
+    /// step's reconstruction and the checkpoint
+    PostBody,
     Rollback,
     /// after the named exchange: each tile below a cut sends its copy of the shared
     /// interface face to the tile above, which compares it with its own bit for bit. the
@@ -406,6 +410,7 @@ impl ExchangePoint {
             ExchangePoint::Stage(k) => (1, k as u32, 0),
             ExchangePoint::Troubled(k) => (2, k as u32, 0),
             ExchangePoint::PostStep => (3, 0, 0),
+            ExchangePoint::PostBody => (27, 0, 0),
             ExchangePoint::Rollback => (4, 0, 0),
             ExchangePoint::Audit(AuditAt::Prime) => (5, 0, 0),
             ExchangePoint::Audit(AuditAt::Stage(k)) => (6, k as u32, 0),

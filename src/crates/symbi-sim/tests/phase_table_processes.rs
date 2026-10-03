@@ -51,6 +51,7 @@ fn moving(point: ExchangePoint) -> Vec<(TransferId, WorkerId, WorkerId, u8)> {
         ExchangePoint::Prime
         | ExchangePoint::Stage(_)
         | ExchangePoint::PostStep
+        | ExchangePoint::PostBody
         | ExchangePoint::Rollback
         | ExchangePoint::Restrict => vec![(t(0), A, B, 0), (t(1), B, A, 0), (t(2), B, C, 1), (t(3), C, B, 1)],
         // the primed root and the primed fine level, before the prime audit
