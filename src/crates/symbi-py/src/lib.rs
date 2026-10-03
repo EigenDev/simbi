@@ -2210,6 +2210,30 @@ macro_rules! lay_perturbation {
     }};
 }
 
+/// a locally isothermal tile's closure cs^2 = p / rho on every allocated cell, read from the whole
+/// grid's initial rows at the nearest whole-grid interior cell: the interior and the cut ghosts
+/// take their own cells' values and the physical ghosts the clamped continuation, the values the
+/// single grid holds at the same cells. the closure is fixed in time, so no exchange carries it.
+macro_rules! seed_local_cs2 {
+    ($sim:expr, $sub:expr, $cfg:expr, $prims:expr, $tile_lo:expr, $n:expr, $d:literal) => {{
+        let cfg: &Config = $cfg;
+        if cfg.locally_isothermal {
+            let ilo: [isize; $d] = std::array::from_fn(|ax| $sim.geom.interior.spaces[ax].lo);
+            for c in $sim.geom.allocated.iter() {
+                let g: [isize; $d] = std::array::from_fn(|ax| {
+                    (c[ax] - ilo[ax] + $tile_lo[ax] as isize).clamp(0, $n[ax] as isize - 1)
+                });
+                let row = &$prims[global_lin::<$d>(&[0; $d], &g, &$n)];
+                let cs2 = row[1 + $d] / row[0];
+                $sub.cs2.set(c, cs2);
+                if let Some(dst) = $sim.fields.cs2.as_ref() {
+                    dst.set(c, cs2);
+                }
+            }
+        }
+    }};
+}
+
 /// a tile's sim with the passive scalar allocated and seeded from the global dye (an undyed run
 /// passes the sim through)
 macro_rules! with_tile_dye {
@@ -8065,9 +8089,6 @@ macro_rules! build_and_run_iso_decomposed {
         if cfg.refinement_enabled {
             return Err("gpus>1 does not yet support mesh refinement; set gpus=1".to_string());
         }
-        if cfg.locally_isothermal {
-            return Err("gpus>1 does not yet support locally-isothermal cs(x); set gpus=1 or use globally isothermal".to_string());
-        }
         let n: [usize; $d] = std::array::from_fn(|ax| cfg.n_cells[ax]);
         let total: usize = n.iter().product();
         if prims.len() != total {
@@ -8184,6 +8205,7 @@ macro_rules! build_and_run_iso_decomposed {
                 // registers them: an edge tile's exterior faces carry their ids from the
                 // physical-boundary copy
                 let sub = attach_gradient_walls(sub, cfg, |sub, gbc| sub.with_gradient_boundary(gbc).0)?;
+                seed_local_cs2!(sim, sub, cfg, prims, tile_lo, n, $d);
                 Ok((sim, sub))
             })?;
             tiles.push(built);
@@ -10729,8 +10751,10 @@ fn validate_launch_scope(cfg: &Config) -> Result<(), String> {
     if cfg.spacetime != "minkowski" {
         return refused(&format!("the {} spacetime", cfg.spacetime));
     }
-    if cfg.locally_isothermal {
-        return refused("a locally isothermal closure");
+    // the isothermal hydro tiles seed the closure field from the whole grid's rows; the
+    // magnetized isothermal tiles derive none
+    if cfg.locally_isothermal && cfg.regime == "imhd" {
+        return refused("a locally isothermal closure with the imhd regime");
     }
     if cfg.refinement_enabled {
         validate_refined_launch_scope(cfg)?;
@@ -10826,6 +10850,10 @@ fn validate_refined_launch_scope(cfg: &Config) -> Result<(), String> {
     }
     if cfg.alpha > 0.0 {
         return refused("an alpha viscosity");
+    }
+    // the refined worker hierarchy seeds no per-cell closure field on its levels
+    if cfg.locally_isothermal {
+        return refused("a locally isothermal closure");
     }
     if cfg.excision_radius > 0.0 {
         return refused("excision");
@@ -12051,6 +12079,7 @@ fn run_worker_process(
                 )?;
                 let sub = attach_gradient_walls(sub, cfg, |sub, gbc| sub.with_gradient_boundary(gbc).0)?;
                 let sub = attach_driven_boundaries(sub, cfg, <IsoNewtonian as Regime<f64, $d>>::SPEC, |sub, built, params| sub.with_driven_boundary(built, params).0)?;
+                seed_local_cs2!(sim, sub, cfg, prims, tile_lo, n, $d);
                 tiles.push((sim, sub));
             }
             session_over!(IsoNewtonian, $d, tiles)

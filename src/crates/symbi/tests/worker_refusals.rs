@@ -173,11 +173,11 @@ fn a_curved_spacetime_is_refused() {
     refused(run2(&mut sim, &kern, RegimeKind::Newtonian), "spacetime");
 }
 
-/// the isothermal closure is admitted while its sound speed is one value over the tile and
-/// refused once it varies: a cut ghost continued from the tile's own interior would then hold
-/// another cell's temperature.
+/// the isothermal closure is admitted uniform and varying: the tile's builder seeds every
+/// allocated cell, the cut ghosts included, from the whole grid's closure, and the worker marches
+/// the field as given.
 #[test]
-fn a_locally_isothermal_closure_is_refused_and_a_global_one_admitted() {
+fn a_locally_isothermal_closure_and_a_global_one_are_admitted() {
     use symbi::regimes::substrate::IsoSubstrateKernelSet;
     use symbi_hydro::eos::Isothermal;
     use symbi_hydro::isothermal::IsoNewtonian;
@@ -222,7 +222,7 @@ fn a_locally_isothermal_closure_is_refused_and_a_global_one_admitted() {
     let kern = IsoSubstrateKernelSet::<HostMemory, f64, 2>::new(1.0, 0.4, &sim.geom.allocated);
     let c = [sim.geom.interior.spaces[0].lo + 3, sim.geom.interior.spaces[1].lo + 4];
     kern.cs2.set(c, 0.25);
-    refused(plan_run(&mut sim, &kern), "a locally isothermal closure");
+    plan_run(&mut sim, &kern).expect("a locally isothermal closure is admitted");
 }
 
 /// a dyed run is admitted: the exchange schema carries the concentration across the cuts, and

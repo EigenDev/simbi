@@ -174,8 +174,6 @@ pub fn refuse<const D: usize, const DOF: usize, M: MemorySpace, K: KernelSet<D, 
     for (store, kernel) in stores.iter().zip(kernels) {
         let reason = if store.geom.spacetime != symbi_geometry::Spacetime::Minkowski {
             Some(format!("the {:?} spacetime", store.geom.spacetime))
-        } else if kernel.isothermal_closure_varies(store) {
-            Some("a locally isothermal closure".to_string())
         } else if crate::driver::horizon_request(store).is_some() {
             Some("a horizon body".to_string())
         } else if store.tracers.is_some() || store.continuous_tracers.is_some() {
