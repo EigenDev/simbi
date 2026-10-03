@@ -12,7 +12,10 @@
 # - a bonded fragment cluster in the same wind;
 # - an accreting bondi sink, fresh, and resumed onto three uneven workers
 #   against three host tiles cut at the same cells;
-# - the adiabatic alpha viscosity about a central body.
+# - the adiabatic alpha viscosity about a central body;
+# - a shaped wall and an accreting sink on the magnetized grid.
+# a magnetized wall takes its shape (a box and a sphere leave different flows),
+# and a body with mesh refinement is refused on launch by name.
 #
 # run: pytest -m simulation simbi/simulation/tests/test_launch_bodies.py
 # =============================================================================
@@ -45,7 +48,11 @@ from simbi.types.bodies import BondedAssembly
 from simbi_configs.examples.ibm.roche_passage import RochePassage
 from simbi_configs.examples.ibm.rubble_wind import RubbleWind
 from simbi_configs.examples.ibm.wind_tunnel import WindTunnel
+from simbi.types import Shape
+from simbi.types.bodies import BodyCapability, ImmersedBodyConfig, RigidProperties
+from simbi_configs.examples.ibm.magnetized_sink import MagnetizedBondiSink
 from simbi_configs.examples.newtonian.bondi import SphericalBondiTest
+from simbi_configs.examples.newtonian.nmhd_orszag_tang import NewtonianOrszagTang
 
 
 def _isothermal(base):
@@ -85,6 +92,37 @@ class AlphaPrimary(RochePassage):
 
 class Bondi(SphericalBondiTest):
     base_resolution: Annotated[int, ProblemParam(24, description="base")]
+
+
+class RefinedPrimary(AlphaPrimary):
+    viscosity_alpha: Annotated[float, ProblemParam(0.0, description="inviscid")]
+    refinement_enabled: Annotated[bool, ProblemParam(True, description="refined")]
+    refinement_max_levels: Annotated[int, ProblemParam(2, description="levels")]
+    refinement_regions: Annotated[list[list[float]], ProblemParam([[-2.0, 2.0, -2.0, 2.0]], description="box")]
+    refinement_ratios: Annotated[list[int], ProblemParam([2], description="ratios")]
+
+
+def _magnetized_wall(shape):
+    return [ImmersedBodyConfig(capability=BodyCapability.RIGID, mass=0.0, radius=0.3, position=(0.5, 0.5), velocity=(0.0, 0.0),
+                               rigid=RigidProperties(inertia=1.0, apply_no_slip=True, k_eta_n=50.0, k_eta_t=50.0, shape=shape))]
+
+
+class MagnetizedBoxWall(NewtonianOrszagTang):
+    @computed_field
+    @property
+    def immersed_bodies(self) -> list:
+        return _magnetized_wall(Shape.box((0.5, 0.5, 0.0), (0.1, 0.1, 1.0)))
+
+
+class MagnetizedBallWall(NewtonianOrszagTang):
+    @computed_field
+    @property
+    def immersed_bodies(self) -> list:
+        return _magnetized_wall(Shape.sphere((0.5, 0.5, 0.0), 0.05))
+
+
+class MagnetizedSink(MagnetizedBondiSink):
+    resolution: Annotated[tuple[int, int, int], ProblemParam((24, 24, 24), description="grid")]
 '''
 # (problem, resolution passed to the run, layout cuts or shape)
 ARMS = {
@@ -93,6 +131,8 @@ ARMS = {
     "fragments": ("RubbleWind", (64, 32)),
     "alpha": ("AlphaPrimary", (64, 64)),
     "sink": ("Bondi", None),
+    "magnetized-wall": ("MagnetizedBoxWall", (32, 32, 1)),
+    "magnetized-sink": ("MagnetizedSink", None),
 }
 
 
@@ -182,7 +222,9 @@ def _assert_same_diagnostics(got: Path, want: Path, label: str) -> None:
 def test_launched_workers_publish_the_host_tiles_bodies(tmp_path: Path, variants: Path, arm: str) -> None:
     problem, resolution = ARMS[arm]
     want = _tiles(problem, resolution, tmp_path / "tiles", STEPS)
-    two = _layout(tmp_path / "two.toml", workers=2, shape=(2, 1) if resolution is not None else (2, 1, 1))
+    # a planar grid cut once along x; the 3d sinks (resolution from their own setup) likewise
+    planar = resolution is not None and sum(1 for r in resolution if r > 1) == 2
+    two = _layout(tmp_path / "two.toml", workers=2, shape=(2, 1) if planar else (2, 1, 1))
     got = _launch(variants, problem, resolution, tmp_path / "launched", two, STEPS)
     _assert_same(got, want, f"{arm}: two launched workers")
     if arm == "sink":
@@ -197,3 +239,25 @@ def test_a_sink_resumed_onto_three_uneven_workers_publishes_the_host_tiles_ledge
     three = _layout(tmp_path / "three.toml", workers=3, cuts=cuts)
     got = _launch(variants, "Bondi", None, tmp_path / "launched", three, STEPS - STEPS // 2, checkpoint=first)
     _assert_same(got, want, "sink resumed onto three uneven workers")
+
+
+def test_a_magnetized_wall_takes_its_shape(tmp_path: Path, variants: Path) -> None:
+    """the shaped wall acts on the magnetized grid: a box and a sphere of the same mask scale
+    leave different flows"""
+    box = _all_levels(_tiles("MagnetizedBoxWall", (32, 32, 1), tmp_path / "box", STEPS, cuts=[[], []]))
+    ball = _all_levels(_tiles("MagnetizedBallWall", (32, 32, 1), tmp_path / "ball", STEPS, cuts=[[], []]))
+    assert not np.array_equal(box["level_0/conserved/den"], ball["level_0/conserved/den"]), "the wall's shape left the flow unchanged"
+
+
+def test_a_body_with_mesh_refinement_on_launch_is_refused(tmp_path: Path, variants: Path) -> None:
+    script = variants.parent / "launched_refinedprimary.py"
+    script.write_text("from variants import RefinedPrimary as Base\n\n\nclass LaunchedRefinedPrimary(Base):\n    pass\n")
+    layout = _layout(tmp_path / "two.toml", workers=2, shape=(2, 1))
+    cmd = [sys.executable, "-m", "simbi.cli", "launch", str(script), "--layout", str(layout), "--max-steps", "1",
+           "--resolution", "64,64", "--data-directory", str(tmp_path / "out"), "--checkpoint-interval", "1e9"]
+    env = dict(os.environ)
+    env.pop("SIMBI_LAUNCH_EXPERIMENTAL", None)
+    done = subprocess.run(cmd, capture_output=True, text=True, timeout=600, env=env)
+    assert done.returncode != 0, f"the launch succeeded:\n{done.stdout}"
+    assert "an immersed body with mesh refinement is outside the distributed first release" in " ".join(done.stderr.split()), done.stderr[-2000:]
+    assert not list((tmp_path / "out").glob("*.h5")), "a checkpoint was published"

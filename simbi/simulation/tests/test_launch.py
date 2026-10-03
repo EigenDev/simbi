@@ -27,7 +27,6 @@ import pytest
 
 from simbi.simulation import launcher
 from simbi.simulation.runner import _load_backend, to_execution_dict
-from simbi_configs.examples.ibm.magnetized_sink import MagnetizedBondiSink
 from simbi_configs.examples.newtonian.kh import KelvinHelmholtz
 from simbi_configs.examples.newtonian.nmhd_orszag_tang import NewtonianOrszagTang
 from simbi_configs.examples.newtonian.ordered_sources import OrderedSources
@@ -581,16 +580,15 @@ def test_a_shared_face_mismatch_exits_every_worker_and_publishes_no_checkpoint(t
 
 TRACED_KH = str(Path(TracedKelvinHelmholtz.__module__.replace(".", "/") + ".py"))
 REFINED_RMHD = str(Path(RefinedMhd3D.__module__.replace(".", "/") + ".py"))
-MAGNETIZED_SINK = str(Path(MagnetizedBondiSink.__module__.replace(".", "/") + ".py"))
 
 
 @pytest.mark.parametrize(
     ("script", "reason"),
-    [(TRACED_KH, "a tracer population"), (REFINED_RMHD, "a refined patch on the periodic face of axis 2 with mesh refinement"), (MAGNETIZED_SINK, "an immersed body with the nmhd regime")],
+    [(TRACED_KH, "a tracer population"), (REFINED_RMHD, "a refined patch on the periodic face of axis 2 with mesh refinement")],
 )
 def test_out_of_scope_problems_are_refused_by_name(tmp_path: Path, script: str, reason: str) -> None:
     # a layout with as many axes as the problem's grid, so the refusal is the scope's
-    problem_class = {TRACED_KH: TracedKelvinHelmholtz, REFINED_RMHD: RefinedMhd3D, MAGNETIZED_SINK: MagnetizedBondiSink}[script]
+    problem_class = {TRACED_KH: TracedKelvinHelmholtz, REFINED_RMHD: RefinedMhd3D}[script]
     default = problem_class.model_fields["resolution"].default
     dims = max(1, sum(1 for r in default if int(r) > 1))
     layout = _layout(tmp_path / "two.toml", workers=2, shape=(2,) + (1,) * (dims - 1))

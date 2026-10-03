@@ -5323,6 +5323,17 @@ macro_rules! into_hierarchy {
 /// feature is wired once -- a decomposed copy silently dropping the shapes (as it once did) is
 /// exactly what a shared attach prevents. the caller owns the empty / refined guard (a refined run
 /// attaches to the hierarchy's finest level instead).
+/// the immersed bodies and their shaped walls, at their global positions: a magnetized regime
+/// carries no bonded fragments (refused at admission), so its bodies are the sinks and walls alone
+macro_rules! attach_bodies_and_shapes {
+    ($sim:expr, $cfg:expr, $d:literal) => {{
+        let cfg: &Config = $cfg;
+        let mut sim = $sim.with_bodies(build_bodies_and_horizon::<$d>(cfg));
+        sim.attach_body_shapes(build_body_shapes(&cfg.bodies));
+        sim
+    }};
+}
+
 macro_rules! attach_bodies_and_fragments {
     ($sim:expr, $cfg:expr, $d:literal) => {{
         let cfg: &Config = $cfg;
@@ -7153,7 +7164,7 @@ macro_rules! build_and_run_mhd {
         let sim = if cfg.bodies.is_empty() || cfg.refinement_enabled {
             sim
         } else {
-            sim.with_bodies(build_bodies_and_horizon::<$d>(cfg))
+            attach_bodies_and_shapes!(sim, cfg, $d)
         };
         let sim = {
             let mut sim = sim;
@@ -7344,7 +7355,7 @@ macro_rules! build_and_run_imhd {
         let sim = if cfg.bodies.is_empty() || cfg.refinement_enabled {
             sim
         } else {
-            sim.with_bodies(build_bodies_and_horizon::<$d>(cfg))
+            attach_bodies_and_shapes!(sim, cfg, $d)
         };
         let sim = {
             let mut sim = sim;
@@ -7531,7 +7542,7 @@ macro_rules! build_and_run_mhd_decomposed {
                 let sim = if cfg.bodies.is_empty() {
                     sim
                 } else {
-                    sim.with_bodies(build_bodies_and_horizon::<$d>(cfg))
+                    attach_bodies_and_shapes!(sim, cfg, $d)
                 };
                 let sub = sim
                     .substrate()
@@ -7732,7 +7743,7 @@ macro_rules! build_and_run_imhd_decomposed {
                 let sim = if cfg.bodies.is_empty() {
                     sim
                 } else {
-                    sim.with_bodies(build_bodies_and_horizon::<$d>(cfg))
+                    attach_bodies_and_shapes!(sim, cfg, $d)
                 };
                 let sub = sim
                     .substrate()
@@ -10711,15 +10722,9 @@ fn validate_launch_scope(cfg: &Config) -> Result<(), String> {
     if cfg.mesh_motion {
         return refused("mesh motion");
     }
-    // the flat gas and isothermal workers carry immersed bodies; the refined and magnetized
-    // worker builders attach none yet
-    if (!cfg.bodies.is_empty() || cfg.bonded_assembly.is_some())
-        && (cfg.refinement_enabled || matches!(cfg.regime.as_str(), "nmhd" | "imhd" | "rmhd"))
-    {
-        return refused(&format!(
-            "an immersed body with {}",
-            if cfg.refinement_enabled { "mesh refinement".to_string() } else { format!("the {} regime", cfg.regime) }
-        ));
+    // the flat workers carry immersed bodies; the refined worker builders attach none yet
+    if (!cfg.bodies.is_empty() || cfg.bonded_assembly.is_some()) && cfg.refinement_enabled {
+        return refused("an immersed body with mesh refinement");
     }
     if cfg.n_tracers > 0 {
         return refused("a tracer population");
@@ -11882,6 +11887,8 @@ fn run_worker_process(
                     })
                     .seed_faces_indexed(&tile_faces)
                     .build();
+                // the immersed bodies and their shaped walls, every tile holding the whole set
+                let sim = if cfg.bodies.is_empty() { sim } else { attach_bodies_and_shapes!(sim, cfg, $d) };
                 // the numerics the single magnetized path installs: the limiter, the solver,
                 // the ohmic resistivity and the edge EMF
                 let sub = sim
@@ -11943,6 +11950,8 @@ fn run_worker_process(
                     })
                     .seed_faces_indexed(&tile_faces)
                     .build();
+                // the immersed bodies and their shaped walls, every tile holding the whole set
+                let sim = if cfg.bodies.is_empty() { sim } else { attach_bodies_and_shapes!(sim, cfg, $d) };
                 // the numerics the single relativistic magnetized path installs: the limiter, the
                 // solver, the ohmic resistivity and the edge EMF
                 let sub = sim
@@ -12062,6 +12071,8 @@ fn run_worker_process(
                     })
                     .seed_faces_indexed(&tile_faces)
                     .build();
+                // the immersed bodies and their shaped walls, every tile holding the whole set
+                let sim = if cfg.bodies.is_empty() { sim } else { attach_bodies_and_shapes!(sim, cfg, $d) };
                 let sub = sim
                     .substrate()
                     .theta(theta)
