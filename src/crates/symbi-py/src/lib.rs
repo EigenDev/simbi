@@ -2234,6 +2234,38 @@ macro_rules! seed_local_cs2 {
     }};
 }
 
+/// an isothermal MHD tile's closure cs^2 = p / rho on every allocated cell, read from the whole
+/// grid's initial rows (pressure in the fifth column) at the cell the single grid continues it
+/// from: the periodic image on an axis the domain closes into a ring, the nearest whole-grid
+/// interior cell otherwise. the closure is fixed in time, so no exchange carries it.
+macro_rules! seed_mhd_local_cs2 {
+    ($sim:expr, $cfg:expr, $prims:expr, $tile_lo:expr, $n:expr, $phys:expr, $d:literal) => {{
+        let cfg: &Config = $cfg;
+        if cfg.locally_isothermal {
+            if $prims.first().is_some_and(|row: &Vec<f64>| row.len() < 5) {
+                return Err(format!(
+                    "locally isothermal MHD prim row has {} components, expected 5 (rho, v1..v3, p_local)",
+                    $prims[0].len()
+                ));
+            }
+            let wraps: [bool; $d] = std::array::from_fn(|ax| {
+                $phys.lo(ax) == BoundaryType::Periodic && $phys.hi(ax) == BoundaryType::Periodic
+            });
+            let ilo: [isize; $d] = std::array::from_fn(|ax| $sim.geom.interior.spaces[ax].lo);
+            let cs2 = $sim.fields.cs2.as_ref().expect("the isothermal closure field exists on an energy-free regime");
+            for c in $sim.geom.allocated.iter() {
+                let g: [isize; $d] = std::array::from_fn(|ax| {
+                    let whole = c[ax] - ilo[ax] + $tile_lo[ax] as isize;
+                    let cells = $n[ax] as isize;
+                    if wraps[ax] { whole.rem_euclid(cells) } else { whole.clamp(0, cells - 1) }
+                });
+                let row = &$prims[global_lin::<$d>(&[0; $d], &g, &$n)];
+                cs2.set(c, row[4] / row[0]);
+            }
+        }
+    }};
+}
+
 /// a tile's sim with the passive scalar allocated and seeded from the global dye (an undyed run
 /// passes the sim through)
 macro_rules! with_tile_dye {
@@ -7705,11 +7737,6 @@ macro_rules! build_and_run_imhd_decomposed {
         if cfg.refinement_enabled {
             return Err("gpus>1 does not yet support mesh refinement; set gpus=1 or disable refinement".to_string());
         }
-        // the per-cell sound speed cs^2(x) = p(x)/rho(x) is derived on the single-grid state
-        // alone; the tiles would march on the uniform cs and ignore the pressure column
-        if cfg.locally_isothermal {
-            return Err("gpus>1 does not yet support locally-isothermal cs(x) for isothermal MHD; set gpus=1 or use globally isothermal".to_string());
-        }
 
         let n: [usize; $d] = std::array::from_fn(|ax| cfg.n_cells[ax]);
         let total: usize = n.iter().product();
@@ -7824,6 +7851,7 @@ macro_rules! build_and_run_imhd_decomposed {
                     }
                     sub
                 };
+                seed_mhd_local_cs2!(sim, cfg, prims, tile_lo, n, phys, $d);
                 Ok((sim, sub))
             })?;
             tiles.push(built);
@@ -10777,11 +10805,7 @@ fn validate_launch_scope(cfg: &Config) -> Result<(), String> {
     if cfg.spacetime != "minkowski" {
         return refused(&format!("the {} spacetime", cfg.spacetime));
     }
-    // the isothermal hydro tiles seed the closure field from the whole grid's rows; the
-    // magnetized isothermal tiles derive none
-    if cfg.locally_isothermal && cfg.regime == "imhd" {
-        return refused("a locally isothermal closure with the imhd regime");
-    }
+
     if cfg.refinement_enabled {
         validate_refined_launch_scope(cfg)?;
     }
@@ -12329,6 +12353,7 @@ fn run_worker_process(
                     .with_resistivity(cfg.resistivity)
                     .ct_method(ct);
                 let sub = attach_driven_boundaries(sub, cfg, <IsothermalMhd as Regime<f64, $d>>::SPEC, |sub, built, params| sub.with_driven_boundary(built, params).0)?;
+                seed_mhd_local_cs2!(sim, cfg, prims, tile_lo, n, phys, $d);
                 tiles.push((sim, sub));
             }
             // the tracer population seeds once from the whole-grid density, as the single grid's,

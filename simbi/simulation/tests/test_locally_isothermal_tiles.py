@@ -7,7 +7,9 @@
 # 2x2 launch, a launch resumed onto three uneven workers, and a troubled cell
 # corrected against a cut each publish the single grid's state bit for bit.
 # the closure changes the run (the globally isothermal gas on the same rows
-# lands elsewhere). refinement with the closure on launch is refused in
+# lands elsewhere). the isothermal orszag-tang vortex carries the closure on
+# two launched workers and resumed onto three uneven ones, periodic and with
+# outflow faces. refinement with the closure on launch is refused in
 # test_launch_isothermal.
 #
 # run: pytest -m simulation simbi/simulation/tests/test_locally_isothermal_tiles.py
@@ -36,6 +38,7 @@ from pydantic import computed_field
 
 from simbi import ProblemParam
 from simbi.types import BoundaryCondition
+from simbi_configs.examples.isothermal.imhd_orszag_tang import IsothermalOrszagTang
 from simbi_configs.examples.isothermal.refined_locally_iso import RefinedLocallyIso
 
 
@@ -85,6 +88,29 @@ class LocalIso(GlobalIso):
 
         return gas
 
+
+class LocalImhd(IsothermalOrszagTang):
+    """the isothermal orszag-tang vortex with the closure cs^2 = 1 + 0.1 sin(v_x)"""
+
+    @computed_field
+    @property
+    def locally_isothermal(self) -> bool:
+        return True
+
+    def initial_primitive_state(self):
+        gas, *faces = super().initial_primitive_state()
+
+        def rows():
+            for row in gas():
+                yield (*row, row[0] * (1.0 + 0.1 * math.sin(row[1])))
+
+        return (rows, *faces)
+
+
+class OutflowLocalImhd(LocalImhd):
+    boundary_conditions: Annotated[
+        list[BoundaryCondition], ProblemParam([BoundaryCondition.OUTFLOW], description="outflow")
+    ]
 '''
 
 
@@ -164,3 +190,13 @@ def test_a_troubled_cell_against_a_cut_corrects_alike_under_the_local_closure(tm
     assert any(not np.array_equal(x, _all_levels(flagged)[n]) for n, x in clean.items()), "the flag left the run unchanged; the correction arm is vacuous"
     _assert_same(_launch(variants, "LocalIso", tmp_path / "corrected", three, STEPS, inject=inject), flagged, "corrected on three")
 
+
+
+@pytest.mark.parametrize("problem", ["LocalImhd", "OutflowLocalImhd"])
+def test_isothermal_mhd_workers_carry_the_local_closure_as_the_single_grid(tmp_path: Path, variants: Path, problem: str) -> None:
+    want = _single(problem, tmp_path / "single")
+    two = _layout(tmp_path / "two.toml", workers=2, shape=(2, 1))
+    _assert_same(_launch(variants, problem, tmp_path / "two", two, STEPS), want, f"{problem}: two workers")
+    first = _launch(variants, problem, tmp_path / "first", two, STEPS // 2)
+    three = _layout(tmp_path / "three.toml", workers=3, cuts=[[10, 21], []])
+    _assert_same(_launch(variants, problem, tmp_path / "resumed", three, STEPS - STEPS // 2, checkpoint=first), want, f"{problem}: resumed onto three uneven workers")

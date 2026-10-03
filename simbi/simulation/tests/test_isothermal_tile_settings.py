@@ -9,8 +9,9 @@
 #   reassociation bound of its cross-tile force sum);
 # - neumann and robin walls, on the isothermal and the adiabatic tiles alike:
 #   two tiles reach the single grid's state bit for bit;
-# - a locally isothermal closure on isothermal MHD tiles, refused by name
-#   before any output.
+# - a locally isothermal closure on isothermal MHD tiles, periodic and with
+#   outflow faces: two tiles reach the single grid's state bit for bit, and the
+#   closure changes the run.
 # a declared perturbation on isothermal tiles is gated with the other drivers
 # in test_tiled_perturbation.
 # every arm runs as a fresh process, the tiled ones as host tiles on a cpu
@@ -41,7 +42,7 @@ from pydantic import computed_field
 
 import simbi.expression as expr
 from simbi import ProblemParam
-from simbi.types import Regime
+from simbi.types import BoundaryCondition, Regime
 from simbi_configs.examples.ibm.rubble_wind import RubbleWind
 from simbi_configs.examples.ibm.wind_tunnel import WindTunnel
 from simbi_configs.examples.isothermal.imhd_orszag_tang import IsothermalOrszagTang
@@ -102,6 +103,14 @@ class LocallyIsothermalOrszagTang(IsothermalOrszagTang):
                 yield (*row, row[0] * (1.0 + 0.1 * math.sin(row[1])))
 
         return (rows, *faces)
+
+
+class OutflowLocallyIsothermalOrszagTang(LocallyIsothermalOrszagTang):
+    """the closure on a box with outflow faces: the ghosts continue it from the nearest cell"""
+
+    boundary_conditions: Annotated[
+        list[BoundaryCondition], ProblemParam([BoundaryCondition.OUTFLOW], description="outflow")
+    ]
 '''
 
 
@@ -193,16 +202,10 @@ def test_tiles_carry_neumann_and_robin_walls(tmp_path: Path, variants: Path, pro
     _assert_bitwise(_final(problem, (32, 32), tmp_path / "tiles", 2, steps=4), single, f"{problem} on two tiles")
 
 
-@pytest.mark.parametrize(
-    ("problem", "resolution", "reason"),
-    [
-        ("LocallyIsothermalOrszagTang", (32, 32, 1), "locally-isothermal cs(x) for isothermal MHD"),
-    ],
-)
-def test_a_tile_setting_the_isothermal_tiles_do_not_carry_is_refused(tmp_path: Path, variants: Path, problem: str, resolution: tuple, reason: str) -> None:
-    # the single grid carries the setting, so the refusal is the tiles' own
-    _final(problem, resolution, tmp_path / "single", 1, steps=1)
-    done = _run(problem, resolution, tmp_path / "tiles", 2, 1)
-    assert done.returncode != 0, "the tiles ran a setting they drop"
-    assert reason in done.stderr.replace("\n", " "), done.stderr[-1500:]
-    assert not list((tmp_path / "tiles").glob("*.h5")), "output was written before the refusal"
+@pytest.mark.parametrize("problem", ["LocallyIsothermalOrszagTang", "OutflowLocallyIsothermalOrszagTang"])
+def test_isothermal_mhd_tiles_carry_the_local_closure(tmp_path: Path, variants: Path, problem: str) -> None:
+    resolution = (32, 32, 1)
+    single = _final(problem, resolution, tmp_path / "single", 1)
+    uniform = _cells(_final("IsothermalOrszagTang", resolution, tmp_path / "uniform", 1))
+    assert not np.array_equal(_cells(single)["conserved/den"], uniform["conserved/den"]), f"{problem}: the closure left the run unchanged"
+    _assert_bitwise(_final(problem, resolution, tmp_path / "tiles", 2), single, f"{problem} on two tiles")
