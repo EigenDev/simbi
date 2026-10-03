@@ -23,7 +23,7 @@
 # relativistic and isothermal MHD (periodic, the fine box inside the domain,
 # under contact and uct, shown to differ), fresh on eight workers whose ragged cuts meet at a
 # corner inside the box and resumed onto them from two. a patch on a periodic face
-# and an alpha viscosity with refinement are refused by name. nested levels:
+# is refused by name. nested levels:
 # the refined blast with a second box inside the first, every level compared,
 # fresh on two and on four ragged workers and resumed onto four from two; a
 # depth whose phase table overflows the wire byte is refused by name before any
@@ -373,27 +373,6 @@ def test_a_refined_patch_on_a_periodic_face_is_refused_by_name(tmp_path: Path) -
     assert done.returncode != 0, f"the launch succeeded:\n{done.stdout}"
     flat = " ".join(done.stderr.split())
     assert "a refined patch on the periodic face of axis 0 with mesh refinement is outside the distributed first release" in flat, done.stderr
-    assert not list((tmp_path / "out").glob("*.h5")), "a checkpoint was published"
-
-
-def test_an_alpha_viscosity_with_refinement_is_refused_by_name(tmp_path: Path) -> None:
-    script = tmp_path / "alpha_blast.py"
-    script.write_text(
-        "from typing import Annotated\n"
-        "from simbi import ProblemParam\n"
-        "from simbi_configs.examples.newtonian.refined_blast import RefinedBlast\n\n"
-        "class AlphaBlast(RefinedBlast):\n"
-        "    viscosity_alpha: Annotated[float, ProblemParam(0.01, description='alpha')]\n"
-    )
-    layout = _layout(tmp_path / "two.toml", workers=2, shape=(2, 1))
-    cmd = [sys.executable, "-m", "simbi.cli", "launch", str(script), "--layout", str(layout), "--max-steps", "1",
-           "--resolution", "32,32,1", "--data-directory", str(tmp_path / "out"), "--checkpoint-interval", "1e9"]
-    env = dict(os.environ, PYTHONPATH=os.pathsep.join([os.getcwd(), os.environ.get("PYTHONPATH", "")]))
-    env.pop("SIMBI_LAUNCH_EXPERIMENTAL", None)
-    done = subprocess.run(cmd, capture_output=True, text=True, timeout=600, env=env)
-    assert done.returncode != 0, f"the launch succeeded:\n{done.stdout}"
-    flat = " ".join(done.stderr.split())
-    assert "an alpha viscosity with mesh refinement is outside the distributed first release" in flat, done.stderr
     assert not list((tmp_path / "out").glob("*.h5")), "a checkpoint was published"
 
 

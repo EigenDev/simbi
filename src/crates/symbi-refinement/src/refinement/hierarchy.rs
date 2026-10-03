@@ -1916,8 +1916,21 @@ where
         dt: f64,
         time: f64,
     ) {
+        if let Err(message) = self.try_apply_global_body_deltas(deltas, dt, time) {
+            panic!("{message}");
+        }
+    }
+
+    /// `apply_global_body_deltas` returning the clipped sink-containment violation as an error,
+    /// for a caller that ends its session by name instead of panicking
+    pub fn try_apply_global_body_deltas(
+        &mut self,
+        deltas: &[symbi_ib::BodyDelta<f64, NDIM>],
+        dt: f64,
+        time: f64,
+    ) -> Result<(), String> {
         if !self.levels[0].state.has_bodies() {
-            return;
+            return Ok(());
         }
         let fi = self.levels.len() - 1;
         {
@@ -1941,7 +1954,10 @@ where
                 }
             }
         }
-        self.assert_sinks_inside_finest_clipped();
+        match self.sink_containment_violation() {
+            Some(message) => Err(message),
+            None => Ok(()),
+        }
     }
 
     /// march the hierarchy to t_final: the root's cfl sets dt, advance_level

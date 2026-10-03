@@ -782,6 +782,11 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize, const
         crate::regimes::fofc::gas_rollback_snapshot_is_complete(sim)
     }
 
+    fn field_rollback_is_complete(&self, _sim: &FieldStore<D, DOF, Mem, Sc>) -> bool {
+        // the step-entry conserved state, ghosts included, restored with its primitives
+        true
+    }
+
     fn snapshot_retry(&self, sim: &FieldStore<D, DOF, Mem, Sc>) {
         crate::regimes::fofc::gas_snapshot_retry(sim);
     }

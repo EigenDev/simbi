@@ -391,11 +391,12 @@ where
 
 /// the words one body's delta travels in: force, normal force, torque, then the accreted mass,
 /// the previous step's mass, the accreted energy and the exported slip heat
-const fn body_delta_words(d: usize) -> usize {
+/// the words of one body's delta: force, normal force, torque, and the four scalar exchanges
+pub const fn body_delta_words(d: usize) -> usize {
     2 * d + 7
 }
 
-fn encode_body_delta<const D: usize>(delta: &symbi_ib::BodyDelta<f64, D>, out: &mut Vec<u64>) {
+pub fn encode_body_delta<const D: usize>(delta: &symbi_ib::BodyDelta<f64, D>, out: &mut Vec<u64>) {
     out.extend((0..D).map(|ax| delta.force_delta[ax].to_bits()));
     out.extend((0..D).map(|ax| delta.force_normal_delta[ax].to_bits()));
     out.extend((0..3).map(|ax| delta.torque_delta[ax].to_bits()));
@@ -404,7 +405,7 @@ fn encode_body_delta<const D: usize>(delta: &symbi_ib::BodyDelta<f64, D>, out: &
     }
 }
 
-fn decode_body_delta<const D: usize>(idx: usize, words: &[u64]) -> symbi_ib::BodyDelta<f64, D> {
+pub fn decode_body_delta<const D: usize>(idx: usize, words: &[u64]) -> symbi_ib::BodyDelta<f64, D> {
     let at = |k: usize| f64::from_bits(words[k]);
     let mut delta = symbi_ib::BodyDelta::new(idx);
     delta.force_delta = symbi_algebra::Tensor::new(std::array::from_fn(|ax| at(ax)));

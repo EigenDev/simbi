@@ -327,11 +327,11 @@ where
         if forced {
             for h in tiles.iter() {
                 for level in &h.levels {
-                    if !level.kernels.rollback_snapshot_is_complete(&level.state) {
+                    if !level.kernels.field_rollback_is_complete(&level.state) {
                         return Err(fail(
                             fabric,
                             WorkerError::Refused(
-                                "a forced rejection on a kernel set without a complete rollback snapshot is \
+                                "a forced rejection on a kernel set whose snapshot leaves out a grid field is \
                                  outside the distributed first release"
                                     .into(),
                             ),
@@ -874,6 +874,13 @@ where
                     with_device(root_dev(k), || {
                         h.level_tail_emf(0, dt);
                         h.level_tail_excise(0);
+                        // rigid walls also act on the uncovered root cells; the restriction
+                        // replaces the covered ones after the fine subcycle, and the sinks stay
+                        // off the root's gravity-only proxies
+                        let level = &h.levels[0];
+                        if level.state.immersed.as_ref().is_some_and(|im| im.bodies.rigid_count() > 0) {
+                            level.kernels.penalize(&level.state, dt);
+                        }
                     });
                 }
                 // the fine subcycle: every worker walks its phases, a worker without fine
@@ -1044,7 +1051,7 @@ where
             }
             for (k, h) in tiles.iter_mut().enumerate() {
                 for level in &h.levels {
-                    if !level.kernels.rollback_snapshot_is_complete(&level.state) {
+                    if !level.kernels.field_rollback_is_complete(&level.state) {
                         return Err(fail(
                             fabric,
                             WorkerError::Numerics(
@@ -1097,6 +1104,9 @@ where
             for h in tiles.iter_mut() {
                 h.levels[0].state.severe_streak = streak;
             }
+        }
+        if tiles.iter().any(|h| h.levels[0].state.has_bodies()) {
+            refined_body_step(tiles, held, plans, fabric, dt, deadline).map_err(|e| fail(fabric, e))?;
         }
         (t, iter) = advance_clock(t, iter, dt);
         report.steps = iter;
@@ -1528,6 +1538,112 @@ impl<const D: usize> RefinedGrids<D> {
     }
 }
 
+/// the per-root-step body bookkeeping of a refined session, in the in-process refined tiles'
+/// order: each tile's finest level reduces its feedback partials, every tile's deltas cross the
+/// workers (a tile's list as long as the bodies its finest level touched, keyed by body) and are
+/// summed in flat root tile order, and the global delta is applied to every held tile's bodies at
+/// the finest level's clock, the one the single hierarchy books its history at
+fn refined_body_step<R, const D: usize, const DOF: usize, M, E, S, Mem, K, L>(
+    tiles: &mut [Hierarchy<R, D, DOF, M, E, S, Mem, K>],
+    held: &Held<'_>,
+    plans: &RefinedPlans<'_, D>,
+    fabric: &mut Fabric<L>,
+    dt: f64,
+    deadline: Duration,
+) -> Result<(), WorkerError>
+where
+    R: Regime<f64, D> + Copy,
+    M: Metric<f64, D> + Copy + Send + Sync,
+    E: symbi_hydro::eos::EosFor<f64, <R as Regime<f64, D>>::Energy> + Copy + Send + Sync,
+    S: ExecutionSpace,
+    Mem: MemorySpace + Sync,
+    K: KernelSet<D, DOF, Mem, f64>,
+    L: Link,
+{
+    use symbi_sim::worker::{body_delta_words, decode_body_delta, encode_body_delta};
+    for h in tiles.iter_mut() {
+        h.finest_body_feedback(dt);
+    }
+    let width = 1 + body_delta_words(D);
+    let local: Vec<(usize, Vec<u64>)> = tiles
+        .iter_mut()
+        .enumerate()
+        .map(|(k, h)| {
+            let mut words = Vec::new();
+            for delta in h.take_body_deltas() {
+                words.push(delta.idx as u64);
+                encode_body_delta(&delta, &mut words);
+            }
+            (held.root_ids[k].0 as usize, words)
+        })
+        .collect();
+    let blocks = symbi_sim::worker_tracers::assemble_blocks(fabric, held.n_root, &local, width, deadline)?;
+    let mut global: Vec<symbi_ib::BodyDelta<f64, D>> = Vec::new();
+    for block in &blocks {
+        for record in block.chunks_exact(width) {
+            let delta = decode_body_delta::<D>(record[0] as usize, &record[1..]);
+            match global.iter_mut().find(|g| g.idx == delta.idx) {
+                Some(g) => *g += delta,
+                None => global.push(delta),
+            }
+        }
+    }
+    let finest = 1 + plans.nested.len();
+    let (t_now, _, _) = agree_fine_clock(tiles, finest, fabric, deadline)?;
+    for (k, h) in tiles.iter_mut().enumerate() {
+        h.try_apply_global_body_deltas(&global, dt, t_now).map_err(WorkerError::Numerics)?;
+        if h.levels.len() == 1 && h.accretion_overlaps_root() {
+            return Err(WorkerError::Numerics(format!(
+                "a sink sphere overlaps the unrefined root tile {}: the refined patch must cover the sink on every tile it touches",
+                held.root_ids[k].0
+            )));
+        }
+    }
+    Ok(())
+}
+
+/// record on every level of every held tile its whole level's interior in the tile's own index
+/// frame, from the level grids and the plan offsets the checkpoint places the tile's blocks by:
+/// a bound that reads the level's extent (the alpha viscosity's slowest orbit) takes the whole
+/// level's, as the single hierarchy does, whichever tile holds a part of it
+pub fn record_level_spans<R, const D: usize, const DOF: usize, M, E, S, Mem, K>(
+    tiles: &mut [Hierarchy<R, D, DOF, M, E, S, Mem, K>],
+    held: &Held<'_>,
+    plans: &RefinedPlans<'_, D>,
+    grids: &RefinedGrids<D>,
+) where
+    R: Regime<f64, D> + Copy,
+    M: Metric<f64, D> + Copy + Send + Sync,
+    E: symbi_hydro::eos::EosFor<f64, <R as Regime<f64, D>>::Energy> + Copy + Send + Sync,
+    S: ExecutionSpace,
+    Mem: MemorySpace + Sync,
+    K: KernelSet<D, DOF, Mem, f64>,
+{
+    fn span<const D: usize>(geom: &symbi_sim::state::PartitionGeometry<D>, offset: [isize; D], grid: &GlobalGrid<D>) -> [(isize, isize); D] {
+        std::array::from_fn(|a| {
+            let shift = geom.interior.spaces[a].lo + geom.index_offset[a] - offset[a];
+            (grid.interior_lo[a] + shift, grid.interior_lo[a] + grid.cells[a] as isize + shift)
+        })
+    }
+    let depth = 2 + plans.nested.len();
+    for (k, h) in tiles.iter_mut().enumerate() {
+        let offset = plans.root.plan().tiles[held.root_ids[k].0 as usize].offset;
+        let whole = span(&h.levels[0].state.geom, offset, &grids.root);
+        h.levels[0].state.geom.whole_span = Some(whole);
+        for level in 1..depth.min(h.levels.len()) {
+            let Some(id) = held.level_ids(level)[k] else {
+                continue;
+            };
+            let plan = if level == 1 { &plans.fine } else { &plans.nested[level - 2].state };
+            let grid = grids.level(level);
+            let layout = &plan.plan().tiles[id.0 as usize];
+            let offset: [isize; D] = std::array::from_fn(|a| grid.interior_lo[a] + layout.offset[a]);
+            let whole = span(&h.levels[level].state.geom, offset, grid);
+            h.levels[level].state.geom.whole_span = Some(whole);
+        }
+    }
+}
+
 /// write one checkpoint of every level across every worker after `accepted` accepted steps:
 /// the shared faces are audited at the checkpoint epoch unless `audit` is off (a second
 /// checkpoint of a step an earlier one certified), each refined level's clock is
@@ -1617,10 +1733,18 @@ where
             })
             .collect();
         ids_by_level.push(ids);
+        // the level's template is this worker's own tile of the level when it holds one: its field
+        // set, and the finest level's body state and history the file records; a worker holding
+        // no tile of the level names the root's
+        let template = tiles
+            .iter()
+            .zip(held.level_ids(level))
+            .find_map(|(h, id)| id.map(|_| &h.levels[level].state))
+            .unwrap_or(&tiles[0].levels[0].state);
         levels.push(LevelTiles {
             tiles: level_tiles,
             grid: grid.clone(),
-            header: Some(LevelHeader { template: &tiles[0].levels[0].state, time, dt, iteration }),
+            header: Some(LevelHeader { template, time, dt, iteration }),
         });
     }
     let mut level_plans =

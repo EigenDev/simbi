@@ -10827,9 +10827,10 @@ fn validate_launch_scope(cfg: &Config) -> Result<(), String> {
             if cfg.refinement_enabled { "mesh refinement".to_string() } else { format!("the {} regime", cfg.regime) }
         ));
     }
-    // the flat workers carry immersed bodies; the refined worker builders attach none yet
-    if (!cfg.bodies.is_empty() || cfg.bonded_assembly.is_some()) && cfg.refinement_enabled {
-        return refused("an immersed body with mesh refinement");
+    // the refined workers carry the bodies as the in-process refined tiles do; bonded fragments
+    // take no advance on a refined hierarchy
+    if cfg.bonded_assembly.is_some() && cfg.refinement_enabled {
+        return refused("a bonded fragment assembly with mesh refinement");
     }
     // the launched gas, isothermal and magnetized tiles carry the discrete and the ito
     // populations on a flat grid
@@ -10843,14 +10844,6 @@ fn validate_launch_scope(cfg: &Config) -> Result<(), String> {
     }
     // the dye rides the launched gas and isothermal tiles under the single grid's admission
     validate_passive_scalar(cfg)?;
-    if cfg.refinement_enabled && cfg.alpha > 0.0 && matches!(cfg.regime.as_str(), "newtonian" | "nmhd") {
-        return refused(&format!(
-            "alpha-disk viscosity on the {} regime with mesh refinement (its stability bound takes \
-             the slowest orbit at the refined patch's farthest corner, which a clipped patch does \
-             not hold)",
-            cfg.regime
-        ));
-    }
     if cfg.equilibrium_json.is_some() {
         return refused("an equilibrium prescription");
     }
@@ -10917,9 +10910,6 @@ fn validate_refined_launch_scope(cfg: &Config) -> Result<(), String> {
     };
     if let Some(ax) = seam {
         return refused(&format!("a refined patch on the periodic face of axis {ax}"));
-    }
-    if cfg.alpha > 0.0 {
-        return refused("an alpha viscosity");
     }
     // the refined worker hierarchy seeds no per-cell closure field on its levels
     if cfg.locally_isothermal {
@@ -11036,6 +11026,12 @@ where
         Hierarchy::with_refinement_of_contributing(sim, sub, &clip, &whole, prolong, kernels_of)
             .map_err(|e| format!("tile {flat} refinement build: {e:?}"))?
     };
+    // immersed bodies at their global positions: the finest level owns the full bodies, coarser
+    // levels a gravity-only proxy, as on the in-process refined tiles
+    if !cfg.bodies.is_empty() {
+        h = h.try_with_bodies(build_bodies_and_horizon::<D>(cfg)).map_err(|e| format!("tile {flat}: {e}"))?;
+        h.attach_body_shapes(build_body_shapes(&cfg.bodies));
+    }
     h.enable_face_stencil().map_err(|e| format!("tile {flat} face stencil: {e:?}"))?;
     h.enable_nested_face_stencils(1 + regions.len()).map_err(|e| format!("tile {flat} nested face stencils: {e:?}"))?;
     Ok(h)
@@ -11672,6 +11668,7 @@ where
     for (part, origin) in nested_parts.iter().zip(&nested_origins) {
         grids = grids.with_nested(part.partition.n_cells(), *origin);
     }
+    symbi::sim::refinement::launched::record_level_spans(&mut tiles, &held, &plans, &grids);
     let restart = cfg.restart_path.is_some();
     if let Some(path) = cfg.restart_path.as_deref() {
         load_refined_tiles(&mut tiles, &held, &plans, &grids, path).map_err(|e| e.to_string())?;
@@ -11719,6 +11716,26 @@ where
         refined_checkpoint(tiles, &held, &plans, &grids, &identity, &req, fabric, accepted, audit)
     };
     let write_initial = !restart && (cfg.checkpoint_index == 0 || cfg.start_time == 0.0);
+    // the body diagnostics, written by the coordinator from its first tile's finest bodies, which
+    // carry the cross-tile-summed reaction as every tile's do; one `<dir>diagnostics.dat` per run
+    let diag_path = if me == WorkerId(0) && cfg.diagnostic_interval > 0.0 && !cfg.bodies.is_empty() {
+        Some(format!("{}diagnostics.dat", cfg.data_dir))
+    } else {
+        None
+    };
+    let diag_interval = (cfg.diagnostic_interval * cfg.time_unit).max(f64::MIN_POSITIVE);
+    let diag_plan = match diag_path.as_ref() {
+        Some(dp) => Some(plan_diagnostics(last_diagnostics_time(dp), cfg.start_time, diag_interval)?),
+        None => None,
+    };
+    let mut next_diag = diag_plan.as_ref().map_or(diag_interval, |p| p.next);
+    if let Some(dp) = &diag_path {
+        if diag_plan.as_ref().is_some_and(|p| p.write_initial) {
+            if let Some(im) = tiles[0].levels.last().and_then(|l| l.state.immersed.as_ref()) {
+                let _ = append_diagnostics(dp, cfg.start_time, &im.bodies);
+            }
+        }
+    }
     let guard = retry_guard_of(cfg);
     let exclusion = retry_exclusion_of(cfg);
     for tile in tiles.iter_mut() {
@@ -11761,6 +11778,13 @@ where
                 r.checkpoint_written(cfg, &path, time, 0.0);
             }
             cadence.advance(time);
+        }
+        if let Some(dp) = &diag_path {
+            if diagnostics_due(time, &mut next_diag, diag_interval) {
+                if let Some(im) = tiles[0].levels.last().and_then(|l| l.state.immersed.as_ref()) {
+                    let _ = append_diagnostics(dp, time, &im.bodies);
+                }
+            }
         }
         Ok(std::ops::ControlFlow::Continue(()))
     });

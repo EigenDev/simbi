@@ -914,6 +914,11 @@ where
             && sim.immersed.is_none()
     }
 
+    fn field_rollback_is_complete(&self, sim: &FieldStore<D, 3, Mem, Sc>) -> bool {
+        // the step snapshot carries the conserved state and the staggered field
+        sim.fields.mhd.as_ref().is_some_and(|mhd| mhd.step_snapshot.is_some())
+    }
+
     fn snapshot_retry(&self, sim: &FieldStore<D, 3, Mem, Sc>) {
         crate::regimes::mhd_substrate::snapshot_retry(sim);
     }

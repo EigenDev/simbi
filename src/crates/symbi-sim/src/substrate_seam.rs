@@ -425,6 +425,14 @@ where
         false
     }
 
+    /// whether `snapshot_retry` and `restore_step` restore every grid field a fresh attempt
+    /// reads. a driver that restores the store's tracer, body and census sidecars itself (the
+    /// refinement hierarchy's retry sidecars) replays from the step entry when this holds.
+    /// default: the complete-snapshot answer.
+    fn field_rollback_is_complete(&self, store: &FieldStore<NDIM, DOF, Mem, Sc>) -> bool {
+        self.rollback_snapshot_is_complete(store)
+    }
+
     /// retain the complete state needed to replay a rejected explicit step. paired with
     /// `restore_step`; a kernel set that implements one must implement the other, and a driver
     /// consults `rollback_snapshot_is_complete` before relying on either.

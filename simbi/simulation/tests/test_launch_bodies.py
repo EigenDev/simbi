@@ -13,9 +13,17 @@
 # - an accreting bondi sink, fresh, and resumed onto three uneven workers
 #   against three host tiles cut at the same cells;
 # - the adiabatic alpha viscosity about a central body;
-# - a shaped wall and an accreting sink on the magnetized grid.
+# - a shaped wall and an accreting sink on the magnetized grid;
+# - with mesh refinement: a gravitating primary, the same with the alpha
+#   viscosity, and an accreting bondi sink under a fine central box, launched
+#   refined workers against refined host tiles; the gravitating arms' host
+#   tiles against the single hierarchy (the sink's link is
+#   test_tiled_body_ledger[refined]); three workers, one holding no fine tile;
+#   and a late fine-substep rejection against its capped clean control, which
+#   must publish no contribution of the rejected attempt.
 # a magnetized wall takes its shape (a box and a sphere leave different flows),
-# and a body with mesh refinement is refused on launch by name.
+# and a bonded fragment assembly with mesh refinement is refused on launch by
+# name.
 #
 # run: pytest -m simulation simbi/simulation/tests/test_launch_bodies.py
 # =============================================================================
@@ -99,6 +107,26 @@ class RefinedPrimary(AlphaPrimary):
     refinement_enabled: Annotated[bool, ProblemParam(True, description="refined")]
     refinement_max_levels: Annotated[int, ProblemParam(2, description="levels")]
     refinement_regions: Annotated[list[list[float]], ProblemParam([[-2.0, 2.0, -2.0, 2.0]], description="box")]
+    refinement_ratios: Annotated[list[int], ProblemParam([2], description="ratios")]
+
+
+class RefinedAlphaPrimary(RefinedPrimary):
+    viscosity_alpha: Annotated[float, ProblemParam(0.1, description="alpha")]
+
+
+class RefinedBondi(Bondi):
+    """the bondi sink under one fine level over the central box"""
+
+    refinement_enabled: Annotated[bool, ProblemParam(True, description="refined")]
+    refinement_max_levels: Annotated[int, ProblemParam(2, description="levels")]
+    refinement_regions: Annotated[list[list[float]] | None, ProblemParam([[-2.5, 2.5, -2.5, 2.5, -2.5, 2.5]], description="box")]
+    refinement_ratios: Annotated[list[int] | None, ProblemParam([2], description="ratios")]
+
+
+class RefinedRubble(RubbleWind):
+    refinement_enabled: Annotated[bool, ProblemParam(True, description="refined")]
+    refinement_max_levels: Annotated[int, ProblemParam(2, description="levels")]
+    refinement_regions: Annotated[list[list[float]], ProblemParam([[0.25, 0.75, 0.25, 0.75]], description="box")]
     refinement_ratios: Annotated[list[int], ProblemParam([2], description="ratios")]
 
 
@@ -249,15 +277,138 @@ def test_a_magnetized_wall_takes_its_shape(tmp_path: Path, variants: Path) -> No
     assert not np.array_equal(box["level_0/conserved/den"], ball["level_0/conserved/den"]), "the wall's shape left the flow unchanged"
 
 
-def test_a_body_with_mesh_refinement_on_launch_is_refused(tmp_path: Path, variants: Path) -> None:
-    script = variants.parent / "launched_refinedprimary.py"
-    script.write_text("from variants import RefinedPrimary as Base\n\n\nclass LaunchedRefinedPrimary(Base):\n    pass\n")
+# refined arms: (problem, resolution); the host tiles cut once along x, as the launch
+REFINED_ARMS = {
+    "refined-primary": ("RefinedPrimary", (64, 64)),
+    "refined-alpha": ("RefinedAlphaPrimary", (64, 64)),
+    "refined-sink": ("RefinedBondi", None),
+}
+
+
+@pytest.mark.parametrize("arm", list(REFINED_ARMS))
+def test_launched_refined_workers_publish_the_refined_host_tiles_bodies(tmp_path: Path, variants: Path, arm: str) -> None:
+    problem, resolution = REFINED_ARMS[arm]
+    want = _tiles(problem, resolution, tmp_path / "tiles", STEPS)
+    assert any(name.startswith("level_1/") for name in _all_levels(want)), f"{arm}: the host tiles published no fine level"
+    planar = resolution is not None
+    two = _layout(tmp_path / "two.toml", workers=2, shape=(2, 1) if planar else (2, 1, 1))
+    got = _launch(variants, problem, resolution, tmp_path / "launched", two, STEPS)
+    _assert_same(got, want, f"{arm}: two launched refined workers")
+    if arm == "refined-sink":
+        _assert_same_diagnostics(tmp_path / "launched", tmp_path / "tiles", arm)
+
+
+def test_a_refined_bonded_assembly_on_launch_is_refused(tmp_path: Path, variants: Path) -> None:
+    script = variants.parent / "launched_refinedrubble.py"
+    script.write_text("from variants import RefinedRubble as Base\n\n\nclass LaunchedRefinedRubble(Base):\n    pass\n")
     layout = _layout(tmp_path / "two.toml", workers=2, shape=(2, 1))
     cmd = [sys.executable, "-m", "simbi.cli", "launch", str(script), "--layout", str(layout), "--max-steps", "1",
-           "--resolution", "64,64", "--data-directory", str(tmp_path / "out"), "--checkpoint-interval", "1e9"]
+           "--resolution", "64,32", "--data-directory", str(tmp_path / "out"), "--checkpoint-interval", "1e9"]
     env = dict(os.environ)
     env.pop("SIMBI_LAUNCH_EXPERIMENTAL", None)
     done = subprocess.run(cmd, capture_output=True, text=True, timeout=600, env=env)
     assert done.returncode != 0, f"the launch succeeded:\n{done.stdout}"
-    assert "an immersed body with mesh refinement is outside the distributed first release" in " ".join(done.stderr.split()), done.stderr[-2000:]
+    assert "a bonded fragment assembly with mesh refinement is outside the distributed first release" in " ".join(done.stderr.split()), done.stderr[-2000:]
     assert not list((tmp_path / "out").glob("*.h5")), "a checkpoint was published"
+
+
+def _single(problem: str, resolution: tuple | None, out: Path, steps: int) -> Path:
+    fields = [f"resolution={resolution!r}"] if resolution is not None else []
+    snippet = (
+        "import sys\n"
+        "from simbi.simulation import runner\n"
+        f"from variants import {problem}\n"
+        f"p = {problem}(gpus=1, data_directory=sys.argv[1]{''.join(', ' + f for f in fields)})\n"
+        "p.checkpoint_interval = 1e9\n"
+        f"runner.run(p, compute_mode='cpu', max_steps={steps})\n"
+    )
+    done = subprocess.run([sys.executable, "-c", snippet, str(out)], capture_output=True, text=True, timeout=900)
+    assert done.returncode == 0, f"{problem} on one device failed:\n{done.stderr[-3000:]}"
+    return _final(out)
+
+
+@pytest.mark.parametrize("problem", ["RefinedPrimary", "RefinedAlphaPrimary"])
+def test_refined_host_tiles_publish_the_single_hierarchy_bodies(tmp_path: Path, variants: Path, problem: str) -> None:
+    # a gravitating body takes no feedback, so no cross-tile sum enters its state: the refined host
+    # tiles the launch is gated against publish the single hierarchy's grid, bodies and history bit
+    # for bit. the accreting sink's link to the single hierarchy is test_tiled_body_ledger[refined],
+    # the same configuration within the reassociation bound of its cross-tile sums.
+    want = _single(problem, (64, 64), tmp_path / "single", STEPS)
+    assert any(name.startswith("level_1/") for name in _all_levels(want)), f"{problem}: the single run published no fine level"
+    _assert_same(_tiles(problem, (64, 64), tmp_path / "tiles", STEPS), want, f"{problem}: two refined host tiles")
+
+
+# three workers, the first holding an unrefined tile alone: (problem, resolution, cuts). the planar
+# patch spans root cells 24..40 of 64, the 3d one 6..18 of 24; every cut keeps clear of its faces
+WITHOUT_FINE = {
+    "primary": ("RefinedPrimary", (64, 64), [[12, 32], []]),
+    "sink": ("RefinedBondi", None, [[3, 12], [], []]),
+}
+
+
+@pytest.mark.parametrize("arm", list(WITHOUT_FINE))
+def test_a_worker_holding_no_fine_tile_joins_the_refined_body_step(tmp_path: Path, variants: Path, arm: str) -> None:
+    # the first worker, the checkpoint coordinator, holds the unrefined first tile alone: it agrees
+    # the finest clock without holding the finest level, contributes no body delta, and publishes
+    # the bodies and their history from its own tile, whose finest level (its root) books the same
+    # global delta every tile applies
+    problem, resolution, cuts = WITHOUT_FINE[arm]
+    want = _tiles(problem, resolution, tmp_path / "tiles", STEPS, cuts=cuts)
+    three = _layout(tmp_path / "three.toml", workers=3, cuts=cuts)
+    got = _launch(variants, problem, resolution, tmp_path / "launched", three, STEPS)
+    _assert_same(got, want, f"{arm}: three workers, the first without a fine tile")
+    if arm == "sink":
+        _assert_same_diagnostics(tmp_path / "launched", tmp_path / "tiles", arm)
+    # resumed on the same layout from the coordinator's own checkpoint: the history the coordinator
+    # publishes after the restart is the host tiles' after theirs
+    first = _launch(variants, problem, resolution, tmp_path / "launched-first", three, STEPS // 2)
+    tiles_first = _tiles(problem, resolution, tmp_path / "tiles-first", STEPS // 2, cuts=cuts)
+    resumed = _launch(variants, problem, resolution, tmp_path / "launched-resumed", three, STEPS - STEPS // 2, checkpoint=first)
+    tiles_resumed = _tiles(problem, resolution, tmp_path / "tiles-resumed", STEPS - STEPS // 2, checkpoint=tiles_first, cuts=cuts)
+    with h5py.File(resumed, "r") as f:
+        assert "body_diagnostics/time" in f and f["body_diagnostics/time"].shape[0] > 0, (
+            f"{arm}: the coordinator published no body history after the restart"
+        )
+    _assert_same(resumed, tiles_resumed, f"{arm}: resumed on three workers, the coordinator without a fine tile")
+
+
+REJECTIONS = __import__("re").compile(r"SIMBI launch: worker=\d+/\d+ steps=\d+ rejections=(\d+)")
+# the sink's late rejection: worker 2 holds root cells 12..24, the patch's upper half; the last
+# stage (rk2) of the second fine substep of root step 2, after the first substep drained the sink
+LATE_STEP = 2
+LATE_REJECTION = f"reject_level:2:{LATE_STEP}:1:1:1"
+
+
+def _launch_counting(variants: Path, out: Path, layout: Path, inject: str | None) -> tuple[Path, set[int]]:
+    script = variants.parent / "launched_refinedbondi.py"
+    script.write_text("from variants import RefinedBondi as Base\n\n\nclass LaunchedRefinedBondi(Base):\n    pass\n")
+    cmd = [sys.executable, "-m", "simbi.cli", "launch", str(script), "--layout", str(layout), "--max-steps", str(STEPS),
+           "--data-directory", str(out), "--checkpoint-interval", "1e9"]
+    env = dict(os.environ)
+    env.pop("SIMBI_LAUNCH_EXPERIMENTAL", None)
+    if inject is not None:
+        env["SIMBI_FABRIC_INJECT"] = inject
+    done = subprocess.run(cmd, capture_output=True, text=True, timeout=900, env=env)
+    assert done.returncode == 0, f"launch failed:\nstdout:\n{done.stdout}\nstderr:\n{done.stderr[-3000:]}"
+    return _final(out), {int(r) for r in REJECTIONS.findall(done.stderr)}
+
+
+def test_a_late_fine_rejection_publishes_no_body_contribution_of_the_rejected_attempt(tmp_path: Path, variants: Path) -> None:
+    three = _layout(tmp_path / "three.toml", workers=3, cuts=WITHOUT_FINE["sink"][2])
+    rejecting, counts = _launch_counting(variants, tmp_path / "rejecting", three, LATE_REJECTION)
+    assert counts == {1}, f"the fine rejection was not counted once on every worker: {counts}"
+    clean, clean_counts = _launch_counting(variants, tmp_path / "clean", three, None)
+    assert clean_counts == {0}
+    with h5py.File(rejecting, "r") as fr, h5py.File(clean, "r") as fc:
+        accepted = float(fr["body_diagnostics/dt"][LATE_STEP])
+        assert accepted < float(fc["body_diagnostics/dt"][LATE_STEP]), "the rejection never reduced the timestep"
+        # the drain booked accretion in the rejected attempt's first fine substep: discarding it is
+        # the transaction under test
+        assert np.abs(fc["body_diagnostics/mass_delta"][LATE_STEP]).max() > 0.0, "the sink accreted nothing at the rejected step"
+    cap = f"cap:{LATE_STEP}:{int(np.float64(accepted).view(np.uint64))}"
+    capped, capped_counts = _launch_counting(variants, tmp_path / "capped", three, cap)
+    assert capped_counts == {0}, "the capped control rejected a step"
+    # the accepted run publishes the capped clean control's grid, bodies, history and diagnostics:
+    # no accretion, force, torque or heat of the rejected attempt survives in any of them
+    _assert_same(rejecting, capped, "late fine rejection against the capped control")
+    _assert_same_diagnostics(tmp_path / "rejecting", tmp_path / "capped", "late fine rejection")
