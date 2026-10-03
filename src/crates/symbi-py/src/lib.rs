@@ -10798,8 +10798,8 @@ fn validate_launch_scope(cfg: &Config) -> Result<(), String> {
     if (!cfg.bodies.is_empty() || cfg.bonded_assembly.is_some()) && cfg.refinement_enabled {
         return refused("an immersed body with mesh refinement");
     }
-    // the launched gas and isothermal tiles carry the discrete and the ito populations on a
-    // flat grid
+    // the launched gas, isothermal and magnetized tiles carry the discrete and the ito
+    // populations on a flat grid
     if cfg.n_tracers > 0 {
         if cfg.tracer_scheme != "discrete" && axis_maps_any(cfg) {
             return refused(&format!("the {} tracer scheme on a non-uniform spacing", cfg.tracer_scheme));
@@ -10810,7 +10810,7 @@ fn validate_launch_scope(cfg: &Config) -> Result<(), String> {
         if cfg.refinement_enabled {
             return refused("a tracer population with mesh refinement");
         }
-        if !matches!(cfg.regime.as_str(), "newtonian" | "rhd" | "isothermal") {
+        if !matches!(cfg.regime.as_str(), "newtonian" | "rhd" | "isothermal" | "nmhd" | "rmhd" | "imhd") {
             return refused(&format!("a tracer population with the {} regime", cfg.regime));
         }
     }
@@ -12030,6 +12030,47 @@ fn run_worker_process(
                 let sub = attach_driven_boundaries(sub, cfg, <NewtonianMhd as Regime<f64, $d>>::SPEC, |sub, built, params| sub.with_driven_boundary(built, params).0)?;
                 tiles.push((sim, sub));
             }
+            // the tracer population seeds once from the whole-grid density, as the single grid's,
+            // and each worker keeps its own tiles' share; the whole-grid state lives for the
+            // seeding alone
+            if cfg.n_tracers > 0 {
+                let global = Sim::build(NewtonianMhd, host_eos(cfg), $geom)
+                    .cells(n)
+                    .ghosts(ghost_width(cfg))
+                    .origin(std::array::from_fn(|ax| cfg.x_lo[ax]))
+                    .spacing(std::array::from_fn(|ax| cfg.dx[ax]))
+                    .coord_maps(axis_maps::<$d>(cfg))
+                    .boundaries(phys)
+                    .cfl(cfg.cfl)
+                    .timestepping(cfg.timestepping)
+                    .cyl_plane(cfg.cyl_plane)
+                    .allocate()
+                    .map_err(|e| format!("global seeding sim allocate: {e:?}"))?
+                    .set_initial_indexed(|idx, _x| {
+                        let lin = global_lin::<$d>(&[0; $d], &idx, &n);
+                        let row = &prims[lin];
+                        let mag: [f64; 3] = std::array::from_fn(|k| {
+                            if k < $d { face_avg_cell_b::<$d>(&bufs[k], k, idx, n) } else { bufs[k][lin] }
+                        });
+                        MhdPrim::new(Prim::adiabatic(Density(row[0]), Tensor::new([row[1], row[2], row[3]]), Pressure(row[4])), Tensor::new(mag))
+                    })
+                    .seed_faces_indexed(&bufs[0..$d])
+                    .build();
+                let mut per_tile = partition_configured_tracers(&global, cfg, &partition);
+                let order = configured_ito_order(cfg)?;
+                for ((sim, _), &flat) in tiles.iter_mut().zip(&mine) {
+                    let set = std::mem::take(&mut per_tile[flat]);
+                    match order {
+                        Some(order) => {
+                            sim.continuous_tracers = Some(
+                                symbi_sim::tracers::ContinuousTracerSet::from_discrete(&set, order)
+                                    .map_err(|detail| format!("continuous tracer partition: {detail}"))?,
+                            )
+                        }
+                        None => sim.tracers = Some(set),
+                    }
+                }
+            }
             session_over!(NewtonianMhd, 3, tiles)
         }};
     }
@@ -12092,6 +12133,47 @@ fn run_worker_process(
                     .ct_method(ct);
                 let sub = attach_driven_boundaries(sub, cfg, <Rmhd as Regime<f64, $d>>::SPEC, |sub, built, params| sub.with_driven_boundary(built, params).0)?;
                 tiles.push((sim, sub));
+            }
+            // the tracer population seeds once from the whole-grid density, as the single grid's,
+            // and each worker keeps its own tiles' share; the whole-grid state lives for the
+            // seeding alone
+            if cfg.n_tracers > 0 {
+                let global = Sim::build(Rmhd, host_eos(cfg), $geom)
+                    .cells(n)
+                    .ghosts(ghost_width(cfg))
+                    .origin(std::array::from_fn(|ax| cfg.x_lo[ax]))
+                    .spacing(std::array::from_fn(|ax| cfg.dx[ax]))
+                    .coord_maps(axis_maps::<$d>(cfg))
+                    .boundaries(phys)
+                    .cfl(cfg.cfl)
+                    .timestepping(cfg.timestepping)
+                    .cyl_plane(cfg.cyl_plane)
+                    .allocate()
+                    .map_err(|e| format!("global seeding sim allocate: {e:?}"))?
+                    .set_initial_indexed(|idx, _x| {
+                        let lin = global_lin::<$d>(&[0; $d], &idx, &n);
+                        let row = &prims[lin];
+                        let mag: [f64; 3] = std::array::from_fn(|k| {
+                            if k < $d { face_avg_cell_b::<$d>(&bufs[k], k, idx, n) } else { bufs[k][lin] }
+                        });
+                        MhdPrim::new(Prim::adiabatic(Density(row[0]), Tensor::new([row[1], row[2], row[3]]), Pressure(row[4])), Tensor::new(mag))
+                    })
+                    .seed_faces_indexed(&bufs[0..$d])
+                    .build();
+                let mut per_tile = partition_configured_tracers(&global, cfg, &partition);
+                let order = configured_ito_order(cfg)?;
+                for ((sim, _), &flat) in tiles.iter_mut().zip(&mine) {
+                    let set = std::mem::take(&mut per_tile[flat]);
+                    match order {
+                        Some(order) => {
+                            sim.continuous_tracers = Some(
+                                symbi_sim::tracers::ContinuousTracerSet::from_discrete(&set, order)
+                                    .map_err(|detail| format!("continuous tracer partition: {detail}"))?,
+                            )
+                        }
+                        None => sim.tracers = Some(set),
+                    }
+                }
             }
             session_over!(Rmhd, 3, tiles)
         }};
@@ -12251,6 +12333,47 @@ fn run_worker_process(
                     .ct_method(ct);
                 let sub = attach_driven_boundaries(sub, cfg, <IsothermalMhd as Regime<f64, $d>>::SPEC, |sub, built, params| sub.with_driven_boundary(built, params).0)?;
                 tiles.push((sim, sub));
+            }
+            // the tracer population seeds once from the whole-grid density, as the single grid's,
+            // and each worker keeps its own tiles' share; the whole-grid state lives for the
+            // seeding alone
+            if cfg.n_tracers > 0 {
+                let global = Sim::build(IsothermalMhd, Isothermal { cs: cfg.cs }, $geom)
+                    .cells(n)
+                    .ghosts(ghost_width(cfg))
+                    .origin(std::array::from_fn(|ax| cfg.x_lo[ax]))
+                    .spacing(std::array::from_fn(|ax| cfg.dx[ax]))
+                    .coord_maps(axis_maps::<$d>(cfg))
+                    .boundaries(phys)
+                    .cfl(cfg.cfl)
+                    .timestepping(cfg.timestepping)
+                    .cyl_plane(cfg.cyl_plane)
+                    .allocate()
+                    .map_err(|e| format!("global seeding sim allocate: {e:?}"))?
+                    .set_initial_indexed(|idx, _x| {
+                        let lin = global_lin::<$d>(&[0; $d], &idx, &n);
+                        let row = &prims[lin];
+                        let mag: [f64; 3] = std::array::from_fn(|k| {
+                            if k < $d { face_avg_cell_b::<$d>(&bufs[k], k, idx, n) } else { bufs[k][lin] }
+                        });
+                        MhdPrimG::<f64, 3, IsoModel>::new(PrimG::isothermal(Density(row[0]), Tensor::new([row[1], row[2], row[3]])), Tensor::new(mag))
+                    })
+                    .seed_faces_indexed(&bufs[0..$d])
+                    .build();
+                let mut per_tile = partition_configured_tracers(&global, cfg, &partition);
+                let order = configured_ito_order(cfg)?;
+                for ((sim, _), &flat) in tiles.iter_mut().zip(&mine) {
+                    let set = std::mem::take(&mut per_tile[flat]);
+                    match order {
+                        Some(order) => {
+                            sim.continuous_tracers = Some(
+                                symbi_sim::tracers::ContinuousTracerSet::from_discrete(&set, order)
+                                    .map_err(|detail| format!("continuous tracer partition: {detail}"))?,
+                            )
+                        }
+                        None => sim.tracers = Some(set),
+                    }
+                }
             }
             session_over!(IsothermalMhd, 3, tiles)
         }};

@@ -12,8 +12,10 @@
 # cut and a corner of an uneven 2x2 launch land as on the single grid, and the
 # traced kelvin-helmholtz example (ito-3, cohorts, periodic) launches as it
 # runs on one grid. a troubled cell flagged against a cut corrects alike on one
-# worker and on three. tracers beside immersed bodies are refused by name
-# before any output.
+# worker and on three. the newtonian, relativistic and isothermal magnetized
+# orszag-tang vortices carry the discrete population, and the newtonian one
+# the ito-3 population, on host tiles and launched workers as on one grid.
+# tracers beside immersed bodies are refused by name before any output.
 #
 # run: pytest -m simulation simbi/simulation/tests/test_launch_tracers.py
 # =============================================================================
@@ -35,6 +37,9 @@ pytestmark = pytest.mark.simulation
 
 LAUNCHED = ["DiscreteDrift", "IsoDrift", "SparseDrift", "Ito2Drift", "Ito3Drift", "SparseIto2Drift"]
 EXTRA = '''
+from simbi_configs.examples.isothermal.imhd_orszag_tang import IsothermalOrszagTang
+from simbi_configs.examples.newtonian.nmhd_orszag_tang import NewtonianOrszagTang
+from simbi_configs.examples.srmhd.rmhd_orszag_tang import OrszagTang as RmhdOrszagTang
 
 class BodyDrift(DiscreteDrift):
     """the drift with a softened point mass at the box center"""
@@ -58,6 +63,34 @@ class BodyDrift(DiscreteDrift):
 
 class BodyIto2Drift(BodyDrift, Ito2Drift):
     """the ito drift with the point mass"""
+
+
+class TracedNmhd(NewtonianOrszagTang):
+    @computed_field
+    @property
+    def n_tracers(self) -> int:
+        return 400
+
+
+class TracedRmhd(RmhdOrszagTang):
+    @computed_field
+    @property
+    def n_tracers(self) -> int:
+        return 400
+
+
+class TracedImhd(IsothermalOrszagTang):
+    @computed_field
+    @property
+    def n_tracers(self) -> int:
+        return 400
+
+
+class Ito3Nmhd(TracedNmhd):
+    @computed_field
+    @property
+    def tracer_scheme(self) -> TracerScheme:
+        return TracerScheme.ITO3
 
 
 class DiagonalIto3Drift(Ito3Drift):
@@ -128,6 +161,25 @@ def test_launched_workers_carry_the_single_grid_tracer_population(tmp_path: Path
     resumed = _launch(variants, problem, tmp_path / "resumed", three, STEPS - _iteration(first), checkpoint=first)
     assert _iteration(resumed) == STEPS
     _assert_same(resumed, want, group, f"{problem}: resumed onto three uneven workers")
+
+
+MAGNETIZED = {"TracedNmhd": "tracers", "TracedRmhd": "tracers", "TracedImhd": "tracers", "Ito3Nmhd": "continuous_tracers"}
+
+
+@pytest.mark.parametrize("problem", list(MAGNETIZED))
+def test_magnetized_tiles_and_workers_carry_the_single_grid_tracer_population(tmp_path: Path, variants: Path, problem: str) -> None:
+    group = MAGNETIZED[problem]
+    want = _run(problem, tmp_path / "single", 1, STEPS)
+    _assert_same(_run(problem, tmp_path / "tiles", 2, STEPS), want, group, f"{problem}: two host tiles")
+    two = _layout(tmp_path / "two.toml", workers=2, shape=(2, 1))
+    _assert_same(_launch(variants, problem, tmp_path / "two", two, STEPS), want, group, f"{problem}: two workers")
+    first = _launch(variants, problem, tmp_path / "first", two, STEPS // 2)
+    three = _layout(tmp_path / "three.toml", workers=3, cuts=[[10, 21], []])
+    resumed = _launch(variants, problem, tmp_path / "resumed", three, STEPS - _iteration(first), checkpoint=first)
+    _assert_same(resumed, want, group, f"{problem}: resumed onto three uneven workers")
+    # the population moved: the gate compares a population the magnetized transport displaced
+    start, end = _population(first, group), _population(want, group)
+    assert not np.array_equal(start["owner"], end["owner"]), f"{problem}: no tracer changed cell; the arm is vacuous"
 
 
 def test_a_troubled_cell_against_a_cut_moves_the_tracers_alike(tmp_path: Path, variants: Path) -> None:
