@@ -110,6 +110,7 @@ fn args(ts: Timestepping, index: usize) -> StageArgs {
         n_stages: stages.len(),
         injection_weight: 1.0,
         allow_elision: false,
+        exit_fraction: symbi_sim::driver::stage_exit_fraction(stages, index),
     }
 }
 

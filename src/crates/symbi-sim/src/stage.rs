@@ -19,7 +19,7 @@
 //
 // usage:
 //  fold_stage(sim, kernels,
-//             StageArgs { dt, a0, ac, stage, n_stages, injection_weight, allow_elision },
+//             StageArgs { dt, a0, ac, stage, n_stages, injection_weight, allow_elision, exit_fraction },
 //             &mut |_hp: HookPoint| {});
 // =============================================================================
 
@@ -301,6 +301,10 @@ pub struct StageArgs {
     /// per-step snapshot already holds it). the decomposed loop passes false —
     /// it never tracks the alias.
     pub allow_elision: bool,
+    /// the time fraction of the step this stage's output stands at
+    /// (`driver::stage_exit_fraction`): the ghost refill that closes the stage evaluates a
+    /// time-dependent boundary there.
+    pub exit_fraction: f64,
 }
 
 #[must_use]
@@ -684,6 +688,14 @@ where
             }),
             PhaseKind::GhostFill => {
                 hook(HookPoint::BeforeGhostFill);
+                // the stage carried the state to its output time; the last stage's output
+                // stands at the end of the step, the clock the step advances to
+                let t_out = if args.stage + 1 == args.n_stages {
+                    sim.time + args.dt
+                } else {
+                    sim.time + args.exit_fraction * args.dt
+                };
+                sim.carry_state_clock(t_out);
                 prof("ghost_fill", || kernels.ghost_fill(sim));
             }
         }

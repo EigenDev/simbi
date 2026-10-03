@@ -105,6 +105,7 @@ fn redo_fluxes(ts: Timestepping, stage: usize, overwrite: Overwrite) -> (Vec<u64
         n_stages,
         injection_weight: 1.0,
         allow_elision: false,
+        exit_fraction: symbi_sim::driver::stage_exit_fraction(stages, index),
     };
     sim.dt = DT;
     let sim = &*sim;
@@ -204,6 +205,7 @@ fn assert_outer_column_is_spliced(x_walls: BoundaryType, label: &str) {
         n_stages: 1,
         injection_weight: 1.0,
         allow_elision: false,
+        exit_fraction: 1.0,
     };
     sim.dt = DT;
     let sim = &*sim;
@@ -280,6 +282,7 @@ fn assert_correction_is_local(ts: Timestepping, stage: usize, label: &str) {
             n_stages: stages.len(),
             injection_weight: 1.0,
             allow_elision: false,
+            exit_fraction: symbi_sim::driver::stage_exit_fraction(stages, index),
         };
         sim.dt = DT;
         {
@@ -404,6 +407,7 @@ fn rk2_args(index: usize) -> StageArgs {
         n_stages: 2,
         injection_weight: 1.0,
         allow_elision: false,
+        exit_fraction: 1.0,
     }
 }
 
@@ -497,6 +501,7 @@ fn corrector_first_order_emf(flag_predictor: bool) -> Vec<f64> {
         n_stages: 1,
         injection_weight: 1.0,
         allow_elision: false,
+        exit_fraction: 1.0,
     };
     assert_eq!(fold_stage_through_mark(s, &kernels, single_stage, &mut |_| {}), 0);
     *s.workspace.fofc_flag.view_mut().at_mut(TROUBLED) = 1.0;
@@ -676,7 +681,7 @@ fn build_step(origin: usize) -> Sim {
 /// face over the interior afterwards, x index first, plus the interior y-face mass fluxes
 fn step_corrected(sim: &Sim, cell: [isize; 2]) -> (Vec<u64>, Vec<f64>, Vec<f64>) {
     let kernels = sim.substrate().with_solver(symbi_sim::substrate_seam::Solver::Hlld).expect("hlld");
-    let args = StageArgs { dt: DT, a0: 0.0, ac: 1.0, stage: 0, n_stages: 1, injection_weight: 1.0, allow_elision: false };
+    let args = StageArgs { dt: DT, a0: 0.0, ac: 1.0, stage: 0, n_stages: 1, injection_weight: 1.0, allow_elision: false, exit_fraction: 1.0 };
     let s = &**sim;
     kernels.c2p(s);
     kernels.ghost_fill(s);

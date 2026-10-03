@@ -160,6 +160,7 @@ fn march(stores: &[&Store], kernels: &[&Kern], schedule: &Schedule<2>, table: &[
                     n_stages: stages.len(),
                     injection_weight: symbi_sim::driver::downstream_injection_weight(stages, ii),
                     allow_elision: false,
+                    exit_fraction: symbi_sim::driver::stage_exit_fraction(stages, ii),
                 };
                 let outcome = fold_stage(store, kernels[k], args, &mut |_| {});
                 assert_eq!(outcome, symbi_sim::stage::StageOutcome::Accepted, "a stage of the vortex array asked for a retry");

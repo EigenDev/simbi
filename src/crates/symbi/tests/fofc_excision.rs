@@ -133,6 +133,7 @@ fn args(sim: &Sim, k: &Kern) -> StageArgs {
         n_stages: 2,
         injection_weight: symbi_sim::driver::downstream_injection_weight(Timestepping::Rk2.stages(), 0),
         allow_elision: false,
+        exit_fraction: symbi_sim::driver::stage_exit_fraction(Timestepping::Rk2.stages(), 0),
     }
 }
 

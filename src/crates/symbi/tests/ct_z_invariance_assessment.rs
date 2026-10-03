@@ -397,6 +397,7 @@ macro_rules! arm_impl {
                         n_stages: 2,
                         injection_weight: symbi_sim::driver::downstream_injection_weight(stages, 0),
                         allow_elision: false,
+                        exit_fraction: symbi_sim::driver::stage_exit_fraction(stages, 0),
                     };
                     let _ = fold_stage(&s, &k, args, &mut |_| {});
                     let b = broken(&s, true);
@@ -485,6 +486,7 @@ macro_rules! arm_impl {
                             n_stages: 2,
                             injection_weight: symbi_sim::driver::downstream_injection_weight(stages, stage),
                             allow_elision: false,
+                            exit_fraction: symbi_sim::driver::stage_exit_fraction(stages, stage),
                         };
                         let hit = std::cell::Cell::new(false);
                         let mut hook = |hp: HookPoint| {

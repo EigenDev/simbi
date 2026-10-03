@@ -74,6 +74,7 @@ pub fn step_once<R, const D: usize, const DOF: usize, M, E, S, Mem>(
         let evidence = symbi_sim::retry_guard::take_evidence(sim, "grid", ledger.rejections());
         ledger.reject(&guard, sim.dt, evidence).unwrap_or_else(|failure| panic!("{failure}"));
         kernels.restore_step(sim);
+        sim.reset_state_clock();
         symbi_sim::tracers::restore_transport_state(&mut sim.store);
         sim.dt = retry_timestep(sim.dt, sim.time).unwrap_or_else(|err| panic!("{}", err.detail));
     }
@@ -220,6 +221,7 @@ where
                 let evidence = symbi_sim::retry_guard::take_evidence(sim, "grid", ledger.rejections());
                 ledger.reject(&guard, sim.dt, evidence).map_err(guard_failure)?;
                 kernels.restore_step(sim);
+                sim.reset_state_clock();
                 symbi_sim::tracers::restore_transport_state(&mut sim.store);
                 sim.dt = retry_timestep(sim.dt, sim.time)?;
                 continue;
@@ -523,6 +525,7 @@ where
                     stage.index,
                 ),
                 allow_elision: true,
+                exit_fraction: symbi_sim::driver::stage_exit_fraction(stages, stage.index),
             },
             &mut |_| {},
         );

@@ -149,6 +149,7 @@ fn args(stage: usize) -> StageArgs {
         n_stages: 2,
         injection_weight: symbi_sim::driver::downstream_injection_weight(stages, stage),
         allow_elision: false,
+        exit_fraction: symbi_sim::driver::stage_exit_fraction(stages, stage),
     }
 }
 

@@ -2465,6 +2465,10 @@ where
     }
 
     pub fn restore_attempt_entry(&self) {
+        // every level stands at its step entry again, the clock its ghost refills read
+        for level in &self.levels {
+            level.state.reset_state_clock();
+        }
         for level in self.levels.iter().skip(1) {
             if let Some(stencil) = level.face_stencil.as_ref() {
                 stencil.filled.set(false);
@@ -3230,6 +3234,7 @@ where
             n_stages: stages.len(),
             injection_weight: symbi_sim::driver::downstream_injection_weight(stages, ii),
             allow_elision: true,
+            exit_fraction: symbi_sim::driver::stage_exit_fraction(stages, ii),
         }
     }
 
@@ -4315,9 +4320,12 @@ where
                     n_stages: 1,
                     injection_weight: 1.0,
                     allow_elision: false,
+                    exit_fraction: 1.0,
                 },
                 &mut |_hp: HookPoint| {},
             );
+            // the probe stage reads the imbalance off; the stored state stands at the clock
+            level.state.reset_state_clock();
             assert!(
                 outcome == symbi_sim::stage::StageOutcome::Accepted,
                 "the stationary target was rejected by the admissibility redo, so it is not a \

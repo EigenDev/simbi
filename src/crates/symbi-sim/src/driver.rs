@@ -169,6 +169,12 @@ pub fn stage_time_fractions(stages: &[(f64, f64)]) -> Vec<f64> {
         .collect()
 }
 
+/// the time fraction of the step at which stage `stage`'s output state stands: the entry of the
+/// next stage, and the end of the step for the last
+pub fn stage_exit_fraction(stages: &[(f64, f64)], stage: usize) -> f64 {
+    if stage + 1 == stages.len() { 1.0 } else { stage_time_fractions(stages)[stage] }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct StageSpec {
     pub index: usize,

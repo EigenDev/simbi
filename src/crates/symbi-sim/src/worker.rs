@@ -775,6 +775,7 @@ where
                     n_stages: stages.len(),
                     injection_weight: downstream_injection_weight(stages, stage.index),
                     allow_elision: false,
+                    exit_fraction: crate::driver::stage_exit_fraction(stages, stage.index),
                 };
                 // the stage runs in two spans. the first ends with every owned tile's troubled
                 // cells marked; the worker then makes one vote for all of them, so workers
@@ -949,6 +950,8 @@ where
                         ));
                     }
                     with_device(dev(k), || kernels[k].restore_step(sh[k]));
+                    // the tile stands at its step entry again, the clock its ghost refills read
+                    sh[k].reset_state_clock();
                 }
                 exchange_point(
                     exchange,

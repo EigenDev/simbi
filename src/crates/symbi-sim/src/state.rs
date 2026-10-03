@@ -2363,6 +2363,12 @@ pub struct FieldStore<
     // ---- time state ----
     pub time: f64,
     pub dt: f64,
+    /// the time the stored state stands at when a step in progress has carried it past `time`
+    /// (the bits of an f64; NaN while it stands at `time`). each stage of a step records its
+    /// output time here before refilling the ghost bands, so a time-dependent boundary
+    /// prescription fills them at the time of the state they bound; a rollback to the step
+    /// entry resets it. read through [`Self::boundary_time`].
+    pub state_clock: std::sync::atomic::AtomicU64,
     /// an upper clamp on the CFL time step (`dt = min(dt_cfl, max_dt)`); 0 disables. pins the
     /// dt sequence across runs whose CFL estimators differ (kernel cross-validation, temporal
     /// convergence studies) — two clamped runs from the same state take bitwise-identical steps.
@@ -2463,6 +2469,23 @@ impl<const NDIM: usize, const DOF: usize, Mem: MemorySpace, Sc: Scalar + Ordered
     #[inline]
     pub fn conserved_is_densitized(&self) -> bool {
         self.geom.spacetime != symbi_geometry::Spacetime::Minkowski && self.fields.mhd.is_none()
+    }
+
+    /// the time the stored state stands at: the output time of the last stage of a step in
+    /// progress, else the clock. a boundary prescription in time is evaluated here.
+    pub fn boundary_time(&self) -> f64 {
+        let carried = f64::from_bits(self.state_clock.load(std::sync::atomic::Ordering::Relaxed));
+        if carried.is_nan() { self.time } else { carried }
+    }
+
+    /// record that a stage carried the stored state to time `t`.
+    pub fn carry_state_clock(&self, t: f64) {
+        self.state_clock.store(t.to_bits(), std::sync::atomic::Ordering::Relaxed);
+    }
+
+    /// the stored state stands at the clock again: a rollback restored the step entry.
+    pub fn reset_state_clock(&self) {
+        self.state_clock.store(f64::NAN.to_bits(), std::sync::atomic::Ordering::Relaxed);
     }
 
     #[inline]
@@ -3080,6 +3103,7 @@ where
                 censuses: Vec::new(),
                 time: 0.0,
                 dt: 0.0,
+                state_clock: std::sync::atomic::AtomicU64::new(f64::NAN.to_bits()),
                 max_dt: 0.0,
                 iteration: 0,
                 cfl,

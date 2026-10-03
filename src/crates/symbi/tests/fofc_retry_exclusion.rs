@@ -89,6 +89,7 @@ fn frozen_stage(exclusion: RetryExclusion) -> (StageOutcome, f64, Vec<u64>, Vec<
         n_stages: 2,
         injection_weight: symbi_sim::driver::downstream_injection_weight(Timestepping::Rk2.stages(), 0),
         allow_elision: false,
+        exit_fraction: symbi_sim::driver::stage_exit_fraction(Timestepping::Rk2.stages(), 0),
     };
     let mut hook = |hp: HookPoint| match hp {
         // after the stage snapshot: the redo restarts from this input and the select holds it

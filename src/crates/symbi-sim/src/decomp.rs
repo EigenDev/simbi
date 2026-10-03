@@ -2687,6 +2687,7 @@ where
                         stage.index,
                     ),
                     allow_elision: false,
+                    exit_fraction: crate::driver::stage_exit_fraction(stages, stage.index),
                 };
                 let mut troubled = 0u64;
                 if has_axis_rings {
@@ -2846,6 +2847,8 @@ where
                 }
                 crate::tracers::restore_transport_state(&mut **store);
                 store.motion = motion_n[ii];
+                // the tile stands at its step entry again, the clock its ghost refills read
+                store.reset_state_clock();
             }
             drain_devices::<M>(devices);
             {

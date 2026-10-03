@@ -271,6 +271,7 @@ fn neighbor_report(stage: usize) -> (u64, SourceReplayOutcome, bool) {
             n_stages: 2,
             injection_weight: symbi_sim::driver::downstream_injection_weight(stages, ii),
             allow_elision: false,
+            exit_fraction: symbi_sim::driver::stage_exit_fraction(stages, ii),
         };
         for (s, k) in sh.iter().zip(&ks) {
             let _ = fold_stage_through_mark(s, k, args, &mut |_| {});

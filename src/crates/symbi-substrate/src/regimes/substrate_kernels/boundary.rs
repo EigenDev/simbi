@@ -192,7 +192,7 @@ fn apply_boundary_dag_cpu<const D: usize, const DOF: usize, Mem, Sc>(
         !Mem::IS_DEVICE_ACCESSIBLE,
         "apply_boundary_dag_cpu is the host path"
     );
-    let t = sim.time;
+    let t = sim.boundary_time();
     let pre = sim.fields.prim.pre_field();
     let fields: Vec<String> = dag.eval.fields().map(|s| s.to_string()).collect();
     let dummy_vel = [0.0f64; DOF]; // Coord prescriptions never read state; rho/vel are never requested.
@@ -289,7 +289,7 @@ fn apply_boundary_dag_gpu<const D: usize, const DOF: usize, Mem, Sc>(
         );
         gv_kernel_to_ir(&program, D as u8, &format!("rt_boundary_{D}d"))
     });
-    let t = sim.time;
+    let t = sim.boundary_time();
     dispatch_runtime_ir(sim, name, ir, band, |bind| {
         let ScalarBind::Ref(sref) = bind else {
             panic!("boundary gpu: unexpected spec scalar {bind:?}");
