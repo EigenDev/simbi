@@ -4,11 +4,14 @@
 # the shakura-sunyaev alpha viscosity (nu = alpha c_s^2 / Omega_K) around the
 # roche primary:
 # - adiabatic: a configured alpha evolves away from the inviscid run on one
-#   device; on several devices it is refused by name, since its stability bound
-#   multiplies whole-grid maxima of p/rho and of the orbital radius that a
-#   tile's own maxima do not reproduce;
-# - isothermal: the bound depends on the orbital radius alone, and two host
-#   tiles reach the single-grid state bit for bit;
+#   device. its stability bound multiplies the largest p/rho by the slowest
+#   orbit: every tile takes the slowest orbit at the whole grid's farthest
+#   corner, and the minimum over the tiles' steps then holds the largest p/rho
+#   of any tile, so two tiles and three unequal tiles take the single grid's
+#   steps and reach its state bit for bit (the bound binds the step there).
+#   refined tiles, whose fine patches are clipped per tile, refuse it by name;
+# - isothermal: the bound depends on the orbital radius alone, and two and
+#   three unequal host tiles reach the single-grid state bit for bit;
 # - isothermal MHD carries no pressure for the local sound speed: alpha is
 #   refused by name before any output.
 #
@@ -41,6 +44,20 @@ from simbi_configs.examples.isothermal.imhd_orszag_tang import IsothermalOrszagT
 
 class AlphaRoche(RochePassage):
     viscosity_alpha: Annotated[float, ProblemParam(0.0, description="alpha")]
+
+
+class AlphaPrimary(AlphaRoche):
+    @computed_field
+    @property
+    def bonded_assembly(self) -> Optional[BondedAssembly]:
+        return None
+
+
+class RefinedAlphaPrimary(AlphaPrimary):
+    refinement_enabled: Annotated[bool, ProblemParam(True, description="refined")]
+    refinement_max_levels: Annotated[int, ProblemParam(2, description="levels")]
+    refinement_regions: Annotated[list[list[float]], ProblemParam([[-2.0, 2.0, -2.0, 2.0]], description="box")]
+    refinement_ratios: Annotated[list[int], ProblemParam([2], description="ratios")]
 
 
 class IsothermalAlphaPrimary(AlphaRoche):
@@ -113,8 +130,12 @@ def _density(out: Path) -> tuple[np.ndarray, float]:
         return level["conserved/den"][()][ng:-ng, ng:-ng], float(level.attrs["time"])
 
 
+# three tiles cut unequally along x (20, 21 and 23 cells of 64)
+UNEQUAL = {3: ", decompose=[[20, 41], []]"}
+
+
 def _alpha_run(out: Path, gpus: int, alpha: float, problem: str = "AlphaRoche") -> tuple[np.ndarray, float]:
-    done = _run(problem, out, gpus, extra=f", viscosity_alpha={alpha!r}")
+    done = _run(problem, out, gpus, extra=f", viscosity_alpha={alpha!r}" + UNEQUAL.get(gpus, ""))
     assert done.returncode == 0, f"{problem} with alpha = {alpha} on {gpus} device(s) failed:\n{done.stderr[-3000:]}"
     return _density(out)
 
@@ -126,17 +147,28 @@ def test_alpha_viscosity_acts_on_one_device(tmp_path: Path, variants: Path, prob
     assert np.abs(viscous - inviscid).max() > 0.0, "the configured alpha left the run inviscid"
 
 
-def test_two_isothermal_tiles_carry_the_alpha_viscosity(tmp_path: Path, variants: Path) -> None:
+@pytest.mark.parametrize("gpus", [2, 3], ids=["two-tiles", "three-unequal-tiles"])
+def test_isothermal_tiles_carry_the_alpha_viscosity(tmp_path: Path, variants: Path, gpus: int) -> None:
     single, t_single = _alpha_run(tmp_path / "single", 1, 0.1, "IsothermalAlphaPrimary")
-    tiles, t_tiles = _alpha_run(tmp_path / "tiles", 2, 0.1, "IsothermalAlphaPrimary")
+    tiles, t_tiles = _alpha_run(tmp_path / "tiles", gpus, 0.1, "IsothermalAlphaPrimary")
     assert t_tiles == t_single
     np.testing.assert_array_equal(tiles, single)
 
 
-def test_adiabatic_alpha_on_two_tiles_is_refused(tmp_path: Path, variants: Path) -> None:
-    done = _run("AlphaRoche", tmp_path / "tiles", 2, extra=", viscosity_alpha=0.1")
+@pytest.mark.parametrize("gpus", [2, 3], ids=["two-tiles", "three-unequal-tiles"])
+def test_adiabatic_tiles_take_the_single_grid_alpha_steps(tmp_path: Path, variants: Path, gpus: int) -> None:
+    single, t_single = _alpha_run(tmp_path / "single", 1, 0.1, "AlphaPrimary")
+    _, t_inviscid = _alpha_run(tmp_path / "inviscid", 1, 0.0, "AlphaPrimary")
+    assert t_single < t_inviscid, "the alpha bound never limited the step; the gate is vacuous"
+    tiles, t_tiles = _alpha_run(tmp_path / "tiles", gpus, 0.1, "AlphaPrimary")
+    assert t_tiles == t_single, f"{gpus} tiles reached t = {t_tiles!r} against {t_single!r}"
+    np.testing.assert_array_equal(tiles, single)
+
+
+def test_adiabatic_alpha_on_refined_tiles_is_refused(tmp_path: Path, variants: Path) -> None:
+    done = _run("RefinedAlphaPrimary", tmp_path / "tiles", 2, extra=", viscosity_alpha=0.1")
     assert done.returncode != 0
-    assert "alpha-disk viscosity on the newtonian regime with several devices" in done.stderr.replace("\n", " "), done.stderr[-1500:]
+    assert "alpha-disk viscosity on the newtonian regime with mesh refinement and several devices" in done.stderr.replace("\n", " "), done.stderr[-1500:]
     assert not list((tmp_path / "tiles").glob("*.h5")), "output was written before the refusal"
 
 

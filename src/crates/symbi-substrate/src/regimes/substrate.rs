@@ -143,8 +143,8 @@ impl<Mem: MemorySpace, Sc: Scalar + OrderedNumeric, const D: usize>
     }
 
     /// nu_max for the alpha viscous CFL cap: nu(r) = alpha cs^2 / Omega_k(r)
-    /// grows with r (Omega_k = sqrt(GM/r^3)), so the maximum over the interior is
-    /// at the corner farthest from the central body. returns 0 (cap inert) with
+    /// grows with r (Omega_k = sqrt(GM/r^3)), so the maximum over the whole grid is
+    /// at its corner farthest from the central body, on every tile alike. returns 0 (cap inert) with
     /// no body — the alpha dispatch then fails loud.
     fn alpha_nu_max(&self, sim: &FieldStore<D, D, Mem, Sc>) -> f64 {
         let geom = &sim.geom;
@@ -165,17 +165,16 @@ impl<Mem: MemorySpace, Sc: Scalar + OrderedNumeric, const D: usize>
         // the body in the disk plane (the first two axes; the vertical z in 3D does
         // not enter Omega_k) — matching the kernel's nu(x, y) exactly.
         let r_max = if geom.coords == Geometry::Cylindrical || geom.coords == Geometry::Spherical {
-            let sp = &geom.interior.spaces[0];
-            geom.x_lo[0] + geom.dx[0] * ((sp.hi + geom.index_offset[0]) as f64)
+            geom.x_lo[0] + geom.dx[0] * (geom.whole_interior(0).1 as f64)
         } else {
             let plane = D.min(2);
             let mut r_max = 0.0_f64;
             for corner in 0..(1usize << D) {
                 let mut d2 = 0.0;
                 for a in 0..plane {
-                    let sp = &geom.interior.spaces[a];
-                    let idx = if corner & (1 << a) != 0 { sp.hi } else { sp.lo };
-                    let x = geom.x_lo[a] + geom.dx[a] * ((idx + geom.index_offset[a]) as f64);
+                    let (lo, hi) = geom.whole_interior(a);
+                    let idx = if corner & (1 << a) != 0 { hi } else { lo };
+                    let x = geom.x_lo[a] + geom.dx[a] * (idx as f64);
                     let d = x - b.position[a];
                     d2 += d * d;
                 }

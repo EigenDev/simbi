@@ -5754,6 +5754,9 @@ where
     for (s, _) in tiles.iter_mut() {
         s.time = cfg.start_time;
         s.max_dt = cfg.max_dt;
+        // the whole grid's interior in the tile's `index + offset` frame, where the grid's first
+        // cell is index 0 at the origin x_lo
+        s.geom.whole_span = Some(std::array::from_fn(|ax| (grid.interior_lo[ax], grid.interior_lo[ax] + grid.cells[ax] as isize)));
     }
     if cfg.n_tracers > 0 {
         reporter.milestone(&format!(
@@ -9129,11 +9132,13 @@ fn dispatch_and_run(
     if cfg.n_gpus > 1 && cfg.bodies.iter().any(|b| b.magnetic_slip.is_some()) {
         return Err("a magnetic slip body with gpus > 1 awaits its tiled slip step; run it on one device".to_string());
     }
-    if cfg.n_gpus > 1 && cfg.alpha > 0.0 && matches!(cfg.regime.as_str(), "newtonian" | "nmhd") {
+    // the bound's slowest orbit sits at the whole grid's farthest corner, which a flat tile
+    // records; a refined tile's fine patch is clipped to the tile and records no whole patch
+    if cfg.n_gpus > 1 && cfg.refinement_enabled && cfg.alpha > 0.0 && matches!(cfg.regime.as_str(), "newtonian" | "nmhd") {
         return Err(format!(
-            "alpha-disk viscosity on the {} regime with several devices: its stability bound \
-                 multiplies the largest p/rho by the slowest orbit, each maximized over the whole \
-                 grid, which a tile's own maxima do not reproduce; run it on one device",
+            "alpha-disk viscosity on the {} regime with mesh refinement and several devices: its \
+             stability bound takes the slowest orbit at the refined patch's farthest corner, which \
+             a tile's clipped patch does not hold; run it on one device or without refinement",
             cfg.regime
         ));
     }
@@ -10714,10 +10719,11 @@ fn validate_launch_scope(cfg: &Config) -> Result<(), String> {
     }
     // the dye rides the launched gas and isothermal tiles under the single grid's admission
     validate_passive_scalar(cfg)?;
-    if cfg.alpha > 0.0 && matches!(cfg.regime.as_str(), "newtonian" | "nmhd") {
+    if cfg.refinement_enabled && cfg.alpha > 0.0 && matches!(cfg.regime.as_str(), "newtonian" | "nmhd") {
         return refused(&format!(
-            "alpha-disk viscosity on the {} regime (its stability bound multiplies whole-grid \
-             maxima a tile does not hold)",
+            "alpha-disk viscosity on the {} regime with mesh refinement (its stability bound takes \
+             the slowest orbit at the refined patch's farthest corner, which a clipped patch does \
+             not hold)",
             cfg.regime
         ));
     }
@@ -11744,6 +11750,9 @@ fn run_worker_process(
             for (sim, _) in $tiles.iter_mut() {
                 sim.time = cfg.start_time;
                 sim.max_dt = cfg.max_dt;
+                // the whole grid's interior in the tile's `index + offset` frame, where the
+                // grid's first cell is index 0 at the origin x_lo
+                sim.geom.whole_span = Some(std::array::from_fn(|ax| (grid.interior_lo[ax], grid.interior_lo[ax] + grid.cells[ax] as isize)));
             }
             let built = build_clock.elapsed();
             worker_session::<$regime_ty, _, _, _, $d, $dof>(

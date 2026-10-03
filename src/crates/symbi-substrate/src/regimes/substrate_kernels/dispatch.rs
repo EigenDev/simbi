@@ -1581,9 +1581,10 @@ where
     for corner in 0..(1usize << D) {
         let mut d2 = 0.0;
         for a in 0..plane {
-            let sp = &geom.interior.spaces[a];
-            let idx = if corner & (1 << a) != 0 { sp.hi } else { sp.lo };
-            let x = geom.x_lo[a] + geom.dx[a] * ((idx + geom.index_offset[a]) as f64);
+            // the whole grid's corners: the slowest orbit is the grid's, whichever tile holds it
+            let (lo, hi) = geom.whole_interior(a);
+            let idx = if corner & (1 << a) != 0 { hi } else { lo };
+            let x = geom.x_lo[a] + geom.dx[a] * (idx as f64);
             let d = x - b.position[a];
             d2 += d * d;
         }
@@ -1689,9 +1690,12 @@ pub fn dispatch_viscous_alpha<const D: usize, const DOF: usize, Mem, Sc>(
         ScalarBind::Spec(s) if &**s == "alpha" => Sc::from_f64(alpha),
         other => panic!("viscous alpha: unexpected spec scalar {other:?}"),
     });
+    // the adiabatic kernels read the pressure through `prim.pre` for the local cs^2 = gamma p / rho;
+    // the isothermal kernels read the closure field and bind no pressure
+    let pre = sim.fields.prim.pre_field().unwrap_or(&sim.fields.cons.den);
     dispatch_named(
         sim,
-        &sim.fields.cons.den,
+        pre,
         None,
         0,
         name,

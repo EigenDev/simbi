@@ -1243,6 +1243,22 @@ pub struct PartitionGeometry<const D: usize> {
     /// evaluates, on the host and in the kernels, is the whole grid's bitwise. zero on an
     /// undivided grid.
     pub index_offset: [isize; D],
+    /// the whole grid's interior on each axis, as the half-open range of `local index +
+    /// index_offset` its cells span; `None` on an undivided grid, whose own interior is the whole.
+    /// a tile reads the whole grid's extent from it where a bound depends on the grid's extreme
+    /// position (the slowest orbit of an alpha disk).
+    pub whole_span: Option<[(isize, isize); D]>,
+}
+
+impl<const D: usize> PartitionGeometry<D> {
+    /// the interior range on `axis` in the `local index + index_offset` frame: the whole grid's
+    /// on a tile that records it, the store's own otherwise
+    pub fn whole_interior(&self, axis: usize) -> (isize, isize) {
+        self.whole_span.map(|span| span[axis]).unwrap_or_else(|| {
+            let sp = &self.interior.spaces[axis];
+            (sp.lo + self.index_offset[axis], sp.hi + self.index_offset[axis])
+        })
+    }
 }
 
 /// the cylindrical 2D plane an MHD sim grids — the one place the grid-axis set is ambiguous
@@ -3004,6 +3020,7 @@ where
                 .collect(),
             axes: default_grid_axes::<D>(metric.geometry()),
             maps: None,
+            whole_span: None,
         };
         let has_energy = regime.has_energy();
 

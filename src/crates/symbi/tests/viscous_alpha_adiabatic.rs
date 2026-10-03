@@ -10,6 +10,9 @@
 //   constant gamma p0/rho0, so the alpha update must differ from a
 //   constant-nu update (nu varies with radius through Omega_K) — a kernel
 //   that dropped the radial law would match it;
+// - the local sound speed is the pressure's: nu is linear in p, so doubling the
+//   pressure doubles the momentum update (to the rounding of the momentum it
+//   is added to);
 // - the 2.5D magnetized-gas (DOF = 3) variant dispatches and diffuses the
 //   out-of-plane momentum.
 // =============================================================================
@@ -39,6 +42,11 @@ type Sim = SimState<Newtonian, 2, Cartesian, IdealGas<f64>, CpuSpace, HostMemory
 type Kern = AdiabaticSubstrateKernelSet<HostMemory, f64, 2>;
 
 fn build() -> Sim {
+    build_at(1.0)
+}
+
+/// the sheared disk at uniform density one and uniform pressure `p0`
+fn build_at(p0: f64) -> Sim {
     Sim::build(Newtonian, IdealGas { gamma: GAMMA }, Cartesian)
         .cells([N, N])
         .origin([-L, -L])
@@ -51,7 +59,7 @@ fn build() -> Sim {
         // v_x(y), so the stress has one dominant component and the heating is
         // strictly positive where the gradient lives.
         .set_initial(|x| {
-            Prim::adiabatic(Density(1.0), Tensor::new([0.3 * x[1], 0.0]), Pressure(1.0))
+            Prim::adiabatic(Density(1.0), Tensor::new([0.3 * x[1], 0.0]), Pressure(p0))
         })
         .build()
         .with_bodies(BodyCollection::new().add(Body::gravitational(
@@ -130,6 +138,33 @@ fn alpha_viscosity_acts_heats_and_carries_the_radial_law() {
         "the alpha update equals a constant-nu update everywhere: the radial \
          Omega_K law is not being applied"
     );
+}
+
+#[test]
+fn alpha_viscosity_reads_the_local_pressure() {
+    // the update and the largest momentum it is added to, at uniform pressure p0
+    let update = |p0: f64| {
+        let sim = build_at(p0);
+        let k = Kern::new(GAMMA, CFL, &sim.geom.allocated).with_alpha(ALPHA);
+        k.c2p(&sim);
+        k.ghost_fill(&sim);
+        let (m0_before, m1_before, _) = snapshot(&sim);
+        k.viscous(&sim, DT);
+        let (m0_after, m1_after, _) = snapshot(&sim);
+        let scale = m0_before.iter().chain(&m1_before).fold(0.0_f64, |m, v| m.max(v.abs()));
+        let delta: Vec<f64> = m0_after.iter().zip(&m0_before).chain(m1_after.iter().zip(&m1_before)).map(|(a, b)| a - b).collect();
+        (delta, scale)
+    };
+    let (once, scale) = update(1.0);
+    let (twice, _) = update(2.0);
+    assert!(once.iter().any(|d| *d != 0.0), "the alpha pass never touched the momentum");
+    // nu = alpha gamma p / (rho Omega_K) is linear in p, so the stress update doubles exactly;
+    // it is measured as (m + dm) - m, and forming m + dm rounds at u |m| (u = 2^-53) in each
+    // run, so the measured updates agree with doubling within 4 u of the largest momentum
+    let bound = 4.0 * f64::EPSILON / 2.0 * scale;
+    for (k, (a, b)) in once.iter().zip(&twice).enumerate() {
+        assert!((b - 2.0 * a).abs() <= bound, "momentum entry {k}: twice the pressure gave {b:e}, not twice {a:e}");
+    }
 }
 
 #[test]
