@@ -16,7 +16,7 @@ use std::time::{Duration, Instant};
 use symbi_fabric::frame::encode_f64s;
 use symbi_fabric::{
     ABSENT, Epoch, Fabric, FabricError, Header, Kind, Link, Loopback, OpKind, PhaseSpec, Progress,
-    SessionId, TransferId, WorkerId,
+    SessionId, TransferId, WorkerId, assemble_windows, window_entries,
 };
 
 const S: SessionId = SessionId(99);
@@ -984,4 +984,75 @@ fn an_index_beyond_the_declared_length_is_refused_locally() {
     let link = Loopback::new();
     let (mut a, _b) = pair2(&link);
     assert!(a.begin_assemble(3, &[(3, 0)]).unwrap_err().is_protocol());
+}
+
+/// the frame that carries `words` assembled words exactly: 9 bytes of kind and length and 16
+/// per (index, word) pair in a contribution, which bounds the dense result as well
+fn frame_of(words: u64) -> usize {
+    9 + 16 * words as usize
+}
+
+#[test]
+fn assembled_windows_tile_the_vector_at_the_frame_bound() {
+    // an exact boundary: every window full
+    assert_eq!(assemble_windows(12, frame_of(4)).unwrap(), vec![0..4, 4..8, 8..12]);
+    // a partial final window holds the remainder
+    assert_eq!(assemble_windows(10, frame_of(4)).unwrap(), vec![0..4, 4..8, 8..10]);
+    // one byte short of a word narrows the window by one
+    assert_eq!(assemble_windows(6, frame_of(3) - 1).unwrap(), vec![0..2, 2..4, 4..6]);
+    // a vector of no words has no window; a frame that carries no word is refused
+    assert!(assemble_windows(0, frame_of(4)).unwrap().is_empty());
+    assert!(assemble_windows(5, frame_of(1) - 1).unwrap_err().contains("carries no assembled word"));
+}
+
+/// replay `entries_a` and `entries_b` window by window over two in-process workers: the dense
+/// vectors both hold, concatenated
+fn windowed(len: u64, frame: usize, entries_a: &[(u64, u64)], entries_b: &[(u64, u64)]) -> (Vec<u64>, Vec<u64>) {
+    let link = Loopback::new();
+    let (mut a, mut b) = pair2(&link);
+    let (mut da, mut db) = (Vec::new(), Vec::new());
+    let windows = assemble_windows(len, frame).unwrap();
+    for window in &windows {
+        let (wa, wb) = (window_entries(entries_a, window), window_entries(entries_b, window));
+        // each window's contribution fits the bound it was cut for
+        assert!(9 + 16 * wa.len() <= frame && 9 + 16 * wb.len() <= frame);
+        let (ra, rb) = run_assemble(&mut a, &mut b, window.end - window.start, &wa, &wb).unwrap();
+        da.extend(ra);
+        db.extend(rb);
+    }
+    (da, db)
+}
+
+#[test]
+fn a_windowed_assembly_reproduces_every_word_through_small_frames() {
+    // records of seven words from two tiles, with bit patterns a float codec would disturb: a
+    // signalling nan, a negative zero, the largest word below the absent marker
+    let words = |base: u64, n: u64| -> Vec<u64> {
+        (0..n)
+            .map(|k| match k % 4 {
+                0 => 0x7ff0_0000_0000_0001,
+                1 => (-0.0f64).to_bits(),
+                2 => u64::MAX - 1,
+                _ => base + k,
+            })
+            .collect()
+    };
+    for (len_a, len_b, frame) in [
+        // an exact boundary: 28 words in windows of 7
+        (14, 14, frame_of(7)),
+        // a partial final window: 31 words in windows of 4
+        (17, 14, frame_of(4)),
+        // an empty contributor: worker a supplies nothing
+        (0, 23, frame_of(5)),
+    ] {
+        let a: Vec<(u64, u64)> = words(1000, len_a).into_iter().enumerate().map(|(i, w)| (i as u64, w)).collect();
+        let b: Vec<(u64, u64)> =
+            words(2000, len_b).into_iter().enumerate().map(|(i, w)| (len_a + i as u64, w)).collect();
+        let want: Vec<u64> = a.iter().chain(&b).map(|e| e.1).collect();
+        let len = len_a + len_b;
+        assert!(assemble_windows(len, frame).unwrap().len() > 1, "the bound leaves one window; the arm is vacuous");
+        let (da, db) = windowed(len, frame, &a, &b);
+        assert_eq!(da, want, "worker a's vector ({len_a} + {len_b} words, frame {frame})");
+        assert_eq!(db, want, "worker b's vector ({len_a} + {len_b} words, frame {frame})");
+    }
 }

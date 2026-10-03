@@ -97,7 +97,8 @@ fn push_decoded<const D: usize>(set: &mut TracerSet<D>, words: &[u64]) {
     set.step_flags.push(unpack([words[D + 6], words[D + 7]]));
 }
 
-/// one fixed-size header per tile, assembled on every worker in flat tile order
+/// one fixed-size header per tile, assembled on every worker in flat tile order. every
+/// assembly here moves in the windows the session's agreed frame bound carries
 pub fn assemble_headers<L: Link, const K: usize>(
     fabric: &mut Fabric<L>,
     n_tiles: usize,
@@ -108,7 +109,7 @@ pub fn assemble_headers<L: Link, const K: usize>(
         .iter()
         .flat_map(|(tile, words)| words.iter().enumerate().map(move |(w, &v)| ((tile * K + w) as u64, v)))
         .collect();
-    let dense = fabric.assemble((n_tiles * K) as u64, &entries, deadline)?;
+    let dense = fabric.assemble_windowed((n_tiles * K) as u64, &entries, deadline)?;
     Ok((0..n_tiles).map(|tile| std::array::from_fn(|w| dense[tile * K + w])).collect())
 }
 
@@ -144,22 +145,7 @@ pub fn assemble_blocks<L: Link>(
             words.iter().enumerate().map(move |(w, &v)| ((start + w) as u64, v))
         })
         .collect();
-    // the words cross in windows one frame carries: a contribution holds (index, word) pairs and
-    // the assembled window comes back dense, so a window of `window` words fits both frames
-    let window = (fabric.link().max_payload() / 8).saturating_sub(16).max(2) / 2;
-    let mut dense = Vec::with_capacity(total);
-    let mut sorted = entries;
-    sorted.sort_unstable_by_key(|e| e.0);
-    let mut next = 0;
-    for lo in (0..total).step_by(window) {
-        let hi = (lo + window).min(total);
-        let first = next;
-        while next < sorted.len() && (sorted[next].0 as usize) < hi {
-            next += 1;
-        }
-        let shifted: Vec<(u64, u64)> = sorted[first..next].iter().map(|&(i, v)| (i - lo as u64, v)).collect();
-        dense.extend(fabric.assemble((hi - lo) as u64, &shifted, deadline)?);
-    }
+    let dense = fabric.assemble_windowed(total as u64, &entries, deadline)?;
     Ok((0..n_tiles).map(|tile| dense[starts[tile]..starts[tile + 1]].to_vec()).collect())
 }
 

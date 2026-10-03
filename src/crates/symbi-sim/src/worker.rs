@@ -459,7 +459,7 @@ where
             .enumerate()
             .map(|(k, s)| (tiles[k].0 as u64, crate::state::local_c_a2_max(*s).to_bits()))
             .collect();
-        let assembled = fabric.assemble(n_tiles as u64, &local, deadline)?;
+        let assembled = fabric.assemble_windowed(n_tiles as u64, &local, deadline)?;
         let mut c_a2 = 0.0_f64;
         for (tile, bits) in assembled.iter().enumerate() {
             if *bits == symbi_fabric::ABSENT {
@@ -515,7 +515,7 @@ where
         let base = tiles[k].0 as u64 * per_tile as u64;
         entries.extend(encoded.into_iter().enumerate().map(|(i, bits)| (base + i as u64, bits)));
     }
-    let assembled = fabric.assemble((n_tiles * per_tile) as u64, &entries, deadline)?;
+    let assembled = fabric.assemble_windowed((n_tiles * per_tile) as u64, &entries, deadline)?;
     let mut tile_deltas = Vec::with_capacity(n_tiles);
     for tile in 0..n_tiles {
         let block = &assembled[tile * per_tile..(tile + 1) * per_tile];
@@ -1048,7 +1048,7 @@ where
                         (0..n).flat_map(|k| crate::axis_ring::ring_entries(sh[k], n_cells)).collect();
                     let clock = Instant::now();
                     let assembled = fabric
-                        .assemble(ring_len, &entries, deadline)
+                        .assemble_windowed(ring_len, &entries, deadline)
                         .map_err(|e| fail(fabric, e.into()))?;
                     timing.collectives += clock.elapsed();
                     for k in 0..n {

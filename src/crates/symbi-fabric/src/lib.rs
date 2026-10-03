@@ -28,6 +28,7 @@ pub mod tcp;
 pub use endpoint::{
     ABSENT,
     Fabric, Link, Loopback, OpKind, PhaseSpec, Progress, RecvState, SendState, Stats,
+    assemble_windows, window_entries,
 };
 pub use error::{AbortReason, Deadline, FabricError};
 pub use frame::{HEADER_LEN, Header, Kind, MAGIC, VERSION};

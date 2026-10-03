@@ -239,6 +239,26 @@ impl OpKind {
 /// the payload of a Contribute or Result frame: the kind byte and its words, little endian. a
 /// scalar operation carries one word; an assembled contribution carries the declared length and
 /// then (index, bits) pairs, and its result the declared length's words.
+/// the windows of an assembled vector of `len` words that frames of `max_payload` bytes carry.
+/// a worker's contribution frame holds the kind byte, the window length and one (index, word)
+/// pair per word it supplies; the result frame holds the kind byte and the dense window. a
+/// window of `w` words thus fits when 9 + 16 w <= max_payload. the last window holds the
+/// remainder; a vector of no words has no window.
+pub fn assemble_windows(len: u64, max_payload: usize) -> Result<Vec<std::ops::Range<u64>>, String> {
+    let words = (max_payload.saturating_sub(9) / 16) as u64;
+    if words == 0 {
+        return Err(format!("a frame of {max_payload} bytes carries no assembled word"));
+    }
+    Ok((0..len).step_by(words as usize).map(|lo| lo..(lo + words).min(len)).collect())
+}
+
+/// the entries of `window` at the window's own indices; `entries` sorted by index
+pub fn window_entries(entries: &[(u64, u64)], window: &std::ops::Range<u64>) -> Vec<(u64, u64)> {
+    let lo = entries.partition_point(|e| e.0 < window.start);
+    let hi = entries.partition_point(|e| e.0 < window.end);
+    entries[lo..hi].iter().map(|&(index, bits)| (index - window.start, bits)).collect()
+}
+
 fn encode_op(kind: OpKind, words: &[u64]) -> Vec<u8> {
     let mut out = Vec::with_capacity(1 + 8 * words.len());
     out.push(kind as u8);
@@ -359,6 +379,9 @@ pub struct Fabric<L: Link> {
     finishing: bool,
     collective: Collective,
     blocks: Blocks,
+    /// the frame bound every worker of the session honors, agreed at the first windowed
+    /// assembly
+    agreed_payload: Option<usize>,
 }
 
 /// the checkpoint block path. a worker sends blocks to the coordinator under a byte
@@ -446,6 +469,7 @@ impl<L: Link> Fabric<L> {
                 delay: None,
                 held: Vec::new(),
             },
+            agreed_payload: None,
             blocks: Blocks {
                 credit: 0,
                 outstanding: 0,
@@ -1211,6 +1235,43 @@ impl<L: Link> Fabric<L> {
             return Ok(Some(result));
         }
         Ok(None)
+    }
+
+    /// the frame bound every worker of the session honors: the smallest link bound over the
+    /// workers, agreed by one collective at the first call and held from then on. every worker
+    /// reaches its first call at the same point of the collective sequence.
+    pub fn agreed_max_payload(&mut self, deadline: Duration) -> Result<usize, FabricError> {
+        if let Some(limit) = self.agreed_payload {
+            return Ok(limit);
+        }
+        // exact in f64 below 2^53, the bound of every frame length a header can state
+        let local = self.link.max_payload().min(1 << 52) as f64;
+        let limit = f64::from_bits(self.collective(OpKind::Min, local.to_bits(), deadline)?) as usize;
+        self.agreed_payload = Some(limit);
+        Ok(limit)
+    }
+
+    /// an assembled collective over `len` words in the windows the session's agreed frame bound
+    /// carries, one assembled collective per window: the dense result of every window in order.
+    /// a bound that carries no word is refused before any window moves.
+    pub fn assemble_windowed(
+        &mut self,
+        len: u64,
+        entries: &[(u64, u64)],
+        deadline: Duration,
+    ) -> Result<Vec<u64>, FabricError> {
+        let limit = self.agreed_max_payload(deadline)?;
+        let windows = assemble_windows(len, limit).map_err(|detail| self.local(detail))?;
+        let mut sorted = entries.to_vec();
+        sorted.sort_unstable_by_key(|e| e.0);
+        if let Some(&(index, _)) = sorted.last().filter(|e| e.0 >= len) {
+            return Err(self.local(format!("assembled index {index} beyond the length {len}")));
+        }
+        let mut dense = Vec::with_capacity(len as usize);
+        for window in &windows {
+            dense.extend(self.assemble(window.end - window.start, &window_entries(&sorted, window), deadline)?);
+        }
+        Ok(dense)
     }
 
     /// a complete assembled collective: contribute `entries` over `len` words, then service
