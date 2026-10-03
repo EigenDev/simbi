@@ -536,6 +536,14 @@ def _validate_expression_payloads(model_dict: dict[str, Any]) -> None:
                 raise ValueError(
                     f"{field} must use kind='dirichlet', got {kind!r}"
                 )
+            # every magnetized regime carries three-component velocity and field on any grid
+            # (2.5d on a plane), and its driven-face fill writes all three of each
+            if model_dict.get("is_mhd", False) and dim != 3:
+                raise ValueError(
+                    f"{field} prescribes {dim}-component vectors, but a magnetized regime carries "
+                    "three-component velocity and field on every grid; serialize the face with "
+                    "dim=3 as [rho, v_0..v_2, pre, B_0..B_2]"
+                )
             expected = 1 + dim + int(has_energy)
             if model_dict.get("is_mhd", False):
                 expected += dim

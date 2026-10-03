@@ -2,12 +2,14 @@
 # test_launch_driven_boundary.py
 #
 # a driven (dynamic) face on launched workers. the x1-inner face of the blast,
-# with and without its refined box, and of an isothermal channel prescribes an
-# inflow whose density and transverse velocity vary along the face and in
-# time. launched on two workers cut across the face (each holding half of it)
+# with and without its refined box, of an isothermal channel and of the
+# magnetized orszag-tang vortex prescribes an inflow whose density and
+# transverse velocity vary along the face and in time. launched on two workers cut across the face (each holding half of it)
 # and cut along it (one holding all of it), every level publishes the single
 # grid's state bit for bit. the prescription changes the run: the same problem
-# with an outflow face lands elsewhere.
+# with an outflow face lands elsewhere. a magnetized face prescribing in-plane
+# vectors alone on the 2.5d grid, whose kernels fill three components, is
+# refused by name.
 #
 # run: pytest -m simulation simbi/simulation/tests/test_launch_driven_boundary.py
 # =============================================================================
@@ -36,6 +38,7 @@ import simbi.expression as expr
 from simbi import ProblemParam
 from simbi.types import BoundaryCondition
 from simbi_configs.examples.isothermal.isothermal_channel import IsothermalChannel
+from simbi_configs.examples.newtonian.nmhd_orszag_tang import NewtonianOrszagTang
 from simbi_configs.examples.newtonian.refined_blast import RefinedBlast
 
 DRIVEN = [BoundaryCondition.DYNAMIC, BoundaryCondition.OUTFLOW, BoundaryCondition.OUTFLOW, BoundaryCondition.OUTFLOW]
@@ -74,6 +77,31 @@ class FlatOutflowBlast(FlatDrivenBlast):
         return {}
 
 
+class DrivenOrszagTang(NewtonianOrszagTang):
+    """the magnetized 2.5d grid carries three-component velocity and field, so its driven face
+    prescribes [rho, v_0..v_2, pre, B_0..B_2]"""
+    boundary_conditions: Annotated[list[BoundaryCondition], ProblemParam(DRIVEN, description="driven")]
+
+    @computed_field
+    @property
+    def bx1_inner_expressions(self) -> dict:
+        x1, x2 = expr.coords(2)
+        t = expr.variable("t", x1)
+        rho = 1.0 + 0.2 * expr.sin(2.0 * math.pi * x2 + 20.0 * t)
+        vy = 0.05 * expr.sin(2.0 * math.pi * x2)
+        by = 0.02 * expr.cos(2.0 * math.pi * x2)
+        return expr.boundary([rho, 0.3, vy, 0.0, 1.0, 0.1, by, 0.0], dim=3)
+
+
+class PlanarDrivenOrszagTang(DrivenOrszagTang):
+    """the same face prescribing in-plane vectors alone"""
+
+    @computed_field
+    @property
+    def bx1_inner_expressions(self) -> dict:
+        return expr.boundary([1.0, 0.3, 0.0, 1.0, 0.1, 0.0], dim=2)
+
+
 class DrivenChannel(IsothermalChannel):
     boundary_conditions: Annotated[list[BoundaryCondition], ProblemParam(DRIVEN, description="driven")]
 
@@ -86,6 +114,7 @@ ARMS = {
     "refined": ("DrivenBlast", (32, 32, 1)),
     "flat": ("FlatDrivenBlast", (32, 32, 1)),
     "isothermal": ("DrivenChannel", (32, 32)),
+    "magnetized": ("DrivenOrszagTang", (32, 32, 1)),
 }
 
 
@@ -146,3 +175,16 @@ def test_launched_workers_drive_the_face_as_the_single_grid(tmp_path: Path, vari
     want = _single(problem, resolution, tmp_path / "single")
     layout = _layout(tmp_path / "two.toml", workers=2, shape=shape)
     _assert_same(_launch(variants, problem, resolution, tmp_path / "launched", layout), want, f"{arm} {shape}: two launched workers")
+
+
+def test_a_magnetized_face_prescribing_planar_vectors_is_refused(tmp_path: Path, variants: Path) -> None:
+    snippet = (
+        "import sys\n"
+        "from simbi.simulation import runner\n"
+        "from variants import PlanarDrivenOrszagTang\n"
+        "runner.run(PlanarDrivenOrszagTang(resolution=(32, 32, 1), checkpoint_interval=1e9, data_directory=sys.argv[1]), compute_mode='cpu', max_steps=1)\n"
+    )
+    done = subprocess.run([sys.executable, "-c", snippet, str(tmp_path / "out")], capture_output=True, text=True, timeout=600)
+    assert done.returncode != 0
+    assert "three-component velocity and field" in done.stderr.replace("\n", " "), done.stderr[-1500:]
+    assert not list((tmp_path / "out").glob("*.h5")), "output was written before the refusal"
