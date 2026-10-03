@@ -6152,6 +6152,25 @@ where
         "refinement: {} of {ntiles} tiles carry a fine level, {depth} levels",
         fine.first().map_or(0, |(fg, _, _)| fg.order.len())
     ));
+    // every level of every tile records its whole level's interior in the tile's own index frame:
+    // a bound that reads the level's extent (the alpha viscosity's slowest orbit) takes the whole
+    // level's, as the single hierarchy does, whichever tile holds a part of it
+    let whole_span = |state: &symbi_sim::state::FieldStore<D, DOF, Mem, f64>, offset: [isize; D], grid: &symbi_sim::checkpoint::GlobalGrid<D>| -> [(isize, isize); D] {
+        std::array::from_fn(|ax| {
+            let shift = state.geom.interior.spaces[ax].lo + state.geom.index_offset[ax] - offset[ax];
+            (grid.interior_lo[ax] + shift, grid.interior_lo[ax] + grid.cells[ax] as isize + shift)
+        })
+    };
+    for (i, tile) in tiles.iter_mut().enumerate() {
+        let span = whole_span(&tile.levels[0].state.store, root_offsets[i], &root_grid);
+        tile.levels[0].state.geom.whole_span = Some(span);
+    }
+    for (level, (fg, offsets, grid)) in fine.iter().enumerate().map(|(k, f)| (k + 1, f)) {
+        for (k, &i) in fg.order.iter().enumerate() {
+            let span = whole_span(&tiles[i].levels[level].state.store, offsets[k], grid);
+            tiles[i].levels[level].state.geom.whole_span = Some(span);
+        }
+    }
     // a restart reads every level of every tile from the checkpoint's global grids.
     if let Some(path) = cfg.restart_path.as_deref() {
         let stored = symbi_sim::checkpoint::checkpoint_level_count(path).map_err(|e| format!("{e}"))?;
@@ -9247,16 +9266,6 @@ fn dispatch_and_run(
     }
     if cfg.n_gpus > 1 && cfg.bodies.iter().any(|b| b.magnetic_slip.is_some()) {
         return Err("a magnetic slip body with gpus > 1 awaits its tiled slip step; run it on one device".to_string());
-    }
-    // the bound's slowest orbit sits at the whole grid's farthest corner, which a flat tile
-    // records; a refined tile's fine patch is clipped to the tile and records no whole patch
-    if cfg.n_gpus > 1 && cfg.refinement_enabled && cfg.alpha > 0.0 && matches!(cfg.regime.as_str(), "newtonian" | "nmhd") {
-        return Err(format!(
-            "alpha-disk viscosity on the {} regime with mesh refinement and several devices: its \
-             stability bound takes the slowest orbit at the refined patch's farthest corner, which \
-             a tile's clipped patch does not hold; run it on one device or without refinement",
-            cfg.regime
-        ));
     }
     if !cfg.census_jsons.is_empty() && cfg.n_gpus > 1 {
         return Err(

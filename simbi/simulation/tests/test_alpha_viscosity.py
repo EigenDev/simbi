@@ -9,7 +9,9 @@
 #   corner, and the minimum over the tiles' steps then holds the largest p/rho
 #   of any tile, so two tiles and three unequal tiles take the single grid's
 #   steps and reach its state bit for bit (the bound binds the step there).
-#   refined tiles, whose fine patches are clipped per tile, refuse it by name;
+#   refined tiles record every level's whole extent, so two and three unequal
+#   refined tiles take the single hierarchy's steps and reach every level of
+#   its state bit for bit;
 # - isothermal: the bound depends on the orbital radius alone, and two and
 #   three unequal host tiles reach the single-grid state bit for bit;
 # - isothermal MHD carries no pressure for the local sound speed: alpha is
@@ -165,11 +167,33 @@ def test_adiabatic_tiles_take_the_single_grid_alpha_steps(tmp_path: Path, varian
     np.testing.assert_array_equal(tiles, single)
 
 
-def test_adiabatic_alpha_on_refined_tiles_is_refused(tmp_path: Path, variants: Path) -> None:
-    done = _run("RefinedAlphaPrimary", tmp_path / "tiles", 2, extra=", viscosity_alpha=0.1")
-    assert done.returncode != 0
-    assert "alpha-disk viscosity on the newtonian regime with mesh refinement and several devices" in done.stderr.replace("\n", " "), done.stderr[-1500:]
-    assert not list((tmp_path / "tiles").glob("*.h5")), "output was written before the refusal"
+# the fine patch [-2, 2] spans parent cells 24..40 of 64: three unequal refined tiles (20, 12 and
+# 32 cells) cut the patch at 32, clear of its faces by more than the prolongation stencil's reach
+REFINED_UNEQUAL = {3: ", decompose=[[20, 32], []]"}
+
+
+def _levels(out: Path) -> dict[str, np.ndarray]:
+    from simbi.simulation.tests.test_launch_refined_numerics import _all_levels
+
+    files = sorted(out.glob("*final*.h5"))
+    assert len(files) == 1, f"expected one final checkpoint in {out}, found {files}"
+    return _all_levels(files[0])
+
+
+@pytest.mark.parametrize("gpus", [2, 3], ids=["two-tiles", "three-unequal-tiles"])
+def test_refined_tiles_take_the_single_hierarchy_alpha_steps(tmp_path: Path, variants: Path, gpus: int) -> None:
+    def run(out: Path, devices: int, alpha: float) -> dict[str, np.ndarray]:
+        done = _run("RefinedAlphaPrimary", out, devices, extra=f", viscosity_alpha={alpha!r}" + REFINED_UNEQUAL.get(devices, ""))
+        assert done.returncode == 0, f"refined alpha = {alpha} on {devices} device(s) failed:\n{done.stderr[-3000:]}"
+        return _levels(out)
+
+    single, inviscid = run(tmp_path / "single", 1, 0.1), run(tmp_path / "inviscid", 1, 0.0)
+    assert "level_1/conserved/den" in single, "the single hierarchy published no fine level; the refined arm is vacuous"
+    assert single["level_0@time"] < inviscid["level_0@time"], "the alpha bound never limited the step; the gate is vacuous"
+    tiles = run(tmp_path / "tiles", gpus, 0.1)
+    assert tiles.keys() == single.keys(), f"datasets {sorted(tiles.keys() ^ single.keys())} differ"
+    for name, x in single.items():
+        np.testing.assert_array_equal(tiles[name], x, err_msg=f"{gpus} refined tiles: {name}")
 
 
 def test_alpha_on_isothermal_mhd_is_refused(tmp_path: Path, variants: Path) -> None:
