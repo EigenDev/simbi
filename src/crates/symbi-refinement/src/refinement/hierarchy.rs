@@ -2877,6 +2877,7 @@ where
             }
             phase_probe::sample(phase_probe::STAGE[ii], level, &self.levels[level].state);
         }
+        self.end_stage_motion(level);
         self.level_step_tail(level, dt, alpha0)
     }
 
@@ -3055,6 +3056,7 @@ where
     /// a root halo exchange between stages (rk2-root requires the
     /// corrector to read each neighbor's stage-1 update, exactly like the single-level exchange).
     pub fn level_step_begin(&mut self, level: usize, dt: f64) {
+        self.levels[level].state.motion_at_step_entry = self.levels[level].state.motion;
         let has_finer = level + 1 < self.levels.len();
         if has_finer {
             prof("refine_save_prim", || save_prim_old(&self.levels[level]));
@@ -3101,6 +3103,7 @@ where
     /// tracer interface ledger's length as the stage opened, ahead of the transfers this
     /// stage's flux sampling appended, which the correction half's tail applies.
     pub fn level_stage_through_mark(&mut self, level: usize, ii: usize, dt: f64, alpha0: f64) -> StageMark {
+        self.bind_stage_motion(level, ii, dt);
         let receipt_start = (level > 0)
             .then(|| self.tracer_interface_ledgers[level - 1].borrow().len())
             .unwrap_or(0);
@@ -3223,6 +3226,24 @@ where
     }
 
     /// the fold's arguments for stage `ii` of `level`
+    /// bind the level's mesh motion to stage `ii`'s entry time: the traced law's a(t), or the
+    /// linear advance from the step entry. a static mesh is left as it is.
+    fn bind_stage_motion(&mut self, level: usize, ii: usize, dt: f64) {
+        let state = &mut self.levels[level].state;
+        let entry = symbi_sim::driver::stage_schedule(state.timestepping.stages())[ii].entry;
+        let t_entry = state.time + entry * dt;
+        let law_value = state.motion_law.as_ref().map(|law| (law.a_at(t_entry), law.adot_at(t_entry)));
+        let a_n = state.motion_at_step_entry.a;
+        symbi_sim::driver::set_stage_motion(&mut state.motion, law_value, dt, a_n, entry);
+    }
+
+    /// the stages moved the scale factor; the step tail starts from the step-entry value, as on
+    /// every other driver
+    fn end_stage_motion(&mut self, level: usize) {
+        let state = &mut self.levels[level].state;
+        state.motion.a = state.motion_at_step_entry.a;
+    }
+
     fn stage_args(&self, level: usize, ii: usize, dt: f64) -> StageArgs {
         let stages = self.levels[level].state.timestepping.stages();
         let (a0, ac) = stages[ii];

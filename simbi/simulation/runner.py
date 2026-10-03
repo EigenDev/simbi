@@ -938,6 +938,8 @@ def launch_worker(
         prim_gen=prim_iterator,
         staggered_bfields=bfield_iterators,
         chi_field=problem.passive_scalar(),
+        a=problem.scale_factor,
+        adot=problem.scale_factor_derivative,
         sim_info=exec_dict,
         launch={
             "worker": int(worker),

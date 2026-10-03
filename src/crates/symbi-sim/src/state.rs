@@ -2395,6 +2395,9 @@ pub struct FieldStore<
 
     // ---- mesh motion (ALE) ----
     pub motion: MotionState<f64>,
+    /// the motion at the entry of the step in progress: each stage binds a(t) at its own entry
+    /// time from it, and the step tail starts from its scale factor
+    pub motion_at_step_entry: MotionState<f64>,
     // traced scale-factor law a(t)/a_dot(t); when present the time loop evaluates it exactly each
     // (sub)stage. None = static / linear.
     pub motion_law: Option<symbi_source_compile::motion_law::MotionLaw>,
@@ -3126,6 +3129,7 @@ where
                 cfl,
                 timestepping,
                 motion: MotionState::static_mesh(),
+                motion_at_step_entry: MotionState::static_mesh(),
                 motion_law: None,
                 immersed: None,
                 tracers: None,

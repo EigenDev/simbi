@@ -15,9 +15,10 @@
 // are the same kernel calls in the same order, so the owned tiles of a worker
 // match the single-process reference bitwise.
 //
-// the first release evolves single-level cartesian hydro and ideal MHD: a
-// store carrying bodies, tracers, mesh motion, or excision is refused at entry. a local fatal error tells every peer through the abort relay before
-// the loop returns it.
+// the loop evolves single-level hydro and ideal MHD with their dye, immersed
+// bodies and mesh motion; a store carrying a horizon body, tracers, or
+// excision is refused at entry. a local fatal error tells every peer through
+// the abort relay before the loop returns it.
 //
 // usage:
 //  let report = evolve_worker(&tiles, &mut stores, &kernels, &devices, &exchange,
@@ -179,8 +180,6 @@ pub fn refuse<const D: usize, const DOF: usize, M: MemorySpace, K: KernelSet<D, 
             Some("a horizon body".to_string())
         } else if store.tracers.is_some() || store.continuous_tracers.is_some() {
             Some("a tracer population".to_string())
-        } else if store.motion_law.is_some() {
-            Some("mesh motion".to_string())
         } else if let Some(property) = crate::stage::post_step_refresh_needed(store, *kernel) {
             // the launched path carries no post-step exchange point, so an operation that
             // leaves the cut halos stale is refused by the recipe's own declaration
@@ -886,6 +885,11 @@ where
         let guard = stores[0].retry_guard;
         let mut ledger = crate::retry_guard::RetryLedger::new(dt);
         let mut attempt: u16 = 0;
+        // homologous mesh motion: each stage's dispatches bind the geometry and grid-velocity
+        // scalars from the tile's motion state, which holds a(t) at the stage's entry; the step
+        // entry is kept for a rollback and for the step-tail advance
+        let motion_n: Vec<_> = stores.iter().map(|s| s.motion).collect();
+        let a_n: Vec<f64> = motion_n.iter().map(|motion| motion.a).collect();
         loop {
             {
                 let sh = shared!();
@@ -903,6 +907,11 @@ where
             }
             let mut rejected = false;
             for stage in &schedule {
+                for (k, s) in stores.iter_mut().enumerate() {
+                    let t_entry = s.time + stage.entry * dt;
+                    let law_value = s.motion_law.as_ref().map(|law| (law.a_at(t_entry), law.adot_at(t_entry)));
+                    crate::driver::set_stage_motion(&mut s.motion, law_value, dt, a_n[k], stage.entry);
+                }
                 let sh = shared!();
                 let mut retry = false;
                 let args = StageArgs {
@@ -1072,6 +1081,9 @@ where
                     return Err(guard_failure(fabric, failure, &cfg.injection, deadline));
                 }
             }
+            for (k, s) in stores.iter_mut().enumerate() {
+                s.motion = motion_n[k];
+            }
             {
                 let sh = shared!();
                 for k in 0..n {
@@ -1121,6 +1133,11 @@ where
             dt =
                 retry_timestep(dt, t).map_err(|e| fail(fabric, WorkerError::Numerics(e.detail)))?;
             attempt += 1;
+        }
+        // the stage refresh moved a; the step-tail advance starts from the step-entry value, as
+        // on the single grid
+        for (k, s) in stores.iter_mut().enumerate() {
+            s.motion.a = a_n[k];
         }
         // the sustained-reduction guard, once per accepted root step, before the post-step
         // recipe and any checkpoint publish it; the agreed timesteps give every worker the same

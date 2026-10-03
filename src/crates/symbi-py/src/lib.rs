@@ -1851,6 +1851,21 @@ fn sub_bool(body: &Bound<'_, PyDict>, group: &str, key: &str, default: bool) -> 
         .unwrap_or(default)
 }
 
+/// the scale factor and its rate at the start time, sampled from the problem's callables (gil
+/// held): the mesh-motion model integrates `a` from the constant rate `a_dot` (linear or free
+/// homologous expansion, a_ddot = 0), so one sample at t0 sets the motion
+fn sample_scale_factor(cfg: &mut Config, a: Option<&Bound<'_, PyAny>>, adot: Option<&Bound<'_, PyAny>>) -> PyResult<()> {
+    if cfg.mesh_motion {
+        let (Some(a), Some(adot)) = (a.filter(|f| !f.is_none()), adot.filter(|f| !f.is_none())) else {
+            return Err(PyValueError::new_err("mesh motion declared without the scale factor callables a(t), a_dot(t)"));
+        };
+        let t0 = cfg.start_time;
+        cfg.scale_a0 = a.call1((t0,))?.extract::<f64>()?;
+        cfg.scale_adot = adot.call1((t0,))?.extract::<f64>()?;
+    }
+    Ok(())
+}
+
 /// the passive-scalar generator as one flat cell-centered buffer in the prim order (None or an
 /// empty generator: an undyed run)
 fn drain_dye(chi_field: Option<&Bound<'_, PyAny>>) -> PyResult<Vec<f64>> {
@@ -8797,6 +8812,21 @@ fn polar_seam_of<const D: usize, const DOF: usize, Mem: MemorySpace>(
     })
 }
 
+/// the mesh motion a run admits: hydro on an unrefined grid
+fn validate_mesh_motion(cfg: &Config) -> Result<(), String> {
+    if cfg.mesh_motion {
+        if cfg.refinement_enabled {
+            return Err("mesh motion is single-grid only (not wired with refinement)".to_string());
+        }
+        if cfg.regime.contains("mhd") {
+            return Err(
+                "mesh motion is not wired for MHD (comoving-field convention pending)".to_string(),
+            );
+        }
+    }
+    Ok(())
+}
+
 /// the passive scalar a run admits: newtonian or isothermal gas on a cartesian chart, and a
 /// driven face prescribing the injected fluid's dye. every driver checks it before seeding.
 fn validate_passive_scalar(cfg: &Config) -> Result<(), String> {
@@ -8881,17 +8911,7 @@ fn dispatch_and_run(
                     reflux assumes 1/dx curl coefficients)"
             .to_string());
     }
-    // mesh motion is single-grid uniform-spacing hydro only.
-    if cfg.mesh_motion {
-        if cfg.refinement_enabled {
-            return Err("mesh motion is single-grid only (not wired with refinement)".to_string());
-        }
-        if cfg.regime.contains("mhd") {
-            return Err(
-                "mesh motion is not wired for MHD (comoving-field convention pending)".to_string(),
-            );
-        }
-    }
+    validate_mesh_motion(cfg)?;
     // immersed bodies + refinement: the finest-owns-bodies AMR sync (`hier.with_bodies` — full
     // bodies on the finest level, gravity-only proxy on coarser) is wired for every hydro regime
     // and, for the staggered field, for adiabatic Newtonian MHD and isothermal MHD on a 3D or 2.5D
@@ -10173,11 +10193,7 @@ fn run_simulation(
     // evaluate the scale-factor callables at the start time (gil held). the rust
     // mesh-motion model integrates `a` from the constant rate `a_dot` (linear /
     // free homologous expansion, a_ddot = 0), so a single sample at t0 suffices.
-    if cfg.mesh_motion {
-        let t0 = cfg.start_time;
-        cfg.scale_a0 = a.call1((t0,))?.extract::<f64>()?;
-        cfg.scale_adot = adot.call1((t0,))?.extract::<f64>()?;
-    }
+    sample_scale_factor(&mut cfg, Some(a), Some(adot))?;
     let prims = drain_prims(prim_gen)?;
     if cfg.excision_radius > 0.0 {
         (cfg.excision_rho_scale, cfg.excision_pre_scale) =
@@ -10719,8 +10735,14 @@ fn validate_launch_scope(cfg: &Config) -> Result<(), String> {
     if cfg.refinement_enabled {
         validate_refined_launch_scope(cfg)?;
     }
-    if cfg.mesh_motion {
-        return refused("mesh motion");
+    // the launched hydro workers move the mesh under the single grid's admission; the refined
+    // and magnetized worker builders attach no motion, so an expression law there is refused
+    validate_mesh_motion(cfg)?;
+    if cfg.motion_json.is_some() && (cfg.refinement_enabled || cfg.regime.contains("mhd")) {
+        return refused(&format!(
+            "an expression mesh motion with {}",
+            if cfg.refinement_enabled { "mesh refinement".to_string() } else { format!("the {} regime", cfg.regime) }
+        ));
     }
     // the flat workers carry immersed bodies; the refined worker builders attach none yet
     if (!cfg.bodies.is_empty() || cfg.bonded_assembly.is_some()) && cfg.refinement_enabled {
@@ -11811,6 +11833,9 @@ fn run_worker_process(
                 } else {
                     attach_bodies_and_fragments!(sim, cfg, $d)
                 };
+                // the clock and the mesh motion, every tile carrying the same a(t)
+                let mut sim = sim;
+                attach_motion(&mut sim, cfg)?;
                 // the declared perturbation at the tile's own cell centers, the single grid's
                 let has_energy = sim.fields.cons.has_energy();
                 lay_perturbation!(sim, cfg, $d, has_energy);
@@ -12006,6 +12031,9 @@ fn run_worker_process(
                 } else {
                     attach_bodies_and_fragments!(sim, cfg, $d)
                 };
+                // the clock and the mesh motion, every tile carrying the same a(t)
+                let mut sim = sim;
+                attach_motion(&mut sim, cfg)?;
                 // the declared perturbation at the tile's own cell centers, the single grid's
                 lay_perturbation!(sim, cfg, $d, false);
                 // the numerics the single isothermal path installs: the limiter, then the
@@ -12686,7 +12714,8 @@ mod canon_tests {
 /// leaves it to the rendezvous file), the bind address and advertised host, and the checkpoint
 /// block size in cells.
 #[pyfunction]
-#[pyo3(signature = (prim_gen, staggered_bfields, sim_info, launch, chi_field=None))]
+#[pyo3(signature = (prim_gen, staggered_bfields, sim_info, launch, chi_field=None, a=None, adot=None))]
+#[allow(clippy::too_many_arguments)]
 fn launch_worker(
     py: Python<'_>,
     prim_gen: &Bound<'_, PyAny>,
@@ -12694,6 +12723,8 @@ fn launch_worker(
     sim_info: &Bound<'_, PyDict>,
     launch: &Bound<'_, PyDict>,
     chi_field: Option<&Bound<'_, PyAny>>,
+    a: Option<&Bound<'_, PyAny>>,
+    adot: Option<&Bound<'_, PyAny>>,
 ) -> PyResult<()> {
     let mut cfg = parse_config(sim_info)?;
     validate_config_preflight(&cfg).map_err(PyValueError::new_err)?;
@@ -12734,6 +12765,7 @@ fn launch_worker(
     let prims = drain_prims(prim_gen)?;
     let bufs = if matches!(cfg.regime.as_str(), "nmhd" | "imhd" | "rmhd") { drain_bfields(staggered_bfields)? } else { Vec::new() };
     cfg.chi_ic = drain_dye(chi_field)?;
+    sample_scale_factor(&mut cfg, a, adot)?;
     let drained = drain_clock.elapsed();
     py.detach(|| run_worker_process(&cfg, &prims, &bufs, &params, drained))
         .map_err(PyRuntimeError::new_err)
