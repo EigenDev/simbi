@@ -2069,7 +2069,10 @@ fn migrate_mass_transport_tracers<const D: usize, const DOF: usize, M: MemorySpa
         };
         let mut ii = 0;
         while ii < tracers.len() {
-            let target = if tracers.flags[ii].escaped {
+            // a tracer owned by no cell (escaped, or in a sink reservoir) is frozen and stays
+            let target = if tracers.flags[ii].escaped
+                || crate::tracers::cell_container_address(tracers.owner[ii]).is_none()
+            {
                 source
             } else {
                 destination(tracers.owner[ii])
@@ -3028,7 +3031,8 @@ where
                         im.set_c_a2_override(global_c_a2);
                     }
                 }
-                if has_discrete_tracers {
+                // the density the sinks drain from, for the tracers of either kind they carry in
+                if has_discrete_tracers || has_continuous_tracers {
                     drain_devices::<M>(devices);
                     accretion_density = sh
                         .iter()

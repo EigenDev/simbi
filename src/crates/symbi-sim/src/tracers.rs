@@ -277,10 +277,13 @@ pub fn advance_continuous_tracers_affine_mesh_host<const D: usize, Mem: symbi_xp
     unsafe {
         let ids = std::slice::from_raw_parts(tracers.id.as_ptr::<u64>(), tracers.len);
         let escaped = std::slice::from_raw_parts(tracers.escaped.as_ptr::<u8>(), tracers.len);
+        let crossed_sink =
+            std::slice::from_raw_parts(tracers.crossed_sink.as_ptr::<u8>(), tracers.len);
         let counters =
             std::slice::from_raw_parts_mut(tracers.random_counter.as_mut_ptr::<u64>(), tracers.len);
         for ii in 0..tracers.len {
-            if escaped[ii] != 0 {
+            // an escaped tracer and one a sink absorbed are frozen at their exit state
+            if escaped[ii] != 0 || crossed_sink[ii] != 0 {
                 continue;
             }
             let position: [f64; D] =

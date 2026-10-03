@@ -178,12 +178,8 @@ pub fn refuse<const D: usize, const DOF: usize, M: MemorySpace, K: KernelSet<D, 
             Some(format!("the {:?} spacetime", store.geom.spacetime))
         } else if crate::driver::horizon_request(store).is_some() {
             Some("a horizon body".to_string())
-        } else if store.continuous_tracers.is_some() && store.immersed.is_some() {
-            Some("an Ito tracer population with immersed bodies".to_string())
         } else if store.continuous_tracers.is_some() && (store.geom.coords != symbi_geometry::Geometry::Cartesian || store.geom.maps.is_some()) {
             Some("an Ito tracer population off a uniform cartesian grid".to_string())
-        } else if store.tracers.is_some() && store.immersed.is_some() {
-            Some("a tracer population with immersed bodies".to_string())
         } else if store.tracers.is_some() && store.geom.coords != symbi_geometry::Geometry::Cartesian {
             Some("a tracer population on a curvilinear chart".to_string())
         } else if let Some(property) = crate::stage::post_step_refresh_needed(store, *kernel) {
@@ -443,14 +439,20 @@ fn body_step<const D: usize, const DOF: usize, M, K, T, L>(
     attempt: u16,
     deadline: Duration,
     spent: &mut Duration,
+    tracer_layouts: &[crate::tracers::TransportLayout<D>],
 ) -> Result<(), WorkerError>
 where
     M: MemorySpace,
     K: KernelSet<D, DOF, M, f64>,
     T: HaloTransport,
     L: Link,
+    symbi_geometry::Cartesian: symbi_geometry::Metric<f64, D>,
 {
     let dev = |k: usize| devices[tiles[k].0 as usize];
+    // the density each tile's sinks drain from, kept for the tracers the drain carries into the
+    // sink reservoirs
+    let traced = stores.iter().any(|s| s.tracers.is_some() || s.continuous_tracers.is_some());
+    let mut accretion_density = Vec::new();
     {
         let sh: Vec<&FieldStore<D, DOF, M, f64>> = stores.iter().map(|s| &**s).collect();
         // the largest Alfven stiffness of any tile (zero off MHD), on every tile
@@ -471,6 +473,9 @@ where
             if let Some(im) = s.immersed.as_ref() {
                 im.set_c_a2_override(c_a2);
             }
+        }
+        if traced {
+            accretion_density = sh.iter().map(|s| crate::tracers::snapshot_accretion_density(*s)).collect();
         }
         // the bodies are the same on every tile, so every worker takes the same branch
         let penalizes = sh.iter().any(|s| s.immersed.as_ref().is_some_and(|im| im.bodies.penalizes()));
@@ -498,6 +503,22 @@ where
                 with_device(dev(k), || kernels[k].body_feedback(sh[k], dt));
             }
         }
+    }
+    // each tile's tracers in the drained cells cross into the sink reservoirs at the step's end
+    for (k, store) in stores.iter_mut().enumerate().filter(|_| traced) {
+        let geometry = store.geom.block_geometry(symbi_geometry::Cartesian);
+        let crossing_time = store.time + dt;
+        crate::tracers::advance_accretion_transport_store(&mut **store, &geometry, tracer_layouts[k], &accretion_density[k], crossing_time)
+            .and_then(|_| {
+                crate::tracers::advance_continuous_accretion_transport_store(
+                    &mut **store,
+                    &geometry,
+                    tracer_layouts[k],
+                    &accretion_density[k],
+                    crossing_time,
+                )
+            })
+            .map_err(|e| WorkerError::Numerics(format!("tracer accretion transport: {e}")))?;
     }
     // every tile's partials, in flat tile order
     let n_bodies = stores.iter().find_map(|s| s.immersed.as_ref().map(|im| im.bodies.len())).unwrap_or(0);
@@ -1401,7 +1422,7 @@ where
         if stores.iter().any(|s| s.immersed.is_some()) {
             body_step(
                 exchange, tiles, stores, kernels, n_tiles, devices, transport, fabric, dt, iter, attempt, deadline,
-                &mut timing.exchange,
+                &mut timing.exchange, &tracer_layouts,
             )
             .map_err(|e| fail(fabric, e))?;
         }

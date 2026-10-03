@@ -10804,9 +10804,6 @@ fn validate_launch_scope(cfg: &Config) -> Result<(), String> {
         if cfg.tracer_scheme != "discrete" && axis_maps_any(cfg) {
             return refused(&format!("the {} tracer scheme on a non-uniform spacing", cfg.tracer_scheme));
         }
-        if !cfg.bodies.is_empty() || cfg.bonded_assembly.is_some() {
-            return refused("a tracer population with immersed bodies");
-        }
         if cfg.refinement_enabled {
             return refused("a tracer population with mesh refinement");
         }

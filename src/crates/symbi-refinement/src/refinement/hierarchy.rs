@@ -322,6 +322,10 @@ where
     /// finer subcycle until the continuous tracers have advanced: the injected tracers enter at
     /// the step's end, as on the single-level driver
     continuous_injection: std::collections::BTreeMap<usize, std::collections::BTreeMap<symbi_sim::mass_transport::ContainerId, f64>>,
+    /// each level's density before its sinks drained it, held from the step tail ahead of the
+    /// finer subcycle until the continuous tracers have advanced: they cross into the sinks from
+    /// their positions at the step's end, as on the single-level driver
+    continuous_accretion: std::collections::BTreeMap<usize, Vec<f64>>,
     /// coarse-fine prolongation order (one above the evolution reconstruction).
     pub prolong_order: ProlongOrder,
     /// set while the coupled root step drives the ideal-MHD hierarchy operator: the material drain
@@ -1162,6 +1166,7 @@ where
             }],
             injection_ledger: std::collections::BTreeMap::new(),
             continuous_injection: std::collections::BTreeMap::new(),
+            continuous_accretion: std::collections::BTreeMap::new(),
             prolong_order: ProlongOrder::Plm,
             drain_suppressed: false,
             run_levels: None,
@@ -1640,6 +1645,7 @@ where
             levels,
             injection_ledger: std::collections::BTreeMap::new(),
             continuous_injection: std::collections::BTreeMap::new(),
+            continuous_accretion: std::collections::BTreeMap::new(),
             prolong_order,
             drain_suppressed: false,
             run_levels: None,
@@ -2583,6 +2589,7 @@ where
         }
         self.injection_ledger.clear();
         self.continuous_injection.clear();
+        self.continuous_accretion.clear();
         for ledger in &self.tracer_interface_ledgers {
             ledger.borrow_mut().clear();
         }
@@ -3596,14 +3603,9 @@ where
                     crossing_time,
                 )
                 .unwrap_or_else(|detail| panic!("tracer accretion transport: {detail}"));
-                symbi_sim::tracers::advance_continuous_accretion_transport_store(
-                    &mut self.levels[level].state.store,
-                    &geometry,
-                    layout,
-                    density_before,
-                    crossing_time,
-                )
-                .unwrap_or_else(|detail| panic!("continuous tracer accretion transport: {detail}"));
+                if self.levels[level].state.continuous_tracers.is_some() {
+                    self.continuous_accretion.insert(level, density_before.to_vec());
+                }
             }
         }
         if self.levels[level].state.continuous_tracers.is_some() {
@@ -3617,6 +3619,22 @@ where
         if self.levels[level].state.continuous_tracers.is_some() {
             self.advance_level_continuous_tracers(level, dt);
             self.spawn_level_continuous_injection(level);
+            if let Some(density_before) = self.continuous_accretion.remove(&level) {
+                let layout = self.tracer_layout(level);
+                let geometry = self.levels[level]
+                    .state
+                    .geom
+                    .block_geometry(self.levels[level].state.physics.metric);
+                let crossing_time = self.levels[level].state.time + dt;
+                symbi_sim::tracers::advance_continuous_accretion_transport_store(
+                    &mut self.levels[level].state.store,
+                    &geometry,
+                    layout,
+                    &density_before,
+                    crossing_time,
+                )
+                .unwrap_or_else(|detail| panic!("continuous tracer accretion transport: {detail}"));
+            }
         }
         self.sample_per_level_censuses(level);
         self.level_clock(level, dt);

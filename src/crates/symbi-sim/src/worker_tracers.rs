@@ -195,7 +195,9 @@ pub fn migrate_discrete<const D: usize, const DOF: usize, M: MemorySpace, L: Lin
         if let Some(tracers) = store.tracers.as_mut() {
             let mut ii = 0;
             while ii < tracers.len() {
-                let target = if tracers.flags[ii].escaped { source } else { owner_tile(plan, cells, tracers.owner[ii]) };
+                // a tracer owned by no cell (escaped, or in a sink reservoir) is frozen and stays
+                let frozen = tracers.flags[ii].escaped || crate::tracers::cell_container_address(tracers.owner[ii]).is_none();
+                let target = if frozen { source } else { owner_tile(plan, cells, tracers.owner[ii]) };
                 if target == source {
                     ii += 1;
                     continue;

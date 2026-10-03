@@ -12,10 +12,12 @@
 # cut and a corner of an uneven 2x2 launch land as on the single grid, and the
 # traced kelvin-helmholtz example (ito-3, cohorts, periodic) launches as it
 # runs on one grid. a troubled cell flagged against a cut corrects alike on one
-# worker and on three. the newtonian, relativistic and isothermal magnetized
+# worker and on three. tracers in the cells an accreting sink drains cross into
+# its reservoir on host tiles and launched workers as on one grid, discrete
+# and ito alike. the newtonian, relativistic and isothermal magnetized
 # orszag-tang vortices carry the discrete population, and the newtonian one
 # the ito-3 population, on host tiles and launched workers as on one grid.
-# tracers beside immersed bodies are refused by name before any output.
+# tracers with mesh refinement are refused by name before any output.
 #
 # run: pytest -m simulation simbi/simulation/tests/test_launch_tracers.py
 # =============================================================================
@@ -41,28 +43,34 @@ from simbi_configs.examples.isothermal.imhd_orszag_tang import IsothermalOrszagT
 from simbi_configs.examples.newtonian.nmhd_orszag_tang import NewtonianOrszagTang
 from simbi_configs.examples.srmhd.rmhd_orszag_tang import OrszagTang as RmhdOrszagTang
 
-class BodyDrift(DiscreteDrift):
-    """the drift with a softened point mass at the box center"""
+class SinkDrift(DiscreteDrift):
+    """the drift through an accreting point mass at the box center: tracers in the drained cells
+    cross into the sink's reservoir"""
 
     @computed_field
     @property
     def immersed_bodies(self) -> list:
-        from simbi.types.bodies import BodyCapability, GravitationalProperties, ImmersedBodyConfig
+        from simbi.types.bodies import AccretionProperties, BodyCapability, GravitationalProperties, ImmersedBodyConfig
 
         return [
             ImmersedBodyConfig(
-                capability=BodyCapability.GRAVITATIONAL,
+                capability=BodyCapability.ACCRETION | BodyCapability.GRAVITATIONAL,
                 mass=0.01,
                 radius=0.0,
                 position=(0.0, 0.0, 0.0),
                 velocity=(0.0, 0.0, 0.0),
-                gravitational=GravitationalProperties(softening_length=0.05),
+                gravitational=GravitationalProperties(softening_length=0.02),
+                accretion=AccretionProperties(accretion_radius=0.1),
             )
         ]
 
 
-class BodyIto2Drift(BodyDrift, Ito2Drift):
-    """the ito drift with the point mass"""
+class SinkIto2Drift(SinkDrift, Ito2Drift):
+    """the ito drift through the accreting sink"""
+
+
+class RefinedTracedDrift(DiscreteDrift):
+    refinement_enabled: Annotated[bool, ProblemParam(True, description="refined")]
 
 
 class TracedNmhd(NewtonianOrszagTang):
@@ -236,11 +244,37 @@ def test_the_traced_kelvin_helmholtz_example_launches_as_it_runs(tmp_path: Path)
     _assert_same(_final(tmp_path / "two"), want, "continuous_tracers", "traced kelvin-helmholtz on two workers")
 
 
+SINKS = {"SinkDrift": "tracers", "SinkIto2Drift": "continuous_tracers"}
+
+
+@pytest.mark.parametrize("problem", list(SINKS))
+def test_tracers_cross_into_a_sink_on_tiles_and_workers_as_on_the_single_grid(tmp_path: Path, variants: Path, problem: str) -> None:
+    group = SINKS[problem]
+    want = _run(problem, tmp_path / "single", 1, STEPS)
+    with h5py.File(want, "r") as f:
+        absorbed = int(np.count_nonzero(f[group]["crossed_sink"][:]))
+    assert absorbed > 0, f"{problem}: no tracer crossed into the sink; the arm is vacuous"
+    # a tracer the sink absorbed is frozen at its crossing: its position, crossing time and
+    # noise counter at the half-way checkpoint hold to the end
+    half, end = _population(_run(problem, tmp_path / "half", 1, STEPS // 2), group), _population(want, group)
+    frozen = np.nonzero(half["crossed_sink"])[0]
+    assert frozen.size > 0, f"{problem}: no tracer was absorbed by the half-way checkpoint; the freeze arm is vacuous"
+    at = np.searchsorted(end["id"], half["id"][frozen])
+    for name in ["position", "crossing_time"] + (["random_counter"] if group == "continuous_tracers" else []):
+        np.testing.assert_array_equal(end[name][at], half[name][frozen], err_msg=f"{problem}: an absorbed tracer's {name} moved")
+    _assert_same(_run(problem, tmp_path / "tiles", 2, STEPS), want, group, f"{problem}: two host tiles")
+    two = _layout(tmp_path / "two.toml", workers=2, shape=(2, 1))
+    _assert_same(_launch(variants, problem, tmp_path / "two", two, STEPS), want, group, f"{problem}: two workers")
+    first = _launch(variants, problem, tmp_path / "first", two, STEPS // 2)
+    three = _layout(tmp_path / "three.toml", workers=3, cuts=[[10, 21], []])
+    resumed = _launch(variants, problem, tmp_path / "resumed", three, STEPS - _iteration(first), checkpoint=first)
+    _assert_same(resumed, want, group, f"{problem}: resumed onto three uneven workers")
+
+
 @pytest.mark.parametrize(
     ("problem", "reason"),
     [
-        ("BodyDrift", "a tracer population with immersed bodies"),
-        ("BodyIto2Drift", "a tracer population with immersed bodies"),
+        ("RefinedTracedDrift", "a tracer population with mesh refinement"),
     ],
 )
 def test_a_tracer_setting_the_workers_do_not_carry_is_refused(tmp_path: Path, variants: Path, problem: str, reason: str) -> None:
