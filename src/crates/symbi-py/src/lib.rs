@@ -10879,13 +10879,13 @@ fn validate_refined_launch_scope(cfg: &Config) -> Result<(), String> {
     if !matches!(cfg.regime.as_str(), "newtonian" | "rhd" | "isothermal" | "nmhd" | "imhd" | "rmhd") {
         return refused(&format!("the {} regime", cfg.regime));
     }
-    if !matches!(cfg.dims, 2 | 3) {
+    if !matches!(cfg.dims, 1..=3) {
         return refused(&format!("a {}-dimensional grid", cfg.dims));
     }
     if cfg.coord_system != "cartesian" {
         return refused(&format!("the {} chart", cfg.coord_system));
     }
-    let mapped = if cfg.dims == 2 { axis_maps::<2>(cfg).is_some() } else { axis_maps::<3>(cfg).is_some() };
+    let mapped = axis_maps_any(cfg);
     if mapped {
         return refused("a non-uniform spacing");
     }
@@ -10904,7 +10904,11 @@ fn validate_refined_launch_scope(cfg: &Config) -> Result<(), String> {
     }
     // the root and seed plans carry the wrap of a periodic axis; the fine level, its registers and
     // its face stencils live inside the domain, so the patch keeps clear of a periodic face
-    let seam = if cfg.dims == 2 { patch_on_periodic_face::<2>(cfg)? } else { patch_on_periodic_face::<3>(cfg)? };
+    let seam = match cfg.dims {
+        1 => patch_on_periodic_face::<1>(cfg)?,
+        2 => patch_on_periodic_face::<2>(cfg)?,
+        _ => patch_on_periodic_face::<3>(cfg)?,
+    };
     if let Some(ax) = seam {
         return refused(&format!("a refined patch on the periodic face of axis {ax}"));
     }
@@ -11278,6 +11282,7 @@ fn run_refined_worker_process(
         }};
     }
     match cfg.dims {
+        1 => refined_worker_of_dims!(1),
         2 => refined_worker_of_dims!(2),
         3 => refined_worker_of_dims!(3),
         d => Err(format!("a {d}-dimensional grid with mesh refinement is outside the distributed first release")),

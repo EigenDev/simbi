@@ -419,7 +419,9 @@ def _all_levels(path: Path) -> dict[str, np.ndarray]:
                 if name.startswith("mesh/") or name.startswith("partition_0/owned") or "/domain/" in name:
                     continue
                 data = level[name][()]
-                if data.ndim < 2:
+                # the mesh and ownership records are excluded by name above; every remaining
+                # array is a field of the grid's own dimension, a 1d grid's included
+                if data.ndim == 0:
                     continue
                 out[f"{level_name}/{name}"] = data if "/magnetic/" in name else data[tuple(slice(ng, -ng) for _ in range(data.ndim))]
             for key in ("time", "iteration"):

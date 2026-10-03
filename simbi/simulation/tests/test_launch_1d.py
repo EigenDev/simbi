@@ -5,7 +5,9 @@
 # shock tubes and the relativistic marti-muller blast. each launched on two
 # workers, and resumed onto three uneven workers from a two-worker checkpoint,
 # publishes the single grid's state bit for bit; a troubled cell flagged
-# against a cut corrects alike on one worker and on three.
+# against a cut corrects alike on one worker and on three. a sod tube with a
+# fine box over the discontinuity publishes the single hierarchy's levels bit
+# for bit on two workers and resumed onto three uneven ones.
 #
 # run: pytest -m simulation simbi/simulation/tests/test_launch_1d.py
 # =============================================================================
@@ -93,3 +95,46 @@ def test_a_1d_launch_matches_the_single_grid_fresh_resumed_and_corrected(tmp_pat
     xs, ys = _all_levels(clean), _all_levels(flagged)
     assert any(not np.array_equal(xs[n], ys[n]) for n in xs), "the flag left the run unchanged; the correction arm is vacuous"
     _assert_same(_launch(module, tmp_path / "corrected", three, STEPS, inject=inject), flagged, f"{case}: corrected on three")
+
+
+REFINED = '''
+from typing import Annotated
+
+from simbi import ProblemParam
+from simbi_configs.examples.newtonian.sod import SodProblem
+
+
+class RefinedSod(SodProblem):
+    """the sod tube with one fine box over the initial discontinuity"""
+
+    refinement_enabled: Annotated[bool, ProblemParam(True, description="refined")]
+    refinement_max_levels: Annotated[int, ProblemParam(2, description="coarse + 1 fine")]
+    refinement_regions: Annotated[list[list[float]], ProblemParam([[0.375, 0.625]], description="fine box")]
+    refinement_ratios: Annotated[list[int], ProblemParam([2], description="ratio")]
+'''
+
+
+def _launch_script(script: Path, out: Path, layout: Path, steps: int, checkpoint: Path | None = None) -> Path:
+    cmd = [sys.executable, "-m", "simbi.cli", "launch", str(script), "--layout", str(layout), "--max-steps", str(steps),
+           "--resolution", str(CELLS), "--data-directory", str(out), "--checkpoint-interval", "1e9"]
+    if checkpoint is not None:
+        cmd += ["--checkpoint", str(checkpoint)]
+    env = dict(os.environ)
+    env.pop("SIMBI_LAUNCH_EXPERIMENTAL", None)
+    done = subprocess.run(cmd, capture_output=True, text=True, timeout=600, env=env)
+    assert done.returncode == 0, f"launch failed:\nstdout:\n{done.stdout}\nstderr:\n{done.stderr[-3000:]}"
+    return _final(out)
+
+
+def test_a_refined_1d_launch_matches_the_single_hierarchy_fresh_and_resumed(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    (tmp_path / "refined_variants.py").write_text(REFINED)
+    monkeypatch.setenv("PYTHONPATH", os.pathsep.join([str(tmp_path), os.getcwd(), os.environ.get("PYTHONPATH", "")]))
+    want = _single("refined_variants", "RefinedSod", tmp_path / "single")
+    assert any(name.startswith("level_1/") for name in _all_levels(want)), "the single run published no fine level; the refined arm is vacuous"
+    script = tmp_path / "launched_refined_sod.py"
+    script.write_text("from refined_variants import RefinedSod as Base\n\n\nclass LaunchedRefinedSod(Base):\n    pass\n")
+    two = _layout(tmp_path / "two.toml", workers=2, shape=(2,))
+    _assert_same(_launch_script(script, tmp_path / "two", two, STEPS), want, "refined sod: two workers")
+    first = _launch_script(script, tmp_path / "first", two, STEPS // 2)
+    three = _layout(tmp_path / "three.toml", workers=3, cuts=THREE)
+    _assert_same(_launch_script(script, tmp_path / "resumed", three, STEPS - STEPS // 2, checkpoint=first), want, "refined sod: resumed onto three uneven workers")
