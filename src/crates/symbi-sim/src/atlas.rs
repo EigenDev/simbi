@@ -319,6 +319,10 @@ pub enum ExchangePoint {
     /// primitives were recovered from it: the cut halos carry the drained gas before the next
     /// step's reconstruction and the checkpoint
     PostBody,
+    /// after the accepted step's continuous-tracer coefficients were materialized and their
+    /// physical ghosts filled: the cut ghosts carry the neighbors' coefficients before the
+    /// tracers interpolate them
+    TracerCoefficients,
     Rollback,
     /// after the named exchange: each tile below a cut sends its copy of the shared
     /// interface face to the tile above, which compares it with its own bit for bit. the
@@ -411,6 +415,7 @@ impl ExchangePoint {
             ExchangePoint::Troubled(k) => (2, k as u32, 0),
             ExchangePoint::PostStep => (3, 0, 0),
             ExchangePoint::PostBody => (27, 0, 0),
+            ExchangePoint::TracerCoefficients => (28, 0, 0),
             ExchangePoint::Rollback => (4, 0, 0),
             ExchangePoint::Audit(AuditAt::Prime) => (5, 0, 0),
             ExchangePoint::Audit(AuditAt::Stage(k)) => (6, k as u32, 0),
@@ -1227,7 +1232,8 @@ impl<const D: usize> ExchangePlan<D> {
             | ExchangePoint::CorrectedFaces
             | ExchangePoint::Nested { .. }
             | ExchangePoint::NestedRestrict { .. }
-            | ExchangePoint::Seed { .. } => false,
+            | ExchangePoint::Seed { .. }
+            | ExchangePoint::TracerCoefficients => false,
             ExchangePoint::Audit(_) => transfer.audit,
             ExchangePoint::Troubled(_) => banded,
             _ => !banded && !transfer.audit,

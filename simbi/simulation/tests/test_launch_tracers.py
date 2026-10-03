@@ -1,20 +1,25 @@
 # =============================================================================
 # test_launch_tracers.py
 #
-# the discrete tracer population on launched workers against the single grid.
-# a 2d gas drifting across a box with outflow faces carries a seeded
-# population; gas entering through the inner x face injects new tracers. on
-# the newtonian and the isothermal gas, two workers, a 2x2 launch and a launch
-# resumed onto three uneven workers publish the single grid's gas and tracer
-# population bit for bit (the population compared by id), and a troubled cell
-# flagged against a cut corrects alike on one worker and on three. the ito
-# schemes and tracers beside immersed bodies are refused by name before any
-# output.
+# tracer populations on launched workers against the single grid. a 2d gas
+# drifting across a box with outflow faces carries a seeded population; gas
+# entering through the inner x face injects new tracers. for the discrete
+# scheme (newtonian and isothermal gas) and the second- and third-order ito
+# schemes, dense and two-seed populations, two workers, a 2x2 launch and a
+# launch resumed onto three uneven workers publish the single grid's gas and
+# tracer population bit for bit, compared by id: positions, ownership, noise
+# counters, the injection remainder and the id counter. ito tracers crossing a
+# cut and a corner of an uneven 2x2 launch land as on the single grid, and the
+# traced kelvin-helmholtz example (ito-3, cohorts, periodic) launches as it
+# runs on one grid. a troubled cell flagged against a cut corrects alike on one
+# worker and on three. tracers beside immersed bodies are refused by name
+# before any output.
 #
 # run: pytest -m simulation simbi/simulation/tests/test_launch_tracers.py
 # =============================================================================
 
 import os
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -24,11 +29,11 @@ import numpy as np
 import pytest
 
 from simbi.simulation.tests.test_launch import _layout, bounded_processes  # noqa: F401  the autouse process guard
-from simbi.simulation.tests.test_tiled_tracers import GROUP, RESOLUTION, STEPS, VARIANTS, _assert_same, _final, _iteration, _population, _run
+from simbi.simulation.tests.test_tiled_tracers import GROUP, INJECTING, RESOLUTION, STEPS, VARIANTS, _assert_same, _final, _iteration, _population, _run
 
 pytestmark = pytest.mark.simulation
 
-LAUNCHED = ["DiscreteDrift", "IsoDrift", "SparseDrift"]
+LAUNCHED = ["DiscreteDrift", "IsoDrift", "SparseDrift", "Ito2Drift", "Ito3Drift", "SparseIto2Drift"]
 EXTRA = '''
 
 class BodyDrift(DiscreteDrift):
@@ -49,6 +54,30 @@ class BodyDrift(DiscreteDrift):
                 gravitational=GravitationalProperties(softening_length=0.05),
             )
         ]
+
+
+class BodyIto2Drift(BodyDrift, Ito2Drift):
+    """the ito drift with the point mass"""
+
+
+class DiagonalIto3Drift(Ito3Drift):
+    """a dense ito-3 population in gas drifting along the diagonal: tracers within a step of the
+    corner of two cuts cross both in one migration"""
+
+    @computed_field
+    @property
+    def n_tracers(self) -> int:
+        return 20000
+
+    def initial_primitive_state(self):
+        def gas():
+            nx, ny, _ = self.resolution
+            for jj in range(ny):
+                for ii in range(nx):
+                    y = (jj + 0.5) / ny
+                    yield (1.0 + 0.3 * math.sin(2.0 * math.pi * y), 1.0, 1.0, 1.0)
+
+        return gas
 '''
 
 
@@ -88,6 +117,13 @@ def test_launched_workers_carry_the_single_grid_tracer_population(tmp_path: Path
     four = _layout(tmp_path / "four.toml", workers=4, shape=(2, 2))
     _assert_same(_launch(variants, problem, tmp_path / "four", four, STEPS), want, group, f"{problem}: a 2x2 launch")
     first = _launch(variants, problem, tmp_path / "first", two, STEPS // 2)
+    if group == "continuous_tracers" and problem in INJECTING:
+        # the resume carries the stochastic continuation, not positions alone
+        with h5py.File(first, "r") as f:
+            g = f[group]
+            assert np.any(g["random_counter"][:] > 0), "no tracer drew noise before the checkpoint; the resume arm is vacuous"
+            assert float(g.attrs["injection_remainder"]) != 0.0, "the checkpoint carries no injection remainder"
+            assert int(g.attrs["next_id"]) > int(g.attrs["n_tracers"]) - 1
     three = _layout(tmp_path / "three.toml", workers=3, cuts=[[10, 21], []])
     resumed = _launch(variants, problem, tmp_path / "resumed", three, STEPS - _iteration(first), checkpoint=first)
     assert _iteration(resumed) == STEPS
@@ -107,11 +143,52 @@ def test_a_troubled_cell_against_a_cut_moves_the_tracers_alike(tmp_path: Path, v
     _assert_same(_launch(variants, "DiscreteDrift", tmp_path / "corrected", three, STEPS, inject=inject), flagged, "tracers", "corrected on three")
 
 
+MIGRATIONS = re.compile(r"SIMBI launch tracers: worker=\d+/\d+ migrations=(\d+) corner_migrations=(\d+)")
+
+
+def test_ito_tracers_crossing_a_cut_and_a_corner_land_as_on_the_single_grid(tmp_path: Path, variants: Path) -> None:
+    want = _run("DiagonalIto3Drift", tmp_path / "single", 1, STEPS)
+    four = _layout(tmp_path / "four.toml", workers=4, cuts=[[12], [12]])
+    done = _launch_run(variants, "DiagonalIto3Drift", tmp_path / "four", four, STEPS)
+    assert done.returncode == 0, f"launch failed:\nstdout:\n{done.stdout}\nstderr:\n{done.stderr[-3000:]}"
+    _assert_same(_final(tmp_path / "four"), want, "continuous_tracers", "DiagonalIto3Drift: an uneven 2x2 launch")
+    # every worker counts the session's moves from the same assembled records
+    counts = {(int(m), int(c)) for m, c in MIGRATIONS.findall(done.stderr)}
+    assert len(counts) == 1, f"the workers report different migration counts: {counts}"
+    moved, corner = counts.pop()
+    assert moved > 0, "no ito tracer crossed a cut; the cut arm is vacuous"
+    assert corner > 0, f"no single migration crossed both cuts ({moved} crossed one); the corner arm is vacuous"
+
+
+def test_the_traced_kelvin_helmholtz_example_launches_as_it_runs(tmp_path: Path) -> None:
+    from simbi_configs.examples.newtonian.traced_kh import TracedKelvinHelmholtz
+
+    module = TracedKelvinHelmholtz.__module__
+    snippet = (
+        "import sys\n"
+        "from simbi.simulation import runner\n"
+        f"from {module} import TracedKelvinHelmholtz\n"
+        "runner.run(TracedKelvinHelmholtz(resolution=(32, 32), tracers=400, checkpoint_interval=1e9, data_directory=sys.argv[1]), compute_mode='cpu', max_steps=6)\n"
+    )
+    done = subprocess.run([sys.executable, "-c", snippet, str(tmp_path / "single")], capture_output=True, text=True, timeout=900)
+    assert done.returncode == 0, done.stderr[-3000:]
+    want = _final(tmp_path / "single")
+    script = str(Path(module.replace(".", "/") + ".py"))
+    two = _layout(tmp_path / "two.toml", workers=2, shape=(2, 1))
+    cmd = [sys.executable, "-m", "simbi.cli", "launch", script, "--layout", str(two), "--max-steps", "6", "--resolution", "32,32",
+           "--tracers", "400", "--data-directory", str(tmp_path / "two"), "--checkpoint-interval", "1e9"]
+    env = dict(os.environ)
+    env.pop("SIMBI_LAUNCH_EXPERIMENTAL", None)
+    done = subprocess.run(cmd, capture_output=True, text=True, timeout=900, env=env)
+    assert done.returncode == 0, f"launch failed:\nstdout:\n{done.stdout}\nstderr:\n{done.stderr[-3000:]}"
+    _assert_same(_final(tmp_path / "two"), want, "continuous_tracers", "traced kelvin-helmholtz on two workers")
+
+
 @pytest.mark.parametrize(
     ("problem", "reason"),
     [
-        ("Ito2Drift", "the ito2 tracer scheme"),
         ("BodyDrift", "a tracer population with immersed bodies"),
+        ("BodyIto2Drift", "a tracer population with immersed bodies"),
     ],
 )
 def test_a_tracer_setting_the_workers_do_not_carry_is_refused(tmp_path: Path, variants: Path, problem: str, reason: str) -> None:

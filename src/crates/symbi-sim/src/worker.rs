@@ -95,6 +95,8 @@ pub struct WorkerReport {
     pub timing: WorkerTiming,
     /// stages in which some worker was troubled and the flags crossed the cuts
     pub troubled_exchanges: u64,
+    /// the tracers that crossed to another tile over the session, every worker counting all
+    pub tracer_migrations: crate::worker_tracers::Migrations,
     /// corrections this worker ran on a tile with a clean interior, because a neighbor's
     /// troubled cell reached that tile's cut ghosts
     pub neighbor_corrections: u64,
@@ -176,8 +178,10 @@ pub fn refuse<const D: usize, const DOF: usize, M: MemorySpace, K: KernelSet<D, 
             Some(format!("the {:?} spacetime", store.geom.spacetime))
         } else if crate::driver::horizon_request(store).is_some() {
             Some("a horizon body".to_string())
-        } else if store.continuous_tracers.is_some() {
-            Some("an Ito tracer population".to_string())
+        } else if store.continuous_tracers.is_some() && store.immersed.is_some() {
+            Some("an Ito tracer population with immersed bodies".to_string())
+        } else if store.continuous_tracers.is_some() && (store.geom.coords != symbi_geometry::Geometry::Cartesian || store.geom.maps.is_some()) {
+            Some("an Ito tracer population off a uniform cartesian grid".to_string())
         } else if store.tracers.is_some() && store.immersed.is_some() {
             Some("a tracer population with immersed bodies".to_string())
         } else if store.tracers.is_some() && store.geom.coords != symbi_geometry::Geometry::Cartesian {
@@ -699,6 +703,45 @@ pub fn evolve_worker<const D: usize, const DOF: usize, M, K, T, L, F>(
     transport: &T,
     fabric: &mut Fabric<L>,
     cfg: &WorkerConfig,
+    on_step: F,
+) -> Result<WorkerReport, WorkerError>
+where
+    M: MemorySpace,
+    K: KernelSet<D, DOF, M, f64>,
+    T: HaloTransport,
+    L: Link,
+    symbi_geometry::Cartesian: symbi_geometry::Metric<f64, D>,
+    F: FnMut(
+        u64,
+        f64,
+        &[&FieldStore<D, DOF, M, f64>],
+        &mut Fabric<L>,
+    ) -> Result<ControlFlow<()>, WorkerError>,
+{
+    evolve_worker_traced(tiles, stores, kernels, devices, exchange, transport, fabric, cfg, None, on_step)
+}
+
+/// what a continuous-tracer population needs beyond the state plan: the plan that carries its
+/// coefficients across the cuts, and the whole domain's faces and boundary conditions the
+/// tracers meet
+pub struct ContinuousTracerContext<'a, const D: usize> {
+    pub coefficients: &'a PlanExchange<'a, D>,
+    pub bounds: [(f64, f64); D],
+    pub boundaries: crate::state::Boundaries<D>,
+}
+
+/// `evolve_worker` with the context a continuous-tracer population rides
+#[allow(clippy::too_many_arguments)]
+pub fn evolve_worker_traced<const D: usize, const DOF: usize, M, K, T, L, F>(
+    tiles: &[TileId],
+    stores: &mut [&mut FieldStore<D, DOF, M, f64>],
+    kernels: &[&K],
+    devices: &[i32],
+    exchange: &PlanExchange<'_, D>,
+    transport: &T,
+    fabric: &mut Fabric<L>,
+    cfg: &WorkerConfig,
+    continuous: Option<&ContinuousTracerContext<'_, D>>,
     mut on_step: F,
 ) -> Result<WorkerReport, WorkerError>
 where
@@ -789,6 +832,31 @@ where
     // the discrete tracer population: every tile of a traced run carries one, its transport laid
     // over the whole grid from the tile's place in the plan
     let has_tracers = stores.iter().any(|s| s.tracers.is_some());
+    let has_continuous = stores.iter().any(|s| s.continuous_tracers.is_some());
+    // whether each population's transport runs is the configuration's: every tile of a traced
+    // run carries a set, empty or not. the workers agree on it once, so each issues the same
+    // collectives and exchange points whatever particles it holds, and a disagreement ends the
+    // session by name
+    for (local, what) in [(has_tracers, "a discrete tracer population"), (has_continuous, "an Ito tracer population")] {
+        let any_enabled = fabric
+            .collective(OpKind::Any, u64::from(local), deadline)
+            .map_err(|e| fail(fabric, e.into()))?
+            != 0;
+        let any_disabled = fabric
+            .collective(OpKind::Any, u64::from(!local), deadline)
+            .map_err(|e| fail(fabric, e.into()))?
+            != 0;
+        // both reductions reach every worker, so a split ends every session at this point
+        if any_enabled && any_disabled {
+            return Err(fail(fabric, WorkerError::Refused(format!("the workers disagree on carrying {what}"))));
+        }
+    }
+    if has_continuous && continuous.is_none() {
+        return Err(fail(
+            fabric,
+            WorkerError::Refused("an Ito tracer population without its coefficient plan is outside the distributed first release".into()),
+        ));
+    }
     let tracer_layouts: Vec<crate::tracers::TransportLayout<D>> = tiles
         .iter()
         .map(|tile| {
@@ -938,6 +1006,11 @@ where
                 s.dt = dt;
                 if has_tracers {
                     crate::tracers::snapshot_transport_state(&mut **s);
+                }
+                if has_continuous {
+                    let geometry = s.geom.block_geometry(symbi_geometry::Cartesian);
+                    crate::tracers::begin_ito_transport_store(&mut **s, &geometry)
+                        .map_err(|e| fail(fabric, WorkerError::Numerics(format!("ito transport initialization: {e}"))))?;
                 }
             }
             injection_ledgers = vec![std::collections::BTreeMap::new(); n];
@@ -1102,24 +1175,34 @@ where
                 // the stage's tracer transport on the exchanged state: each tile books its
                 // boundary and source injection and moves its tracers' owners, the leavers cross
                 // to their owners' tiles, the ancestry blend runs, and the reverted cross again
-                if has_tracers {
+                if has_tracers || has_continuous {
                     for k in 0..n {
                         let store = &mut *stores[k];
                         let geometry = store.geom.block_geometry(symbi_geometry::Cartesian);
                         let layout = tracer_layouts[k];
+                        if has_continuous {
+                            crate::tracers::accumulate_ito_transport_stage_store(store, &geometry, stage.ac)
+                                .map_err(|e| fail(fabric, WorkerError::Numerics(format!("ito transport accumulation: {e}"))))?;
+                        }
                         let mut injections = crate::tracers::boundary_injection_transfers_store(&*store, &geometry, layout);
                         injections.extend(crate::tracers::source_injection_transfers_store(
                             &*store, &geometry, layout, stage.a0, stage.ac,
                         ));
                         crate::tracers::fold_injection_ledger(&mut injection_ledgers[k], injections, stage.ac);
-                        crate::tracers::advance_stage_mass_transport_tile(store, &geometry, layout, stage.a0, stage.ac, stage.index)
-                            .map_err(|e| fail(fabric, WorkerError::Numerics(format!("tracer mass transport: {e}"))))?;
+                        if has_tracers {
+                            crate::tracers::advance_stage_mass_transport_tile(store, &geometry, layout, stage.a0, stage.ac, stage.index)
+                                .map_err(|e| fail(fabric, WorkerError::Numerics(format!("tracer mass transport: {e}"))))?;
+                        }
                     }
-                    crate::worker_tracers::migrate_discrete(stores, tiles, exchange.plan(), fabric, deadline)
+                }
+                if has_tracers {
+                    let moves = crate::worker_tracers::migrate_discrete(stores, tiles, exchange.plan(), fabric, deadline)
                         .map_err(|e| fail(fabric, e.into()))?;
+                    report.tracer_migrations.add(moves);
                     crate::worker_tracers::blend_discrete(stores, stage.ac, stage.index);
-                    crate::worker_tracers::migrate_discrete(stores, tiles, exchange.plan(), fabric, deadline)
+                    let moves = crate::worker_tracers::migrate_discrete(stores, tiles, exchange.plan(), fabric, deadline)
                         .map_err(|e| fail(fabric, e.into()))?;
+                    report.tracer_migrations.add(moves);
                 }
             }
             if !rejected {
@@ -1129,7 +1212,7 @@ where
             crate::guard_ledger::step_discard();
             // a migrated tracer lives in another tile's storage, and no per-tile restore puts it
             // back, so a traced run ends instead of replaying
-            if has_tracers {
+            if has_tracers || has_continuous {
                 return Err(fail(
                     fabric,
                     WorkerError::Numerics(
@@ -1223,6 +1306,68 @@ where
         if has_tracers {
             crate::worker_tracers::spawn_discrete_injection(stores, tiles, exchange.plan(), &injection_ledgers, fabric, deadline)
                 .map_err(|e| fail(fabric, e.into()))?;
+        }
+        // the accepted step's continuous transport: each tile materializes its coefficients and
+        // fills their physical ghosts, the cut ghosts cross, the tracers advance and meet the
+        // domain's faces, the leavers cross to their cells' tiles, and the injection spawns
+        if let Some(context) = continuous.filter(|_| has_continuous) {
+            for s in stores.iter_mut() {
+                let geometry = s.geom.block_geometry(symbi_geometry::Cartesian);
+                crate::tracers::materialize_ito_coefficients_store(&mut **s, &geometry)
+                    .map_err(|e| fail(fabric, WorkerError::Numerics(format!("ito coefficient materialization: {e}"))))?;
+                crate::tracers::fill_ito_coefficient_boundaries_host(
+                    s.ito_coefficients.as_ref().expect("ito coefficients were materialized"),
+                    &s.geom,
+                    s.boundaries,
+                )
+                .map_err(|e| fail(fabric, WorkerError::Numerics(format!("ito coefficient boundaries: {e}"))))?;
+            }
+            {
+                let sh = shared!();
+                let mut fields: Vec<Vec<&Field<f64, D, M>>> = (0..n_tiles).map(|_| Vec::new()).collect();
+                for (k, store) in sh.iter().enumerate() {
+                    let c = store.ito_coefficients.as_ref().expect("ito coefficients were materialized");
+                    fields[tiles[k].0 as usize] = c.drift.iter().chain(c.variance.iter()).chain(c.third.iter()).collect();
+                }
+                exchange_point_fields(
+                    context.coefficients,
+                    &fields,
+                    devices,
+                    transport,
+                    fabric,
+                    ExchangePoint::TracerCoefficients,
+                    iter,
+                    attempt,
+                    deadline,
+                    &mut timing.exchange,
+                )
+                .map_err(|e| fail(fabric, e.into()))?;
+            }
+            for s in stores.iter_mut() {
+                let mut tracers = s.continuous_tracers.take().expect("every tile of a traced run carries tracers");
+                let (scale_start, scale_end, offset_start, offset_end) = crate::tracers::continuous_tracer_mesh_step(&**s, dt);
+                let advanced = crate::tracers::advance_continuous_tracers(
+                    &mut tracers,
+                    s.ito_coefficients.as_ref().expect("ito coefficients were materialized"),
+                    &s.geom,
+                    scale_start,
+                    scale_end,
+                    offset_start,
+                    offset_end,
+                    dt,
+                )
+                .and_then(|_| {
+                    let bounds = crate::tracers::map_continuous_tracer_bounds(context.bounds, scale_end, offset_end);
+                    crate::tracers::apply_continuous_boundaries_host(&mut tracers, bounds, context.boundaries)
+                });
+                s.continuous_tracers = Some(tracers);
+                advanced.map_err(|e| fail(fabric, WorkerError::Numerics(format!("ito tracer advancement: {e}"))))?;
+            }
+            let moves = crate::worker_tracers::migrate_continuous(stores, tiles, exchange.plan(), context.bounds, fabric, deadline)
+                .map_err(|e| fail(fabric, WorkerError::Numerics(format!("continuous tracer migration: {e}"))))?;
+            report.tracer_migrations.add(moves);
+            crate::worker_tracers::spawn_continuous_injection(stores, tiles, exchange.plan(), &injection_ledgers, dt, fabric, deadline)
+                .map_err(|e| fail(fabric, WorkerError::Numerics(format!("continuous tracer injection: {e}"))))?;
         }
         {
             // the post-step recipe on the accepted step: an operation that writes the conserved

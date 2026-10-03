@@ -2023,7 +2023,9 @@ fn fold_into_domain<const D: usize>(
     hi: [f64; D],
 ) -> [f64; D] {
     for dd in 0..D {
-        if !schedule.wraps(dd) {
+        // a position inside the domain is the one the trajectory reached; re-folding it would
+        // round (p - lo) + lo away from p
+        if !schedule.wraps(dd) || (position[dd] >= lo[dd] && position[dd] < hi[dd]) {
             continue;
         }
         let span = hi[dd] - lo[dd];
@@ -2370,6 +2372,56 @@ fn spawn_decomposed_injection<const D: usize, const DOF: usize, M: MemorySpace>(
     }
 }
 
+/// the continuous tracers one step's merged injection spawns: ids from `next_id`, the global
+/// remainder `store`'s population carries, each placed in its whole-grid cell on the mesh moved to
+/// the step's end through `store`'s geometry (any tile of the grid places a whole-grid cell bit
+/// for bit). `store` also lends the population's order, weight and sampling seed and the step's
+/// iteration.
+pub(crate) fn spawn_continuous_injection_set<const D: usize, const DOF: usize, M: MemorySpace>(
+    store: &FieldStore<D, DOF, M, f64>,
+    cells: [usize; D],
+    injections: std::collections::BTreeMap<crate::mass_transport::ContainerId, f64>,
+    next_id: u64,
+    dt: f64,
+) -> Result<crate::tracers::ContinuousTracerSet<D, M>, String> {
+    let template = store
+        .continuous_tracers
+        .as_ref()
+        .ok_or_else(|| "continuous tracer population is missing".to_string())?;
+    let first_geom = &store.geom;
+    let (_, scale_end, _, offset_end) = crate::tracers::continuous_tracer_mesh_step(store, dt);
+    let mut spawned = crate::tracers::ContinuousTracerSet::<D, M>::allocate(0, template.order)?;
+    spawned.weight = template.weight;
+    spawned.run_seed = template.run_seed;
+    spawned.next_id = next_id;
+    spawned.injection_remainder = template.injection_remainder;
+    let key = crate::mass_transport::SamplingKey {
+        run_seed: spawned.run_seed,
+        epoch: store.iteration | (1 << 62),
+    };
+    crate::tracers::spawn_continuous_injected_tracers(
+        &mut spawned,
+        injections
+            .into_iter()
+            .map(|(destination, mass)| crate::mass_transport::MassTransfer { destination, mass }),
+        |owner| {
+            let mut linear = owner.0 as usize;
+            let local: [isize; D] = std::array::from_fn(|dd| {
+                let index = linear % cells[dd];
+                linear /= cells[dd];
+                index as isize - first_geom.index_offset[dd]
+            });
+            let lo: [f64; D] = first_geom.stagger_coord(local, [crate::state::Loc::Face; D]);
+            (
+                std::array::from_fn(|dd| scale_end * lo[dd] + offset_end[dd]),
+                std::array::from_fn(|dd| scale_end * first_geom.cell_width(local, dd)),
+            )
+        },
+        key,
+    )?;
+    Ok(spawned)
+}
+
 fn spawn_decomposed_continuous_injection<const D: usize, const DOF: usize, M: MemorySpace>(
     stores: &mut [&mut FieldStore<D, DOF, M, f64>],
     schedule: &Schedule<D>,
@@ -2389,51 +2441,14 @@ fn spawn_decomposed_continuous_injection<const D: usize, const DOF: usize, M: Me
         let sh: Vec<&FieldStore<D, DOF, M, f64>> = stores.iter().map(|s| &**s).collect();
         tile_partition_of(&sh, schedule.counts())
     };
-    // positions of global cells from the grid's first tile, at the global index less its offset,
-    // carried onto the moved mesh at the step's end as the single grid places them
-    let first_geom = &stores[0].geom;
-    let (_, scale_end, _, offset_end) = crate::tracers::continuous_tracer_mesh_step(&*stores[0], dt);
-    let template = stores
-        .iter()
-        .filter_map(|store| store.continuous_tracers.as_ref())
-        .next()
-        .ok_or_else(|| "decomposed continuous tracer population is missing".to_string())?;
-    let mut spawned = crate::tracers::ContinuousTracerSet::<D, M>::allocate(0, template.order)?;
-    spawned.weight = template.weight;
-    spawned.run_seed = template.run_seed;
-    spawned.next_id = stores
+    let next_id = stores
         .iter()
         .filter_map(|store| store.continuous_tracers.as_ref())
         .map(|tracers| tracers.next_id)
         .max()
         .unwrap_or(0);
-    // the remainder is one global value every tile carries
-    spawned.injection_remainder = template.injection_remainder;
-    let key = crate::mass_transport::SamplingKey {
-        run_seed: spawned.run_seed,
-        epoch: stores[0].iteration | (1 << 62),
-    };
-    let count = crate::tracers::spawn_continuous_injected_tracers(
-        &mut spawned,
-        injections
-            .into_iter()
-            .map(|(destination, mass)| crate::mass_transport::MassTransfer { destination, mass }),
-        |owner| {
-            let n_global = partition.n_cells();
-            let mut linear = owner.0 as usize;
-            let local: [isize; D] = std::array::from_fn(|dd| {
-                let index = linear % n_global[dd];
-                linear /= n_global[dd];
-                index as isize - first_geom.index_offset[dd]
-            });
-            let lo: [f64; D] = first_geom.stagger_coord(local, [crate::state::Loc::Face; D]);
-            (
-                std::array::from_fn(|dd| scale_end * lo[dd] + offset_end[dd]),
-                std::array::from_fn(|dd| scale_end * first_geom.cell_width(local, dd)),
-            )
-        },
-        key,
-    )?;
+    let mut spawned = spawn_continuous_injection_set(&*stores[0], partition.n_cells(), injections, next_id, dt)?;
+    let count = spawned.len;
     for store in stores.iter_mut() {
         if let Some(tracers) = store.continuous_tracers.as_mut() {
             tracers.next_id = spawned.next_id;

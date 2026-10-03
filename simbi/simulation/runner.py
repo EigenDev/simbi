@@ -940,6 +940,7 @@ def launch_worker(
         chi_field=problem.passive_scalar(),
         a=problem.scale_factor,
         adot=problem.scale_factor_derivative,
+        cohort_field=problem.tracer_cohort(),
         sim_info=exec_dict,
         launch={
             "worker": int(worker),

@@ -869,6 +869,49 @@ impl<const D: usize, Mem: symbi_xpu::MemorySpace> ContinuousTracerSet<D, Mem> {
         }
     }
 
+    /// the record at `index`, read in place
+    pub fn record_host(&self, index: usize) -> Result<ContinuousTracerRecord<D>, String> {
+        if !Mem::IS_HOST_ACCESSIBLE {
+            return Err("host tracer reads require host-accessible memory".to_string());
+        }
+        if index >= self.len {
+            return Err(format!("continuous tracer index {index} exceeds length {}", self.len));
+        }
+        unsafe {
+            Ok(ContinuousTracerRecord {
+                x: std::array::from_fn(|dd| *self.x[dd].as_ptr::<f64>().add(index)),
+                step_x: std::array::from_fn(|dd| *self.step_x[dd].as_ptr::<f64>().add(index)),
+                id: *self.id.as_ptr::<u64>().add(index),
+                cohort: *self.cohort.as_ptr::<u16>().add(index),
+                owner: *self.owner.as_ptr::<crate::mass_transport::ContainerId>().add(index),
+                escaped: *self.escaped.as_ptr::<u8>().add(index),
+                crossed_sink: *self.crossed_sink.as_ptr::<u8>().add(index),
+                crossing_time: *self.crossing_time.as_ptr::<f64>().add(index),
+                random_counter: *self.random_counter.as_ptr::<u64>().add(index),
+            })
+        }
+    }
+
+    /// overwrite the position of the tracer at `index`
+    pub fn set_position_host(&mut self, index: usize, position: [f64; D]) -> Result<(), String> {
+        if !Mem::IS_HOST_ACCESSIBLE || index >= self.len {
+            return Err(format!("continuous tracer position write at {index} of {}", self.len));
+        }
+        for dd in 0..D {
+            unsafe { *self.x[dd].as_mut_ptr::<f64>().add(index) = position[dd] };
+        }
+        Ok(())
+    }
+
+    /// overwrite the owner of the tracer at `index`
+    pub fn set_owner_host(&mut self, index: usize, owner: crate::mass_transport::ContainerId) -> Result<(), String> {
+        if !Mem::IS_HOST_ACCESSIBLE || index >= self.len {
+            return Err(format!("continuous tracer owner write at {index} of {}", self.len));
+        }
+        unsafe { *self.owner.as_mut_ptr::<crate::mass_transport::ContainerId>().add(index) = owner };
+        Ok(())
+    }
+
     pub fn push_host(&mut self, record: ContinuousTracerRecord<D>) -> Result<(), String> {
         self.reserve_host(self.len + 1)?;
         let index = self.len;

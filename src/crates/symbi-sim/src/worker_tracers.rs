@@ -14,6 +14,9 @@
 // - spawn_discrete_injection: every tile's injection ledger merged in flat tile
 //   order and spawned alike on every worker; each keeps its tiles' tracers
 // - gather_discrete: every tile's population, for the checkpoint
+// - migrate_continuous, spawn_continuous_injection, gather_continuous: the same
+//   for the ito population, owned by the cell its position lies in
+// - whole_bounds: the whole domain's faces from any tile's geometry
 //
 // usage:
 //   migrate_discrete(stores, tiles, plan, fabric, deadline)?;
@@ -29,7 +32,33 @@ use symbi_xpu::MemorySpace;
 use crate::atlas::{ExchangePlan, TileId};
 use crate::mass_transport::ContainerId;
 use crate::state::FieldStore;
-use crate::tracers::{TracerFlags, TracerSet};
+use crate::tracers::{ContinuousTracerRecord, ContinuousTracerSet, TracerFlags, TracerSet};
+
+/// the tracers that crossed to another tile, over the whole session: every move, and the moves
+/// whose source and destination tiles differ along two or more partition axes (through a corner)
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct Migrations {
+    pub moved: u64,
+    pub corner: u64,
+}
+
+impl Migrations {
+    fn count<const D: usize>(&mut self, plan: &ExchangePlan<D>, source: usize, target: usize) {
+        let offset = |tile: usize| plan.tiles.iter().find(|t| t.tile.0 as usize == tile).map(|t| t.offset);
+        let (Some(from), Some(to)) = (offset(source), offset(target)) else {
+            return;
+        };
+        self.moved += 1;
+        if (0..D).filter(|&ax| from[ax] != to[ax]).count() >= 2 {
+            self.corner += 1;
+        }
+    }
+
+    pub fn add(&mut self, other: Migrations) {
+        self.moved += other.moved;
+        self.corner += other.corner;
+    }
+}
 
 /// the words of one tracer: position, id, cohort, owner, step-entry owner, flags, step flags
 pub const fn record_words(d: usize) -> usize {
@@ -115,7 +144,22 @@ pub fn assemble_blocks<L: Link>(
             words.iter().enumerate().map(move |(w, &v)| ((start + w) as u64, v))
         })
         .collect();
-    let dense = fabric.assemble(total as u64, &entries, deadline)?;
+    // the words cross in windows one frame carries: a contribution holds (index, word) pairs and
+    // the assembled window comes back dense, so a window of `window` words fits both frames
+    let window = (fabric.link().max_payload() / 8).saturating_sub(16).max(2) / 2;
+    let mut dense = Vec::with_capacity(total);
+    let mut sorted = entries;
+    sorted.sort_unstable_by_key(|e| e.0);
+    let mut next = 0;
+    for lo in (0..total).step_by(window) {
+        let hi = (lo + window).min(total);
+        let first = next;
+        while next < sorted.len() && (sorted[next].0 as usize) < hi {
+            next += 1;
+        }
+        let shifted: Vec<(u64, u64)> = sorted[first..next].iter().map(|&(i, v)| (i - lo as u64, v)).collect();
+        dense.extend(fabric.assemble((hi - lo) as u64, &shifted, deadline)?);
+    }
     Ok((0..n_tiles).map(|tile| dense[starts[tile]..starts[tile + 1]].to_vec()).collect())
 }
 
@@ -155,7 +199,7 @@ pub fn migrate_discrete<const D: usize, const DOF: usize, M: MemorySpace, L: Lin
     plan: &ExchangePlan<D>,
     fabric: &mut Fabric<L>,
     deadline: Duration,
-) -> Result<(), FabricError> {
+) -> Result<Migrations, FabricError> {
     let cells = plan_cells(plan);
     let width = 1 + record_words(D);
     let mut local = Vec::with_capacity(stores.len());
@@ -192,16 +236,18 @@ pub fn migrate_discrete<const D: usize, const DOF: usize, M: MemorySpace, L: Lin
         local.push((source, words));
     }
     let blocks = assemble_blocks(fabric, plan.tiles.len(), &local, width, deadline)?;
-    for block in &blocks {
+    let mut moves = Migrations::default();
+    for (source, block) in blocks.iter().enumerate() {
         for record in block.chunks_exact(width) {
             let target = record[0] as usize;
+            moves.count(plan, source, target);
             if let Some(k) = tiles.iter().position(|t| t.0 as usize == target) {
                 let tracers = stores[k].tracers.as_mut().expect("every tile of a traced run carries tracers");
                 push_decoded(tracers, &record[1..]);
             }
         }
     }
-    Ok(())
+    Ok(moves)
 }
 
 /// the ssp ancestry selection of stage `stage`: a tracer outside the systematic sample of the
@@ -352,4 +398,232 @@ pub fn gather_discrete<const D: usize, L: Link>(
         sets.push(set);
     }
     Ok(sets)
+}
+
+// ---- the continuous (ito) population ----------------------------------------------------
+
+/// the words of one continuous tracer: position, step position, id, cohort, owner, flags,
+/// crossing time and noise counter
+pub const fn continuous_words(d: usize) -> usize {
+    2 * d + 7
+}
+
+fn encode_continuous<const D: usize>(record: &ContinuousTracerRecord<D>, out: &mut Vec<u64>) {
+    out.extend(record.x.iter().map(|v| v.to_bits()));
+    out.extend(record.step_x.iter().map(|v| v.to_bits()));
+    out.push(record.id);
+    out.push(u64::from(record.cohort));
+    out.push(record.owner.0);
+    out.push(u64::from(record.escaped));
+    out.push(u64::from(record.crossed_sink));
+    out.push(record.crossing_time.to_bits());
+    out.push(record.random_counter);
+}
+
+fn decode_continuous<const D: usize>(words: &[u64]) -> ContinuousTracerRecord<D> {
+    ContinuousTracerRecord {
+        x: std::array::from_fn(|dd| f64::from_bits(words[dd])),
+        step_x: std::array::from_fn(|dd| f64::from_bits(words[D + dd])),
+        id: words[2 * D],
+        cohort: words[2 * D + 1] as u16,
+        owner: ContainerId(words[2 * D + 2]),
+        escaped: words[2 * D + 3] as u8,
+        crossed_sink: words[2 * D + 4] as u8,
+        crossing_time: f64::from_bits(words[2 * D + 5]),
+        random_counter: words[2 * D + 6],
+    }
+}
+
+/// a position folded into the whole domain on the axes that close into a ring
+fn fold_into_domain<const D: usize>(mut position: [f64; D], wraps: [bool; D], bounds: [(f64, f64); D]) -> [f64; D] {
+    for dd in 0..D {
+        // a position inside the domain is the one the trajectory reached; re-folding it would
+        // round (p - lo) + lo away from p
+        if !wraps[dd] || (position[dd] >= bounds[dd].0 && position[dd] < bounds[dd].1) {
+            continue;
+        }
+        let span = bounds[dd].1 - bounds[dd].0;
+        if span > 0.0 {
+            let offset = (position[dd] - bounds[dd].0).rem_euclid(span);
+            position[dd] = bounds[dd].0 + offset;
+        }
+    }
+    position
+}
+
+/// move every continuous tracer whose position lies in another tile's cells to that tile, its
+/// owner the whole-grid cell it sits in. leavers come out by swap removal in index order and
+/// reach their targets in (source tile, removal) order, the in-process driver's order; an
+/// escaped, absorbed or out-of-domain tracer stays where it is. `bounds` is the whole domain.
+pub fn migrate_continuous<const D: usize, const DOF: usize, M: MemorySpace, L: Link>(
+    stores: &mut [&mut FieldStore<D, DOF, M, f64>],
+    tiles: &[TileId],
+    plan: &ExchangePlan<D>,
+    bounds: [(f64, f64); D],
+    fabric: &mut Fabric<L>,
+    deadline: Duration,
+) -> Result<Migrations, String> {
+    let cells = plan_cells(plan);
+    let dx = stores[0].geom.dx;
+    let width = 1 + continuous_words(D);
+    let mut local = Vec::with_capacity(stores.len());
+    for (k, store) in stores.iter_mut().enumerate() {
+        let source = tiles[k].0 as usize;
+        let mut words = Vec::new();
+        if let Some(tracers) = store.continuous_tracers.as_mut() {
+            let mut ii = 0;
+            while ii < tracers.len {
+                let record = tracers.record_host(ii)?;
+                if record.escaped != 0 || record.crossed_sink != 0 {
+                    ii += 1;
+                    continue;
+                }
+                let position = fold_into_domain(record.x, plan.wraps, bounds);
+                if (0..D).any(|dd| position[dd] < bounds[dd].0 || position[dd] >= bounds[dd].1) {
+                    ii += 1;
+                    continue;
+                }
+                if position != record.x {
+                    tracers.set_position_host(ii, position)?;
+                }
+                let cell: [usize; D] = std::array::from_fn(|dd| ((position[dd] - bounds[dd].0) / dx[dd]).floor() as usize);
+                let owner = crate::tracers::cell_container_id(crate::tracers::cell_address(cell, cells), 0);
+                let target = owner_tile(plan, cells, owner);
+                if target == source {
+                    tracers.set_owner_host(ii, owner)?;
+                    ii += 1;
+                } else {
+                    let mut record = tracers.swap_remove_host(ii)?;
+                    record.owner = owner;
+                    words.push(target as u64);
+                    encode_continuous(&record, &mut words);
+                }
+            }
+        }
+        local.push((source, words));
+    }
+    let blocks = assemble_blocks(fabric, plan.tiles.len(), &local, width, deadline).map_err(|e| e.to_string())?;
+    let mut moves = Migrations::default();
+    for (source, block) in blocks.iter().enumerate() {
+        for record in block.chunks_exact(width) {
+            let target = record[0] as usize;
+            moves.count(plan, source, target);
+            if let Some(k) = tiles.iter().position(|t| t.0 as usize == target) {
+                let tracers = stores[k].continuous_tracers.as_mut().expect("every tile of a traced run carries tracers");
+                tracers.push_host(decode_continuous(&record[1..]))?;
+            }
+        }
+    }
+    Ok(moves)
+}
+
+/// spawn the step's injection as continuous tracers: every tile's ledger merged in flat tile
+/// order and spawned alike on every worker on the moved mesh, each worker keeping the tracers its
+/// tiles own, pushed in the in-process order (last spawned first). the remainder is one global
+/// value every tile carries.
+pub fn spawn_continuous_injection<const D: usize, const DOF: usize, M: MemorySpace, L: Link>(
+    stores: &mut [&mut FieldStore<D, DOF, M, f64>],
+    tiles: &[TileId],
+    plan: &ExchangePlan<D>,
+    ledgers: &[BTreeMap<ContainerId, f64>],
+    dt: f64,
+    fabric: &mut Fabric<L>,
+    deadline: Duration,
+) -> Result<(), String> {
+    let n_tiles = plan.tiles.len();
+    let mut headers = Vec::with_capacity(stores.len());
+    let mut blocks = Vec::with_capacity(stores.len());
+    for (k, store) in stores.iter().enumerate() {
+        let tracers = store.continuous_tracers.as_ref().expect("every tile of a traced run carries tracers");
+        headers.push((tiles[k].0 as usize, [tracers.next_id]));
+        blocks.push((tiles[k].0 as usize, ledgers[k].iter().flat_map(|(dest, mass)| [dest.0, mass.to_bits()]).collect()));
+    }
+    let headers = assemble_headers(fabric, n_tiles, &headers, deadline).map_err(|e| e.to_string())?;
+    let blocks = assemble_blocks(fabric, n_tiles, &blocks, 2, deadline).map_err(|e| e.to_string())?;
+    let mut injections = BTreeMap::new();
+    for block in &blocks {
+        for pair in block.chunks_exact(2) {
+            *injections.entry(ContainerId(pair[0])).or_insert(0.0) += f64::from_bits(pair[1]);
+        }
+    }
+    if injections.is_empty() {
+        return Ok(());
+    }
+    let next_id = headers.iter().map(|h| h[0]).max().unwrap_or(0);
+    let cells = plan_cells(plan);
+    let mut spawned = crate::decomp::spawn_continuous_injection_set(&*stores[0], cells, injections, next_id, dt)?;
+    for store in stores.iter_mut() {
+        let tracers = store.continuous_tracers.as_mut().expect("every tile of a traced run carries tracers");
+        tracers.next_id = spawned.next_id;
+        tracers.injection_remainder = spawned.injection_remainder;
+    }
+    while spawned.len > 0 {
+        let record = spawned.swap_remove_host(spawned.len - 1)?;
+        let target = owner_tile(plan, cells, record.owner);
+        if let Some(k) = tiles.iter().position(|t| t.0 as usize == target) {
+            stores[k].continuous_tracers.as_mut().expect("every tile of a traced run carries tracers").push_host(record)?;
+        }
+    }
+    Ok(())
+}
+
+/// every tile's continuous population, in flat tile order, on every worker
+pub fn gather_continuous<const D: usize, M: MemorySpace, L: Link>(
+    fabric: &mut Fabric<L>,
+    n_tiles: usize,
+    local: &[(usize, &ContinuousTracerSet<D, M>)],
+    deadline: Duration,
+) -> Result<Vec<ContinuousTracerSet<D, M>>, String> {
+    let me = fabric.me();
+    let headers: Vec<(usize, [u64; 5])> = local
+        .iter()
+        .map(|(tile, set)| {
+            let order = match set.order {
+                crate::mass_transport::ItoOrder::Two => 2,
+                crate::mass_transport::ItoOrder::Three => 3,
+            };
+            (*tile, [order, set.weight.to_bits(), set.run_seed, set.next_id, set.injection_remainder.to_bits()])
+        })
+        .collect();
+    let mut blocks = Vec::with_capacity(local.len());
+    for (tile, set) in local {
+        let mut words = Vec::with_capacity(set.len * continuous_words(D));
+        for ii in 0..set.len {
+            encode_continuous(&set.record_host(ii)?, &mut words);
+        }
+        blocks.push((*tile, words));
+    }
+    let headers = assemble_headers(fabric, n_tiles, &headers, deadline).map_err(|e| e.to_string())?;
+    let blocks = assemble_blocks(fabric, n_tiles, &blocks, continuous_words(D), deadline).map_err(|e| e.to_string())?;
+    let mut sets = Vec::with_capacity(n_tiles);
+    for (tile, (header, block)) in headers.iter().zip(&blocks).enumerate() {
+        let order = match header[0] {
+            2 => crate::mass_transport::ItoOrder::Two,
+            3 => crate::mass_transport::ItoOrder::Three,
+            _ => return Err(format!("worker {}: tile {tile}'s continuous tracer header is missing from the assembled vector", me.0)),
+        };
+        let mut set = ContinuousTracerSet::<D, M>::allocate(0, order)?;
+        set.weight = f64::from_bits(header[1]);
+        set.run_seed = header[2];
+        set.next_id = header[3];
+        set.injection_remainder = f64::from_bits(header[4]);
+        for record in block.chunks_exact(continuous_words(D)) {
+            set.push_host(decode_continuous(record))?;
+        }
+        sets.push(set);
+    }
+    Ok(sets)
+}
+
+/// the whole domain's lower and upper faces per axis from one tile's geometry: the whole grid's
+/// cells 0 and `cells` in the tile's index frame, the faces the grid's first and last tiles hold
+pub fn whole_bounds<const D: usize>(geom: &crate::state::PartitionGeometry<D>, cells: [usize; D]) -> [(f64, f64); D] {
+    std::array::from_fn(|dd| {
+        let face = |global: isize| {
+            let mut idx = [0isize; D];
+            idx[dd] = global - geom.index_offset[dd];
+            geom.stagger_coord(idx, [crate::state::Loc::Face; D])[dd]
+        };
+        (face(0), face(cells[dd] as isize))
+    })
 }

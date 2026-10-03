@@ -32,7 +32,6 @@ from simbi_configs.examples.newtonian.nmhd_orszag_tang import NewtonianOrszagTan
 from simbi_configs.examples.newtonian.ordered_sources import OrderedSources
 from simbi_configs.examples.newtonian.refined_mhd_3d import RefinedMhd3D
 from simbi_configs.examples.srhd.ram44 import Ram44
-from simbi_configs.examples.newtonian.traced_kh import TracedKelvinHelmholtz
 
 from simbi.simulation.tests.process_guard import ProcessGuard, descendants
 
@@ -578,17 +577,16 @@ def test_a_shared_face_mismatch_exits_every_worker_and_publishes_no_checkpoint(t
         assert int(f["level_0"].attrs["iteration"]) == 0, "a checkpoint after the perturbation was published"
 
 
-TRACED_KH = str(Path(TracedKelvinHelmholtz.__module__.replace(".", "/") + ".py"))
 REFINED_RMHD = str(Path(RefinedMhd3D.__module__.replace(".", "/") + ".py"))
 
 
 @pytest.mark.parametrize(
     ("script", "reason"),
-    [(TRACED_KH, "the ito3 tracer scheme"), (REFINED_RMHD, "a refined patch on the periodic face of axis 2 with mesh refinement")],
+    [(REFINED_RMHD, "a refined patch on the periodic face of axis 2 with mesh refinement")],
 )
 def test_out_of_scope_problems_are_refused_by_name(tmp_path: Path, script: str, reason: str) -> None:
     # a layout with as many axes as the problem's grid, so the refusal is the scope's
-    problem_class = {TRACED_KH: TracedKelvinHelmholtz, REFINED_RMHD: RefinedMhd3D}[script]
+    problem_class = {REFINED_RMHD: RefinedMhd3D}[script]
     default = problem_class.model_fields["resolution"].default
     dims = max(1, sum(1 for r in default if int(r) > 1))
     layout = _layout(tmp_path / "two.toml", workers=2, shape=(2,) + (1,) * (dims - 1))

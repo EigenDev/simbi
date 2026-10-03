@@ -386,6 +386,20 @@ where
     } else {
         Some(crate::worker_tracers::gather_discrete(fabric, plans[0].plan.n_tiles(), &local, req.deadline)?)
     };
+    let local: Vec<(usize, &crate::tracers::ContinuousTracerSet<D, Mem>)> = plans[0]
+        .tile_ids
+        .iter()
+        .zip(&levels[0].tiles)
+        .filter_map(|(tile, view)| view.state.continuous_tracers.as_ref().map(|set| (tile.0 as usize, set)))
+        .collect();
+    let continuous = if local.is_empty() {
+        None
+    } else {
+        Some(
+            crate::worker_tracers::gather_continuous(fabric, plans[0].plan.n_tiles(), &local, req.deadline)
+                .map_err(|e| CheckpointError::Refused(format!("continuous tracer gather: {e}")))?,
+        )
+    };
     if fabric.is_coordinator() {
         let opened = CheckpointStream::open::<R, D, DOF, Mem>(
             identity,
@@ -395,6 +409,7 @@ where
             budget,
             false,
             population.as_deref(),
+            continuous.as_deref(),
         );
         let ok = fabric.collective(OpKind::CheckpointOpen, u64::from(opened.is_ok()), req.deadline)?;
         let mut stream = opened?;

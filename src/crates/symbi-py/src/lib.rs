@@ -10222,25 +10222,7 @@ fn run_simulation(
     // drain the passive-scalar generator (None = undyed). one flat cell-centered
     // buffer; the per-arm seeding checks the count against the interior.
     cfg.chi_ic = drain_dye(chi_field)?;
-    if let Some(cohort_field) = cohort_field {
-        if !cohort_field.is_none() {
-            let mut vals = Vec::new();
-            for value in cohort_field.try_iter()? {
-                let cohort = value?.extract::<i64>()?;
-                vals.push(u16::try_from(cohort).map_err(|_| {
-                    PyValueError::new_err(format!(
-                        "tracer cohort {cohort} is outside the supported range 0..=65534"
-                    ))
-                })?);
-            }
-            if vals.iter().any(|&cohort| cohort == u16::MAX) {
-                return Err(PyValueError::new_err(
-                    "tracer cohort 65535 is reserved for injected material",
-                ));
-            }
-            cfg.cohort_ic = vals;
-        }
-    }
+    cfg.cohort_ic = drain_cohort(cohort_field)?;
     validate_config_preflight(&cfg).map_err(PyValueError::new_err)?;
     // a non-linear (log) radial axis is supported under decomposition: each tile carries the global
     // per-cell slope and an origin advanced multiplicatively to its first global cell
@@ -10748,6 +10730,15 @@ fn ungated_launch_combination(cfg: &Config) -> Option<String> {
 /// the distributed first release: 2D cartesian adiabatic newtonian hydro on a static uniform
 /// grid with a linear checkpoint cadence. every other configuration is named and refused here,
 /// before any tile is built.
+/// whether the run spaces any axis non-uniformly
+fn axis_maps_any(cfg: &Config) -> bool {
+    match cfg.dims {
+        1 => axis_maps::<1>(cfg).is_some(),
+        2 => axis_maps::<2>(cfg).is_some(),
+        _ => axis_maps::<3>(cfg).is_some(),
+    }
+}
+
 fn validate_launch_scope(cfg: &Config) -> Result<(), String> {
     let refused = |what: &str| Err(format!("{what} is outside the distributed first release"));
     if !matches!(cfg.regime.as_str(), "newtonian" | "rhd" | "isothermal" | "nmhd" | "imhd" | "rmhd") {
@@ -10807,10 +10798,11 @@ fn validate_launch_scope(cfg: &Config) -> Result<(), String> {
     if (!cfg.bodies.is_empty() || cfg.bonded_assembly.is_some()) && cfg.refinement_enabled {
         return refused("an immersed body with mesh refinement");
     }
-    // the launched gas and isothermal tiles carry the discrete population on a flat grid
+    // the launched gas and isothermal tiles carry the discrete and the ito populations on a
+    // flat grid
     if cfg.n_tracers > 0 {
-        if cfg.tracer_scheme != "discrete" {
-            return refused(&format!("the {} tracer scheme", cfg.tracer_scheme));
+        if cfg.tracer_scheme != "discrete" && axis_maps_any(cfg) {
+            return refused(&format!("the {} tracer scheme on a non-uniform spacing", cfg.tracer_scheme));
         }
         if !cfg.bodies.is_empty() || cfg.bonded_assembly.is_some() {
             return refused("a tracer population with immersed bodies");
@@ -11961,8 +11953,18 @@ fn run_worker_process(
                     })
                     .build();
                 let mut per_tile = partition_configured_tracers(&global, cfg, &partition);
+                let order = configured_ito_order(cfg)?;
                 for ((sim, _), &flat) in tiles.iter_mut().zip(&mine) {
-                    sim.tracers = Some(std::mem::take(&mut per_tile[flat]));
+                    let set = std::mem::take(&mut per_tile[flat]);
+                    match order {
+                        Some(order) => {
+                            sim.continuous_tracers = Some(
+                                symbi_sim::tracers::ContinuousTracerSet::from_discrete(&set, order)
+                                    .map_err(|detail| format!("continuous tracer partition: {detail}"))?,
+                            )
+                        }
+                        None => sim.tracers = Some(set),
+                    }
                 }
             }
             session_over!($regime_ty, $d, tiles)
@@ -12177,8 +12179,18 @@ fn run_worker_process(
                     })
                     .build();
                 let mut per_tile = partition_configured_tracers(&global, cfg, &partition);
+                let order = configured_ito_order(cfg)?;
                 for ((sim, _), &flat) in tiles.iter_mut().zip(&mine) {
-                    sim.tracers = Some(std::mem::take(&mut per_tile[flat]));
+                    let set = std::mem::take(&mut per_tile[flat]);
+                    match order {
+                        Some(order) => {
+                            sim.continuous_tracers = Some(
+                                symbi_sim::tracers::ContinuousTracerSet::from_discrete(&set, order)
+                                    .map_err(|detail| format!("continuous tracer partition: {detail}"))?,
+                            )
+                        }
+                        None => sim.tracers = Some(set),
+                    }
                 }
             }
             session_over!(IsoNewtonian, $d, tiles)
@@ -12317,7 +12329,7 @@ where
     use symbi_sim::plan_exchange::PlanExchange;
     use symbi_sim::phase_table::PhaseTable;
     use symbi_sim::substrate_seam::RegimeKind;
-    use symbi_sim::worker::{WorkerConfig, WorkerError, evolve_worker};
+    use symbi_sim::worker::{WorkerConfig, WorkerError, evolve_worker_traced};
 
     let n: [usize; D] = std::array::from_fn(|ax| cfg.n_cells[ax]);
     let total: usize = n.iter().product();
@@ -12331,7 +12343,21 @@ where
     let seam = polar_seam_of_partition::<D>(&cfg.coord_system, &boundaries_nd::<D>(&cfg.boundaries), topology, partition);
     let plan = ExchangePlan::compile_with_seam(partition, topology, &schema, ng, seam).map_err(|e| e.to_string())?;
     let table = PhaseTable::flat(cfg.timestepping.stages().len() as u8).map_err(|e| e.to_string())?;
-    let exchange = PlanExchange::new(&plan, &placement, me, table);
+    let exchange = PlanExchange::new(&plan, &placement, me, table.clone());
+    // a continuous-tracer population's coefficients cross the cuts through their own plan, its
+    // fabric ids after the state plan's
+    let continuous_traced = cfg.n_tracers > 0 && configured_ito_order(cfg)?.is_some();
+    let coefficient_plan = if continuous_traced {
+        let schema = (0..3 * D).fold(symbi_sim::atlas::FieldSchema::new(), |schema, ii| schema.cell(&format!("ito_coefficient_{ii}")));
+        let seam = polar_seam_of_partition::<D>(&cfg.coord_system, &boundaries_nd::<D>(&cfg.boundaries), topology, partition);
+        Some(ExchangePlan::compile_with_seam(partition, topology, &schema, ng, seam).map_err(|e| e.to_string())?)
+    } else {
+        None
+    };
+    let coefficients = coefficient_plan.as_ref().map(|p| {
+        PlanExchange::new(p, &placement, me, table.clone())
+            .with_role(symbi_sim::plan_exchange::PlanRole::TracerCoefficients, exchange.lens().len() as u32)
+    });
     let budget = launch.staging_cells.max(1);
     let credit = block_credit_for(budget, D);
     let bind: std::net::IpAddr = launch
@@ -12358,7 +12384,10 @@ where
         startup: std::time::Duration::from_secs(120),
     };
     let deadline = std::time::Duration::from_secs(600);
-    let lens = exchange.lens();
+    let mut lens = exchange.lens().to_vec();
+    if let Some(c) = coefficients.as_ref() {
+        lens.extend(c.lens().iter().copied());
+    }
     let max_payload = (lens.iter().max().copied().unwrap_or(0) * 8).max(credit as usize);
     let connect_clock = std::time::Instant::now();
     let (link, session) = connect(&rendezvous, max_payload).map_err(|e| e.to_string())?;
@@ -12378,9 +12407,26 @@ where
         let _ = std::io::stderr().write_all(line.as_bytes());
     }
     let sends_per_peer_axis = exchange.sends_per_peer_axis();
-    let mut fabric = exchange
-        .fabric(link, session)
-        .with_block_credit(credit);
+    let mut fabric = match coefficients.as_ref() {
+        Some(c) => symbi_sim::plan_exchange::fabric_for(&[&exchange, c], link, session),
+        None => exchange.fabric(link, session),
+    }
+    .with_block_credit(credit);
+    // the whole domain's faces and boundary conditions the continuous tracers meet
+    let continuous_context = coefficients.as_ref().map(|c| symbi_sim::worker::ContinuousTracerContext {
+        coefficients: c,
+        bounds: symbi_sim::worker_tracers::whole_bounds(&tiles[0].0.geom, n),
+        boundaries: {
+            let phys = boundaries_nd::<D>(&cfg.boundaries);
+            symbi_sim::state::Boundaries::per_axis(std::array::from_fn(|dd| {
+                if topology.is_periodic(dd) {
+                    [symbi_sim::state::BoundaryType::Periodic; 2]
+                } else {
+                    [phys.lo(dd), phys.hi(dd)]
+                }
+            }))
+        },
+    });
     let devices = vec![0i32; partition.n_tiles()];
 
     // the coordinator reports through the decomposed table
@@ -12524,7 +12570,7 @@ where
         if launch.worker == 0 {
             announce_retry_guard(&*stores[0]);
         }
-        let report = evolve_worker(
+        let report = evolve_worker_traced(
             &tile_ids,
             &mut stores,
             &kernels,
@@ -12533,6 +12579,7 @@ where
             &LocalCopy,
             &mut fabric,
             &worker_cfg,
+            continuous_context.as_ref(),
             |iter, time, sh, fabric| {
                 if fault.exit_after == Some(iter) {
                     // the process ends here as a lost node would: no relay, no unwinding, the
@@ -12617,6 +12664,15 @@ where
                 audit.elapsed.as_secs_f64(),
             );
             let _ = std::io::stderr().write_all(line.as_bytes());
+            // the tracers that crossed tiles, every move and those through a corner
+            if cfg.n_tracers > 0 {
+                let line = format!(
+                    "SIMBI launch tracers: worker={}/{} migrations={} corner_migrations={}
+",
+                    launch.worker, launch.workers, report.tracer_migrations.moved, report.tracer_migrations.corner,
+                );
+                let _ = std::io::stderr().write_all(line.as_bytes());
+            }
             // the halo frames one exchange point sends each peer on each axis, and how the
             // session's waiting passes divided between advancing and idle
             let st = fabric.stats();
@@ -12839,12 +12895,35 @@ mod canon_tests {
     }
 }
 
+/// drain the tracer-cohort generator (None = no cohort field): one label per interior cell in
+/// the gas state's traversal order, each in 0..=65534 (65535 marks injected material)
+fn drain_cohort(cohort_field: Option<&Bound<'_, PyAny>>) -> PyResult<Vec<u16>> {
+    let Some(cohort_field) = cohort_field.filter(|field| !field.is_none()) else {
+        return Ok(Vec::new());
+    };
+    let mut vals = Vec::new();
+    for value in cohort_field.try_iter()? {
+        let cohort = value?.extract::<i64>()?;
+        vals.push(u16::try_from(cohort).map_err(|_| {
+            PyValueError::new_err(format!(
+                "tracer cohort {cohort} is outside the supported range 0..=65534"
+            ))
+        })?);
+    }
+    if vals.iter().any(|&cohort| cohort == u16::MAX) {
+        return Err(PyValueError::new_err(
+            "tracer cohort 65535 is reserved for injected material",
+        ));
+    }
+    Ok(vals)
+}
+
 /// one worker of a `simbi launch` session. `launch` carries the worker id, the worker count,
 /// the tile owner map, the per-axis cuts, the rendezvous file, the session credential (zero
 /// leaves it to the rendezvous file), the bind address and advertised host, and the checkpoint
 /// block size in cells.
 #[pyfunction]
-#[pyo3(signature = (prim_gen, staggered_bfields, sim_info, launch, chi_field=None, a=None, adot=None))]
+#[pyo3(signature = (prim_gen, staggered_bfields, sim_info, launch, chi_field=None, a=None, adot=None, cohort_field=None))]
 #[allow(clippy::too_many_arguments)]
 fn launch_worker(
     py: Python<'_>,
@@ -12855,6 +12934,7 @@ fn launch_worker(
     chi_field: Option<&Bound<'_, PyAny>>,
     a: Option<&Bound<'_, PyAny>>,
     adot: Option<&Bound<'_, PyAny>>,
+    cohort_field: Option<&Bound<'_, PyAny>>,
 ) -> PyResult<()> {
     let mut cfg = parse_config(sim_info)?;
     validate_config_preflight(&cfg).map_err(PyValueError::new_err)?;
@@ -12895,6 +12975,7 @@ fn launch_worker(
     let prims = drain_prims(prim_gen)?;
     let bufs = if matches!(cfg.regime.as_str(), "nmhd" | "imhd" | "rmhd") { drain_bfields(staggered_bfields)? } else { Vec::new() };
     cfg.chi_ic = drain_dye(chi_field)?;
+    cfg.cohort_ic = drain_cohort(cohort_field)?;
     sample_scale_factor(&mut cfg, a, adot)?;
     let drained = drain_clock.elapsed();
     py.detach(|| run_worker_process(&cfg, &prims, &bufs, &params, drained))

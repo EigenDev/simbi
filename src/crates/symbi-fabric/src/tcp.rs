@@ -451,6 +451,10 @@ impl TcpLink {
 }
 
 impl Link for TcpLink {
+    fn max_payload(&self) -> usize {
+        self.max_payload
+    }
+
     fn send(
         &self,
         _from: WorkerId,

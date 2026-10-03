@@ -69,6 +69,12 @@ pub trait Link {
     /// stop carrying frames to or from `peer`: it has finished the session.
     fn detach(&self, _peer: WorkerId) {}
 
+    /// the largest payload one frame carries; a link whose frames move whole in memory carries
+    /// any size
+    fn max_payload(&self) -> usize {
+        usize::MAX
+    }
+
     /// whether any frame this worker sent has bytes still to be written.
     fn outbound_pending(&self) -> bool {
         false

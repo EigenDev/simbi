@@ -31,6 +31,8 @@ use crate::phase_table::PhaseTable;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PlanRole {
     RootState,
+    /// the continuous-tracer coefficients: every transfer moves at the tracer-coefficient point
+    TracerCoefficients,
     RootSeed,
     Fine,
     /// the flux-register contributions: every transfer moves at every fine stage point
@@ -119,6 +121,9 @@ impl<'p, const D: usize> PlanExchange<'p, D> {
     pub fn moves(&self, t: &crate::atlas::Transfer<D>, point: ExchangePoint) -> bool {
         match self.role {
             PlanRole::RootState => self.plan.moves_at(t, point),
+            PlanRole::TracerCoefficients => {
+                point == ExchangePoint::TracerCoefficients && self.plan.moves_at(t, ExchangePoint::Stage(0))
+            }
             PlanRole::RootSeed => point == ExchangePoint::Prime && self.plan.moves_at(t, point),
             PlanRole::Fine => match point {
                 ExchangePoint::Fine { point: fine, .. } => {

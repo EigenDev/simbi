@@ -10,7 +10,8 @@
 # resumed from a checkpoint written on two tiles. the isothermal gas carries
 # the discrete population the same way; a population of two seeds on three
 # tiles leaves a tile with none, which still keys the ancestry blend with the
-# population's seed.
+# population's seed. the traced kelvin-helmholtz example (ito-3, cohorts,
+# doubly periodic) runs on two tiles as on one grid.
 #
 # run: pytest -m simulation simbi/simulation/tests/test_tiled_tracers.py
 # =============================================================================
@@ -204,3 +205,24 @@ def test_tiles_resume_the_tracer_population(tmp_path: Path, variants: Path, prob
     resumed = _run(problem, tmp_path / "resumed", 3, STEPS - _iteration(first), extra=", decompose=[[10, 21], []]", checkpoint=first)
     assert _iteration(resumed) == STEPS
     _assert_same(resumed, want, group, f"{problem}: resumed onto three uneven tiles")
+
+
+def test_tiles_carry_the_traced_kelvin_helmholtz_population(tmp_path: Path) -> None:
+    # ito-3 tracers with cohorts on a doubly periodic box: positions folded across the seams
+    # land as on the single grid, and a position inside the domain keeps its bits
+    from simbi_configs.examples.newtonian.traced_kh import TracedKelvinHelmholtz
+
+    def run(gpus: int, out: Path) -> Path:
+        snippet = (
+            "import sys\n"
+            "from simbi.simulation import runner\n"
+            f"from {TracedKelvinHelmholtz.__module__} import TracedKelvinHelmholtz\n"
+            f"runner.run(TracedKelvinHelmholtz(resolution=(32, 32), tracers=400, gpus={gpus}, checkpoint_interval=1e9, data_directory=sys.argv[1]), compute_mode='cpu', max_steps=6)\n"
+        )
+        env = dict(os.environ, SYMBI_GPU_OVERSUBSCRIBE="1")
+        done = subprocess.run([sys.executable, "-c", snippet, str(out)], capture_output=True, text=True, timeout=900, env=env)
+        assert done.returncode == 0, f"traced kelvin-helmholtz on {gpus} device(s) failed:\n{done.stderr[-3000:]}"
+        return _final(out)
+
+    want = run(1, tmp_path / "single")
+    _assert_same(run(2, tmp_path / "two"), want, "continuous_tracers", "traced kelvin-helmholtz on two tiles")

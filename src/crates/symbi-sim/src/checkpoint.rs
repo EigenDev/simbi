@@ -2702,7 +2702,7 @@ where
     Mem: MemorySpace,
 {
     let whole = levels.first().is_some_and(|l| l.tiles.len() == 1);
-    let mut stream = CheckpointStream::open::<R, D, DOF, Mem>(identity, levels, path, extras, budget, whole, None)?;
+    let mut stream = CheckpointStream::open::<R, D, DOF, Mem>(identity, levels, path, extras, budget, whole, None, None)?;
     for (idx, level) in levels.iter().enumerate() {
         for tile in &level.tiles {
             let mut sink = |dataset_path: &str, start: &[usize], count: &[usize], data: &[f64]| {
@@ -2736,6 +2736,7 @@ impl CheckpointStream {
         budget: usize,
         whole: bool,
         population: Option<&[symbi_sim_tracers::TracerSet<D>]>,
+        continuous: Option<&[symbi_sim_tracers::ContinuousTracerSet<D, Mem>]>,
     ) -> Result<Self>
     where
         R: Regime<f64, D>,
@@ -2891,12 +2892,16 @@ impl CheckpointStream {
     if let Some(ts) = tracers.as_ref() {
         root.push_group(tracer_group::<D>(ts));
     }
-    let continuous = combine_continuous_tracer_snaps(
-        levels
-            .iter()
-            .flat_map(|l| l.tiles.iter())
-            .filter_map(|t| t.state.continuous_tracers.as_ref().map(continuous_tracer_snap)),
-    );
+    // a continuous population gathered from every worker's tiles stands in for this file's tiles
+    let continuous = match continuous {
+        Some(sets) => combine_continuous_tracer_snaps(sets.iter().map(continuous_tracer_snap)),
+        None => combine_continuous_tracer_snaps(
+            levels
+                .iter()
+                .flat_map(|l| l.tiles.iter())
+                .filter_map(|t| t.state.continuous_tracers.as_ref().map(continuous_tracer_snap)),
+        ),
+    };
     if let Some(snap) = continuous.as_ref() {
         root.push_group(continuous_tracer_group::<D>(snap));
     }

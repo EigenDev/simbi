@@ -133,6 +133,7 @@ impl PhaseTable {
         }
         // the post-step refresh runs when a recovery wrote the interior; the accept point is
         // the last phase every worker opens, the phase before it
+        phases.push(skippable(ExchangePoint::TracerCoefficients));
         phases.push(skippable(ExchangePoint::PostStep));
         phases.push(skippable(ExchangePoint::PostBody));
         phases.push(skippable(ExchangePoint::Rollback));
@@ -275,6 +276,7 @@ mod tests {
                 ExchangePoint::Troubled(1),
                 ExchangePoint::Stage(1),
                 ExchangePoint::Audit(AuditAt::Stage(1)),
+                ExchangePoint::TracerCoefficients,
                 ExchangePoint::PostStep,
                 ExchangePoint::PostBody,
                 ExchangePoint::Rollback,
@@ -305,7 +307,8 @@ mod tests {
         );
         assert!(bytes(ExchangePoint::Fine { substep: 1, point: FinePoint::PostTail }) < bytes(ExchangePoint::CorrectedFaces));
         assert!(bytes(ExchangePoint::CorrectedFaces) < bytes(ExchangePoint::Restrict));
-        assert!(bytes(ExchangePoint::Restrict) < bytes(ExchangePoint::PostStep));
+        assert!(bytes(ExchangePoint::Restrict) < bytes(ExchangePoint::TracerCoefficients));
+        assert!(bytes(ExchangePoint::TracerCoefficients) < bytes(ExchangePoint::PostStep));
         assert!(bytes(ExchangePoint::PostStep) < bytes(ExchangePoint::PostBody));
         assert!(bytes(ExchangePoint::PostBody) < bytes(ExchangePoint::Rollback));
         // the primed root crosses the cuts after the prime and before the prime audit, once
@@ -315,8 +318,8 @@ mod tests {
         let b = |p| t.byte_of(p).unwrap() as usize;
         assert!(r.init_only[b(ExchangePoint::Primed)] && !r.skippable[b(ExchangePoint::Primed)]);
         assert_eq!(PhaseTable::flat(2).unwrap().byte_of(ExchangePoint::Primed), None, "a flat table primes no refined level");
-        // 3 + 3 * 2 + 2 * (1 + 3 * 2 + 2) + 3 + 5
-        assert_eq!(t.len(), 35);
+        // 3 + 3 * 2 + 2 * (1 + 3 * 2 + 2) + 3 + 6
+        assert_eq!(t.len(), 36);
         let flat = PhaseTable::flat(2).unwrap();
         assert_ne!(flat.digest(), t.digest());
         assert_eq!(PhaseTable::flat(2).unwrap().digest(), flat.digest());
