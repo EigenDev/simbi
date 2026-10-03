@@ -540,6 +540,8 @@ pub struct ExchangePlan<const D: usize> {
     /// every (tile, side) whose band beyond the pole the antipodal transfers fill; the band's
     /// odd components take their sign after every state exchange
     pub polar_bands: Vec<(TileId, Side)>,
+    /// the axes the domain closes into a ring, as the topology the plan was compiled under
+    pub wraps: [bool; D],
     pub digest: Digest,
 }
 
@@ -778,6 +780,7 @@ impl<const D: usize> ExchangePlan<D> {
             axes,
             seam: schedule.seam().cloned(),
             polar_bands,
+            wraps: std::array::from_fn(|ax| topology.is_periodic(ax)),
             digest: Digest(0),
         };
         plan.validate()?;
@@ -867,7 +870,7 @@ impl<const D: usize> ExchangePlan<D> {
                 }
             }
         }
-        let plan = Self { reach: ng, tiles, fields, schema, axes, seam: None, polar_bands: Vec::new(), digest: Digest(0) };
+        let plan = Self { reach: ng, tiles, fields, schema, axes, seam: None, polar_bands: Vec::new(), wraps: std::array::from_fn(|ax| topology.is_periodic(ax)), digest: Digest(0) };
         plan.validate()?;
         let digest = plan.compute_digest(counts, topology);
         Ok(Self { digest, ..plan })
@@ -946,7 +949,7 @@ impl<const D: usize> ExchangePlan<D> {
                 next += 1;
             }
         }
-        let plan = Self { reach: ng, tiles, fields, schema, axes, seam: None, polar_bands: Vec::new(), digest: Digest(0) };
+        let plan = Self { reach: ng, tiles, fields, schema, axes, seam: None, polar_bands: Vec::new(), wraps: std::array::from_fn(|ax| topology.is_periodic(ax)), digest: Digest(0) };
         plan.validate()?;
         let digest = plan.compute_digest(counts, topology);
         Ok(Self { digest, ..plan })
@@ -1138,7 +1141,7 @@ impl<const D: usize> ExchangePlan<D> {
                 next += 1;
             }
         }
-        let plan = Self { reach: ng, tiles, fields, schema, axes, seam: None, polar_bands: Vec::new(), digest: Digest(0) };
+        let plan = Self { reach: ng, tiles, fields, schema, axes, seam: None, polar_bands: Vec::new(), wraps: std::array::from_fn(|ax| topology.is_periodic(ax)), digest: Digest(0) };
         plan.validate()?;
         let digest = plan.compute_digest(counts, topology);
         Ok(Self { digest, ..plan })

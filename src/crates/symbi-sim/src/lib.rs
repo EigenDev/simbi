@@ -41,3 +41,4 @@ pub mod substrate_seam;
 mod tracer_device;
 pub mod tracers;
 pub mod worker;
+pub mod worker_tracers;

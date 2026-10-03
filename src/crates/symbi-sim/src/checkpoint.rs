@@ -2702,7 +2702,7 @@ where
     Mem: MemorySpace,
 {
     let whole = levels.first().is_some_and(|l| l.tiles.len() == 1);
-    let mut stream = CheckpointStream::open::<R, D, DOF, Mem>(identity, levels, path, extras, budget, whole)?;
+    let mut stream = CheckpointStream::open::<R, D, DOF, Mem>(identity, levels, path, extras, budget, whole, None)?;
     for (idx, level) in levels.iter().enumerate() {
         for tile in &level.tiles {
             let mut sink = |dataset_path: &str, start: &[usize], count: &[usize], data: &[f64]| {
@@ -2735,6 +2735,7 @@ impl CheckpointStream {
         extras: &Metadata,
         budget: usize,
         whole: bool,
+        population: Option<&[symbi_sim_tracers::TracerSet<D>]>,
     ) -> Result<Self>
     where
         R: Regime<f64, D>,
@@ -2874,14 +2875,19 @@ impl CheckpointStream {
         root.push_group(body_state_group::<D>(bs, heat_name));
     }
     // a level held whole writes its population in its own order; tiles combine theirs in id order.
-    let tracers = levels
+    // a population gathered from every worker's tiles stands in for the tiles this file holds.
+    let gathered = population.and_then(|sets| {
+        let snaps: Vec<TracerSnap> = sets.iter().map(tracer_snap).collect();
+        if snaps.len() == 1 { snaps.into_iter().next() } else { combine_tracer_snaps(snaps) }
+    });
+    let tracers = gathered.or_else(|| levels
         .iter()
         .find(|l| l.tiles.iter().any(|t| t.state.tracers.is_some()))
         .and_then(|l| {
             let snaps: Vec<TracerSnap> =
                 l.tiles.iter().filter_map(|t| t.state.tracers.as_ref().map(tracer_snap)).collect();
             if snaps.len() == 1 { snaps.into_iter().next() } else { combine_tracer_snaps(snaps) }
-        });
+        }));
     if let Some(ts) = tracers.as_ref() {
         root.push_group(tracer_group::<D>(ts));
     }

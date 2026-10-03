@@ -7,7 +7,10 @@
 # second- and third-order ito schemes, two tiles and three uneven tiles
 # publish the single grid's gas and tracer population bit for bit (the
 # population compared by id; storage order is a layout choice), fresh and
-# resumed from a checkpoint written on two tiles.
+# resumed from a checkpoint written on two tiles. the isothermal gas carries
+# the discrete population the same way; a population of two seeds on three
+# tiles leaves a tile with none, which still keys the ancestry blend with the
+# population's seed.
 #
 # run: pytest -m simulation simbi/simulation/tests/test_tiled_tracers.py
 # =============================================================================
@@ -35,7 +38,7 @@ from typing import Annotated
 from pydantic import computed_field
 
 from simbi import ProblemParam
-from simbi.types import TracerScheme
+from simbi.types import Regime, TracerScheme
 from simbi_configs.examples.newtonian.refined_blast import RefinedBlast
 
 
@@ -77,8 +80,45 @@ class Ito3Drift(Drift):
     @property
     def tracer_scheme(self) -> TracerScheme:
         return TracerScheme.ITO3
+
+
+class IsoDrift(Drift):
+    regime: Annotated[Regime, ProblemParam(Regime.ISOTHERMAL, description="isothermal")]
+    sound_speed: Annotated[float, ProblemParam(1.0, description="sound speed")]
+
+    def initial_primitive_state(self):
+        adiabatic = super().initial_primitive_state()
+
+        def gas():
+            for row in adiabatic():
+                yield row[:-1]
+
+        return gas
+
+
+class SparseDrift(Drift):
+    @computed_field
+    @property
+    def n_tracers(self) -> int:
+        return 2
+
+
+class SparseIto2Drift(Ito2Drift):
+    @computed_field
+    @property
+    def n_tracers(self) -> int:
+        return 2
 '''
-GROUP = {"DiscreteDrift": "tracers", "Ito2Drift": "continuous_tracers", "Ito3Drift": "continuous_tracers"}
+GROUP = {
+    "DiscreteDrift": "tracers",
+    "Ito2Drift": "continuous_tracers",
+    "Ito3Drift": "continuous_tracers",
+    "IsoDrift": "tracers",
+    "SparseDrift": "tracers",
+    "SparseIto2Drift": "continuous_tracers",
+}
+# the injection arm needs a population fine enough that ten steps of inflow spawn a tracer
+INJECTING = {"DiscreteDrift", "Ito2Drift", "Ito3Drift", "IsoDrift"}
 
 
 @pytest.fixture
@@ -142,9 +182,10 @@ def _assert_same(got: Path, want: Path, group: str, label: str) -> None:
 def test_tiles_carry_the_single_grid_tracer_population(tmp_path: Path, variants: Path, problem: str) -> None:
     group = GROUP[problem]
     want = _run(problem, tmp_path / "single", 1, STEPS)
-    with h5py.File(want, "r") as f:
-        grown = int(f[group].attrs["n_tracers"])
-    assert grown > SEEDED, f"the inflow injected no tracer ({grown}); the injection arm is vacuous"
+    if problem in INJECTING:
+        with h5py.File(want, "r") as f:
+            grown = int(f[group].attrs["n_tracers"])
+        assert grown > SEEDED, f"the inflow injected no tracer ({grown}); the injection arm is vacuous"
     _assert_same(_run(problem, tmp_path / "two", 2, STEPS), want, group, f"{problem}: two tiles")
     _assert_same(_run(problem, tmp_path / "uneven", 3, STEPS, extra=", decompose=[[10, 21], []]"), want, group, f"{problem}: three uneven tiles")
 
@@ -157,8 +198,9 @@ def test_tiles_resume_the_tracer_population(tmp_path: Path, variants: Path, prob
     single_first = _run(problem, tmp_path / "single-first", 1, STEPS // 2)
     _assert_same(_run(problem, tmp_path / "single-resumed", 1, STEPS, checkpoint=single_first), want, group, f"{problem}: the single grid resumed")
     first = _run(problem, tmp_path / "first", 2, STEPS // 2)
-    with h5py.File(first, "r") as f:
-        assert int(f[group].attrs["n_tracers"]) > SEEDED, "the checkpoint holds no injected tracer; the resume arm is vacuous"
+    if problem in INJECTING:
+        with h5py.File(first, "r") as f:
+            assert int(f[group].attrs["n_tracers"]) > SEEDED, "the checkpoint holds no injected tracer; the resume arm is vacuous"
     resumed = _run(problem, tmp_path / "resumed", 3, STEPS - _iteration(first), extra=", decompose=[[10, 21], []]", checkpoint=first)
     assert _iteration(resumed) == STEPS
     _assert_same(resumed, want, group, f"{problem}: resumed onto three uneven tiles")

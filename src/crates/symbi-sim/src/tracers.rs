@@ -3017,6 +3017,45 @@ where
     M: symbi_geometry::Metric<f64, D> + Copy,
     Mem: MemorySpace,
 {
+    stage_mass_transport(sim, geometry, layout, inactive, a0, ac, stage, true)
+}
+
+/// one tile's stage transport on a decomposed grid: the forward-Euler candidate owners under
+/// the stage's convex weights, with the ancestry blend left to the caller, which ranks the whole
+/// population's ids once the leavers have crossed to their tiles
+pub fn advance_stage_mass_transport_tile<const D: usize, const DOF: usize, M, Mem>(
+    sim: &mut FieldStore<D, DOF, Mem, f64>,
+    geometry: &symbi_geometry::BlockGeometry<M, f64, D>,
+    layout: TransportLayout<D>,
+    a0: f64,
+    ac: f64,
+    stage: usize,
+) -> Result<(), String>
+where
+    M: symbi_geometry::Metric<f64, D> + Copy,
+    Mem: MemorySpace,
+{
+    stage_mass_transport(sim, geometry, layout, None, a0, ac, stage, false)
+}
+
+/// the stage transport: every cell's tracers sampled over its outflow faces and its material
+/// removal, the removal measured against the stage's convex update a0 u_n + ac (u_stage - dt
+/// div F); with `blend`, the ssp ancestry selection over this store's ids follows
+#[allow(clippy::too_many_arguments)]
+fn stage_mass_transport<const D: usize, const DOF: usize, M, Mem>(
+    sim: &mut FieldStore<D, DOF, Mem, f64>,
+    geometry: &symbi_geometry::BlockGeometry<M, f64, D>,
+    layout: TransportLayout<D>,
+    inactive: Option<&symbi_algebra::Domain<D>>,
+    a0: f64,
+    ac: f64,
+    stage: usize,
+    blend: bool,
+) -> Result<(), String>
+where
+    M: symbi_geometry::Metric<f64, D> + Copy,
+    Mem: MemorySpace,
+{
     use crate::mass_transport::{
         ContainerId, MassTransfer, SamplingKey, TransportKernel, sample_convex_blend,
         sample_systematic,
@@ -3138,7 +3177,7 @@ where
         }
     }
 
-    if a0 != 0.0 || ac != 1.0 {
+    if blend && (a0 != 0.0 || ac != 1.0) {
         let selections = sample_convex_blend(&tracers.id, ac, key)?;
         let choices = candidate_choices_by_storage_order(&tracers.id, selections)?;
         for (ii, choose_candidate) in choices.into_iter().enumerate() {
@@ -3603,9 +3642,13 @@ fn partition_seeded<const D: usize>(
     partition: &crate::decomp::Partition<D>,
 ) -> Vec<TracerSet<D>> {
     let ntiles: usize = partition.n_tiles();
+    // every tile carries the population's sampling seed and id counter, a tile that receives no
+    // seed included: the ancestry blend and the injection key on them
     let mut per_tile: Vec<TracerSet<D>> = (0..ntiles)
         .map(|_| TracerSet {
             weight: set.weight,
+            run_seed: set.run_seed,
+            next_id: set.next_id,
             ..Default::default()
         })
         .collect();
@@ -3620,8 +3663,6 @@ fn partition_seeded<const D: usize>(
         per_tile[dest].owner.push(set.owner[i]);
         per_tile[dest].step_owner.push(set.step_owner[i]);
         per_tile[dest].step_flags.push(set.step_flags[i]);
-        per_tile[dest].run_seed = set.run_seed;
-        per_tile[dest].next_id = set.next_id;
     }
     per_tile
 }

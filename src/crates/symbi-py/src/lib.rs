@@ -8211,6 +8211,41 @@ macro_rules! build_and_run_iso_decomposed {
             tiles.push(built);
         }
 
+        // the tracer population seeds once from the whole-grid density and splits across the
+        // tiles by position, so the run starts from the particles a single grid would carry;
+        // the whole-grid state lives for that seeding alone.
+        if cfg.n_tracers > 0 {
+            let global = Sim::build(IsoNewtonian, Isothermal { cs: cfg.cs }, $geom)
+                .cells(n)
+                .origin(std::array::from_fn(|ax| cfg.x_lo[ax]))
+                .spacing(std::array::from_fn(|ax| cfg.dx[ax]))
+                .coord_maps(axis_maps::<$d>(cfg))
+                .boundaries(phys)
+                .cfl(cfg.cfl)
+                .timestepping(cfg.timestepping)
+                .cyl_plane(cfg.cyl_plane)
+                .allocate()
+                .map_err(|e| format!("global seeding sim allocate: {e:?}"))?
+                .set_initial_indexed(|idx, _x| {
+                    let row = &prims[global_lin::<$d>(&[0; $d], &idx, &n)];
+                    PrimG::<f64, $d, IsoModel>::isothermal(Density(row[0]), Tensor::new(std::array::from_fn(|k| row[1 + k])))
+                })
+                .build();
+            let per_tile = partition_configured_tracers(&global, cfg, &partition);
+            if let Some(order) = configured_ito_order(cfg)? {
+                for ((tile, _), set) in tiles.iter_mut().zip(per_tile) {
+                    tile.continuous_tracers = Some(
+                        symbi_sim::tracers::ContinuousTracerSet::from_discrete(&set, order)
+                            .map_err(|detail| format!("continuous tracer partition: {detail}"))?,
+                    );
+                }
+            } else {
+                for ((tile, _), set) in tiles.iter_mut().zip(per_tile) {
+                    tile.tracers = Some(set);
+                }
+            }
+        }
+
         let offsets = tile_offsets(&partition);
         let grid = decomposed_grid::<$d>(cfg, tiles[0].0.geom.ng);
         run_decomposed_loop(cfg, tiles, offsets, grid, counts)
@@ -9137,7 +9172,7 @@ fn dispatch_and_run(
         if cfg.n_gpus > 1
             && !matches!(
                 cfg.regime.as_str(),
-                "newtonian" | "rhd" | "nmhd" | "rmhd" | "imhd"
+                "newtonian" | "rhd" | "isothermal" | "nmhd" | "rmhd" | "imhd"
             )
         {
             return Err(format!(
@@ -10772,8 +10807,20 @@ fn validate_launch_scope(cfg: &Config) -> Result<(), String> {
     if (!cfg.bodies.is_empty() || cfg.bonded_assembly.is_some()) && cfg.refinement_enabled {
         return refused("an immersed body with mesh refinement");
     }
+    // the launched gas and isothermal tiles carry the discrete population on a flat grid
     if cfg.n_tracers > 0 {
-        return refused("a tracer population");
+        if cfg.tracer_scheme != "discrete" {
+            return refused(&format!("the {} tracer scheme", cfg.tracer_scheme));
+        }
+        if !cfg.bodies.is_empty() || cfg.bonded_assembly.is_some() {
+            return refused("a tracer population with immersed bodies");
+        }
+        if cfg.refinement_enabled {
+            return refused("a tracer population with mesh refinement");
+        }
+        if !matches!(cfg.regime.as_str(), "newtonian" | "rhd" | "isothermal") {
+            return refused(&format!("a tracer population with the {} regime", cfg.regime));
+        }
     }
     // the dye rides the launched gas and isothermal tiles under the single grid's admission
     validate_passive_scalar(cfg)?;
@@ -11892,6 +11939,32 @@ fn run_worker_process(
                 let sub = attach_driven_boundaries(sub, cfg, <$regime_ty as Regime<f64, $d>>::SPEC, |sub, built, params| sub.with_driven_boundary(built, params).0)?;
                 tiles.push((sim, sub));
             }
+            // the tracer population seeds once from the whole-grid density, as the single grid's,
+            // and each worker keeps its own tiles' share; the whole-grid state lives for the
+            // seeding alone
+            if cfg.n_tracers > 0 {
+                let global = Sim::build($regime, host_eos(cfg), $geom)
+                    .cells(n)
+                    .ghosts(ghost_width(cfg))
+                    .origin(std::array::from_fn(|ax| cfg.x_lo[ax]))
+                    .spacing(std::array::from_fn(|ax| cfg.dx[ax]))
+                    .coord_maps(axis_maps::<$d>(cfg))
+                    .boundaries(phys)
+                    .cfl(cfg.cfl)
+                    .timestepping(cfg.timestepping)
+                    .cyl_plane(cfg.cyl_plane)
+                    .allocate()
+                    .map_err(|e| format!("global seeding sim allocate: {e:?}"))?
+                    .set_initial_indexed(|idx, _x| {
+                        let row = &prims[global_lin::<$d>(&[0; $d], &idx, &n)];
+                        Prim::adiabatic(Density(row[0]), Tensor::new(std::array::from_fn(|k| row[1 + k])), Pressure(row[1 + $d]))
+                    })
+                    .build();
+                let mut per_tile = partition_configured_tracers(&global, cfg, &partition);
+                for ((sim, _), &flat) in tiles.iter_mut().zip(&mine) {
+                    sim.tracers = Some(std::mem::take(&mut per_tile[flat]));
+                }
+            }
             session_over!($regime_ty, $d, tiles)
         }};
     }
@@ -12082,6 +12155,32 @@ fn run_worker_process(
                 seed_local_cs2!(sim, sub, cfg, prims, tile_lo, n, $d);
                 tiles.push((sim, sub));
             }
+            // the tracer population seeds once from the whole-grid density, as the single grid's,
+            // and each worker keeps its own tiles' share; the whole-grid state lives for the
+            // seeding alone
+            if cfg.n_tracers > 0 {
+                let global = Sim::build(IsoNewtonian, Isothermal { cs: cfg.cs }, $geom)
+                    .cells(n)
+                    .ghosts(ghost_width(cfg))
+                    .origin(std::array::from_fn(|ax| cfg.x_lo[ax]))
+                    .spacing(std::array::from_fn(|ax| cfg.dx[ax]))
+                    .coord_maps(axis_maps::<$d>(cfg))
+                    .boundaries(phys)
+                    .cfl(cfg.cfl)
+                    .timestepping(cfg.timestepping)
+                    .cyl_plane(cfg.cyl_plane)
+                    .allocate()
+                    .map_err(|e| format!("global seeding sim allocate: {e:?}"))?
+                    .set_initial_indexed(|idx, _x| {
+                        let row = &prims[global_lin::<$d>(&[0; $d], &idx, &n)];
+                        PrimG::<f64, $d, IsoModel>::isothermal(Density(row[0]), Tensor::new(std::array::from_fn(|k| row[1 + k])))
+                    })
+                    .build();
+                let mut per_tile = partition_configured_tracers(&global, cfg, &partition);
+                for ((sim, _), &flat) in tiles.iter_mut().zip(&mine) {
+                    sim.tracers = Some(std::mem::take(&mut per_tile[flat]));
+                }
+            }
             session_over!(IsoNewtonian, $d, tiles)
         }};
     }
@@ -12203,6 +12302,7 @@ fn worker_session<R, G, E, K, const D: usize, const DOF: usize>(
     mut tiles: Vec<(SimDefaultGeneric<R, D, DOF, G, E>, K)>,
 ) -> Result<(), String>
 where
+    symbi::symbi_geometry::Cartesian: symbi::symbi_geometry::Metric<f64, D>,
     R: Regime<f64, D>,
     G: symbi_geometry::Metric<f64, D> + Copy,
     E: Eos<f64>,

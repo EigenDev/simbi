@@ -584,7 +584,7 @@ REFINED_RMHD = str(Path(RefinedMhd3D.__module__.replace(".", "/") + ".py"))
 
 @pytest.mark.parametrize(
     ("script", "reason"),
-    [(TRACED_KH, "a tracer population"), (REFINED_RMHD, "a refined patch on the periodic face of axis 2 with mesh refinement")],
+    [(TRACED_KH, "the ito3 tracer scheme"), (REFINED_RMHD, "a refined patch on the periodic face of axis 2 with mesh refinement")],
 )
 def test_out_of_scope_problems_are_refused_by_name(tmp_path: Path, script: str, reason: str) -> None:
     # a layout with as many axes as the problem's grid, so the refusal is the scope's

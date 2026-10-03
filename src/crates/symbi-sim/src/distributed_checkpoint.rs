@@ -373,8 +373,29 @@ where
             .position(|(l, _, p)| *l == li && p == path)
             .expect("the walker names a declared dataset")
     };
+    // the tracer population of every worker's tiles, gathered so the coordinator writes it whole;
+    // every tile of a traced run carries one, so each worker joins the gather
+    let local: Vec<(usize, &crate::tracers::TracerSet<D>)> = plans[0]
+        .tile_ids
+        .iter()
+        .zip(&levels[0].tiles)
+        .filter_map(|(tile, view)| view.state.tracers.as_ref().map(|set| (tile.0 as usize, set)))
+        .collect();
+    let population = if local.is_empty() {
+        None
+    } else {
+        Some(crate::worker_tracers::gather_discrete(fabric, plans[0].plan.n_tiles(), &local, req.deadline)?)
+    };
     if fabric.is_coordinator() {
-        let opened = CheckpointStream::open::<R, D, DOF, Mem>(identity, levels, req.path, req.extras, budget, false);
+        let opened = CheckpointStream::open::<R, D, DOF, Mem>(
+            identity,
+            levels,
+            req.path,
+            req.extras,
+            budget,
+            false,
+            population.as_deref(),
+        );
         let ok = fabric.collective(OpKind::CheckpointOpen, u64::from(opened.is_ok()), req.deadline)?;
         let mut stream = opened?;
         if ok == 0 {

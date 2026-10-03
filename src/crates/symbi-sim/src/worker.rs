@@ -176,8 +176,12 @@ pub fn refuse<const D: usize, const DOF: usize, M: MemorySpace, K: KernelSet<D, 
             Some(format!("the {:?} spacetime", store.geom.spacetime))
         } else if crate::driver::horizon_request(store).is_some() {
             Some("a horizon body".to_string())
-        } else if store.tracers.is_some() || store.continuous_tracers.is_some() {
-            Some("a tracer population".to_string())
+        } else if store.continuous_tracers.is_some() {
+            Some("an Ito tracer population".to_string())
+        } else if store.tracers.is_some() && store.immersed.is_some() {
+            Some("a tracer population with immersed bodies".to_string())
+        } else if store.tracers.is_some() && store.geom.coords != symbi_geometry::Geometry::Cartesian {
+            Some("a tracer population on a curvilinear chart".to_string())
         } else if let Some(property) = crate::stage::post_step_refresh_needed(store, *kernel) {
             // the launched path carries no post-step exchange point, so an operation that
             // leaves the cut halos stale is refused by the recipe's own declaration
@@ -702,6 +706,7 @@ where
     K: KernelSet<D, DOF, M, f64>,
     T: HaloTransport,
     L: Link,
+    symbi_geometry::Cartesian: symbi_geometry::Metric<f64, D>,
     F: FnMut(
         u64,
         f64,
@@ -781,6 +786,22 @@ where
     };
     let multistage = needs_step_snapshot(stages);
     let schedule = stage_schedule(stages);
+    // the discrete tracer population: every tile of a traced run carries one, its transport laid
+    // over the whole grid from the tile's place in the plan
+    let has_tracers = stores.iter().any(|s| s.tracers.is_some());
+    let tracer_layouts: Vec<crate::tracers::TransportLayout<D>> = tiles
+        .iter()
+        .map(|tile| {
+            let layout = exchange.plan().tiles.iter().find(|l| l.tile == *tile).expect("the plan lays out every tile");
+            crate::tracers::TransportLayout {
+                global_cells: n_cells,
+                tile_offset: std::array::from_fn(|ax| layout.offset[ax] as usize),
+                wraps: exchange.plan().wraps,
+                level: 0,
+            }
+        })
+        .collect();
+    let mut injection_ledgers: Vec<std::collections::BTreeMap<crate::mass_transport::ContainerId, f64>>;
 
     let mut report = WorkerReport::default();
 
@@ -888,6 +909,19 @@ where
         // entry is kept for a rollback and for the step-tail advance
         let motion_n: Vec<_> = stores.iter().map(|s| s.motion).collect();
         let a_n: Vec<f64> = motion_n.iter().map(|motion| motion.a).collect();
+        // the ancestry blend ranks the population's ids 0..next_id, the whole id set: the tile
+        // counts and the id bound confirm it once per step
+        if has_tracers {
+            let sh = shared!();
+            let whole = crate::worker_tracers::contiguous_ids(&sh, tiles, n_tiles, fabric, deadline)
+                .map_err(|e| fail(fabric, e.into()))?;
+            if !whole {
+                return Err(fail(
+                    fabric,
+                    WorkerError::Numerics("the tracer ids are not the range 0..next_id the ancestry blend ranks".into()),
+                ));
+            }
+        }
         loop {
             {
                 let sh = shared!();
@@ -902,7 +936,11 @@ where
             }
             for s in stores.iter_mut() {
                 s.dt = dt;
+                if has_tracers {
+                    crate::tracers::snapshot_transport_state(&mut **s);
+                }
             }
+            injection_ledgers = vec![std::collections::BTreeMap::new(); n];
             let mut rejected = false;
             for stage in &schedule {
                 for (k, s) in stores.iter_mut().enumerate() {
@@ -1060,12 +1098,45 @@ where
                     )
                     .map_err(|e| fail(fabric, e))?;
                 }
+                drop(sh);
+                // the stage's tracer transport on the exchanged state: each tile books its
+                // boundary and source injection and moves its tracers' owners, the leavers cross
+                // to their owners' tiles, the ancestry blend runs, and the reverted cross again
+                if has_tracers {
+                    for k in 0..n {
+                        let store = &mut *stores[k];
+                        let geometry = store.geom.block_geometry(symbi_geometry::Cartesian);
+                        let layout = tracer_layouts[k];
+                        let mut injections = crate::tracers::boundary_injection_transfers_store(&*store, &geometry, layout);
+                        injections.extend(crate::tracers::source_injection_transfers_store(
+                            &*store, &geometry, layout, stage.a0, stage.ac,
+                        ));
+                        crate::tracers::fold_injection_ledger(&mut injection_ledgers[k], injections, stage.ac);
+                        crate::tracers::advance_stage_mass_transport_tile(store, &geometry, layout, stage.a0, stage.ac, stage.index)
+                            .map_err(|e| fail(fabric, WorkerError::Numerics(format!("tracer mass transport: {e}"))))?;
+                    }
+                    crate::worker_tracers::migrate_discrete(stores, tiles, exchange.plan(), fabric, deadline)
+                        .map_err(|e| fail(fabric, e.into()))?;
+                    crate::worker_tracers::blend_discrete(stores, stage.ac, stage.index);
+                    crate::worker_tracers::migrate_discrete(stores, tiles, exchange.plan(), fabric, deadline)
+                        .map_err(|e| fail(fabric, e.into()))?;
+                }
             }
             if !rejected {
                 crate::guard_ledger::step_commit();
                 break;
             }
             crate::guard_ledger::step_discard();
+            // a migrated tracer lives in another tile's storage, and no per-tile restore puts it
+            // back, so a traced run ends instead of replaying
+            if has_tracers {
+                return Err(fail(
+                    fabric,
+                    WorkerError::Numerics(
+                        "a step was rejected with tracers attached: cross-tile tracer migration has no per-tile inverse".into(),
+                    ),
+                ));
+            }
             report.rejections += 1;
             // every worker books the agreed rejection with the evidence its own tiles hold, so
             // every worker reaches the guard's decision at the same attempt
@@ -1149,6 +1220,10 @@ where
                 store.severe_streak = streak;
             }
         }
+        if has_tracers {
+            crate::worker_tracers::spawn_discrete_injection(stores, tiles, exchange.plan(), &injection_ledgers, fabric, deadline)
+                .map_err(|e| fail(fabric, e.into()))?;
+        }
         {
             // the post-step recipe on the accepted step: an operation that writes the conserved
             // interior recovers the primitives and refreshes the cut halos at the post-step
@@ -1187,6 +1262,12 @@ where
         }
         for s in stores.iter_mut() {
             advance_state_clock(&mut **s, dt);
+        }
+        if has_tracers {
+            for (k, s) in stores.iter_mut().enumerate() {
+                let geometry = s.geom.block_geometry(symbi_geometry::Cartesian);
+                crate::tracers::refresh_derived_positions_store(&mut **s, &geometry, tracer_layouts[k]);
+            }
         }
         (t, iter) = advance_clock(t, iter, dt);
         report.steps = iter;

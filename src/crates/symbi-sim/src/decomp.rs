@@ -2268,6 +2268,50 @@ fn blend_mass_transport_ancestry<const D: usize, const DOF: usize, M: MemorySpac
     }
 }
 
+/// the tracers one step's merged injection spawns: ids from `next_id`, the sub-quantum
+/// `remainder` carried, each at its whole-grid cell's center through `store`'s geometry. any tile
+/// of the grid places a whole-grid cell bit for bit (whole-grid origin and index offset); `store`
+/// also lends the population's weight and sampling seed and the step's iteration.
+pub(crate) fn spawn_injection_set<const D: usize, const DOF: usize, M: MemorySpace>(
+    store: &FieldStore<D, DOF, M, f64>,
+    cells: [usize; D],
+    injections: std::collections::BTreeMap<crate::mass_transport::ContainerId, f64>,
+    next_id: u64,
+    remainder: f64,
+) -> crate::tracers::TracerSet<D> {
+    let template = store.tracers.as_ref().expect("a traced tile carries tracers");
+    let mut spawned = crate::tracers::TracerSet {
+        weight: template.weight,
+        run_seed: template.run_seed,
+        next_id,
+        injection_remainder: remainder,
+        ..Default::default()
+    };
+    let key = crate::mass_transport::SamplingKey {
+        run_seed: spawned.run_seed,
+        epoch: store.iteration | (1 << 62),
+    };
+    let geom = &store.geom;
+    crate::tracers::spawn_injected_tracers(
+        &mut spawned,
+        injections
+            .into_iter()
+            .map(|(destination, mass)| crate::mass_transport::MassTransfer { destination, mass }),
+        |owner| {
+            let mut linear = owner.0 as usize;
+            let local: [isize; D] = std::array::from_fn(|dd| {
+                let index = linear % cells[dd];
+                linear /= cells[dd];
+                index as isize - geom.index_offset[dd]
+            });
+            geom.cell_coord(local)
+        },
+        key,
+    )
+    .unwrap_or_else(|detail| panic!("tracer injection: {detail}"));
+    spawned
+}
+
 fn spawn_decomposed_injection<const D: usize, const DOF: usize, M: MemorySpace>(
     stores: &mut [&mut FieldStore<D, DOF, M, f64>],
     schedule: &Schedule<D>,
@@ -2286,50 +2330,18 @@ fn spawn_decomposed_injection<const D: usize, const DOF: usize, M: MemorySpace>(
         let sh: Vec<&FieldStore<D, DOF, M, f64>> = stores.iter().map(|s| &**s).collect();
         tile_partition_of(&sh, schedule.counts())
     };
-    // positions of global cells from the grid's first tile, at the global index less its offset
-    let first_geom = &stores[0].geom;
-    let first = stores
+    let next_id = stores
         .iter()
-        .find_map(|store| store.tracers.as_ref())
-        .expect("decomposed tracer population is present");
-    let mut spawned = crate::tracers::TracerSet {
-        weight: first.weight,
-        run_seed: first.run_seed,
-        next_id: stores
-            .iter()
-            .filter_map(|store| store.tracers.as_ref())
-            .map(|tracers| tracers.next_id)
-            .max()
-            .unwrap_or(0),
-        injection_remainder: stores
-            .iter()
-            .filter_map(|store| store.tracers.as_ref())
-            .map(|tracers| tracers.injection_remainder)
-            .sum(),
-        ..Default::default()
-    };
-    let key = crate::mass_transport::SamplingKey {
-        run_seed: spawned.run_seed,
-        epoch: stores[0].iteration | (1 << 62),
-    };
-    crate::tracers::spawn_injected_tracers(
-        &mut spawned,
-        injections
-            .into_iter()
-            .map(|(destination, mass)| crate::mass_transport::MassTransfer { destination, mass }),
-        |owner| {
-            let n_global = partition.n_cells();
-            let mut linear = owner.0 as usize;
-            let local: [isize; D] = std::array::from_fn(|dd| {
-                let index = linear % n_global[dd];
-                linear /= n_global[dd];
-                index as isize - first_geom.index_offset[dd]
-            });
-            first_geom.cell_coord(local)
-        },
-        key,
-    )
-    .unwrap_or_else(|detail| panic!("decomposed tracer injection: {detail}"));
+        .filter_map(|store| store.tracers.as_ref())
+        .map(|tracers| tracers.next_id)
+        .max()
+        .unwrap_or(0);
+    let remainder = stores
+        .iter()
+        .filter_map(|store| store.tracers.as_ref())
+        .map(|tracers| tracers.injection_remainder)
+        .sum();
+    let spawned = spawn_injection_set(&*stores[0], partition.n_cells(), injections, next_id, remainder);
 
     for store in stores.iter_mut() {
         let tracers = store
@@ -2819,12 +2831,12 @@ where
                             stage.ac,
                         );
                         if has_discrete_tracers {
-                            crate::tracers::advance_stage_mass_transport_store(
+                            crate::tracers::advance_stage_mass_transport_tile(
                                 &mut **store,
                                 &geometry,
                                 layout,
-                                0.0,
-                                1.0,
+                                stage.a0,
+                                stage.ac,
                                 stage.index,
                             )
                             .unwrap_or_else(|err| panic!("tracer mass transport failed: {err}"));
