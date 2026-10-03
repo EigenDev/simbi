@@ -10723,7 +10723,7 @@ fn validate_launch_scope(cfg: &Config) -> Result<(), String> {
     if matches!(cfg.regime.as_str(), "nmhd" | "imhd" | "rmhd") && !cfg.source_jsons.is_empty() {
         return refused(&format!("a user source with the {} regime", cfg.regime));
     }
-    if !matches!(cfg.dims, 2 | 3) {
+    if !matches!(cfg.dims, 1..=3) {
         return refused(&format!("a {}-dimensional grid", cfg.dims));
     }
     if cfg.spacetime != "minkowski" {
@@ -12147,6 +12147,7 @@ fn run_worker_process(
         }};
     }
     match cfg.dims {
+        1 => worker_of_dims!(1),
         2 => worker_of_dims!(2),
         3 => worker_of_dims!(3),
         other => Err(format!("a {other}-dimensional grid is outside the distributed first release")),

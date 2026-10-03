@@ -1,12 +1,12 @@
 // =============================================================================
 // worker_refusals.rs
 //
-// the distributed loop's first-release scope, enforced at entry: 2D cartesian
-// adiabatic newtonian hydro in host memory on a static mesh, with or without a
-// passive scalar. each gate builds a store or kernel set that leaves the scope
-// by one property and shows the loop refuses it before any step, naming the
-// property, on a single worker over the in-process link; the admitted
-// properties (a constant viscosity, a dye) march to their end.
+// the distributed loop's scope, enforced at entry, on the adiabatic newtonian
+// fixture in host memory. each refusal gate builds a store or kernel set that
+// leaves the scope by one property and shows the loop refuses it before any
+// step, naming the property, on a single worker over the in-process link; the
+// admitted properties (a one-dimensional grid, a constant viscosity, a dye)
+// march to their end.
 //
 // run: cargo test -p symbi --test worker_refusals
 // =============================================================================
@@ -247,7 +247,7 @@ fn viscous_transport_is_admitted() {
 }
 
 #[test]
-fn a_one_dimensional_grid_is_refused() {
+fn a_one_dimensional_grid_is_admitted() {
     let mut sim = Sim1::build(Newtonian, IdealGas { gamma: 1.4 }, Cartesian)
         .cells([32])
         .spacing([1.0 / 32.0])
@@ -279,5 +279,5 @@ fn a_one_dimensional_grid_is_refused() {
         |_, _, _, _| Ok(ControlFlow::Continue(())),
     )
     .and_then(|_| fabric.finish(Duration::from_secs(2)).map_err(WorkerError::from));
-    refused(result, "1-dimensional");
+    result.expect("a one-dimensional grid marches on a worker");
 }

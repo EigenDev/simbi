@@ -165,7 +165,7 @@ pub fn refuse<const D: usize, const DOF: usize, M: MemorySpace, K: KernelSet<D, 
     let refused = |reason: &str| {
         WorkerError::Refused(format!("{reason} is outside the distributed first release"))
     };
-    if !matches!(D, 2 | 3) {
+    if !matches!(D, 1..=3) {
         return Err(refused(&format!("a {D}-dimensional grid")));
     }
     if M::IS_DEVICE_ACCESSIBLE {
