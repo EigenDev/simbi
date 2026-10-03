@@ -1211,180 +1211,13 @@ where
     // the run continues the previous population (flags, ids, weight intact)
     // regardless of what the fresh-run config would have seeded.
     if let Some(tg) = tree.find_group("tracers") {
-        let getf = |name: &str| -> Result<Vec<f64>> {
-            Ok(tg
-                .find_dataset(name)
-                .ok_or_else(|| IoError::MissingPath(format!("tracers/{name}")))?
-                .data
-                .as_f64()
-                .ok_or_else(|| IoError::MissingPath(format!("tracers/{name}: not f64")))?
-                .to_vec())
-        };
-        let getu = |name: &str| -> Result<Vec<u64>> {
-            Ok(tg
-                .find_dataset(name)
-                .ok_or_else(|| IoError::MissingPath(format!("tracers/{name}")))?
-                .data
-                .as_u64()
-                .ok_or_else(|| IoError::MissingPath(format!("tracers/{name}: not u64")))?
-                .to_vec())
-        };
-        let xs = getf("position")?;
-        let ids = getu("id")?;
-        let cohorts = getu("cohort")?;
-        let owners = getu("owner")?;
-        let (esc, crx, ct) = (
-            getf("escaped")?,
-            getf("crossed_sink")?,
-            getf("crossing_time")?,
-        );
-        let weight = getf("weight")?.first().copied().unwrap_or(0.0);
-        let n = ids.len();
-        let run_seed = tg
-            .find_attr("run_seed")
-            .ok_or_else(|| IoError::MissingPath("tracers/run_seed".to_string()))?
-            .as_u64("tracers/run_seed")?;
-        let next_id = tg
-            .find_attr("next_id")
-            .ok_or_else(|| IoError::MissingPath("tracers/next_id".to_string()))?
-            .as_u64("tracers/next_id")?;
-        let injection_remainder = tg
-            .find_attr("injection_remainder")
-            .ok_or_else(|| IoError::MissingPath("tracers/injection_remainder".to_string()))?
-            .as_f64("tracers/injection_remainder")?;
-        let mut tr = symbi_sim_tracers::TracerSet::<D> {
-            weight,
-            run_seed,
-            next_id,
-            injection_remainder,
-            ..Default::default()
-        };
-        for i in 0..n {
-            let mut p = [0.0; D];
-            for a in 0..D {
-                p[a] = xs[i * D + a];
-            }
-            tr.x.push(p);
-            tr.id.push(ids[i]);
-            tr.cohort.push(
-                u16::try_from(cohorts[i])
-                    .map_err(|_| IoError::Backend("tracer cohort exceeds u16".to_string()))?,
-            );
-            tr.owner.push(crate::mass_transport::ContainerId(owners[i]));
-            tr.flags.push(symbi_sim_tracers::TracerFlags {
-                escaped: esc[i] != 0.0,
-                crossed_sink: crx[i] != 0.0,
-                crossing_time: ct[i],
-            });
-        }
-        tr.step_owner = tr.owner.clone();
-        tr.step_flags = tr.flags.clone();
-        sim.tracers = Some(tr);
+        sim.tracers = Some(read_tracer_population::<D>(tg)?);
         let geometry = sim.geom.block_geometry(sim.physics.metric);
         let layout = symbi_sim_tracers::TransportLayout::single(&sim.geom.interior);
         symbi_sim_tracers::refresh_derived_positions_store(&mut sim.store, &geometry, layout);
     }
     if let Some(group) = tree.find_group("continuous_tracers") {
-        let getf = |name: &str| -> Result<Vec<f64>> {
-            Ok(group
-                .find_dataset(name)
-                .ok_or_else(|| IoError::MissingPath(format!("continuous_tracers/{name}")))?
-                .data
-                .as_f64()
-                .ok_or_else(|| IoError::MissingPath(format!("continuous_tracers/{name}: not f64")))?
-                .to_vec())
-        };
-        let getu = |name: &str| -> Result<Vec<u64>> {
-            Ok(group
-                .find_dataset(name)
-                .ok_or_else(|| IoError::MissingPath(format!("continuous_tracers/{name}")))?
-                .data
-                .as_u64()
-                .ok_or_else(|| IoError::MissingPath(format!("continuous_tracers/{name}: not u64")))?
-                .to_vec())
-        };
-        let x = getf("position")?;
-        let step_x = getf("step_position")?;
-        let id = getu("id")?;
-        let cohort = getu("cohort")?;
-        let owner = getu("owner")?;
-        let escaped = getu("escaped")?;
-        let crossed_sink = getu("crossed_sink")?;
-        let crossing_time = getf("crossing_time")?;
-        let random_counter = getu("random_counter")?;
-        let weight = getf("weight")?.first().copied().unwrap_or(0.0);
-        let n = id.len();
-        if [
-            x.len() / D,
-            step_x.len() / D,
-            cohort.len(),
-            owner.len(),
-            escaped.len(),
-            crossed_sink.len(),
-            crossing_time.len(),
-            random_counter.len(),
-        ]
-        .into_iter()
-        .any(|length| length != n)
-        {
-            return Err(IoError::Backend(
-                "continuous tracer checkpoint arrays have inconsistent lengths".to_string(),
-            ));
-        }
-        let order = match group
-            .find_attr("order")
-            .ok_or_else(|| IoError::MissingPath("continuous_tracers/order".to_string()))?
-            .as_u64("continuous_tracers/order")?
-        {
-            2 => crate::mass_transport::ItoOrder::Two,
-            3 => crate::mass_transport::ItoOrder::Three,
-            value => {
-                return Err(IoError::Backend(format!(
-                    "unsupported continuous tracer order {value}"
-                )));
-            }
-        };
-        let mut tracers = symbi_sim_tracers::ContinuousTracerSet::<D, Mem>::allocate(n, order)
-            .map_err(IoError::Backend)?;
-        tracers.weight = weight;
-        tracers.run_seed = group
-            .find_attr("run_seed")
-            .ok_or_else(|| IoError::MissingPath("continuous_tracers/run_seed".to_string()))?
-            .as_u64("continuous_tracers/run_seed")?;
-        tracers.next_id = group
-            .find_attr("next_id")
-            .ok_or_else(|| IoError::MissingPath("continuous_tracers/next_id".to_string()))?
-            .as_u64("continuous_tracers/next_id")?;
-        tracers.injection_remainder = group
-            .find_attr("injection_remainder")
-            .ok_or_else(|| {
-                IoError::MissingPath("continuous_tracers/injection_remainder".to_string())
-            })?
-            .as_f64("continuous_tracers/injection_remainder")?;
-        for ii in 0..n {
-            tracers
-                .push_host(symbi_sim_tracers::ContinuousTracerRecord {
-                    x: std::array::from_fn(|dd| x[ii * D + dd]),
-                    step_x: std::array::from_fn(|dd| step_x[ii * D + dd]),
-                    id: id[ii],
-                    cohort: u16::try_from(cohort[ii]).map_err(|_| {
-                        IoError::Backend("continuous tracer cohort exceeds u16".to_string())
-                    })?,
-                    owner: crate::mass_transport::ContainerId(owner[ii]),
-                    escaped: u8::try_from(escaped[ii]).map_err(|_| {
-                        IoError::Backend("continuous tracer escaped flag exceeds u8".to_string())
-                    })?,
-                    crossed_sink: u8::try_from(crossed_sink[ii]).map_err(|_| {
-                        IoError::Backend(
-                            "continuous tracer crossed-sink flag exceeds u8".to_string(),
-                        )
-                    })?,
-                    crossing_time: crossing_time[ii],
-                    random_counter: random_counter[ii],
-                })
-                .map_err(IoError::Backend)?;
-        }
-        sim.continuous_tracers = Some(tracers);
+        sim.continuous_tracers = Some(read_continuous_population::<D, Mem>(group)?);
     }
 
     if let (Some(bodies_g), Some(im)) = (tree.find_group("bodies"), sim.immersed.as_mut()) {
@@ -1392,6 +1225,211 @@ where
     }
 
     Ok(meta)
+}
+
+/// the discrete tracer population recorded under `tracers`: ids, cohorts, owners, flags and the
+/// spawn bookkeeping, with the step-entry owners and flags equal to the stored ones
+fn read_tracer_population<const D: usize>(tg: &TreeBuf) -> Result<symbi_sim_tracers::TracerSet<D>> {
+    let getf = |name: &str| -> Result<Vec<f64>> {
+        Ok(tg
+            .find_dataset(name)
+            .ok_or_else(|| IoError::MissingPath(format!("tracers/{name}")))?
+            .data
+            .as_f64()
+            .ok_or_else(|| IoError::MissingPath(format!("tracers/{name}: not f64")))?
+            .to_vec())
+    };
+    let getu = |name: &str| -> Result<Vec<u64>> {
+        Ok(tg
+            .find_dataset(name)
+            .ok_or_else(|| IoError::MissingPath(format!("tracers/{name}")))?
+            .data
+            .as_u64()
+            .ok_or_else(|| IoError::MissingPath(format!("tracers/{name}: not u64")))?
+            .to_vec())
+    };
+    let xs = getf("position")?;
+    let ids = getu("id")?;
+    let cohorts = getu("cohort")?;
+    let owners = getu("owner")?;
+    let (esc, crx, ct) = (
+        getf("escaped")?,
+        getf("crossed_sink")?,
+        getf("crossing_time")?,
+    );
+    let weight = getf("weight")?.first().copied().unwrap_or(0.0);
+    let n = ids.len();
+    let run_seed = tg
+        .find_attr("run_seed")
+        .ok_or_else(|| IoError::MissingPath("tracers/run_seed".to_string()))?
+        .as_u64("tracers/run_seed")?;
+    let next_id = tg
+        .find_attr("next_id")
+        .ok_or_else(|| IoError::MissingPath("tracers/next_id".to_string()))?
+        .as_u64("tracers/next_id")?;
+    let injection_remainder = tg
+        .find_attr("injection_remainder")
+        .ok_or_else(|| IoError::MissingPath("tracers/injection_remainder".to_string()))?
+        .as_f64("tracers/injection_remainder")?;
+    let mut tr = symbi_sim_tracers::TracerSet::<D> {
+        weight,
+        run_seed,
+        next_id,
+        injection_remainder,
+        ..Default::default()
+    };
+    for i in 0..n {
+        let mut p = [0.0; D];
+        for a in 0..D {
+            p[a] = xs[i * D + a];
+        }
+        tr.x.push(p);
+        tr.id.push(ids[i]);
+        tr.cohort.push(
+            u16::try_from(cohorts[i])
+                .map_err(|_| IoError::Backend("tracer cohort exceeds u16".to_string()))?,
+        );
+        tr.owner.push(crate::mass_transport::ContainerId(owners[i]));
+        tr.flags.push(symbi_sim_tracers::TracerFlags {
+            escaped: esc[i] != 0.0,
+            crossed_sink: crx[i] != 0.0,
+            crossing_time: ct[i],
+        });
+    }
+    tr.step_owner = tr.owner.clone();
+    tr.step_flags = tr.flags.clone();
+    Ok(tr)
+}
+
+/// the continuous tracer population recorded under `continuous_tracers`, in its stored order
+fn read_continuous_population<const D: usize, Mem: MemorySpace>(
+    group: &TreeBuf,
+) -> Result<symbi_sim_tracers::ContinuousTracerSet<D, Mem>> {
+    let getf = |name: &str| -> Result<Vec<f64>> {
+        Ok(group
+            .find_dataset(name)
+            .ok_or_else(|| IoError::MissingPath(format!("continuous_tracers/{name}")))?
+            .data
+            .as_f64()
+            .ok_or_else(|| IoError::MissingPath(format!("continuous_tracers/{name}: not f64")))?
+            .to_vec())
+    };
+    let getu = |name: &str| -> Result<Vec<u64>> {
+        Ok(group
+            .find_dataset(name)
+            .ok_or_else(|| IoError::MissingPath(format!("continuous_tracers/{name}")))?
+            .data
+            .as_u64()
+            .ok_or_else(|| IoError::MissingPath(format!("continuous_tracers/{name}: not u64")))?
+            .to_vec())
+    };
+    let x = getf("position")?;
+    let step_x = getf("step_position")?;
+    let id = getu("id")?;
+    let cohort = getu("cohort")?;
+    let owner = getu("owner")?;
+    let escaped = getu("escaped")?;
+    let crossed_sink = getu("crossed_sink")?;
+    let crossing_time = getf("crossing_time")?;
+    let random_counter = getu("random_counter")?;
+    let weight = getf("weight")?.first().copied().unwrap_or(0.0);
+    let n = id.len();
+    if [
+        x.len() / D,
+        step_x.len() / D,
+        cohort.len(),
+        owner.len(),
+        escaped.len(),
+        crossed_sink.len(),
+        crossing_time.len(),
+        random_counter.len(),
+    ]
+    .into_iter()
+    .any(|length| length != n)
+    {
+        return Err(IoError::Backend(
+            "continuous tracer checkpoint arrays have inconsistent lengths".to_string(),
+        ));
+    }
+    let order = match group
+        .find_attr("order")
+        .ok_or_else(|| IoError::MissingPath("continuous_tracers/order".to_string()))?
+        .as_u64("continuous_tracers/order")?
+    {
+        2 => crate::mass_transport::ItoOrder::Two,
+        3 => crate::mass_transport::ItoOrder::Three,
+        value => {
+            return Err(IoError::Backend(format!(
+                "unsupported continuous tracer order {value}"
+            )));
+        }
+    };
+    let mut tracers = symbi_sim_tracers::ContinuousTracerSet::<D, Mem>::allocate(n, order)
+        .map_err(IoError::Backend)?;
+    tracers.weight = weight;
+    tracers.run_seed = group
+        .find_attr("run_seed")
+        .ok_or_else(|| IoError::MissingPath("continuous_tracers/run_seed".to_string()))?
+        .as_u64("continuous_tracers/run_seed")?;
+    tracers.next_id = group
+        .find_attr("next_id")
+        .ok_or_else(|| IoError::MissingPath("continuous_tracers/next_id".to_string()))?
+        .as_u64("continuous_tracers/next_id")?;
+    tracers.injection_remainder = group
+        .find_attr("injection_remainder")
+        .ok_or_else(|| {
+            IoError::MissingPath("continuous_tracers/injection_remainder".to_string())
+        })?
+        .as_f64("continuous_tracers/injection_remainder")?;
+    for ii in 0..n {
+        tracers
+            .push_host(symbi_sim_tracers::ContinuousTracerRecord {
+                x: std::array::from_fn(|dd| x[ii * D + dd]),
+                step_x: std::array::from_fn(|dd| step_x[ii * D + dd]),
+                id: id[ii],
+                cohort: u16::try_from(cohort[ii]).map_err(|_| {
+                    IoError::Backend("continuous tracer cohort exceeds u16".to_string())
+                })?,
+                owner: crate::mass_transport::ContainerId(owner[ii]),
+                escaped: u8::try_from(escaped[ii]).map_err(|_| {
+                    IoError::Backend("continuous tracer escaped flag exceeds u8".to_string())
+                })?,
+                crossed_sink: u8::try_from(crossed_sink[ii]).map_err(|_| {
+                    IoError::Backend(
+                        "continuous tracer crossed-sink flag exceeds u8".to_string(),
+                    )
+                })?,
+                crossing_time: crossing_time[ii],
+                random_counter: random_counter[ii],
+            })
+            .map_err(IoError::Backend)?;
+    }
+    Ok(tracers)
+}
+
+/// whether the tile at whole-grid `offset` with `local` interior cells holds a tracer `owner`: a
+/// root-level cell owner is held by the tile containing the cell; an owner naming no cell
+/// (escaped, or a sink reservoir) by the first tile alone
+fn tile_holds_owner<const D: usize>(
+    owner: crate::mass_transport::ContainerId,
+    offset: [isize; D],
+    local: [usize; D],
+    cells: [usize; D],
+    first_tile: bool,
+) -> std::result::Result<bool, String> {
+    let Some((level, mut linear)) = symbi_sim_tracers::cell_container_address(owner) else {
+        return Ok(first_tile);
+    };
+    if level != 0 {
+        return Err(format!("a tracer owned on refinement level {level}; a partitioned restart repartitions root-level owners only"));
+    }
+    let mut held = true;
+    for ax in 0..D {
+        let index = (linear % cells[ax]) as isize;
+        linear /= cells[ax];
+        held &= index >= offset[ax] && index < offset[ax] + local[ax] as isize;
+    }
+    Ok(held)
 }
 
 /// restore the per-body kinematic and accretion state recorded under `bodies` over the
@@ -3410,10 +3448,70 @@ where
         }
         mhd.bface_initialized.store(true, std::sync::atomic::Ordering::Relaxed);
     }
-    if read_group(file, "tracers").is_ok() {
+    // the tracer populations: the tile keeps the tracers whose owner cell it holds, in stored
+    // order; a tracer owned by no cell (escaped, or in a sink reservoir) rides the first tile
+    let has_population = read_group(file, "tracers").is_ok() || read_group(file, "continuous_tracers").is_ok();
+    if has_population && level_index > 0 {
         return Err(IoError::Backend(format!(
-            "checkpoint '{path}' carries a tracer population; a partitioned restart does not repartition tracers"
+            "checkpoint '{path}' carries a tracer population; a partitioned restart repartitions root-level tracers only"
         )));
+    }
+    let local: [usize; D] = std::array::from_fn(|ax| (interior.spaces[ax].hi - interior.spaces[ax].lo) as usize);
+    let first_tile = offset.iter().all(|&o| o == 0);
+    let held = |owner: crate::mass_transport::ContainerId| -> Result<bool> {
+        tile_holds_owner(owner, offset, local, grid.cells, first_tile)
+            .map_err(|detail| IoError::Backend(format!("checkpoint '{path}': {detail}")))
+    };
+    if let Ok(group) = read_group(file, "tracers") {
+        let all = read_tracer_population::<D>(&group)?;
+        let mut own = symbi_sim_tracers::TracerSet::<D> {
+            weight: all.weight,
+            run_seed: all.run_seed,
+            next_id: all.next_id,
+            // one global remainder, booked on the first tile as the decomposed injection keeps it
+            injection_remainder: if first_tile { all.injection_remainder } else { 0.0 },
+            ..Default::default()
+        };
+        for ii in 0..all.len() {
+            if held(all.owner[ii])? {
+                own.x.push(all.x[ii]);
+                own.id.push(all.id[ii]);
+                own.cohort.push(all.cohort[ii]);
+                own.flags.push(all.flags[ii]);
+                own.owner.push(all.owner[ii]);
+                own.step_owner.push(all.step_owner[ii]);
+                own.step_flags.push(all.step_flags[ii]);
+            }
+        }
+        sim.tracers = Some(own);
+        let geometry = sim.geom.block_geometry(sim.physics.metric);
+        // the derived positions resolve each owner to its cell; the wrap flags take no part
+        let layout = symbi_sim_tracers::TransportLayout {
+            global_cells: grid.cells,
+            tile_offset: std::array::from_fn(|ax| offset[ax] as usize),
+            wraps: [false; D],
+            level: level_index as u8,
+        };
+        symbi_sim_tracers::refresh_derived_positions_store(&mut sim.store, &geometry, layout);
+    }
+    if let Ok(group) = read_group(file, "continuous_tracers") {
+        let mut all = read_continuous_population::<D, Mem>(&group)?;
+        let mut own = symbi_sim_tracers::ContinuousTracerSet::<D, Mem>::allocate(0, all.order)
+            .map_err(IoError::Backend)?;
+        own.weight = all.weight;
+        own.run_seed = all.run_seed;
+        own.next_id = all.next_id;
+        own.injection_remainder = all.injection_remainder;
+        let mut records = Vec::with_capacity(all.len);
+        while all.len > 0 {
+            records.push(all.swap_remove_host(all.len - 1).map_err(IoError::Backend)?);
+        }
+        for record in records.into_iter().rev() {
+            if held(record.owner)? {
+                own.push_host(record).map_err(IoError::Backend)?;
+            }
+        }
+        sim.continuous_tracers = Some(own);
     }
     if let Some(im) = sim.immersed.as_mut() {
         if let Ok(bodies) = read_group(file, "bodies") {

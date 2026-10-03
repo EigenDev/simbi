@@ -2362,6 +2362,7 @@ fn spawn_decomposed_continuous_injection<const D: usize, const DOF: usize, M: Me
     stores: &mut [&mut FieldStore<D, DOF, M, f64>],
     schedule: &Schedule<D>,
     ledgers: Vec<std::collections::BTreeMap<crate::mass_transport::ContainerId, f64>>,
+    dt: f64,
 ) -> Result<usize, String> {
     let mut injections = std::collections::BTreeMap::new();
     for ledger in ledgers {
@@ -2376,8 +2377,10 @@ fn spawn_decomposed_continuous_injection<const D: usize, const DOF: usize, M: Me
         let sh: Vec<&FieldStore<D, DOF, M, f64>> = stores.iter().map(|s| &**s).collect();
         tile_partition_of(&sh, schedule.counts())
     };
-    // positions of global cells from the grid's first tile, at the global index less its offset
+    // positions of global cells from the grid's first tile, at the global index less its offset,
+    // carried onto the moved mesh at the step's end as the single grid places them
     let first_geom = &stores[0].geom;
+    let (_, scale_end, _, offset_end) = crate::tracers::continuous_tracer_mesh_step(&*stores[0], dt);
     let template = stores
         .iter()
         .filter_map(|store| store.continuous_tracers.as_ref())
@@ -2392,11 +2395,8 @@ fn spawn_decomposed_continuous_injection<const D: usize, const DOF: usize, M: Me
         .map(|tracers| tracers.next_id)
         .max()
         .unwrap_or(0);
-    spawned.injection_remainder = stores
-        .iter()
-        .filter_map(|store| store.continuous_tracers.as_ref())
-        .map(|tracers| tracers.injection_remainder)
-        .sum();
+    // the remainder is one global value every tile carries
+    spawned.injection_remainder = template.injection_remainder;
     let key = crate::mass_transport::SamplingKey {
         run_seed: spawned.run_seed,
         epoch: stores[0].iteration | (1 << 62),
@@ -2414,9 +2414,10 @@ fn spawn_decomposed_continuous_injection<const D: usize, const DOF: usize, M: Me
                 linear /= n_global[dd];
                 index as isize - first_geom.index_offset[dd]
             });
+            let lo: [f64; D] = first_geom.stagger_coord(local, [crate::state::Loc::Face; D]);
             (
-                first_geom.stagger_coord(local, [crate::state::Loc::Face; D]),
-                std::array::from_fn(|dd| first_geom.cell_width(local, dd)),
+                std::array::from_fn(|dd| scale_end * lo[dd] + offset_end[dd]),
+                std::array::from_fn(|dd| scale_end * first_geom.cell_width(local, dd)),
             )
         },
         key,
@@ -2424,11 +2425,8 @@ fn spawn_decomposed_continuous_injection<const D: usize, const DOF: usize, M: Me
     for store in stores.iter_mut() {
         if let Some(tracers) = store.continuous_tracers.as_mut() {
             tracers.next_id = spawned.next_id;
-            tracers.injection_remainder = 0.0;
+            tracers.injection_remainder = spawned.injection_remainder;
         }
-    }
-    if let Some(tracers) = stores[0].continuous_tracers.as_mut() {
-        tracers.injection_remainder = spawned.injection_remainder;
     }
     while spawned.len > 0 {
         let record = spawned.swap_remove_host(spawned.len - 1)?;
@@ -2954,7 +2952,7 @@ where
             }
             migrate_continuous_tracers(stores, &schedule)
                 .unwrap_or_else(|err| panic!("continuous tracer migration failed: {err}"));
-            spawn_decomposed_continuous_injection(stores, &schedule, injection_ledgers)
+            spawn_decomposed_continuous_injection(stores, &schedule, injection_ledgers, dt)
                 .unwrap_or_else(|err| panic!("continuous tracer injection failed: {err}"));
         }
         let mut horizon_receipt = None;
@@ -4232,14 +4230,20 @@ mod tests {
             &mut [&mut lo, &mut hi],
             &schedule,
             vec![ledger, Default::default()],
+            0.0,
         )
         .unwrap();
 
         assert_eq!(spawned, 2);
         assert_eq!(lo.continuous_tracers.as_ref().unwrap().len, 0);
         assert_eq!(hi.continuous_tracers.as_ref().unwrap().len, 2);
+        // the one global remainder rides every tile, as the checkpoint combine requires
         assert!(
             (lo.continuous_tracers.as_ref().unwrap().injection_remainder - 0.05).abs() < 1.0e-15
+        );
+        assert_eq!(
+            hi.continuous_tracers.as_ref().unwrap().injection_remainder.to_bits(),
+            lo.continuous_tracers.as_ref().unwrap().injection_remainder.to_bits()
         );
         assert_eq!(hi.continuous_tracers.as_ref().unwrap().next_id, 11);
     }

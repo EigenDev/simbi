@@ -318,6 +318,10 @@ where
 {
     pub levels: Vec<LevelData<R, NDIM, DOF, M, E, S, Mem, K>>,
     injection_ledger: std::collections::BTreeMap<symbi_sim::mass_transport::ContainerId, f64>,
+    /// each level's boundary injection of its current step, held from the step tail ahead of the
+    /// finer subcycle until the continuous tracers have advanced: the injected tracers enter at
+    /// the step's end, as on the single-level driver
+    continuous_injection: std::collections::BTreeMap<usize, std::collections::BTreeMap<symbi_sim::mass_transport::ContainerId, f64>>,
     /// coarse-fine prolongation order (one above the evolution reconstruction).
     pub prolong_order: ProlongOrder,
     /// set while the coupled root step drives the ideal-MHD hierarchy operator: the material drain
@@ -1157,6 +1161,7 @@ where
                 prim_eq: None,
             }],
             injection_ledger: std::collections::BTreeMap::new(),
+            continuous_injection: std::collections::BTreeMap::new(),
             prolong_order: ProlongOrder::Plm,
             drain_suppressed: false,
             run_levels: None,
@@ -1634,6 +1639,7 @@ where
         Ok(Hierarchy {
             levels,
             injection_ledger: std::collections::BTreeMap::new(),
+            continuous_injection: std::collections::BTreeMap::new(),
             prolong_order,
             drain_suppressed: false,
             run_levels: None,
@@ -2576,6 +2582,7 @@ where
             }
         }
         self.injection_ledger.clear();
+        self.continuous_injection.clear();
         for ledger in &self.tracer_interface_ledgers {
             ledger.borrow_mut().clear();
         }
@@ -3481,7 +3488,10 @@ where
     /// coefficients of the continuous tracers.
     pub fn level_tail_pre(&mut self, level: usize, dt: f64) {
         let has_finer = level + 1 < self.run_levels();
-        if self.levels[level].state.has_tracers() {
+        if self.levels[level].state.continuous_tracers.is_some() {
+            let ledger = std::mem::take(&mut self.injection_ledger);
+            self.continuous_injection.insert(level, ledger);
+        } else if self.levels[level].state.has_tracers() {
             let ledger = std::mem::take(&mut self.injection_ledger);
             let layout = self.tracer_layout(level);
             let geometry = self.levels[level]
@@ -3606,6 +3616,7 @@ where
     pub fn level_tail_post(&mut self, level: usize, dt: f64) {
         if self.levels[level].state.continuous_tracers.is_some() {
             self.advance_level_continuous_tracers(level, dt);
+            self.spawn_level_continuous_injection(level);
         }
         self.sample_per_level_censuses(level);
         self.level_clock(level, dt);
@@ -3733,6 +3744,36 @@ where
 
     /// advance particles owned by one level over exactly that level's accepted
     /// interval. hierarchy ownership remains frozen until the root step ends.
+    /// the level's held boundary injection as continuous tracers placed on the moved mesh, then
+    /// the spawn bookkeeping (next id, remainder) carried to every level's population
+    fn spawn_level_continuous_injection(&mut self, level: usize) {
+        let ledger = self.continuous_injection.remove(&level).unwrap_or_default();
+        let layout = self.tracer_layout(level);
+        let geometry = self.levels[level]
+            .state
+            .geom
+            .block_geometry(self.levels[level].state.physics.metric);
+        symbi_sim::tracers::spawn_continuous_boundary_injection_store(
+            &mut self.levels[level].state.store,
+            &geometry,
+            layout,
+            ledger,
+        )
+        .unwrap_or_else(|detail| panic!("continuous tracer boundary injection: {detail}"));
+        let source = self.levels[level]
+            .state
+            .continuous_tracers
+            .as_ref()
+            .expect("continuous tracers remain attached through the level step");
+        let (next_id, injection_remainder) = (source.next_id, source.injection_remainder);
+        for data in &mut self.levels {
+            if let Some(tracers) = data.state.continuous_tracers.as_mut() {
+                tracers.next_id = next_id;
+                tracers.injection_remainder = injection_remainder;
+            }
+        }
+    }
+
     fn advance_level_continuous_tracers(&mut self, level: usize, dt: f64) {
         let mut tracers = self.levels[level]
             .state
