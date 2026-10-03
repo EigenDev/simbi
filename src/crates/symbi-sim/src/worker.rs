@@ -178,8 +178,8 @@ pub fn refuse<const D: usize, const DOF: usize, M: MemorySpace, K: KernelSet<D, 
             Some(format!("the {:?} spacetime", store.geom.spacetime))
         } else if crate::driver::horizon_request(store).is_some() {
             Some("a horizon body".to_string())
-        } else if store.continuous_tracers.is_some() && (store.geom.coords != symbi_geometry::Geometry::Cartesian || store.geom.maps.is_some()) {
-            Some("an Ito tracer population off a uniform cartesian grid".to_string())
+        } else if store.continuous_tracers.is_some() && store.geom.coords != symbi_geometry::Geometry::Cartesian {
+            Some("an Ito tracer population on a curvilinear chart".to_string())
         } else if store.tracers.is_some() && store.geom.coords != symbi_geometry::Geometry::Cartesian {
             Some("a tracer population on a curvilinear chart".to_string())
         } else if let Some(property) = crate::stage::post_step_refresh_needed(store, *kernel) {

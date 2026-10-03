@@ -452,7 +452,6 @@ pub fn migrate_continuous<const D: usize, const DOF: usize, M: MemorySpace, L: L
     deadline: Duration,
 ) -> Result<Migrations, String> {
     let cells = plan_cells(plan);
-    let dx = stores[0].geom.dx;
     let width = 1 + continuous_words(D);
     let mut local = Vec::with_capacity(stores.len());
     for (k, store) in stores.iter_mut().enumerate() {
@@ -474,7 +473,8 @@ pub fn migrate_continuous<const D: usize, const DOF: usize, M: MemorySpace, L: L
                 if position != record.x {
                     tracers.set_position_host(ii, position)?;
                 }
-                let cell: [usize; D] = std::array::from_fn(|dd| ((position[dd] - bounds[dd].0) / dx[dd]).floor() as usize);
+                // the whole-grid cell the position lies in, on a uniform or a mapped axis
+                let cell: [usize; D] = std::array::from_fn(|dd| (store.geom.cell_at(dd, position[dd]) + store.geom.index_offset[dd]) as usize);
                 let owner = crate::tracers::cell_container_id(crate::tracers::cell_address(cell, cells), 0);
                 let target = owner_tile(plan, cells, owner);
                 if target == source {

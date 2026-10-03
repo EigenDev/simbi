@@ -5,7 +5,7 @@
 # drifting across a box with outflow faces carries a seeded population; gas
 # entering through the inner x face injects new tracers. for the discrete
 # scheme (newtonian and isothermal gas) and the second- and third-order ito
-# schemes, dense and two-seed populations, two workers, a 2x2 launch and a
+# schemes, dense, two-seed and geometrically graded, two workers, a 2x2 launch and a
 # launch resumed onto three uneven workers publish the single grid's gas and
 # tracer population bit for bit, compared by id: positions, ownership, noise
 # counters, the injection remainder and the id counter. ito tracers crossing a
@@ -37,7 +37,7 @@ from simbi.simulation.tests.test_tiled_tracers import GROUP, INJECTING, RESOLUTI
 
 pytestmark = pytest.mark.simulation
 
-LAUNCHED = ["DiscreteDrift", "IsoDrift", "SparseDrift", "Ito2Drift", "Ito3Drift", "SparseIto2Drift"]
+LAUNCHED = ["DiscreteDrift", "IsoDrift", "SparseDrift", "Ito2Drift", "Ito3Drift", "SparseIto2Drift", "GradedDrift", "GradedIto2Drift"]
 EXTRA = '''
 from simbi_configs.examples.isothermal.imhd_orszag_tang import IsothermalOrszagTang
 from simbi_configs.examples.newtonian.nmhd_orszag_tang import NewtonianOrszagTang

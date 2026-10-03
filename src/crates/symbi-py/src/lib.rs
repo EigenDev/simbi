@@ -10834,9 +10834,6 @@ fn validate_launch_scope(cfg: &Config) -> Result<(), String> {
     // the launched gas, isothermal and magnetized tiles carry the discrete and the ito
     // populations on a flat grid
     if cfg.n_tracers > 0 {
-        if cfg.tracer_scheme != "discrete" && axis_maps_any(cfg) {
-            return refused(&format!("the {} tracer scheme on a non-uniform spacing", cfg.tracer_scheme));
-        }
         if cfg.refinement_enabled {
             return refused("a tracer population with mesh refinement");
         }

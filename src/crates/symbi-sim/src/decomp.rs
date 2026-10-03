@@ -2115,18 +2115,13 @@ fn migrate_continuous_tracers<const D: usize, const DOF: usize, M: MemorySpace>(
     if !M::IS_HOST_ACCESSIBLE {
         return Err("continuous tracer migration requires host-accessible memory".to_string());
     }
-    if stores.iter().any(|store| {
-        store.geom.coords != symbi_geometry::Geometry::Cartesian || store.geom.maps.is_some()
-    }) {
-        return Err(
-            "continuous tracer migration requires a uniform Cartesian decomposition".to_string(),
-        );
+    if stores.iter().any(|store| store.geom.coords != symbi_geometry::Geometry::Cartesian) {
+        return Err("continuous tracer migration requires a Cartesian decomposition".to_string());
     }
     let partition = {
         let sh: Vec<&FieldStore<D, DOF, M, f64>> = stores.iter().map(|s| &**s).collect();
         tile_partition_of(&sh, schedule.counts())
     };
-    let dx = stores[0].geom.dx;
     let global_lo: [f64; D] = std::array::from_fn(|dd| {
         stores
             .iter()
@@ -2180,8 +2175,9 @@ fn migrate_continuous_tracers<const D: usize, const DOF: usize, M: MemorySpace>(
                     unsafe { *tracers.x[dd].as_mut_ptr::<f64>().add(ii) = position[dd] };
                 }
             }
+            // the whole-grid cell the position lies in, on a uniform or a mapped axis
             let global_cell: [usize; D] = std::array::from_fn(|dd| {
-                ((position[dd] - global_lo[dd]) / dx[dd]).floor() as usize
+                (store.geom.cell_at(dd, position[dd]) + store.geom.index_offset[dd]) as usize
             });
             let target = flatten(partition.tile_of(global_cell), partition.counts());
             let owner = crate::tracers::cell_container_id(

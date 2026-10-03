@@ -10,7 +10,8 @@
 # resumed from a checkpoint written on two tiles. the isothermal gas carries
 # the discrete population the same way; a population of two seeds on three
 # tiles leaves a tile with none, which still keys the ancestry blend with the
-# population's seed. the traced kelvin-helmholtz example (ito-3, cohorts,
+# population's seed. both schemes ride a grid graded geometrically along
+# both axes the same way. the traced kelvin-helmholtz example (ito-3, cohorts,
 # doubly periodic) runs on two tiles as on one grid.
 #
 # run: pytest -m simulation simbi/simulation/tests/test_tiled_tracers.py
@@ -39,7 +40,7 @@ from typing import Annotated
 from pydantic import computed_field
 
 from simbi import ProblemParam
-from simbi.types import Regime, TracerScheme
+from simbi.types import CellSpacing, Regime, TracerScheme
 from simbi_configs.examples.newtonian.refined_blast import RefinedBlast
 
 
@@ -97,6 +98,19 @@ class IsoDrift(Drift):
         return gas
 
 
+class GradedDrift(DiscreteDrift):
+    """the drift on cells widening geometrically along x and narrowing along y"""
+
+    x1_spacing: Annotated[CellSpacing, ProblemParam(CellSpacing.GEOMETRIC, description="graded x")]
+    x1_spacing_ratio: Annotated[float, ProblemParam(1.03, description="x growth")]
+    x2_spacing: Annotated[CellSpacing, ProblemParam(CellSpacing.GEOMETRIC, description="graded y")]
+    x2_spacing_ratio: Annotated[float, ProblemParam(0.98, description="y growth")]
+
+
+class GradedIto2Drift(GradedDrift, Ito2Drift):
+    """the ito drift on the graded cells"""
+
+
 class SparseDrift(Drift):
     @computed_field
     @property
@@ -117,9 +131,11 @@ GROUP = {
     "IsoDrift": "tracers",
     "SparseDrift": "tracers",
     "SparseIto2Drift": "continuous_tracers",
+    "GradedDrift": "tracers",
+    "GradedIto2Drift": "continuous_tracers",
 }
 # the injection arm needs a population fine enough that ten steps of inflow spawn a tracer
-INJECTING = {"DiscreteDrift", "Ito2Drift", "Ito3Drift", "IsoDrift"}
+INJECTING = {"DiscreteDrift", "Ito2Drift", "Ito3Drift", "IsoDrift", "GradedDrift", "GradedIto2Drift"}
 
 
 @pytest.fixture
