@@ -2521,6 +2521,127 @@ pub fn evolve_scheduled<const D: usize, const DOF: usize, M, K, T, F>(
     t_final: f64,
     interval: u64,
     transport: &T,
+    on_checkpoint: F,
+) -> crate::run_diagnostics::RunDiagnostics
+where
+    M: MemorySpace,
+    K: KernelSet<D, DOF, M, f64>,
+    T: HaloTransport,
+    F: FnMut(u64, f64, &[&FieldStore<D, DOF, M, f64>]) -> ControlFlow<()>,
+    symbi_geometry::Cartesian: symbi_geometry::Metric<f64, D>,
+{
+    evolve_scheduled_hooked(
+        stores, kernels, schedule, devices, ts, start_time, t_final, interval, transport,
+        &mut |_, _, _, _| {}, on_checkpoint,
+    )
+}
+
+/// the stage-entry contract over every tile: primitives and physical ghosts, the cut halos, and
+/// the physical ghosts again at the cut corners
+pub fn prime_tiles<const D: usize, const DOF: usize, M, K, T>(
+    tiles: &[&FieldStore<D, DOF, M, f64>],
+    kernels: &[&K],
+    schedule: &Schedule<D>,
+    devices: &[i32],
+    transport: &T,
+) where
+    M: MemorySpace,
+    K: KernelSet<D, DOF, M, f64>,
+    T: HaloTransport,
+{
+    for i in 0..tiles.len() {
+        symbi_xpu::with_device(devices[i], || {
+            kernels[i].c2p(tiles[i]);
+            kernels[i].ghost_fill(tiles[i]);
+        });
+    }
+    drain_devices::<M>(devices);
+    exchange_grid(tiles, schedule, devices, transport);
+    flip_polar_bands(tiles, kernels, schedule, devices);
+    for i in 0..tiles.len() {
+        symbi_xpu::with_device(devices[i], || kernels[i].ghost_fill(tiles[i]));
+    }
+    drain_devices::<M>(devices);
+}
+
+/// one forward-euler stage of length `dt` over every tile, split as the march splits it: every
+/// tile marks its troubled cells, the flags cross the cuts, and every tile corrects. the stored
+/// clocks stand at their entry afterwards. an admissibility redo that rejects the stage on any
+/// tile is an error.
+pub fn probe_stage<const D: usize, const DOF: usize, M, K, T>(
+    tiles: &[&FieldStore<D, DOF, M, f64>],
+    kernels: &[&K],
+    schedule: &Schedule<D>,
+    devices: &[i32],
+    transport: &T,
+    dt: f64,
+) -> Result<(), String>
+where
+    M: MemorySpace,
+    K: KernelSet<D, DOF, M, f64>,
+    T: HaloTransport,
+{
+    let n = tiles.len();
+    let args = crate::stage::StageArgs {
+        dt,
+        a0: 0.0,
+        ac: 1.0,
+        stage: 0,
+        n_stages: 1,
+        injection_weight: 1.0,
+        allow_elision: false,
+        exit_fraction: 1.0,
+    };
+    let mut troubled = 0u64;
+    for i in 0..n {
+        troubled += symbi_xpu::with_device(devices[i], || {
+            crate::stage::fold_stage_through_mark(tiles[i], kernels[i], args, &mut |_| {})
+        });
+    }
+    let mut cut_trouble = vec![false; n];
+    if troubled > 0 {
+        drain_devices::<M>(devices);
+        let received = exchange_trouble(tiles, schedule, devices, transport);
+        drain_devices::<M>(devices);
+        for i in 0..n {
+            cut_trouble[i] = symbi_xpu::with_device(devices[i], || {
+                received[i].iter().any(|region| kernels[i].fofc_flags_in(tiles[i], region) > 0)
+            });
+        }
+    }
+    let mut rejected = false;
+    for i in 0..n {
+        let outcome = symbi_xpu::with_device(devices[i], || {
+            crate::stage::fold_stage_from_correction(tiles[i], kernels[i], args, cut_trouble[i], &mut |_| {})
+        });
+        rejected |= outcome != crate::stage::StageOutcome::Accepted;
+        tiles[i].reset_state_clock();
+    }
+    drain_devices::<M>(devices);
+    if rejected {
+        return Err("the probe stage was rejected by the admissibility redo".to_string());
+    }
+    Ok(())
+}
+
+/// a tile's stage hook: called with the tile's flat index, its store, the hook point and the
+/// stage's arguments at every hook point of every stage fold, the admissibility redo's included
+pub type TileStageHook<'h, const D: usize, const DOF: usize, M> =
+    dyn FnMut(usize, &FieldStore<D, DOF, M, f64>, crate::stage::HookPoint, crate::stage::StageArgs) + 'h;
+
+/// `evolve_scheduled` with a per-tile stage hook: the hook a stationary target's residual rides
+#[allow(clippy::too_many_arguments)]
+pub fn evolve_scheduled_hooked<const D: usize, const DOF: usize, M, K, T, F>(
+    stores: &mut [&mut FieldStore<D, DOF, M, f64>],
+    kernels: &[&K],
+    schedule: &Schedule<D>,
+    devices: &[i32],
+    ts: Timestepping,
+    start_time: f64,
+    t_final: f64,
+    interval: u64,
+    transport: &T,
+    stage_hook: &mut TileStageHook<'_, D, DOF, M>,
     mut on_checkpoint: F,
 ) -> crate::run_diagnostics::RunDiagnostics
 where
@@ -2740,20 +2861,20 @@ where
                     // the stage's complete EMF and its curl, across every tile holding a copy
                     for i in 0..n {
                         symbi_xpu::with_device(devices[i], || {
-                            crate::stage::fold_stage_through_emf(sh[i], kernels[i], args, &mut |_| {})
+                            crate::stage::fold_stage_through_emf(sh[i], kernels[i], args, &mut |hp| stage_hook(i, sh[i], hp, args))
                         });
                     }
                     drain_devices::<M>(devices);
                     crate::axis_ring::reconcile_across(&sh);
                     for i in 0..n {
                         troubled += symbi_xpu::with_device(devices[i], || {
-                            crate::stage::fold_stage_curl_through_mark(sh[i], kernels[i], args, &mut |_| {})
+                            crate::stage::fold_stage_curl_through_mark(sh[i], kernels[i], args, &mut |hp| stage_hook(i, sh[i], hp, args))
                         });
                     }
                 } else {
                     for i in 0..n {
                         troubled += symbi_xpu::with_device(devices[i], || {
-                            crate::stage::fold_stage_through_mark(sh[i], kernels[i], args, &mut |_| {})
+                            crate::stage::fold_stage_through_mark(sh[i], kernels[i], args, &mut |hp| stage_hook(i, sh[i], hp, args))
                         });
                     }
                 }
@@ -2777,7 +2898,7 @@ where
                             kernels[i],
                             args,
                             cut_trouble[i],
-                            &mut |_| {},
+                            &mut |hp| stage_hook(i, sh[i], hp, args),
                         )
                     });
                     retry |= outcome == crate::stage::StageOutcome::RetryStep;

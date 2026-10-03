@@ -5717,6 +5717,172 @@ macro_rules! build_and_run_hydro {
     }};
 }
 
+/// the halo schedule of a decomposed run on its chart: a polar axis face whose azimuth is cut
+/// hands its ghost band to the schedule's antipodal legs, so the pole tiles' axis faces become
+/// cuts their own fill skips, and the seam names the azimuth slabs the legs rotate across
+fn tiled_schedule<const D: usize, const DOF: usize, Mem: MemorySpace>(
+    cfg: &Config,
+    counts: [usize; D],
+    stores: &mut [&mut symbi_sim::state::FieldStore<D, DOF, Mem, f64>],
+) -> symbi::sim::decomp::Schedule<D> {
+    let phys = boundaries_nd::<D>(&cfg.boundaries);
+    let topology = chart_topology(cfg, &phys, counts);
+    let seam = polar_seam_of(cfg, counts, &stores.iter().map(|s| &**s).collect::<Vec<_>>());
+    if let Some(seam) = seam.as_ref() {
+        for (flat, store) in stores.iter_mut().enumerate() {
+            let tc = symbi::sim::decomp::unflatten(flat, counts);
+            for (side, on_pole) in [(0usize, tc[seam.mirror] == 0), (1usize, tc[seam.mirror] + 1 == counts[seam.mirror])] {
+                if seam.sides[side] && on_pole {
+                    store.boundaries.0[seam.mirror][side] = BoundaryType::CoarseFine;
+                }
+            }
+        }
+    }
+    symbi::sim::decomp::Schedule::derive_with_seam(counts, stores[0].geom.ng, &topology, seam)
+}
+
+/// a stationary target's discrete imbalance on every tile, as the single hierarchy reads it off
+/// its level: the tiles already hold the target on their interiors; they are primed across the
+/// cuts, each keeps the target's anchor state, their interface fluxes are evaluated, and one
+/// forward-euler stage of the tiled pipeline at the smallest cfl step of any tile (the single
+/// grid's step) advances them, so `R = (target - advanced) / dt` on each tile's cells. returns
+/// each tile's anchor and residual; the caller restores the state it saved.
+fn tiled_equilibrium_probe<const D: usize, const DOF: usize, Mem, K>(
+    cfg: &Config,
+    stores: &mut [&mut symbi_sim::state::FieldStore<D, DOF, Mem, f64>],
+    kernels: &[&K],
+    counts: [usize; D],
+) -> Result<
+    (
+        Vec<symbi::sim::refinement::equilibrium::GasState<D, DOF, Mem>>,
+        Vec<symbi_sim::state::ConsFieldsGeneric<D, DOF, Mem>>,
+    ),
+    String,
+>
+where
+    Mem: MemorySpace + Sync,
+    K: KernelSet<D, DOF, Mem, f64>,
+{
+    use symbi::sim::refinement::equilibrium::{imbalance_from_stage, save_gas_state};
+    // the probe is no accepted evolution: it runs before the march opens its guard scope, so no
+    // guard act is booked, and a stage books no body delta (feedback and the surface operations
+    // follow the stages), both checked below; the restored state and the reset stage clock leave
+    // the tiles at their build state
+    if symbi_sim::guard_ledger::scope_is_open() {
+        return Err("the stationary target's probe ran inside a guard scope, where its acts would be booked".to_string());
+    }
+    let schedule = tiled_schedule(cfg, counts, stores);
+    let devices: Vec<i32> = (0..stores.len() as i32).collect();
+    #[cfg(feature = "gpu")]
+    let transport = symbi::sim::decomp::PeerCopy;
+    #[cfg(not(feature = "gpu"))]
+    let transport = symbi::sim::decomp::LocalCopy;
+    let sh: Vec<&symbi_sim::state::FieldStore<D, DOF, Mem, f64>> = stores.iter().map(|s| &**s).collect();
+    symbi::sim::decomp::prime_tiles(&sh, kernels, &schedule, &devices, &transport);
+    let anchors = sh
+        .iter()
+        .map(|s| save_gas_state(*s))
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|e| format!("stationary target anchor: {e:?}"))?;
+    for (store, kernel) in sh.iter().zip(kernels) {
+        kernel.wave_speeds(*store);
+        for dd in 0..D {
+            kernel.flux(*store, dd);
+        }
+    }
+    let probe_dt = sh.iter().zip(kernels).map(|(store, kernel)| kernel.cfl(*store)).fold(f64::INFINITY, f64::min);
+    if !(probe_dt.is_finite() && probe_dt > 0.0) {
+        return Err(format!(
+            "the stationary target has no finite cfl step ({probe_dt:.3e}), so it cannot be advanced to read off its imbalance"
+        ));
+    }
+    symbi::sim::decomp::probe_stage(&sh, kernels, &schedule, &devices, &transport, probe_dt)
+        .map_err(|e| format!("the stationary target is not a state the scheme can carry: {e}"))?;
+    if sh.iter().any(|store| store.immersed.as_ref().is_some_and(|im| !im.diagnostics.consolidate().is_empty())) {
+        return Err("the stationary target's probe booked a body delta".to_string());
+    }
+    // the probe's step, reported as the single hierarchy reports its level's
+    eprintln!("SIMBI equilibrium probe: level=0 dt_bits={:016x}", probe_dt.to_bits());
+    for (k, store) in sh.iter().enumerate() {
+        let err = symbi_sim::hydro_ops::scan_c2p_errors(*store);
+        if err.is_err() {
+            return Err(format!(
+                "advancing the stationary target by one cfl step left an unrecoverable state on tile {k} ({err}), so its imbalance cannot be read off a linear response"
+            ));
+        }
+    }
+    let residuals = sh
+        .iter()
+        .zip(&anchors)
+        .map(|(store, anchor)| imbalance_from_stage(anchor.cons(), &store.fields.cons, &store.geom.allocated, probe_dt))
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|e| format!("stationary target residual: {e:?}"))?;
+    Ok((anchors, residuals))
+}
+
+/// the tiles' stationary-target residuals when the run declares a target: each tile's interior is
+/// seeded from the declared expression at its cell centres (t = 0; the whole-grid origin and
+/// index offset place a whole-grid cell bit for bit), the tiled probe reads the imbalance off,
+/// and the tiles' own state comes back; a fresh start seeded from the target takes the anchor.
+macro_rules! tiled_equilibrium {
+    ($tiles:expr, $cfg:expr, $counts:expr, $d:literal) => {{
+        let cfg: &Config = $cfg;
+        match cfg.equilibrium_json.as_ref() {
+            None => None,
+            Some(target) => {
+                use symbi::sim::refinement::equilibrium::{overwrite, restore_gas_state, save_gas_state};
+                if !cfg.chi_ic.is_empty() {
+                    return Err("the passive scalar carries no declared target concentration, so its interface flux has nothing to difference against".to_string());
+                }
+                let declared = symbi_source_compile::EquilibriumConfig::from_json(target)
+                    .map_err(|e| format!("stationary target parse: {e}"))?;
+                let has_energy = $tiles[0].0.fields.cons.has_energy();
+                let expected = 1 + $d + usize::from(has_energy);
+                if declared.outputs.len() != expected || declared.dim != $d {
+                    return Err(format!(
+                        "the declared stationary target supplies {} primitive components on a {}-dimensional grid; this run needs {expected} on a {}-dimensional grid",
+                        declared.outputs.len(),
+                        declared.dim,
+                        $d
+                    ));
+                }
+                let expression = declared.to_expression().map_err(|e| format!("the declared stationary target does not load: {e:?}"))?;
+                let saved = $tiles
+                    .iter()
+                    .map(|(s, _)| save_gas_state(&**s))
+                    .collect::<Result<Vec<_>, _>>()
+                    .map_err(|e| format!("stationary target save: {e:?}"))?;
+                for (s, _) in $tiles.iter() {
+                    s.seed_cells(|x| {
+                        let at = |aa: usize| x.get(aa).copied().unwrap_or(0.0);
+                        symbi_hydro::state::PrimFromSlots::from_slots(&expression.eval(at(0), at(1), at(2), 0.0))
+                    });
+                }
+                let (anchors, residuals) = {
+                    let mut stores = Vec::with_capacity($tiles.len());
+                    let mut kernels = Vec::with_capacity($tiles.len());
+                    for (s, k) in $tiles.iter_mut() {
+                        stores.push(&mut **s);
+                        kernels.push(&*k);
+                    }
+                    tiled_equilibrium_probe(cfg, &mut stores, &kernels, $counts)?
+                };
+                for ((s, _), state) in $tiles.iter().zip(&saved) {
+                    restore_gas_state(&**s, state);
+                }
+                // a restart restores the checkpoint after this point, so a resumed run continues from
+                // its own state and the seed applies only to a fresh start
+                if cfg.seed_from_equilibrium {
+                    for ((s, _), anchor) in $tiles.iter().zip(&anchors) {
+                        overwrite(anchor.cons(), &s.fields.cons, &s.geom.allocated);
+                    }
+                }
+                Some(residuals)
+            }
+        }
+    }};
+}
+
 /// the regime-agnostic decomposed run loop: evolve N pre-built tiles in
 /// lockstep with the universal `PeerCopy` transport (real peer where a link exists, staged over
 /// managed memory otherwise -- so the same code runs on one card with `--ngpus 2` and on a node
@@ -5729,6 +5895,7 @@ fn run_decomposed_loop<R, const D: usize, const DOF: usize, M, E, S, Mem, K>(
     offsets: Vec<[isize; D]>,
     grid: symbi_sim::checkpoint::GlobalGrid<D>,
     counts: [usize; D],
+    residuals: Option<Vec<symbi_sim::state::ConsFieldsGeneric<D, DOF, Mem>>>,
 ) -> Result<symbi_sim::run_diagnostics::RunDiagnostics, String>
 where
     R: Regime<f64, D>,
@@ -5739,7 +5906,7 @@ where
     K: KernelSet<D, DOF, Mem, f64>,
     Cartesian: Metric<f64, D>,
 {
-    use symbi::sim::decomp::{Schedule, enable_peer_mesh, evolve_scheduled};
+    use symbi::sim::decomp::{enable_peer_mesh, evolve_scheduled_hooked};
     use symbi_sim::checkpoint::{
         LevelTiles, TileView, load_partitioned_level, write_partitioned_checkpoint,
     };
@@ -5890,21 +6057,7 @@ where
             stores.push(&mut **s);
             kernels.push(&*k);
         }
-        // a polar axis face whose azimuth is cut hands its ghost band to the schedule's
-        // antipodal legs: the pole tiles' axis faces become cuts so their own fill skips the
-        // band, and the seam names the azimuth slabs the legs rotate across.
-        let seam = polar_seam_of(cfg, counts, &stores.iter().map(|s| &**s).collect::<Vec<_>>());
-        if let Some(seam) = seam.as_ref() {
-            for (flat, store) in stores.iter_mut().enumerate() {
-                let tc = symbi::sim::decomp::unflatten(flat, counts);
-                for (side, on_pole) in [(0usize, tc[seam.mirror] == 0), (1usize, tc[seam.mirror] + 1 == counts[seam.mirror])] {
-                    if seam.sides[side] && on_pole {
-                        store.boundaries.0[seam.mirror][side] = BoundaryType::CoarseFine;
-                    }
-                }
-            }
-        }
-        let schedule = Schedule::derive_with_seam(counts, stores[0].geom.ng, &topology, seam);
+        let schedule = tiled_schedule(cfg, counts, &mut stores);
         reporter.milestone(&format!(
             "halo schedule: {} legs{}; priming primitives, halos and the first exchange",
             schedule.legs().len(),
@@ -5921,7 +6074,23 @@ where
             store.retry_exclusion = exclusion;
         }
         announce_retry_guard(&*stores[0]);
-        evolve_scheduled(
+        // a declared stationary target's residual, added back before the recovery of every stage
+        // (the admissibility redo's included): the target becomes an exact fixed point of the
+        // tiled scheme as of the single grid's
+        let mut stage_hook = |tile: usize,
+                              store: &symbi_sim::state::FieldStore<D, DOF, Mem, f64>,
+                              point: symbi_sim::stage::HookPoint,
+                              args: symbi_sim::stage::StageArgs| {
+            if let (symbi_sim::stage::HookPoint::BeforeC2p, Some(residuals)) = (point, residuals.as_ref()) {
+                symbi::sim::refinement::equilibrium::accumulate(
+                    &residuals[tile],
+                    &store.fields.cons,
+                    &store.geom.interior,
+                    args.ac * args.dt,
+                );
+            }
+        };
+        evolve_scheduled_hooked(
             &mut stores,
             &kernels,
             &schedule,
@@ -5931,6 +6100,7 @@ where
             cfg.t_final,
             1,
             &transport,
+            &mut stage_hook,
             |iter, time, sh| {
                 reporter.progress(iter, time);
                 // bounded march: stop after `max_steps` root iterations (0 = unbounded), ahead of
@@ -6893,7 +7063,8 @@ macro_rules! build_and_run_hydro_decomposed {
         // hand the built tiles + output sim to the regime-agnostic decomposed loop (evolve +
         // gather + checkpoint, universal transport). every regime shares this loop.
         }
-        run_decomposed_loop(cfg, tiles, offsets, grid, counts)
+        let residuals = tiled_equilibrium!(tiles, cfg, counts, $d);
+        run_decomposed_loop(cfg, tiles, offsets, grid, counts, residuals)
     }};
 }
 
@@ -7738,7 +7909,7 @@ macro_rules! build_and_run_mhd_decomposed {
             }
         }
         }
-        run_decomposed_loop(cfg, tiles, offsets, grid, counts)
+        run_decomposed_loop(cfg, tiles, offsets, grid, counts, None)
     }};
 }
 
@@ -7930,7 +8101,7 @@ macro_rules! build_and_run_imhd_decomposed {
             }
         }
         }
-        run_decomposed_loop(cfg, tiles, offsets, grid, counts)
+        run_decomposed_loop(cfg, tiles, offsets, grid, counts, None)
     }};
 }
 
@@ -8295,7 +8466,8 @@ macro_rules! build_and_run_iso_decomposed {
 
         let offsets = tile_offsets(&partition);
         let grid = decomposed_grid::<$d>(cfg, tiles[0].0.geom.ng);
-        run_decomposed_loop(cfg, tiles, offsets, grid, counts)
+        let residuals = tiled_equilibrium!(tiles, cfg, counts, $d);
+        run_decomposed_loop(cfg, tiles, offsets, grid, counts, residuals)
     }};
 }
 
@@ -9259,11 +9431,22 @@ fn dispatch_and_run(
     // decomposed equivalence gate, so the combination is refused rather than run unbalanced.
     // a census reduces over the whole grid; the tiled drivers carry no cross-tile census, so a
     // configured one is refused rather than left unrecorded
-    // the tiled drivers install no equilibrium prescription and step no magnetic slip body: both
-    // are refused by name rather than run without them
+    // the flat gas and isothermal tiles read a stationary target's residual off the tiled pipeline;
+    // the refined and magnetized tiles carry none, and a fresh start seeded from the target lays
+    // the perturbation on the tiles before the target exists: each is refused by name
     if cfg.n_gpus > 1 && cfg.equilibrium_json.is_some() {
-        return Err("an equilibrium prescription with gpus > 1 awaits its tiled residual; run it on one device".to_string());
+        if cfg.refinement_enabled || !matches!(cfg.regime.as_str(), "newtonian" | "rhd" | "isothermal") {
+            return Err(format!(
+                "an equilibrium prescription with gpus > 1 awaits its tiled residual on the {} regime{}; run it on one device",
+                cfg.regime,
+                if cfg.refinement_enabled { " with mesh refinement" } else { "" }
+            ));
+        }
+        if cfg.seed_from_equilibrium && cfg.perturbation_json.is_some() {
+            return Err("a perturbation over a state seeded from the equilibrium prescription with gpus > 1: the tiles lay the perturbation before the target is seeded; run it on one device".to_string());
+        }
     }
+    // the tiled drivers step no magnetic slip body: refused by name rather than run without it
     if cfg.n_gpus > 1 && cfg.bodies.iter().any(|b| b.magnetic_slip.is_some()) {
         return Err("a magnetic slip body with gpus > 1 awaits its tiled slip step; run it on one device".to_string());
     }

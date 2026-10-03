@@ -4386,7 +4386,7 @@ where
 
         let mut flux_eq = Vec::with_capacity(self.levels.len());
         let mut residual_eq = Vec::with_capacity(self.levels.len());
-        for (level, anchored) in self.levels.iter().zip(&anchor) {
+        for (ll, (level, anchored)) in self.levels.iter().zip(&anchor).enumerate() {
             level.kernels.wave_speeds(&level.state);
             for dd in 0..NDIM {
                 level.kernels.flux(&level.state, dd);
@@ -4400,6 +4400,11 @@ where
             // state unphysical and the response stops being linear, a far smaller one loses the
             // difference `qt - advanced` to cancellation.
             let probe_dt = level.kernels.cfl(&level.state);
+            // the probe's step per level: the timestep a decomposed run's probe must reproduce
+            eprintln!(
+                "SIMBI equilibrium probe: level={ll} dt_bits={:016x}",
+                probe_dt.to_bits()
+            );
             assert!(
                 probe_dt.is_finite() && probe_dt > 0.0,
                 "the stationary target has no finite cfl step ({probe_dt:.3e}), so it cannot be \
