@@ -6605,9 +6605,12 @@ macro_rules! build_and_run_hydro_decomposed_refined {
                 let sim = Sim::build($regime, $eos, $geom)
                     .cells(m)
                     .ghosts(ghost_width(cfg))
-                    .origin(origin)
+                    // the whole grid's origin and the tile's first cell: every level places its
+                    // cells where the single hierarchy places them, bit for bit
+                    .origin(std::array::from_fn(|ax| cfg.x_lo[ax]))
                     .spacing(dx)
-                    .coord_maps(tile_axis_maps::<$d>(cfg, tile_lo))
+                    .coord_maps(axis_maps::<$d>(cfg))
+                    .index_offset(std::array::from_fn(|ax| tile_lo[ax] as isize))
                     .boundaries(bnd)
                     .cfl(cfg.cfl)
                     .timestepping(cfg.timestepping)
@@ -6740,6 +6743,35 @@ macro_rules! build_and_run_hydro_decomposed_refined {
                 &seed_transport,
             )
             .map_err(|e| format!("decomposed fine seed: {e:?}"))?;
+            // the declared stationary target on every level of every tile, its imbalance read off
+            // the tiled probe per level; a fresh run seeded from it starts there, as the single
+            // hierarchy does
+            if let Some(target) = cfg.equilibrium_json.as_ref() {
+                use symbi_hydro::state::PrimFromSlots;
+                let declared = symbi_source_compile::EquilibriumConfig::from_json(target)
+                    .map_err(|e| format!("stationary target parse: {e}"))?;
+                let has_energy = tiles[0].levels[0].state.fields.cons.has_energy();
+                let expected = 1 + $d + usize::from(has_energy);
+                if declared.outputs.len() != expected || declared.dim != $d {
+                    return Err(format!(
+                        "the declared stationary target supplies {} components on a {}-dimensional grid; this run needs {expected} on a {}-dimensional grid",
+                        declared.outputs.len(), declared.dim, $d
+                    ));
+                }
+                let expression = declared
+                    .to_expression()
+                    .map_err(|e| format!("the declared stationary target does not load: {e:?}"))?;
+                symbi::sim::refinement::with_equilibrium_decomposed(&mut tiles, counts, &devices, &seed_transport, |x| {
+                    let at = |aa: usize| x.get(aa).copied().unwrap_or(0.0);
+                    <<$regime_ty as Regime<f64, $d>>::Prim as PrimFromSlots<f64, $d>>::from_slots(&expression.eval(at(0), at(1), at(2), 0.0))
+                })
+                .map_err(|e| format!("stationary target: {}", e.detail))?;
+                if cfg.seed_from_equilibrium {
+                    for (k, h) in tiles.iter_mut().enumerate() {
+                        symbi::symbi_xpu::with_device(devices[k], || h.seed_equilibrium());
+                    }
+                }
+            }
             for (k, h) in tiles.iter_mut().enumerate() {
                 // the declared perturbation over the seeded levels at their own cell centers,
                 // the covered coarse cells re-restricted, as the single hierarchy lays it
@@ -6855,9 +6887,12 @@ macro_rules! build_and_run_magnetized_decomposed_refined {
                 let mut sim = Sim::build($regime, $eos, $geom)
                     .cells(m)
                     .ghosts(ghost_width(cfg))
-                    .origin(origin)
+                    // the whole grid's origin and the tile's first cell: every level places its
+                    // cells where the single hierarchy places them, bit for bit
+                    .origin(std::array::from_fn(|ax| cfg.x_lo[ax]))
                     .spacing(dx)
-                    .coord_maps(tile_axis_maps::<$d>(cfg, tile_lo))
+                    .coord_maps(axis_maps::<$d>(cfg))
+                    .index_offset(std::array::from_fn(|ax| tile_lo[ax] as isize))
                     .boundaries(bnd)
                     .cfl(cfg.cfl)
                     .timestepping(cfg.timestepping)
@@ -9620,17 +9655,14 @@ fn dispatch_and_run(
     // decomposed equivalence gate, so the combination is refused rather than run unbalanced.
     // a census reduces over the whole grid; the tiled drivers carry no cross-tile census, so a
     // configured one is refused rather than left unrecorded
-    // the flat gas and isothermal tiles read a stationary target's residual off the tiled pipeline
-    // and lay a declared perturbation over it; the refined and magnetized tiles carry none: each is
-    // refused by name
-    if cfg.n_gpus > 1 && cfg.equilibrium_json.is_some() {
-        if cfg.refinement_enabled || !matches!(cfg.regime.as_str(), "newtonian" | "rhd" | "isothermal") {
-            return Err(format!(
-                "an equilibrium prescription with gpus > 1 awaits its tiled residual on the {} regime{}; run it on one device",
-                cfg.regime,
-                if cfg.refinement_enabled { " with mesh refinement" } else { "" }
-            ));
-        }
+    // the gas and isothermal tiles, flat and refined, read a stationary target's residual off the
+    // tiled pipeline and lay a declared perturbation over it; the magnetized tiles carry none and
+    // are refused by name
+    if cfg.n_gpus > 1 && cfg.equilibrium_json.is_some() && !matches!(cfg.regime.as_str(), "newtonian" | "rhd" | "isothermal") {
+        return Err(format!(
+            "an equilibrium prescription with gpus > 1 awaits its tiled residual on the {} regime; run it on one device",
+            cfg.regime
+        ));
     }
     // the tiled drivers step no magnetic slip body: refused by name rather than run without it
     if cfg.n_gpus > 1 && cfg.bodies.iter().any(|b| b.magnetic_slip.is_some()) {
@@ -11490,8 +11522,9 @@ fn run_refined_worker_process(
                         let sim = Sim::build($regime, host_eos(cfg), Cartesian)
                             .cells(m)
                             .ghosts(ghost_width(cfg))
-                            .origin(origin)
+                            .origin(std::array::from_fn(|ax| cfg.x_lo[ax]))
                             .spacing(dx)
+                            .index_offset(std::array::from_fn(|ax| tile_lo[ax] as isize))
                             .boundaries(bnd)
                             .cfl(cfg.cfl)
                             .timestepping(cfg.timestepping)
@@ -11546,8 +11579,9 @@ fn run_refined_worker_process(
                         let sim = Sim::build($regime, host_eos(cfg), Cartesian)
                             .cells(m)
                             .ghosts(ghost_width(cfg))
-                            .origin(origin)
+                            .origin(std::array::from_fn(|ax| cfg.x_lo[ax]))
                             .spacing(dx)
+                            .index_offset(std::array::from_fn(|ax| tile_lo[ax] as isize))
                             .boundaries(bnd)
                             .cfl(cfg.cfl)
                             .timestepping(cfg.timestepping)
@@ -11596,8 +11630,9 @@ fn run_refined_worker_process(
                         let sim = Sim::build(IsoNewtonian, Isothermal { cs: cfg.cs }, Cartesian)
                             .cells(m)
                             .ghosts(ghost_width(cfg))
-                            .origin(origin)
+                            .origin(std::array::from_fn(|ax| cfg.x_lo[ax]))
                             .spacing(dx)
+                            .index_offset(std::array::from_fn(|ax| tile_lo[ax] as isize))
                             .boundaries(bnd)
                             .cfl(cfg.cfl)
                             .timestepping(cfg.timestepping)
@@ -11647,8 +11682,9 @@ fn run_refined_worker_process(
                         let sim = Sim::build(IsothermalMhd, Isothermal { cs: cfg.cs }, Cartesian)
                             .cells(m)
                             .ghosts(ghost_width(cfg))
-                            .origin(origin)
+                            .origin(std::array::from_fn(|ax| cfg.x_lo[ax]))
                             .spacing(dx)
+                            .index_offset(std::array::from_fn(|ax| tile_lo[ax] as isize))
                             .boundaries(bnd)
                             .cfl(cfg.cfl)
                             .timestepping(cfg.timestepping)

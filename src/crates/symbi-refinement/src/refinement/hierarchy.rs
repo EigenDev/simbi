@@ -1372,7 +1372,7 @@ where
 
         for (region, whole_region) in regions.iter().zip(whole) {
             let parent = &levels.last().unwrap().state;
-            whole_coverages.push(region_to_domain(whole_region, &parent.geom.x_lo, &parent.geom.dx));
+            whole_coverages.push(region_to_domain(whole_region, &parent.geom.x_lo, &parent.geom.dx, &parent.geom.index_offset));
             if parent.fields.mhd.is_some() {
                 assert!(
                     NDIM == 2 || NDIM == 3,
@@ -1383,7 +1383,7 @@ where
                     "mhd refinement: cartesian only (the emf-reflux curl coefficients are 1/dx)"
                 );
             }
-            let coverage = region_to_domain(region, &parent.geom.x_lo, &parent.geom.dx);
+            let coverage = region_to_domain(region, &parent.geom.x_lo, &parent.geom.dx, &parent.geom.index_offset);
             // a region covering its parent entirely leaves the parent no leaf cell: the parent's
             // CFL reduction then runs over nothing and the run stops on a zero timestep. such a
             // run wants a finer root grid, so it is refused here with the reason.
@@ -1494,7 +1494,7 @@ where
                 }
             }
 
-            let fine = SimStateGeneric::new_at(
+            let mut fine = SimStateGeneric::new_at(
                 parent.physics.regime,
                 parent.physics.eos,
                 parent.physics.metric,
@@ -1508,6 +1508,9 @@ where
                 parent.timestepping,
                 0,
             )?;
+            // the fine level shares the parent's origin and places its cells by whole-grid fine
+            // index, so a tile's fine cells sit where the single hierarchy's sit, bit for bit
+            fine.geom.index_offset = std::array::from_fn(|ax| parent.geom.index_offset[ax] * RATIO as isize);
             assert!(
                 parent.geom.maps.is_none(),
                 "refinement: non-uniform axis maps need a per-level map split (not built)"
@@ -1817,8 +1820,8 @@ where
             let mut clip_hi = [0.0f64; NDIM];
             let mut overlaps = true;
             for ax in 0..NDIM {
-                let rlo = rg.x_lo[ax] + rg.interior.spaces[ax].lo as f64 * rg.dx[ax];
-                let rhi = rg.x_lo[ax] + rg.interior.spaces[ax].hi as f64 * rg.dx[ax];
+                let rlo = rg.x_lo[ax] + (rg.interior.spaces[ax].lo + rg.index_offset[ax]) as f64 * rg.dx[ax];
+                let rhi = rg.x_lo[ax] + (rg.interior.spaces[ax].hi + rg.index_offset[ax]) as f64 * rg.dx[ax];
                 let p: f64 = body.position[ax];
                 clip_lo[ax] = (p - racc).max(rlo);
                 clip_hi[ax] = (p + racc).min(rhi);
@@ -1828,8 +1831,8 @@ where
                 return;
             }
             for ax in 0..NDIM {
-                let flo = fg.x_lo[ax] + fg.interior.spaces[ax].lo as f64 * fg.dx[ax];
-                let fhi = fg.x_lo[ax] + fg.interior.spaces[ax].hi as f64 * fg.dx[ax];
+                let flo = fg.x_lo[ax] + (fg.interior.spaces[ax].lo + fg.index_offset[ax]) as f64 * fg.dx[ax];
+                let fhi = fg.x_lo[ax] + (fg.interior.spaces[ax].hi + fg.index_offset[ax]) as f64 * fg.dx[ax];
                 if !(clip_lo[ax] >= flo && clip_hi[ax] <= fhi) {
                     violation = Some(format!(
                         "refinement x decomposition: body {} sink support sphere (radius {racc:.4}: the \
@@ -1861,8 +1864,8 @@ where
             let racc: f64 = body.accretion_radius().unwrap_or(0.0);
             let mut overlaps = true;
             for ax in 0..NDIM {
-                let rlo = rg.x_lo[ax] + rg.interior.spaces[ax].lo as f64 * rg.dx[ax];
-                let rhi = rg.x_lo[ax] + rg.interior.spaces[ax].hi as f64 * rg.dx[ax];
+                let rlo = rg.x_lo[ax] + (rg.interior.spaces[ax].lo + rg.index_offset[ax]) as f64 * rg.dx[ax];
+                let rhi = rg.x_lo[ax] + (rg.interior.spaces[ax].hi + rg.index_offset[ax]) as f64 * rg.dx[ax];
                 let p: f64 = body.position[ax];
                 overlaps &= (p - racc).max(rlo) < (p + racc).min(rhi);
             }
@@ -4092,9 +4095,9 @@ where
             (coarse.kernels.reconstruction_reach() as usize + 2)
                 .min(symbi_discretize::WB_CF_CHAIN_MAX as usize),
             gamma,
-            &fine.state.geom.x_lo,
+            &shifted_origin(&fine.state.geom),
             &fine.state.geom.dx,
-            &coarse.state.geom.x_lo,
+            &shifted_origin(&coarse.state.geom),
             &coarse.state.geom.dx,
             &coarse.state.immersed.as_ref().unwrap().bodies,
         );
@@ -4208,9 +4211,9 @@ where
                     &fine.state.geom.interior,
                     self.prolong_order,
                     alpha,
-                    &parent.state.geom.x_lo,
+                    &shifted_origin(&parent.state.geom),
                     &parent.state.geom.dx,
-                    &fine.state.geom.x_lo,
+                    &shifted_origin(&fine.state.geom),
                     &fine.state.geom.dx,
                     &parent.state.immersed.as_ref().unwrap().bodies,
                     &fine.state.immersed.as_ref().unwrap().bodies,
@@ -5023,16 +5026,31 @@ fn shell_around<const D: usize>(cov: &Domain<D>, interior: &Domain<D>) -> Domain
 
 /// snap a physical refinement region to parent cells: absolute parent indices
 /// from the shared global origin.
+/// the cells of `region` on a lattice of origin `x_lo` and spacing `dx` whose local cell 0 is
+/// whole-grid cell `offset`, in local indices
 fn region_to_domain<const D: usize>(
     region: &RefinementRegion<D>,
     x_lo: &[f64; D],
     dx: &[f64; D],
+    offset: &[isize; D],
 ) -> Domain<D> {
     Domain::new(std::array::from_fn(|ax| Space {
         name: axis_name(ax),
-        lo: ((region.x_lo[ax] - x_lo[ax]) / dx[ax]).round() as isize,
-        hi: ((region.x_hi[ax] - x_lo[ax]) / dx[ax]).round() as isize,
+        lo: ((region.x_lo[ax] - x_lo[ax]) / dx[ax]).round() as isize - offset[ax],
+        hi: ((region.x_hi[ax] - x_lo[ax]) / dx[ax]).round() as isize - offset[ax],
     }))
+}
+
+/// the origin a kernel that places cell `i` at `x_lo + (i + 0.5) dx` needs for a lattice whose
+/// local cell 0 is whole-grid cell `index_offset`; the grid's own origin on an undivided grid
+fn shifted_origin<const D: usize>(geom: &symbi_sim::state::PartitionGeometry<D>) -> [f64; D] {
+    std::array::from_fn(|ax| {
+        if geom.index_offset[ax] == 0 {
+            geom.x_lo[ax]
+        } else {
+            geom.x_lo[ax] + geom.index_offset[ax] as f64 * geom.dx[ax]
+        }
+    })
 }
 
 /// the coverage must sit inside the parent interior, and on every coarse-fine
@@ -5229,6 +5247,162 @@ where
         }
     }
     Ok(reseeded)
+}
+
+/// declare a stationary target on every tile's hierarchy, as [`Hierarchy::with_equilibrium`]
+/// declares it on the single hierarchy: every level of every tile is seeded with the target, the
+/// fine target restricted into the covered coarse cells, and the levels primed coarsest first with
+/// each level's cut halos exchanged before its children prolong from them. each level's anchor
+/// holds the primed target with its cut halos; its interface flux and its imbalance are read off
+/// one forward-euler stage at the level's cfl step, the minimum over the tiles carrying it, with
+/// the troubled cells marked across the cuts. every tile's state is restored afterwards.
+pub fn with_equilibrium_decomposed<R, const NDIM: usize, const DOF: usize, M, E, S, Mem, K, T>(
+    tiles: &mut [Hierarchy<R, NDIM, DOF, M, E, S, Mem, K>],
+    counts: [usize; NDIM],
+    devices: &[i32],
+    transport: &T,
+    target: impl Fn([f64; NDIM]) -> <R as Regime<f64, DOF>>::Prim,
+) -> symbi_xpu::Result<()>
+where
+    R: Regime<f64, NDIM, Energy = <R as Regime<f64, DOF>>::Energy> + Regime<f64, DOF> + Copy,
+    M: Metric<f64, NDIM> + Metric<f64, DOF> + Copy + Send + Sync,
+    E: symbi_hydro::eos::EosFor<f64, <R as Regime<f64, NDIM>>::Energy> + Copy + Send + Sync,
+    S: ExecutionSpace,
+    Mem: MemorySpace + Sync,
+    K: KernelSet<NDIM, DOF, Mem, f64>,
+    T: HaloTransport,
+    <R as Regime<f64, DOF>>::Cons: symbi_hydro::state::SeedableCons<f64, DOF>,
+{
+    let fail = |detail: String| symbi_xpu::XpuError { operation: "stationary target", code: -1, detail };
+    for (k, tile) in tiles.iter().enumerate() {
+        for (ll, level) in tile.levels.iter().enumerate() {
+            if level.state.fields.mhd.is_some() || level.state.fields.cons.chi_field().is_some() {
+                return Err(fail(format!(
+                    "tile {k} level {ll}: a magnetized or dyed target has no interface flux to difference against"
+                )));
+            }
+        }
+    }
+    let depth = tiles.iter().map(|t| t.levels.len()).max().unwrap_or(1);
+    let saved = tiles
+        .iter()
+        .map(|t| t.levels.iter().map(|l| save_gas_state(&l.state)).collect::<symbi_xpu::Result<Vec<_>>>())
+        .collect::<symbi_xpu::Result<Vec<_>>>()?;
+    drain_devices::<Mem>(devices);
+    for tile in tiles.iter() {
+        for level in &tile.levels {
+            level.state.seed_cells(&target);
+        }
+        // the coarse target is the restriction of the fine one wherever a finer level exists
+        for ll in (0..tile.levels.len().saturating_sub(1)).rev() {
+            let (lo, hi) = tile.levels.split_at(ll + 1);
+            restrict_cons(&hi[0].state.fields.cons, &lo[ll].state.fields.cons, lo[ll].coverage.as_ref().unwrap());
+        }
+    }
+    // the prime, coarsest first: recovery, the coarse-fine prolongation from the parent's
+    // exchanged halos, the physical fill, then the level's own cut halos
+    for tile in tiles.iter_mut() {
+        tile.priming = true;
+    }
+    for ll in 0..depth {
+        let Some(grid) = fine_subgrid_of_level(tiles, counts, devices, ll) else { break };
+        for (k, &i) in grid.order.iter().enumerate() {
+            symbi_xpu::with_device(grid.devices[k], || {
+                let level = &tiles[i].levels[ll];
+                level.kernels.c2p(&level.state);
+                if ll > 0 {
+                    tiles[i].prolong_cf(ll, 1.0);
+                }
+                let level = &tiles[i].levels[ll];
+                level.kernels.ghost_fill(&level.state);
+            });
+        }
+        drain_devices::<Mem>(&grid.devices);
+        {
+            let states: Vec<&FieldStore<NDIM, DOF, Mem, f64>> =
+                grid.order.iter().map(|&i| &*tiles[i].levels[ll].state).collect();
+            let schedule = schedule_of_tiles(&states, grid.counts, &level_topology(tiles, ll, &grid.order));
+            symbi_sim::decomp::exchange_grid_cons(&states, &schedule, &grid.devices, transport);
+            exchange_grid(&states, &schedule, &grid.devices, transport);
+        }
+        for (k, &i) in grid.order.iter().enumerate() {
+            symbi_xpu::with_device(grid.devices[k], || {
+                let level = &tiles[i].levels[ll];
+                level.kernels.ghost_fill(&level.state);
+            });
+            let err = scan_c2p_errors(&tiles[i].levels[ll].state);
+            if err.is_err() {
+                return Err(fail(format!("tile {i} level {ll}: the target's recovery failed ({err})")));
+            }
+        }
+    }
+    for tile in tiles.iter_mut() {
+        tile.priming = false;
+    }
+    let anchors = tiles
+        .iter()
+        .map(|t| t.levels.iter().map(|l| save_gas_state(&l.state)).collect::<symbi_xpu::Result<Vec<_>>>())
+        .collect::<symbi_xpu::Result<Vec<_>>>()?;
+    let mut flux_eq: Vec<Vec<Option<EquilibriumFlux<NDIM, DOF, Mem>>>> =
+        tiles.iter().map(|t| t.levels.iter().map(|_| None).collect()).collect();
+    let mut residual_eq: Vec<Vec<Option<ConsFieldsGeneric<NDIM, DOF, Mem>>>> =
+        tiles.iter().map(|t| t.levels.iter().map(|_| None).collect()).collect();
+    for ll in 0..depth {
+        let Some(grid) = fine_subgrid_of_level(tiles, counts, devices, ll) else { break };
+        let mut probe_dt = f64::INFINITY;
+        for (k, &i) in grid.order.iter().enumerate() {
+            let level = &tiles[i].levels[ll];
+            symbi_xpu::with_device(grid.devices[k], || {
+                level.kernels.wave_speeds(&level.state);
+                for dd in 0..NDIM {
+                    level.kernels.flux(&level.state, dd);
+                }
+            });
+            flux_eq[i][ll] = Some(snapshot_flux(&level.state)?);
+            probe_dt = probe_dt.min(symbi_xpu::with_device(grid.devices[k], || level.kernels.cfl(&level.state)));
+        }
+        // the probe's step per level, the timestep the single hierarchy's probe takes
+        eprintln!("SIMBI equilibrium probe: level={ll} dt_bits={:016x}", probe_dt.to_bits());
+        if !(probe_dt.is_finite() && probe_dt > 0.0) {
+            return Err(fail(format!(
+                "the stationary target has no finite cfl step ({probe_dt:.3e}) on level {ll}, so it cannot be advanced to read off its imbalance"
+            )));
+        }
+        {
+            let states: Vec<&FieldStore<NDIM, DOF, Mem, f64>> =
+                grid.order.iter().map(|&i| &*tiles[i].levels[ll].state).collect();
+            let kernels: Vec<&K> = grid.order.iter().map(|&i| &tiles[i].levels[ll].kernels).collect();
+            let schedule = schedule_of_tiles(&states, grid.counts, &level_topology(tiles, ll, &grid.order));
+            symbi_sim::decomp::probe_stage(&states, &kernels, &schedule, &grid.devices, transport, probe_dt)
+                .map_err(|e| fail(format!("level {ll}: the stationary target is not a state the scheme can carry: {e}")))?;
+        }
+        for &i in &grid.order {
+            let level = &tiles[i].levels[ll];
+            let err = scan_c2p_errors(&level.state);
+            if err.is_err() {
+                return Err(fail(format!(
+                    "advancing the stationary target by one cfl step left an unrecoverable state on tile {i} level {ll} ({err})"
+                )));
+            }
+            residual_eq[i][ll] =
+                Some(imbalance_from_stage(anchors[i][ll].cons(), &level.state.fields.cons, &level.state.geom.allocated, probe_dt)?);
+        }
+    }
+    for ((tile, saved), ((anchors, fluxes), residuals)) in
+        tiles.iter_mut().zip(&saved).zip(anchors.into_iter().zip(flux_eq).zip(residual_eq))
+    {
+        for (level, state) in tile.levels.iter().zip(saved) {
+            restore_gas_state(&level.state, state);
+        }
+        for (((level, anchored), flux), residual) in tile.levels.iter_mut().zip(anchors).zip(fluxes).zip(residuals) {
+            level.flux_eq = flux;
+            level.residual_eq = residual;
+            let (cons, prim) = anchored.into_parts();
+            level.cons_eq = Some(cons);
+            level.prim_eq = Some(prim);
+        }
+    }
+    Ok(())
 }
 
 /// the sub-grid of the tiles carrying the first refined level; None if no tile is refined.

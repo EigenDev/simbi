@@ -11,7 +11,13 @@
 # without it lands elsewhere), and every decomposition probes at the single
 # grid's own timestep, bit for bit. a perturbation declared over the seeded
 # target is laid over it after the probe, on tiles and on launch, as the
-# single grid lays it.
+# single grid lays it. with one refined box, adiabatic and isothermal, two
+# tiles and three uneven tiles cut through the box publish every level of the
+# single hierarchy bit for bit, fresh and resumed onto three tiles, and probe
+# every level at the single hierarchy's own timestep. the same refined
+# atmosphere without a target, its gravity evaluated at cell centres of a
+# spacing no power of two divides, runs on two tiles as on one hierarchy, and
+# the target changes the run.
 #
 # run: pytest -m simulation simbi/simulation/tests/test_tiled_equilibrium.py
 # =============================================================================
@@ -61,6 +67,23 @@ class IsothermalAtmosphere(RefinedIsothermalAtmosphere):
     refinement_enabled: Annotated[bool, ProblemParam(False, description="flat")]
 
 
+class RefinedTarget(RefinedAtmosphere):
+    pass
+
+
+class RefinedIsothermalTarget(RefinedIsothermalAtmosphere):
+    pass
+
+
+class RefinedWithoutTarget(RefinedAtmosphere):
+    seed_from_equilibrium: Annotated[bool, ProblemParam(False, description="unseeded")]
+
+    @computed_field
+    @property
+    def equilibrium_expressions(self) -> dict:
+        return {}
+
+
 class PerturbedAtmosphere(Atmosphere):
     @computed_field
     @property
@@ -93,6 +116,7 @@ def _run_raw(problem: str, out: Path, gpus: int, steps: int, extra: str = "", ch
 
 
 PROBE = re.compile(r"SIMBI equilibrium probe: level=0 dt_bits=([0-9a-f]{16})")
+LEVEL_PROBES = re.compile(r"SIMBI equilibrium probe: level=(\d+) dt_bits=([0-9a-f]{16})")
 
 
 def _run(problem: str, out: Path, gpus: int, steps: int = STEPS, extra: str = "", checkpoint: Path | None = None) -> Path:
@@ -203,3 +227,45 @@ def test_launched_workers_lay_a_perturbation_over_the_seeded_target(tmp_path: Pa
     three = _layout(tmp_path / "three.toml", workers=3, cuts=[[30, 70]])
     got, _ = _launch_probed(variants, "PerturbedAtmosphere", tmp_path / "three", three, STEPS)
     _assert_same(got, want, "perturbed: three uneven workers")
+
+
+# three uneven tiles of the 96 cells, the box (cells 29 to 67) cut at 48 and clear of the cut at 20
+REFINED_UNEVEN = ", decompose=[[20, 48]]"
+
+
+def _level_probes(problem: str, out: Path, gpus: int, steps: int = STEPS, extra: str = "", checkpoint: Path | None = None) -> tuple[Path, set[tuple[str, str]]]:
+    """the final checkpoint and the (level, timestep bits) every probe reported"""
+    done = _run_raw(problem, out, gpus, steps, extra, checkpoint)
+    assert done.returncode == 0, f"{problem} on {gpus} device(s) failed:\n{done.stderr[-3000:]}"
+    files = sorted(out.glob("*final*.h5"))
+    assert len(files) == 1, f"expected one final checkpoint in {out}, found {files}"
+    return files[0], set(LEVEL_PROBES.findall(done.stderr))
+
+
+@pytest.mark.parametrize("problem", ["RefinedTarget", "RefinedIsothermalTarget"])
+def test_refined_tiles_hold_the_declared_target_as_the_single_hierarchy(tmp_path: Path, variants: Path, problem: str) -> None:
+    want, probes = _level_probes(problem, tmp_path / "single", 1)
+    assert {level for level, _ in probes} == {"0", "1"}, f"{problem}: the single hierarchy probed levels {probes}"
+    assert any(name.startswith("level_1/") for name in _all_levels(want)), f"{problem}: no fine level was published"
+    two, two_probes = _level_probes(problem, tmp_path / "two", 2)
+    assert two_probes == probes, f"{problem}: two tiles probed at {two_probes}, the single hierarchy at {probes}"
+    _assert_same(two, want, f"{problem}: two refined tiles")
+    uneven, uneven_probes = _level_probes(problem, tmp_path / "uneven", 3, extra=REFINED_UNEVEN)
+    assert uneven_probes == probes, f"{problem}: three uneven tiles probed at {uneven_probes}, the single hierarchy at {probes}"
+    _assert_same(uneven, want, f"{problem}: three uneven refined tiles")
+    first, _ = _level_probes(problem, tmp_path / "first", 2, steps=STEPS // 2)
+    # a resumed run on tiles takes `max_steps` further steps
+    resumed, _ = _level_probes(problem, tmp_path / "resumed", 3, steps=STEPS - _iteration(first), extra=REFINED_UNEVEN, checkpoint=first)
+    _assert_same(resumed, want, f"{problem}: resumed onto three uneven refined tiles")
+
+
+def test_refined_tiles_place_their_cells_where_the_single_hierarchy_does(tmp_path: Path, variants: Path) -> None:
+    # the 96-cell spacing is no power of two, so a tile placing its cells from its own origin
+    # lands them an ulp away from the single hierarchy's, and the gravity read at them follows
+    want, _ = _level_probes("RefinedWithoutTarget", tmp_path / "single", 1)
+    held, _ = _level_probes("RefinedTarget", tmp_path / "held", 1)
+    assert not np.array_equal(_all_levels(want)["level_0/conserved/den"], _all_levels(held)["level_0/conserved/den"]), (
+        "the target left the refined run unchanged"
+    )
+    two, _ = _level_probes("RefinedWithoutTarget", tmp_path / "two", 2)
+    _assert_same(two, want, "the untargeted refined atmosphere on two tiles")
