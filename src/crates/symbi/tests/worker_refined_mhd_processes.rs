@@ -593,7 +593,7 @@ fn run_worker(arm: &Arm, me: WorkerId, out: PathBuf) -> Result<(), WorkerError> 
     let checkpoint_path = std::env::var("W_CKPT_PATH").unwrap_or_default();
     let extras = Metadata::new();
     fofc_reset_stats();
-    let report = evolve_refined_worker(&mut tiles, &held, &plans, &LocalCopy, &mut fabric, &cfg, |_| Ok(()), |accepted, _, tiles, fabric| {
+    let report = evolve_refined_worker(&mut tiles, &held, &plans, &LocalCopy, &mut fabric, &cfg, None, |_| Ok(()), |accepted, _, tiles, fabric| {
         if checkpoint_after == Some(accepted) {
             let req = CheckpointRequest {
                 path: &checkpoint_path,

@@ -102,7 +102,7 @@ use symbi_grid::Field;
 
 use super::emf_register::EmfRegister;
 use super::equilibrium::{
-    EquilibriumFlux, accumulate as equilibrium_accumulate, imbalance_from_stage,
+    EquilibriumFlux, GasState, accumulate as equilibrium_accumulate, imbalance_from_stage,
     overwrite as equilibrium_overwrite, residual_components, restore_gas_state, save_gas_state,
     snapshot_flux,
 };
@@ -406,6 +406,38 @@ where
     Mem: MemorySpace + Sync,
     K: KernelSet<NDIM, DOF, Mem, f64>,
 {
+    /// the prime of level `ll` of a seeded target on this tile, as the single hierarchy primes it:
+    /// recovery, the coarse-fine prolongation from the parent's current state, the physical fill.
+    /// the caller exchanges the level's cut halos after it, before a child prolongs from them
+    pub fn prime_target_level(&mut self, ll: usize) {
+        self.priming = true;
+        let level = &self.levels[ll];
+        level.kernels.c2p(&level.state);
+        if ll > 0 {
+            self.prolong_cf(ll, 1.0);
+        }
+        let level = &self.levels[ll];
+        level.kernels.ghost_fill(&level.state);
+        self.priming = false;
+    }
+
+    /// install a decomposed probe's results on this tile's levels: each level's anchored target,
+    /// its interface flux and its imbalance
+    pub fn install_declared_target(
+        &mut self,
+        anchors: Vec<GasState<NDIM, DOF, Mem>>,
+        fluxes: Vec<Option<EquilibriumFlux<NDIM, DOF, Mem>>>,
+        residuals: Vec<Option<ConsFieldsGeneric<NDIM, DOF, Mem>>>,
+    ) {
+        for (((level, anchored), flux), residual) in self.levels.iter_mut().zip(anchors).zip(fluxes).zip(residuals) {
+            level.flux_eq = flux;
+            level.residual_eq = residual;
+            let (cons, prim) = anchored.into_parts();
+            level.cons_eq = Some(cons);
+            level.prim_eq = Some(prim);
+        }
+    }
+
     /// seed tracers from the hierarchy's active composite mass: covered coarse
     /// cells are omitted and their finest available children supply the mass.
     pub fn seed_mass_tracers(&self, n: usize) -> symbi_sim::tracers::TracerSet<NDIM> {
@@ -4473,6 +4505,31 @@ where
         Ok(self)
     }
 
+    /// a decomposed run's share of [`Self::with_equilibrium`] on this tile: refuse a target the
+    /// scheme cannot difference, seed every level with it, and restrict the fine target into the
+    /// covered coarse cells, finest pair first
+    pub fn seed_declared_target(
+        &self,
+        target: &dyn Fn([f64; NDIM]) -> <R as Regime<f64, DOF>>::Prim,
+    ) -> Result<(), String> {
+        for (ll, level) in self.levels.iter().enumerate() {
+            if level.state.fields.mhd.is_some() || level.state.fields.cons.chi_field().is_some() {
+                return Err(format!(
+                    "level {ll}: a magnetized or dyed target has no interface flux to difference against"
+                ));
+            }
+        }
+        symbi_substrate::regimes::substrate_gpu::device_sync::<Mem>();
+        for level in &self.levels {
+            level.state.seed_cells(target);
+        }
+        for ll in (0..self.levels.len().saturating_sub(1)).rev() {
+            let (lo, hi) = self.levels.split_at(ll + 1);
+            restrict_cons(&hi[0].state.fields.cons, &lo[ll].state.fields.cons, lo[ll].coverage.as_ref().unwrap());
+        }
+        Ok(())
+    }
+
     /// the declared target must actually be a steady state of the equations being solved.
     ///
     /// the method takes the declaration as given: the imbalance is measured and subtracted whatever
@@ -5274,48 +5331,21 @@ where
     <R as Regime<f64, DOF>>::Cons: symbi_hydro::state::SeedableCons<f64, DOF>,
 {
     let fail = |detail: String| symbi_xpu::XpuError { operation: "stationary target", code: -1, detail };
-    for (k, tile) in tiles.iter().enumerate() {
-        for (ll, level) in tile.levels.iter().enumerate() {
-            if level.state.fields.mhd.is_some() || level.state.fields.cons.chi_field().is_some() {
-                return Err(fail(format!(
-                    "tile {k} level {ll}: a magnetized or dyed target has no interface flux to difference against"
-                )));
-            }
-        }
-    }
     let depth = tiles.iter().map(|t| t.levels.len()).max().unwrap_or(1);
     let saved = tiles
         .iter()
         .map(|t| t.levels.iter().map(|l| save_gas_state(&l.state)).collect::<symbi_xpu::Result<Vec<_>>>())
         .collect::<symbi_xpu::Result<Vec<_>>>()?;
     drain_devices::<Mem>(devices);
-    for tile in tiles.iter() {
-        for level in &tile.levels {
-            level.state.seed_cells(&target);
-        }
-        // the coarse target is the restriction of the fine one wherever a finer level exists
-        for ll in (0..tile.levels.len().saturating_sub(1)).rev() {
-            let (lo, hi) = tile.levels.split_at(ll + 1);
-            restrict_cons(&hi[0].state.fields.cons, &lo[ll].state.fields.cons, lo[ll].coverage.as_ref().unwrap());
-        }
+    for (k, tile) in tiles.iter().enumerate() {
+        tile.seed_declared_target(&target).map_err(|e| fail(format!("tile {k} {e}")))?;
     }
-    // the prime, coarsest first: recovery, the coarse-fine prolongation from the parent's
-    // exchanged halos, the physical fill, then the level's own cut halos
-    for tile in tiles.iter_mut() {
-        tile.priming = true;
-    }
+    // the prime, coarsest first: each level primed, then its own cut halos exchanged before its
+    // children prolong from them
     for ll in 0..depth {
         let Some(grid) = fine_subgrid_of_level(tiles, counts, devices, ll) else { break };
         for (k, &i) in grid.order.iter().enumerate() {
-            symbi_xpu::with_device(grid.devices[k], || {
-                let level = &tiles[i].levels[ll];
-                level.kernels.c2p(&level.state);
-                if ll > 0 {
-                    tiles[i].prolong_cf(ll, 1.0);
-                }
-                let level = &tiles[i].levels[ll];
-                level.kernels.ghost_fill(&level.state);
-            });
+            symbi_xpu::with_device(grid.devices[k], || tiles[i].prime_target_level(ll));
         }
         drain_devices::<Mem>(&grid.devices);
         {
@@ -5335,9 +5365,6 @@ where
                 return Err(fail(format!("tile {i} level {ll}: the target's recovery failed ({err})")));
             }
         }
-    }
-    for tile in tiles.iter_mut() {
-        tile.priming = false;
     }
     let anchors = tiles
         .iter()
@@ -5394,13 +5421,7 @@ where
         for (level, state) in tile.levels.iter().zip(saved) {
             restore_gas_state(&level.state, state);
         }
-        for (((level, anchored), flux), residual) in tile.levels.iter_mut().zip(anchors).zip(fluxes).zip(residuals) {
-            level.flux_eq = flux;
-            level.residual_eq = residual;
-            let (cons, prim) = anchored.into_parts();
-            level.cons_eq = Some(cons);
-            level.prim_eq = Some(prim);
-        }
+        tile.install_declared_target(anchors, fluxes, residuals);
     }
     Ok(())
 }

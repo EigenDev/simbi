@@ -11258,13 +11258,10 @@ fn validate_launch_scope(cfg: &Config) -> Result<(), String> {
     }
     // the dye rides the launched gas and isothermal tiles under the single grid's admission
     validate_passive_scalar(cfg)?;
-    // the flat gas and isothermal workers read a stationary target's residual off a probe stage of
-    // the launched pipeline and lay a declared perturbation over it; the refined and magnetized
+    // the gas and isothermal workers, flat and refined, read a stationary target's residual off a
+    // probe stage of the launched pipeline and lay a declared perturbation over it; the magnetized
     // workers carry none
     if cfg.equilibrium_json.is_some() {
-        if cfg.refinement_enabled {
-            return refused("an equilibrium prescription with mesh refinement");
-        }
         if !matches!(cfg.regime.as_str(), "newtonian" | "rhd" | "isothermal") {
             return refused(&format!("an equilibrium prescription with the {} regime", cfg.regime));
         }
@@ -11539,7 +11536,22 @@ fn run_refined_worker_process(
                         let sim = with_tile_dye!(sim, cfg, tile_lo, n, flat);
                         tiles.push(refined_tile(cfg, &layout, flat, origin, m, sim, kernels_of)?);
                     }
-                    refined_session(cfg, launch, fault, drained, build_clock, &layout, tiles, |h| {
+                    // the declared stationary target, seeded on every held level for the probe the
+                    // session runs once the levels are seeded; a fresh run seeded from it starts there
+                    let has_energy = tiles[0].levels[0].state.fields.cons.has_energy();
+                    let expression = declared_equilibrium!(cfg, $d, has_energy);
+                    let mut seed = |h: &Hierarchy<$regime, $d, $d, Cartesian, EosSelect<f64>, DefaultSpace, DefaultMemory, _>| -> Result<(), String> {
+                        let Some(expression) = expression.as_ref() else { return Ok(()) };
+                        h.seed_declared_target(&|x: [f64; $d]| {
+                            let at = |aa: usize| x.get(aa).copied().unwrap_or(0.0);
+                            symbi_hydro::state::PrimFromSlots::from_slots(&expression.eval(at(0), at(1), at(2), 0.0))
+                        })
+                    };
+                    let declared = expression.is_some();
+                    refined_session(cfg, launch, fault, drained, build_clock, &layout, tiles, declared.then_some(&mut seed as _), |h| {
+                        if declared && cfg.seed_from_equilibrium {
+                            h.seed_equilibrium();
+                        }
                         // the declared perturbation over the seeded levels, as the single hierarchy lays it
                         let has_energy = h.levels[0].state.fields.cons.has_energy();
                         if lay_perturbation!(h, cfg, $d, has_energy) {
@@ -11600,7 +11612,7 @@ fn run_refined_worker_process(
                             .map_err(|e| format!("tile {flat} rollback snapshot: {e:?}"))?;
                         tiles.push(refined_tile(cfg, &layout, flat, origin, m, sim, kernels_of)?);
                     }
-                    refined_session(cfg, launch, fault, drained, build_clock, &layout, tiles, |_| Ok(()))
+                    refined_session(cfg, launch, fault, drained, build_clock, &layout, tiles, None, |_| Ok(()))
                 }};
             }
             match cfg.regime.as_str() {
@@ -11647,7 +11659,19 @@ fn run_refined_worker_process(
                         let sim = with_tile_dye!(sim, cfg, tile_lo, n, flat);
                         tiles.push(refined_tile(cfg, &layout, flat, origin, m, sim, kernels_of)?);
                     }
-                    refined_session(cfg, launch, fault, drained, build_clock, &layout, tiles, |h| {
+                    let expression = declared_equilibrium!(cfg, $d, false);
+                    let mut seed = |h: &Hierarchy<IsoNewtonian, $d, $d, Cartesian, Isothermal<f64>, DefaultSpace, DefaultMemory, _>| -> Result<(), String> {
+                        let Some(expression) = expression.as_ref() else { return Ok(()) };
+                        h.seed_declared_target(&|x: [f64; $d]| {
+                            let at = |aa: usize| x.get(aa).copied().unwrap_or(0.0);
+                            symbi_hydro::state::PrimFromSlots::from_slots(&expression.eval(at(0), at(1), at(2), 0.0))
+                        })
+                    };
+                    let declared = expression.is_some();
+                    refined_session(cfg, launch, fault, drained, build_clock, &layout, tiles, declared.then_some(&mut seed as _), |h| {
+                        if declared && cfg.seed_from_equilibrium {
+                            h.seed_equilibrium();
+                        }
                         // the declared perturbation over the seeded levels, as the single hierarchy lays it
                         if lay_perturbation!(h, cfg, $d, false) {
                             h.sync_perturbed();
@@ -11703,7 +11727,7 @@ fn run_refined_worker_process(
                             .map_err(|e| format!("tile {flat} rollback snapshot: {e:?}"))?;
                         tiles.push(refined_tile(cfg, &layout, flat, origin, m, sim, kernels_of)?);
                     }
-                    refined_session(cfg, launch, fault, drained, build_clock, &layout, tiles, |_| Ok(()))
+                    refined_session(cfg, launch, fault, drained, build_clock, &layout, tiles, None, |_| Ok(()))
                 }
                 other => Err(format!("the {other} regime with mesh refinement is outside the distributed first release")),
             }
@@ -11731,6 +11755,7 @@ fn refined_session<R, const D: usize, const DOF: usize, E, K>(
     build_clock: std::time::Instant,
     layout: &RefinedLayout<D>,
     mut tiles: Vec<Hierarchy<R, D, DOF, Cartesian, E, DefaultSpace, DefaultMemory, K>>,
+    seed_target: Option<&mut dyn FnMut(&Hierarchy<R, D, DOF, Cartesian, E, DefaultSpace, DefaultMemory, K>) -> Result<(), String>>,
     on_seeded: impl FnMut(&mut Hierarchy<R, D, DOF, Cartesian, E, DefaultSpace, DefaultMemory, K>) -> Result<(), String>,
 ) -> Result<(), String>
 where
@@ -12173,7 +12198,7 @@ where
     if me == WorkerId(0) {
         announce_retry_guard(&tiles[0].levels[0].state);
     }
-    let outcome = evolve_refined_worker(&mut tiles, &held, &plans, &LocalCopy, &mut fabric, &refined_cfg, on_seeded, |accepted, time, tiles, fabric| {
+    let outcome = evolve_refined_worker(&mut tiles, &held, &plans, &LocalCopy, &mut fabric, &refined_cfg, seed_target, on_seeded, |accepted, time, tiles, fabric| {
         if accepted == 0 {
             if write_initial {
                 let tag = cadence.tag(cfg, cp_width, cfg.start_time, cfg.checkpoint_index);

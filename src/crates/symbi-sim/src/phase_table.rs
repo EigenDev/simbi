@@ -109,6 +109,16 @@ impl PhaseTable {
         for level in 2..depth {
             phases.push(Phase { point: ExchangePoint::Seed { level }, skippable: true, init_only: true });
         }
+        // a declared stationary target's probe on a refined run, once every level is seeded: each
+        // level's primed target across its cuts, coarsest first, then each level's probe stage
+        // flags; a run without a target passes them
+        if depth > 1 {
+            for troubled in [false, true] {
+                for level in 0..depth {
+                    phases.push(Phase { point: ExchangePoint::EquilibriumLevel { level, troubled }, skippable: true, init_only: true });
+                }
+            }
+        }
         if substeps > 0 {
             phases.push(Phase { point: ExchangePoint::Primed, skippable: false, init_only: true });
         }
@@ -343,8 +353,16 @@ mod tests {
         let b = |p| t.byte_of(p).unwrap() as usize;
         assert!(r.init_only[b(ExchangePoint::Primed)] && !r.skippable[b(ExchangePoint::Primed)]);
         assert_eq!(PhaseTable::flat(2).unwrap().byte_of(ExchangePoint::Primed), None, "a flat table primes no refined level");
-        // 5 + 3 * 2 + 2 * (1 + 3 * 2 + 2) + 3 + 6
-        assert_eq!(t.len(), 38);
+        // a declared target's probe on each level, after the seeds and before the primed root:
+        // every level's halos coarsest first, then every level's probe flags
+        let probe = |level, troubled| bytes(ExchangePoint::EquilibriumLevel { level, troubled });
+        assert!(bytes(ExchangePoint::Prime) < probe(0, false));
+        assert!(probe(0, false) < probe(1, false) && probe(1, false) < probe(0, true) && probe(0, true) < probe(1, true));
+        assert!(probe(1, true) < bytes(ExchangePoint::Primed));
+        assert!(r.init_only[b(ExchangePoint::EquilibriumLevel { level: 1, troubled: true })]);
+        assert!(r.skippable[b(ExchangePoint::EquilibriumLevel { level: 1, troubled: true })]);
+        // 5 + 2 * 2 + 3 * 2 + 2 * (1 + 3 * 2 + 2) + 3 + 6
+        assert_eq!(t.len(), 42);
         let flat = PhaseTable::flat(2).unwrap();
         assert_ne!(flat.digest(), t.digest());
         assert_eq!(PhaseTable::flat(2).unwrap().digest(), flat.digest());

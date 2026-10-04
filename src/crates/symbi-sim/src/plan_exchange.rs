@@ -120,7 +120,10 @@ impl<'p, const D: usize> PlanExchange<'p, D> {
     /// whether `t` moves at `point` under this plan's role
     pub fn moves(&self, t: &crate::atlas::Transfer<D>, point: ExchangePoint) -> bool {
         match self.role {
-            PlanRole::RootState => self.plan.moves_at(t, point),
+            PlanRole::RootState => match point {
+                ExchangePoint::EquilibriumLevel { level, .. } => level == 0 && self.plan.moves_at(t, point),
+                _ => self.plan.moves_at(t, point),
+            },
             PlanRole::TracerCoefficients => {
                 point == ExchangePoint::TracerCoefficients && self.plan.moves_at(t, ExchangePoint::Stage(0))
             }
@@ -135,6 +138,7 @@ impl<'p, const D: usize> PlanExchange<'p, D> {
                     self.plan.moves_at(t, as_root)
                 }
                 ExchangePoint::Rollback => self.plan.moves_at(t, ExchangePoint::Rollback),
+                ExchangePoint::EquilibriumLevel { level: 1, .. } => self.plan.moves_at(t, point),
                 // the primed fine state, and the fine state after a nested level restricted into it
                 ExchangePoint::Primed | ExchangePoint::NestedRestrict { level: 1, .. } => {
                     self.plan.moves_at(t, ExchangePoint::Stage(0))
@@ -156,6 +160,7 @@ impl<'p, const D: usize> PlanExchange<'p, D> {
                     self.plan.moves_at(t, as_root)
                 }
                 ExchangePoint::NestedRestrict { level: l, .. } if l == level => self.plan.moves_at(t, ExchangePoint::Stage(0)),
+                ExchangePoint::EquilibriumLevel { level: l, .. } if l == level => self.plan.moves_at(t, point),
                 ExchangePoint::Primed => self.plan.moves_at(t, ExchangePoint::Stage(0)),
                 ExchangePoint::Rollback => self.plan.moves_at(t, ExchangePoint::Rollback),
                 ExchangePoint::Audit(AuditAt::Prime) | ExchangePoint::Audit(AuditAt::Checkpoint) => {

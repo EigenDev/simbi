@@ -199,6 +199,7 @@ pub fn evolve_refined_worker<R, const D: usize, const DOF: usize, M, E, S, Mem, 
     transport: &T,
     fabric: &mut Fabric<L>,
     cfg: &RefinedConfig,
+    mut seed_target: Option<&mut dyn FnMut(&Hierarchy<R, D, DOF, M, E, S, Mem, K>) -> Result<(), String>>,
     mut on_seeded: G,
     mut on_step: F,
 ) -> Result<WorkerReport, WorkerError>
@@ -691,6 +692,12 @@ where
                     }
                 }
             }
+        }
+        // a declared stationary target, read off once every level is seeded or loaded
+        if let Some(seed) = seed_target.as_mut() {
+            probe_refined_target(tiles, held, plans, depth, transport, fabric, deadline, &mut timing, &mut **seed)?;
+        }
+        if !cfg.restart {
             // a fresh start lays its initial-state edits (a declared perturbation) over every
             // seeded level before the priming fills and certifies them
             for h in tiles.iter_mut() {
@@ -1338,6 +1345,183 @@ where
 }
 
 /// the collective retry vote of one stage: true when any worker rejects
+/// a declared stationary target on the refined workers, as [`Hierarchy::with_equilibrium`]
+/// declares it on the single hierarchy: every held level seeded with the target through `seed`,
+/// the levels primed coarsest first with each level's cut halos crossing at its own point before a
+/// child prolongs from them; each level's anchor, interface flux and imbalance read off one
+/// forward-euler stage at the level's cfl step, the minimum over every worker's tiles of the level,
+/// with the troubled flags across the cuts; every tile restored afterwards. a worker holding no tile
+/// of a level takes every point and vote of it
+#[allow(clippy::too_many_arguments)]
+fn probe_refined_target<R, const D: usize, const DOF: usize, M, E, S, Mem, K, T, L>(
+    tiles: &mut [Hierarchy<R, D, DOF, M, E, S, Mem, K>],
+    held: &Held<'_>,
+    plans: &RefinedPlans<'_, D>,
+    depth: usize,
+    transport: &T,
+    fabric: &mut Fabric<L>,
+    deadline: Duration,
+    timing: &mut WorkerTiming,
+    seed: &mut dyn FnMut(&Hierarchy<R, D, DOF, M, E, S, Mem, K>) -> Result<(), String>,
+) -> Result<(), WorkerError>
+where
+    R: Regime<f64, D> + Copy,
+    M: Metric<f64, D> + Copy + Send + Sync,
+    E: symbi_hydro::eos::EosFor<f64, <R as Regime<f64, D>>::Energy> + Copy + Send + Sync,
+    S: ExecutionSpace,
+    Mem: MemorySpace + Sync,
+    K: KernelSet<D, DOF, Mem, f64>,
+    T: HaloTransport,
+    L: Link,
+{
+    use super::equilibrium::{imbalance_from_stage, restore_gas_state, save_gas_state, snapshot_flux};
+    use symbi_sim::stage::{StageArgs, StageOutcome, fold_stage_from_correction, fold_stage_through_mark};
+    let numerics = |detail: String| WorkerError::Numerics(detail);
+    // the tiles holding level `ll` on this worker, their ids on the level's plan, the plan and the
+    // devices by id
+    let members = |ll: usize, tiles: &[Hierarchy<R, D, DOF, M, E, S, Mem, K>]| -> (Vec<usize>, Vec<TileId>) {
+        let mut ks = Vec::new();
+        let mut ids = Vec::new();
+        for k in 0..tiles.len() {
+            let id = if ll == 0 { Some(held.root_ids[k]) } else { held.level_ids(ll)[k] };
+            if let Some(id) = id {
+                ks.push(k);
+                ids.push(id);
+            }
+        }
+        (ks, ids)
+    };
+    let plan_of = |ll: usize| -> &PlanExchange<'_, D> {
+        match ll {
+            0 => &plans.root,
+            1 => &plans.fine,
+            _ => &plans.nested[ll - 2].state,
+        }
+    };
+    let devices_of = |ll: usize| -> &[i32] { if ll == 0 { held.root_devices } else { held.level_devices(ll) } };
+    let saved = tiles
+        .iter()
+        .map(|t| t.levels.iter().map(|l| save_gas_state(&l.state)).collect::<symbi_xpu::Result<Vec<_>>>())
+        .collect::<symbi_xpu::Result<Vec<_>>>()
+        .map_err(|e| fail(fabric, numerics(format!("stationary target save: {e:?}"))))?;
+    for tile in tiles.iter() {
+        seed(tile).map_err(|e| fail(fabric, WorkerError::Refused(e)))?;
+    }
+    for ll in 0..depth {
+        let (ks, ids) = members(ll, tiles);
+        let (plan, devices) = (plan_of(ll), devices_of(ll));
+        for (r, &k) in ks.iter().enumerate() {
+            with_device(devices[ids[r].0 as usize], || tiles[k].prime_target_level(ll));
+        }
+        {
+            let mut lists: Vec<Vec<&Field<f64, D, Mem>>> = (0..plan.plan().n_tiles()).map(|_| Vec::new()).collect();
+            for (r, &k) in ks.iter().enumerate() {
+                lists[ids[r].0 as usize] = plan_fields(&tiles[k].levels[ll].state);
+            }
+            let part = PlanPart { plan, fields: &lists, devices, fault: None, dst_fields: None };
+            let point = ExchangePoint::EquilibriumLevel { level: ll as u8, troubled: false };
+            exchange_point_plans(&[part], transport, fabric, point, 0, 0, deadline, &mut timing.exchange)
+                .map_err(|e| fail(fabric, e.into()))?;
+        }
+        for (r, &k) in ks.iter().enumerate() {
+            let level = &tiles[k].levels[ll];
+            with_device(devices[ids[r].0 as usize], || level.kernels.ghost_fill(&level.state));
+            let err = scan_c2p_errors(&level.state);
+            if err.is_err() {
+                return Err(fail(fabric, numerics(format!("level {ll}: the stationary target's recovery failed ({err})"))));
+            }
+        }
+    }
+    let anchors = tiles
+        .iter()
+        .map(|t| t.levels.iter().map(|l| save_gas_state(&l.state)).collect::<symbi_xpu::Result<Vec<_>>>())
+        .collect::<symbi_xpu::Result<Vec<_>>>()
+        .map_err(|e| fail(fabric, numerics(format!("stationary target anchor: {e:?}"))))?;
+    let mut fluxes: Vec<Vec<_>> = tiles.iter().map(|t| t.levels.iter().map(|_| None).collect()).collect();
+    let mut residuals: Vec<Vec<_>> = tiles.iter().map(|t| t.levels.iter().map(|_| None).collect()).collect();
+    for ll in 0..depth {
+        let (ks, ids) = members(ll, tiles);
+        let (plan, devices) = (plan_of(ll), devices_of(ll));
+        // a worker without a tile of the level offers the largest finite step, which every other
+        // offer undercuts
+        let mut local = f64::MAX;
+        for (r, &k) in ks.iter().enumerate() {
+            let level = &tiles[k].levels[ll];
+            let dev = devices[ids[r].0 as usize];
+            with_device(dev, || {
+                level.kernels.wave_speeds(&level.state);
+                for dd in 0..D {
+                    level.kernels.flux(&level.state, dd);
+                }
+            });
+            fluxes[k][ll] = Some(snapshot_flux(&level.state).map_err(|e| fail(fabric, numerics(format!("stationary target flux: {e:?}"))))?);
+            let candidate = with_device(dev, || level.kernels.cfl(&level.state));
+            if !(candidate.is_finite() && candidate > 0.0) {
+                return Err(fail(fabric, numerics(format!(
+                    "the stationary target has no finite cfl step ({candidate:.3e}) on level {ll}, so it cannot be advanced to read off its imbalance"
+                ))));
+            }
+            local = local.min(candidate);
+        }
+        let dt = f64::from_bits(fabric.collective(OpKind::Min, local.to_bits(), deadline).map_err(|e| fail(fabric, e.into()))?);
+        // the probe's step per level, the timestep the single hierarchy's probe takes
+        eprintln!("SIMBI equilibrium probe: level={ll} dt_bits={:016x}", dt.to_bits());
+        let args = StageArgs {
+            dt,
+            a0: 0.0,
+            ac: 1.0,
+            stage: 0,
+            n_stages: 1,
+            injection_weight: 1.0,
+            allow_elision: false,
+            exit_fraction: 1.0,
+        };
+        let mut troubled = 0u64;
+        for (r, &k) in ks.iter().enumerate() {
+            let level = &tiles[k].levels[ll];
+            troubled += with_device(devices[ids[r].0 as usize], || fold_stage_through_mark(&level.state, &level.kernels, args, &mut |_| {}));
+        }
+        let mut exchanges = 0u64;
+        let point = ExchangePoint::EquilibriumLevel { level: ll as u8, troubled: true };
+        let cut_trouble =
+            fine_level_trouble(tiles, ll, &ks, plan, &ids, devices, troubled, point, 0, 0, transport, fabric, deadline, timing, &mut exchanges)?;
+        let mut rejected = false;
+        for (r, &k) in ks.iter().enumerate() {
+            let level = &tiles[k].levels[ll];
+            let outcome = with_device(devices[ids[r].0 as usize], || {
+                fold_stage_from_correction(&level.state, &level.kernels, args, cut_trouble[r], &mut |_| {})
+            });
+            rejected |= outcome != StageOutcome::Accepted;
+            level.state.reset_state_clock();
+        }
+        if vote_retry(fabric, rejected, deadline, timing)? {
+            return Err(fail(fabric, numerics(format!("level {ll}: the stationary target's probe stage was rejected by the admissibility redo"))));
+        }
+        for &k in &ks {
+            let level = &tiles[k].levels[ll];
+            let err = scan_c2p_errors(&level.state);
+            if err.is_err() {
+                return Err(fail(fabric, numerics(format!(
+                    "advancing the stationary target by one cfl step left an unrecoverable state on level {ll} ({err})"
+                ))));
+            }
+            residuals[k][ll] = Some(
+                imbalance_from_stage(anchors[k][ll].cons(), &level.state.fields.cons, &level.state.geom.allocated, dt)
+                    .map_err(|e| fail(fabric, numerics(format!("stationary target residual: {e:?}"))))?,
+            );
+        }
+    }
+    for ((tile, saved), ((anchors, fluxes), residuals)) in
+        tiles.iter_mut().zip(&saved).zip(anchors.into_iter().zip(fluxes).zip(residuals))
+    {
+        for (level, state) in tile.levels.iter().zip(saved) {
+            restore_gas_state(&level.state, state);
+        }
+        tile.install_declared_target(anchors, fluxes, residuals);
+    }
+    Ok(())
+}
+
 fn vote_retry<L: Link>(
     fabric: &mut Fabric<L>,
     retry: bool,

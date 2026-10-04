@@ -361,6 +361,10 @@ pub enum ExchangePoint {
     /// after the excision rebuild of stage `k`, or of the post-step when `k` is the stage count:
     /// the cut halos carry the rebuilt cells before the stage exchange or the next step reads them
     ExciseRebuild(u8),
+    /// a declared stationary target's probe on a refined run, at initialization once every level
+    /// is seeded: level `level`'s primed target crosses its cuts, or, `troubled`, its probe
+    /// stage's troubled flags do
+    EquilibriumLevel { level: u8, troubled: bool },
 }
 
 /// the points of one fine substep, in order
@@ -462,6 +466,7 @@ impl ExchangePoint {
             ExchangePoint::Seed { level } => (26, level as u32, 0),
             ExchangePoint::ExciseSweep(k) => (31, k as u32, 0),
             ExchangePoint::ExciseRebuild(k) => (32, k as u32, 0),
+            ExchangePoint::EquilibriumLevel { level, troubled } => (33, level as u32, troubled as u32),
         };
         kind << 16 | a << 8 | b
     }
@@ -1251,7 +1256,9 @@ impl<const D: usize> ExchangePlan<D> {
             | ExchangePoint::Seed { .. }
             | ExchangePoint::TracerCoefficients => false,
             ExchangePoint::Audit(_) => transfer.audit,
-            ExchangePoint::Troubled(_) | ExchangePoint::EquilibriumTroubled => banded,
+            ExchangePoint::Troubled(_)
+            | ExchangePoint::EquilibriumTroubled
+            | ExchangePoint::EquilibriumLevel { troubled: true, .. } => banded,
             _ => !banded && !transfer.audit,
         }
     }

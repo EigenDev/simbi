@@ -17,7 +17,9 @@
 # every level at the single hierarchy's own timestep. the same refined
 # atmosphere without a target, its gravity evaluated at cell centres of a
 # spacing no power of two divides, runs on two tiles as on one hierarchy, and
-# the target changes the run.
+# the target changes the run. two and three uneven launched refined workers
+# hold the target likewise, fresh and resumed onto three, probing every level
+# at the single hierarchy's timesteps.
 #
 # run: pytest -m simulation simbi/simulation/tests/test_tiled_equilibrium.py
 # =============================================================================
@@ -180,7 +182,7 @@ def test_tiles_lay_a_perturbation_over_the_seeded_target(tmp_path: Path, variant
     _assert_same(_run("PerturbedAtmosphere", tmp_path / "uneven", 3, extra=UNEVEN), want, "perturbed: three uneven tiles")
 
 
-def _launch_probed(variants: Path, problem: str, out: Path, layout: Path, steps: int, checkpoint: Path | None = None) -> tuple[Path, set[str]]:
+def _launch_probed(variants: Path, problem: str, out: Path, layout: Path, steps: int, checkpoint: Path | None = None, levels: bool = False) -> tuple[Path, set]:
     script = variants.parent / f"launched_{problem.lower()}.py"
     script.write_text(f"from variants import {problem} as Base\n\n\nclass Launched{problem}(Base):\n    pass\n")
     cmd = [sys.executable, "-m", "simbi.cli", "launch", str(script), "--layout", str(layout), "--max-steps", str(steps),
@@ -193,7 +195,7 @@ def _launch_probed(variants: Path, problem: str, out: Path, layout: Path, steps:
     assert done.returncode == 0, f"launch failed:\nstdout:\n{done.stdout}\nstderr:\n{done.stderr[-3000:]}"
     files = sorted(out.glob("*final*.h5"))
     assert len(files) == 1, f"expected one final checkpoint in {out}, found {files}"
-    return files[0], set(PROBE.findall(done.stderr))
+    return files[0], set(LEVEL_PROBES.findall(done.stderr)) if levels else set(PROBE.findall(done.stderr))
 
 
 @pytest.mark.parametrize("problem", ["Atmosphere", "IsothermalAtmosphere"])
@@ -269,3 +271,23 @@ def test_refined_tiles_place_their_cells_where_the_single_hierarchy_does(tmp_pat
     )
     two, _ = _level_probes("RefinedWithoutTarget", tmp_path / "two", 2)
     _assert_same(two, want, "the untargeted refined atmosphere on two tiles")
+
+
+@pytest.mark.parametrize("problem", ["RefinedTarget", "RefinedIsothermalTarget"])
+def test_launched_refined_workers_hold_the_declared_target_as_the_single_hierarchy(tmp_path: Path, variants: Path, problem: str) -> None:
+    from simbi.simulation.tests.test_launch import _layout
+
+    want, probes = _level_probes(problem, tmp_path / "single", 1)
+    assert {level for level, _ in probes} == {"0", "1"}, f"{problem}: the single hierarchy probed levels {probes}"
+    two = _layout(tmp_path / "two.toml", workers=2, shape=(2,))
+    got, got_probes = _launch_probed(variants, problem, tmp_path / "two", two, STEPS, levels=True)
+    assert got_probes == probes, f"{problem}: two refined workers probed at {got_probes}, the single hierarchy at {probes}"
+    _assert_same(got, want, f"{problem}: two refined workers")
+    three = _layout(tmp_path / "three.toml", workers=3, cuts=[[20, 48]])
+    got, got_probes = _launch_probed(variants, problem, tmp_path / "three", three, STEPS, levels=True)
+    assert got_probes == probes, f"{problem}: three uneven refined workers probed at {got_probes}, the single hierarchy at {probes}"
+    _assert_same(got, want, f"{problem}: three uneven refined workers")
+    first, _ = _launch_probed(variants, problem, tmp_path / "first", two, STEPS // 2, levels=True)
+    # a resumed launch takes `max_steps` further steps
+    resumed, _ = _launch_probed(variants, problem, tmp_path / "resumed", three, STEPS - _iteration(first), checkpoint=first, levels=True)
+    _assert_same(resumed, want, f"{problem}: resumed onto three uneven refined workers")
