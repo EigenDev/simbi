@@ -41,7 +41,7 @@ import pytest
 
 from simbi.simulation.tests.test_launch import _layout, bounded_processes  # noqa: F401  the autouse process guard
 from simbi.simulation.tests.test_launch_refined_numerics import _all_levels
-from simbi.simulation.tests.test_tiled_body_ledger import U, _pull
+from simbi.simulation.tests.test_tiled_body_ledger import U, _diagnostics, _pull
 
 pytestmark = pytest.mark.simulation
 
@@ -409,8 +409,10 @@ def test_workers_holding_fewer_levels_publish_the_single_hierarchy_nested_sink(t
     root_lo, root_hi = _level_root_span(want, "level_0")
     width = (root_hi - root_lo) / 24
     fine_cells = (round((lo - root_lo) / width), round((hi - root_lo) / width))
+    # worker 0, the checkpoint coordinator, holds root cells 0..8 and worker 2 holds 16..24: both
+    # hold level 1 without level 2
     assert NESTED_CUTS[0][0] <= fine_cells[0] and fine_cells[1] <= NESTED_CUTS[0][1], (
-        f"level 2 spans root cells {fine_cells}; a cut crosses it and every worker holds the finest level"
+        f"level 2 spans root cells {fine_cells}; the coordinator holds the finest level and the gate is vacuous"
     )
     with h5py.File(want, "r") as f:
         assert float(f["bodies/total_accreted_mass"][0]) > 0.0, "the sink accreted nothing; the gate is vacuous"
@@ -433,6 +435,22 @@ def test_workers_holding_fewer_levels_publish_the_single_hierarchy_nested_sink(t
         scale = pull if "force" in name else pull * arm if "torque" in name else np.abs(y).max()
         worst = np.abs(bx[name].astype(float) - y).max()
         assert worst <= cells * U * scale, f"nested sink: {name} differs by {worst:.3e} against {cells * U:.1e} of {scale:.3e}"
+    # the published body state carries the published history: one row per step, and the accreted
+    # mass is the sum of the per-step receipts (a sum of STEPS terms of one sign)
+    assert bx["body_diagnostics/mass_delta"].shape[0] == STEPS, f"the history books {bx['body_diagnostics/mass_delta'].shape[0]} rows for {STEPS} steps"
+    receipts = float(np.sum(bx["body_diagnostics/mass_delta"]))
+    published = float(bx["bodies/total_accreted_mass"][0])
+    assert abs(published - receipts) <= STEPS * U * receipts, f"the published accreted mass {published:.17e} departs from its history {receipts:.17e}"
+    rows, single_rows = _diagnostics(tmp_path / "launched"), _diagnostics(tmp_path / "single")
+    assert rows.shape == single_rows.shape, f"diagnostics rows {rows.shape} against {single_rows.shape}"
+    np.testing.assert_array_equal(rows[:, 0], single_rows[:, 0], err_msg="diagnostics times")
+    # nine printed significant digits (%.8e) on top of the reassociation bound; force and torque
+    # columns take the bound on their unsummed scales
+    unsummed = np.zeros(rows.shape[1])
+    unsummed[8:11], unsummed[11:14] = pull, pull * arm
+    tolerance = 1e-8 * np.maximum(np.abs(rows), np.abs(single_rows)) + cells * U * unsummed
+    excess = np.abs(rows - single_rows) - tolerance
+    assert np.all(excess <= 0.0), f"diagnostics differ beyond the printed precision: column {int(np.argmax(excess.max(axis=0)))}"
 
 
 REJECTIONS = __import__("re").compile(r"SIMBI launch: worker=\d+/\d+ steps=\d+ rejections=(\d+)")
