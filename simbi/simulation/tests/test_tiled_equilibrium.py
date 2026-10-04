@@ -9,8 +9,9 @@
 # from a checkpoint written on two tiles; two and three uneven launched workers
 # likewise, resumed onto three. the target changes the run (the same atmosphere
 # without it lands elsewhere), and every decomposition probes at the single
-# grid's own timestep, bit for bit. a perturbation over a seeded target, on
-# tiles and on launch, is refused by name before any output.
+# grid's own timestep, bit for bit. a perturbation declared over the seeded
+# target is laid over it after the probe, on tiles and on launch, as the
+# single grid lays it.
 #
 # run: pytest -m simulation simbi/simulation/tests/test_tiled_equilibrium.py
 # =============================================================================
@@ -145,11 +146,14 @@ def test_tiles_resume_against_the_declared_target(tmp_path: Path, variants: Path
     _assert_same(resumed, want, "resumed onto three uneven tiles")
 
 
-def test_a_perturbation_over_a_seeded_target_on_tiles_is_refused(tmp_path: Path, variants: Path) -> None:
-    done = _run_raw("PerturbedAtmosphere", tmp_path / "tiles", 2, 1)
-    assert done.returncode != 0, "the tiles ran a perturbation over a seeded target"
-    assert "the tiles lay the perturbation before the target is seeded" in " ".join(done.stderr.split()), done.stderr[-1500:]
-    assert not list((tmp_path / "tiles").glob("*.h5")), "output was written before the refusal"
+def test_tiles_lay_a_perturbation_over_the_seeded_target(tmp_path: Path, variants: Path) -> None:
+    # the single grid seeds the target and lays the perturbation over it; the tiles lay it after
+    # their probe, over the same seeded target
+    want = _run("PerturbedAtmosphere", tmp_path / "single", 1)
+    calm = _all_levels(_run("Atmosphere", tmp_path / "calm", 1))
+    assert not np.array_equal(_all_levels(want)["level_0/conserved/den"], calm["level_0/conserved/den"]), "the perturbation left the run unchanged"
+    _assert_same(_run("PerturbedAtmosphere", tmp_path / "two", 2), want, "perturbed: two tiles")
+    _assert_same(_run("PerturbedAtmosphere", tmp_path / "uneven", 3, extra=UNEVEN), want, "perturbed: three uneven tiles")
 
 
 def _launch_probed(variants: Path, problem: str, out: Path, layout: Path, steps: int, checkpoint: Path | None = None) -> tuple[Path, set[str]]:
@@ -189,17 +193,13 @@ def test_launched_workers_hold_the_declared_target_as_the_single_grid(tmp_path: 
     _assert_same(resumed, want, f"{problem}: resumed onto three uneven workers")
 
 
-def test_a_perturbation_over_a_seeded_target_on_launch_is_refused(tmp_path: Path, variants: Path) -> None:
+def test_launched_workers_lay_a_perturbation_over_the_seeded_target(tmp_path: Path, variants: Path) -> None:
     from simbi.simulation.tests.test_launch import _layout
 
-    script = variants.parent / "launched_perturbedatmosphere.py"
-    script.write_text("from variants import PerturbedAtmosphere as Base\n\n\nclass LaunchedPerturbedAtmosphere(Base):\n    pass\n")
+    want = _run("PerturbedAtmosphere", tmp_path / "single", 1)
     two = _layout(tmp_path / "two.toml", workers=2, shape=(2,))
-    cmd = [sys.executable, "-m", "simbi.cli", "launch", str(script), "--layout", str(two), "--max-steps", "1",
-           "--resolution", str(CELLS), "--data-directory", str(tmp_path / "out"), "--checkpoint-interval", "1e9"]
-    env = dict(os.environ)
-    env.pop("SIMBI_LAUNCH_EXPERIMENTAL", None)
-    done = subprocess.run(cmd, capture_output=True, text=True, timeout=600, env=env)
-    assert done.returncode != 0, f"the launch succeeded:\n{done.stdout}"
-    assert "a perturbation over a state seeded from the equilibrium prescription is outside the distributed first release" in " ".join(done.stderr.split()), done.stderr[-2000:]
-    assert not list((tmp_path / "out").glob("*.h5")), "a checkpoint was published"
+    got, _ = _launch_probed(variants, "PerturbedAtmosphere", tmp_path / "two", two, STEPS)
+    _assert_same(got, want, "perturbed: two workers")
+    three = _layout(tmp_path / "three.toml", workers=3, cuts=[[30, 70]])
+    got, _ = _launch_probed(variants, "PerturbedAtmosphere", tmp_path / "three", three, STEPS)
+    _assert_same(got, want, "perturbed: three uneven workers")

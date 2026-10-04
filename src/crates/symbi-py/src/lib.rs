@@ -6959,9 +6959,12 @@ macro_rules! build_and_run_hydro_decomposed {
                 // clock + mesh motion per tile: every tile carries the identical a(t) law and
                 // the decomposed loop advances them in lockstep with the shared dt.
                 attach_motion(&mut sim, cfg)?;
-                // the declared perturbation at the tile's own cell centers, the single grid's
+                // the declared perturbation at the tile's own cell centers, the single grid's; with a
+                // declared stationary target it is laid over the target, after the probe
                 let has_energy = sim.fields.cons.has_energy();
-                lay_perturbation!(sim, cfg, $dof, has_energy);
+                if cfg.equilibrium_json.is_none() {
+                    lay_perturbation!(sim, cfg, $dof, has_energy);
+                }
                 // the reconstruction and its flatten as the single-grid build installs them:
                 // a tile left on the default reconstruction runs plm under a ppm request.
                 let sub = sim
@@ -7093,6 +7096,13 @@ macro_rules! build_and_run_hydro_decomposed {
         // gather + checkpoint, universal transport). every regime shares this loop.
         }
         let residuals = tiled_equilibrium!(tiles, cfg, counts, $d);
+        // the declared perturbation over the target, as the single grid lays it after the target
+        if cfg.equilibrium_json.is_some() {
+            let has_energy = tiles[0].0.fields.cons.has_energy();
+            for (sim, _) in tiles.iter_mut() {
+                lay_perturbation!(sim, cfg, $dof, has_energy);
+            }
+        }
         run_decomposed_loop(cfg, tiles, offsets, grid, counts, residuals)
     }};
 }
@@ -8413,8 +8423,11 @@ macro_rules! build_and_run_iso_decomposed {
                 // the decomposed loop advances them in lockstep with the shared dt.
                 let mut sim = sim;
                 attach_motion(&mut sim, cfg)?;
-                // the declared perturbation at the tile's own cell centers, the single grid's
-                lay_perturbation!(sim, cfg, $d, false);
+                // the declared perturbation at the tile's own cell centers, the single grid's; with a
+                // declared stationary target it is laid over the target, after the probe
+                if cfg.equilibrium_json.is_none() {
+                    lay_perturbation!(sim, cfg, $d, false);
+                }
                 let sim = sim;
                 let sub = sim
                     .substrate()
@@ -8496,6 +8509,13 @@ macro_rules! build_and_run_iso_decomposed {
         let offsets = tile_offsets(&partition);
         let grid = decomposed_grid::<$d>(cfg, tiles[0].0.geom.ng);
         let residuals = tiled_equilibrium!(tiles, cfg, counts, $d);
+        // the declared perturbation over the target, as the single grid lays it after the target
+        if cfg.equilibrium_json.is_some() {
+            let has_energy = false;
+            for (sim, _) in tiles.iter_mut() {
+                lay_perturbation!(sim, cfg, $d, has_energy);
+            }
+        }
         run_decomposed_loop(cfg, tiles, offsets, grid, counts, residuals)
     }};
 }
@@ -9460,9 +9480,9 @@ fn dispatch_and_run(
     // decomposed equivalence gate, so the combination is refused rather than run unbalanced.
     // a census reduces over the whole grid; the tiled drivers carry no cross-tile census, so a
     // configured one is refused rather than left unrecorded
-    // the flat gas and isothermal tiles read a stationary target's residual off the tiled pipeline;
-    // the refined and magnetized tiles carry none, and a fresh start seeded from the target lays
-    // the perturbation on the tiles before the target exists: each is refused by name
+    // the flat gas and isothermal tiles read a stationary target's residual off the tiled pipeline
+    // and lay a declared perturbation over it; the refined and magnetized tiles carry none: each is
+    // refused by name
     if cfg.n_gpus > 1 && cfg.equilibrium_json.is_some() {
         if cfg.refinement_enabled || !matches!(cfg.regime.as_str(), "newtonian" | "rhd" | "isothermal") {
             return Err(format!(
@@ -9470,9 +9490,6 @@ fn dispatch_and_run(
                 cfg.regime,
                 if cfg.refinement_enabled { " with mesh refinement" } else { "" }
             ));
-        }
-        if cfg.seed_from_equilibrium && cfg.perturbation_json.is_some() {
-            return Err("a perturbation over a state seeded from the equilibrium prescription with gpus > 1: the tiles lay the perturbation before the target is seeded; run it on one device".to_string());
         }
     }
     // the tiled drivers step no magnetic slip body: refused by name rather than run without it
@@ -11057,17 +11074,14 @@ fn validate_launch_scope(cfg: &Config) -> Result<(), String> {
     // the dye rides the launched gas and isothermal tiles under the single grid's admission
     validate_passive_scalar(cfg)?;
     // the flat gas and isothermal workers read a stationary target's residual off a probe stage of
-    // the launched pipeline; the refined and magnetized workers carry none, and the builders lay a
-    // perturbation before the session seeds the target
+    // the launched pipeline and lay a declared perturbation over it; the refined and magnetized
+    // workers carry none
     if cfg.equilibrium_json.is_some() {
         if cfg.refinement_enabled {
             return refused("an equilibrium prescription with mesh refinement");
         }
         if !matches!(cfg.regime.as_str(), "newtonian" | "rhd" | "isothermal") {
             return refused(&format!("an equilibrium prescription with the {} regime", cfg.regime));
-        }
-        if cfg.seed_from_equilibrium && cfg.perturbation_json.is_some() {
-            return refused("a perturbation over a state seeded from the equilibrium prescription");
         }
     }
     // the launched workers carry no cross-tile census reduction
@@ -12118,9 +12132,9 @@ fn run_worker_process(
     // the fabric session over the built tiles
     macro_rules! session_over {
         ($regime_ty:ty, $dof:literal, $tiles:ident) => {{
-            session_over!($regime_ty, $dof, $tiles, None)
+            session_over!($regime_ty, $dof, $tiles, None, None)
         }};
-        ($regime_ty:ty, $dof:literal, $tiles:ident, $seed:expr) => {{
+        ($regime_ty:ty, $dof:literal, $tiles:ident, $seed:expr, $perturb:expr) => {{
             let ng = $tiles[0].0.geom.ng;
             let grid = decomposed_grid::<$d>(cfg, ng);
             for (sim, _) in $tiles.iter_mut() {
@@ -12132,7 +12146,7 @@ fn run_worker_process(
             }
             let built = build_clock.elapsed();
             worker_session::<$regime_ty, _, _, _, $d, $dof>(
-                cfg, launch, fault, drained, built, &partition, placement, &topology, me, &mine, &offsets, $tiles, $seed,
+                cfg, launch, fault, drained, built, &partition, placement, &topology, me, &mine, &offsets, $tiles, $seed, $perturb,
             )
         }};
     }
@@ -12178,9 +12192,12 @@ fn run_worker_process(
                 // the clock and the mesh motion, every tile carrying the same a(t)
                 let mut sim = sim;
                 attach_motion(&mut sim, cfg)?;
-                // the declared perturbation at the tile's own cell centers, the single grid's
+                // the declared perturbation at the tile's own cell centers, the single grid's; with a
+                // declared stationary target the session lays it over the target, after the probe
                 let has_energy = sim.fields.cons.has_energy();
-                lay_perturbation!(sim, cfg, $d, has_energy);
+                if cfg.equilibrium_json.is_none() {
+                    lay_perturbation!(sim, cfg, $d, has_energy);
+                }
                 // the numerics the single path installs: reconstruction, the ppm flatten, the
                 // well-balanced reconstruction, the eos, and the solver
                 let sub = sim
@@ -12254,7 +12271,11 @@ fn run_worker_process(
                     })
                 }
             });
-            session_over!($regime_ty, $d, tiles, seed.as_ref().map(|f| f as &dyn Fn(&Sim)))
+            let perturb = |sim: &mut Sim| -> Result<(), String> {
+                lay_perturbation!(sim, cfg, $d, has_energy);
+                Ok(())
+            };
+            session_over!($regime_ty, $d, tiles, seed.as_ref().map(|f| f as &dyn Fn(&Sim)), expression.as_ref().map(|_| &perturb as &dyn Fn(&mut Sim) -> Result<(), String>))
         }};
     }
     macro_rules! nmhd_tiles {
@@ -12506,8 +12527,11 @@ fn run_worker_process(
                 // the clock and the mesh motion, every tile carrying the same a(t)
                 let mut sim = sim;
                 attach_motion(&mut sim, cfg)?;
-                // the declared perturbation at the tile's own cell centers, the single grid's
-                lay_perturbation!(sim, cfg, $d, false);
+                // the declared perturbation at the tile's own cell centers, the single grid's; with a
+                // declared stationary target the session lays it over the target, after the probe
+                if cfg.equilibrium_json.is_none() {
+                    lay_perturbation!(sim, cfg, $d, false);
+                }
                 // the numerics the single isothermal path installs: the limiter, then the
                 // user sources; the closure is globally isothermal, one sound speed per run
                 let sub = sim
@@ -12574,7 +12598,11 @@ fn run_worker_process(
                     })
                 }
             });
-            session_over!(IsoNewtonian, $d, tiles, seed.as_ref().map(|f| f as &dyn Fn(&Sim)))
+            let perturb = |sim: &mut Sim| -> Result<(), String> {
+                lay_perturbation!(sim, cfg, $d, false);
+                Ok(())
+            };
+            session_over!(IsoNewtonian, $d, tiles, seed.as_ref().map(|f| f as &dyn Fn(&Sim)), expression.as_ref().map(|_| &perturb as &dyn Fn(&mut Sim) -> Result<(), String>))
         }};
     }
     macro_rules! imhd_tiles {
@@ -12736,6 +12764,7 @@ fn worker_session<R, G, E, K, const D: usize, const DOF: usize>(
     offsets: &[[isize; D]],
     mut tiles: Vec<(SimDefaultGeneric<R, D, DOF, G, E>, K)>,
     seed_target: Option<&dyn Fn(&SimDefaultGeneric<R, D, DOF, G, E>)>,
+    perturb_over_target: Option<&dyn Fn(&mut SimDefaultGeneric<R, D, DOF, G, E>) -> Result<(), String>>,
 ) -> Result<(), String>
 where
     symbi::symbi_geometry::Cartesian: symbi::symbi_geometry::Metric<f64, D>,
@@ -12937,6 +12966,12 @@ where
             Some(residuals)
         }
     };
+    // the declared perturbation over the target, as the single grid lays it after the target
+    if let Some(perturb) = perturb_over_target {
+        for (sim, _) in tiles.iter_mut() {
+            perturb(sim)?;
+        }
+    }
     // the restart from a partitioned checkpoint, after the stationary target's probe
     if let Some(path) = cfg.restart_path.as_deref() {
         for (&flat, (sim, _)) in mine.iter().zip(tiles.iter_mut()) {
