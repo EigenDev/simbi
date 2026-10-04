@@ -10,7 +10,8 @@
 // before the next fine substep. two placements: the sink inside one tile's fine patch, and the
 // sink straddling a root cut with the patch spanning both tiles. without a body, a pressure blob
 // on the cut under a sheared, divergence-free field drives flow across the cut and the
-// coarse-fine boundary.
+// coarse-fine boundary. each tile seeds the faces of its own lattice, so the fine seed reads the
+// parent's cell field and transverse faces across a cut only through the seed's exchange.
 // =============================================================================
 
 use symbi::regimes::substrate_newtonian_mhd::NewtonianMhdSubstrateKernelSet;
@@ -43,13 +44,14 @@ enum Setup {
     Shaped,
 }
 
-// face-normal components each independent of their own axis: discretely divergence-free
+// face-normal components each independent of their own axis: discretely divergence-free, and
+// varying across the cut at x = 1.5 with no mirror symmetry about it
 fn bx(y: f64) -> f64 {
-    B0[0] + 0.3 * (2.0 * std::f64::consts::PI * y / 3.0).sin()
+    B0[0] + 0.3 * (4.0 * std::f64::consts::PI * y / 3.0 + 0.4).sin()
 }
 
 fn by(x: f64) -> f64 {
-    B0[1] + 0.3 * (2.0 * std::f64::consts::PI * x / 3.0).cos()
+    B0[1] + 0.3 * (8.0 * std::f64::consts::PI * x / 3.0 + 0.7).cos()
 }
 
 type Sim = SimStateGeneric<NewtonianMhd, 2, 3, Cartesian, IdealGas<f64>, CpuSpace, HostMemory, f64>;
@@ -102,10 +104,20 @@ fn build_root(cells: [usize; 2], origin: [f64; 2], bnd: Boundaries<2>, setup: Se
                 Tensor::new(b),
             )
         })
-        .seed_faces(|d, x| match (shaped, d) {
-            (false, _) => B0[d],
-            (true, 0) => bx(x[1]),
-            (true, _) => by(x[0]),
+        // the faces of the tile's own lattice, as a run seeds them from its face buffers; the
+        // ghost faces start empty and take their values from the exchanges and boundaries
+        .seed_faces(|d, x| {
+            let inside = (0..2).all(|a| {
+                let (lo, hi) = (origin[a], origin[a] + cells[a] as f64 * DX);
+                let eps = 1e-9 * DX;
+                if a == d { x[a] >= lo - eps && x[a] <= hi + eps } else { x[a] > lo && x[a] < hi }
+            });
+            match (inside, shaped, d) {
+                (false, _, _) => 0.0,
+                (true, false, _) => B0[d],
+                (true, true, 0) => bx(x[1]),
+                (true, true, _) => by(x[0]),
+            }
         })
         .build()
 }

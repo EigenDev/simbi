@@ -5208,7 +5208,9 @@ where
     let depth = tiles.iter().map(|t| t.levels.len()).max().unwrap_or(1);
     let mut reseeded = 0usize;
     for level in 1..depth {
-        // the parent level's conserved cut halos, over the tiles carrying it
+        // the parent level's cut halos, over the tiles carrying it: the conserved fields the seed
+        // prolongs, and the primitives, the cell field and the transverse faces the magnetized
+        // seed prolongs across the cut
         let parents: Vec<usize> = (0..tiles.len()).filter(|&i| tiles[i].levels.len() >= level).collect();
         let Some(grid) = fine_subgrid_of_level(tiles, counts, devices, level - 1) else { break };
         debug_assert_eq!(grid.order.len(), parents.len());
@@ -5218,6 +5220,7 @@ where
                 grid.order.iter().map(|&i| &*tiles[i].levels[level - 1].state).collect();
             let schedule = schedule_of_tiles(&states, grid.counts, &level_topology(tiles, level - 1, &grid.order));
             symbi_sim::decomp::exchange_grid_cons(&states, &schedule, &grid.devices, transport);
+            symbi_sim::decomp::exchange_grid(&states, &schedule, &grid.devices, transport);
         }
         for (k, &i) in grid.order.iter().enumerate() {
             if tiles[i].levels.len() > level {

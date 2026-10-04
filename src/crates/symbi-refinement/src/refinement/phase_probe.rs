@@ -20,8 +20,9 @@ use std::cell::{Cell, RefCell};
 use symbi_sim::state::FieldStore;
 use symbi_xpu::MemorySpace;
 
-/// one level of one tile after one operation: every allocated cell's primitives and
-/// conserved density, with the cell coordinates in the same order
+/// one level of one tile after one operation: every allocated cell's primitives, conserved
+/// density and, on a magnetized level, cell magnetic field, with the cell coordinates in the
+/// same order
 pub struct PhaseSample {
     pub phase: &'static str,
     pub level: usize,
@@ -34,6 +35,7 @@ pub struct PhaseSample {
 
 pub const STAGE: [&str; 4] = ["stage0", "stage1", "stage2", "stage3"];
 const VEL: [&str; 3] = ["v0", "v1", "v2"];
+const BCELL: [&str; 3] = ["b0", "b1", "b2"];
 
 thread_local! {
     static LOG: RefCell<Option<Vec<PhaseSample>>> = const { RefCell::new(None) };
@@ -81,6 +83,11 @@ pub(crate) fn sample<const D: usize, const DOF: usize, Mem: MemorySpace>(
         fields.push(("pre", gather(p)));
     }
     fields.push(("den", gather(&state.fields.cons.den)));
+    if let Some(mhd) = state.fields.mhd.as_ref() {
+        for (a, b) in mhd.bcell.b.iter().enumerate().take(3) {
+            fields.push((BCELL[a], gather(b)));
+        }
+    }
     let pad = |c: &[isize; D]| -> [isize; 3] { std::array::from_fn(|a| if a < D { c[a] } else { 0 }) };
     let sample = PhaseSample {
         phase,
