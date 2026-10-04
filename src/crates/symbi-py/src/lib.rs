@@ -6527,11 +6527,14 @@ where
 /// hierarchy bit for bit. mass-transport tracers use global owners and migrate complete records
 /// across cuts. mesh motion and bonded fragments are carried by the single hierarchy alone.
 macro_rules! build_and_run_hydro_decomposed_refined {
-    ($cfg:expr, $prims:expr, $regime:expr, $regime_ty:ty, $d:literal, $geom:expr, $geom_ty:ty) => {{
+    (
+        $cfg:expr, $prims:expr, $regime:expr, $regime_ty:ty, $d:literal, $geom:expr, $geom_ty:ty,
+        $eos:expr, $eos_ty:ty, prim = |$row:ident| $prim:expr, kernels = |$s:ident, $root:ident| $kernels:expr
+    ) => {{
         use symbi::sim::decomp::unflatten;
         let cfg: &Config = $cfg;
         let prims: &[Vec<f64>] = $prims;
-        type Sim = SimDefault<$regime_ty, $d, $geom_ty, EosSelect<f64>>;
+        type Sim = SimDefault<$regime_ty, $d, $geom_ty, $eos_ty>;
         // the per-tile / global hierarchy type. DOF = D for hydro; the kernel set is the substrate's
         // associated type (matches what `sim.substrate()` yields).
         type Hier = Hierarchy<
@@ -6539,7 +6542,7 @@ macro_rules! build_and_run_hydro_decomposed_refined {
             $d,
             $d,
             $geom_ty,
-            EosSelect<f64>,
+            $eos_ty,
             DefaultSpace,
             DefaultMemory,
             <Sim as symbi::prelude::SimSubstrate<DefaultMemory, f64, $d>>::KernelSet,
@@ -6567,8 +6570,6 @@ macro_rules! build_and_run_hydro_decomposed_refined {
         let counts = partition.counts();
         let dx: [f64; $d] = std::array::from_fn(|ax| cfg.dx[ax]);
         let ntiles: usize = counts.iter().product();
-        let theta = build_theta(cfg);
-        let solver = cfg.solver;
         let prolong = prolong_order_for(&cfg.reconstruction_name);
         let regions = refinement_regions_nd::<$d>(&cfg.refinement_regions)?;
         // immersed bodies give each tile's own finest level the full bodies; a tile holding fewer
@@ -6601,7 +6602,7 @@ macro_rules! build_and_run_hydro_decomposed_refined {
             let tile_regions = clip_regions_to_tile::<$d>(&regions, origin, m, &tile_maps);
             let dev = flat as i32;
             let built = symbi::symbi_xpu::with_device(dev, || -> Result<Hier, String> {
-                let sim = Sim::build($regime, host_eos(cfg), $geom)
+                let sim = Sim::build($regime, $eos, $geom)
                     .cells(m)
                     .ghosts(ghost_width(cfg))
                     .origin(origin)
@@ -6620,8 +6621,8 @@ macro_rules! build_and_run_hydro_decomposed_refined {
                             lin += (tile_lo[ax] + idx[ax] as usize) * stride;
                             stride *= n[ax];
                         }
-                        let row = &prims[lin];
-                        Prim::adiabatic(Density(row[0]), Tensor::new(std::array::from_fn(|k| row[1 + k])), Pressure(row[1 + $d]))
+                        let $row = &prims[lin];
+                        $prim
                     })
                     .build();
                 // the physical clock starts at start_time on the root, and the hierarchy built
@@ -6642,21 +6643,8 @@ macro_rules! build_and_run_hydro_decomposed_refined {
                 };
                 // the tile set carries the same reconstruction, non-ideal and excision knobs as
                 // the monolithic base; a tile set without them runs a different scheme silently
-                let sub = sim
-                    .substrate()
-                    .theta(theta)
-                    .reconstruction(build_recon(cfg))
-                    .ppm_flatten(cfg.ppm_flatten_onset, cfg.ppm_flatten_full)
-                    .with_eos(build_eos(cfg))
-                    .with_solver(solver)
-                    .map_err(|e| format!("tile {flat} substrate/solver: {e:?}"))?
-                    .with_viscosity(cfg.viscosity).with_alpha(cfg.alpha)
-                    .with_resistivity(cfg.resistivity)
-                    .with_excision(
-                        cfg.excision_radius,
-                        cfg.excision_rho_scale,
-                        cfg.excision_pre_scale,
-                    );
+                let kernels_of = |$s: &Sim, $root: bool| $kernels;
+                let sub = kernels_of(&sim, true);
                 // register the driven (dynamic) boundary DAGs on the tile root and every fine
                 // level, in Driven-id order: an edge tile's exterior faces carry Driven(id)
                 // from the physical-boundary copy above, and a fine level flush against one
@@ -6705,17 +6693,7 @@ macro_rules! build_and_run_hydro_decomposed_refined {
                 let make = |s: &Sim| {
                     // same non-ideal knobs as the base (the viscous pass runs on the
                     // finest level only).
-                    register(
-                        s.substrate()
-                            .theta(theta)
-                            .reconstruction(build_recon(cfg))
-                            .ppm_flatten(cfg.ppm_flatten_onset, cfg.ppm_flatten_full)
-                            .with_eos(build_eos(cfg))
-                            .with_solver(solver)
-                            .expect("fine kernel set")
-                            .with_viscosity(cfg.viscosity).with_alpha(cfg.alpha)
-                            .with_resistivity(cfg.resistivity),
-                    )
+                    register(kernels_of(s, false))
                 };
                 let mut h = if tile_regions.is_empty() {
                     Hierarchy::single(sim, sub)
@@ -6962,8 +6940,30 @@ macro_rules! build_and_run_hydro_decomposed {
         // refinement + gpus>1 takes the decomposed-hierarchy path (per-tile hierarchies + the
         // root/fine halo exchange); plain single-level continues below.
         if cfg.refinement_enabled {
+            let theta = build_theta(cfg);
+            let solver = cfg.solver;
             return build_and_run_hydro_decomposed_refined!(
-                $cfg, $prims, $regime, $regime_ty, $d, $geom, $geom_ty
+                $cfg, $prims, $regime, $regime_ty, $d, $geom, $geom_ty, host_eos(cfg), EosSelect<f64>,
+                prim = |row| Prim::adiabatic(Density(row[0]), Tensor::new(std::array::from_fn(|k| row[1 + k])), Pressure(row[1 + $d])),
+                // the reconstruction, eos, solver and non-ideal knobs of every level; the root
+                // carries the excision
+                kernels = |s, root| {
+                    let ks = s
+                        .substrate()
+                        .theta(theta)
+                        .reconstruction(build_recon(cfg))
+                        .ppm_flatten(cfg.ppm_flatten_onset, cfg.ppm_flatten_full)
+                        .with_eos(build_eos(cfg))
+                        .with_solver(solver)
+                        .expect("tile kernel set")
+                        .with_viscosity(cfg.viscosity).with_alpha(cfg.alpha)
+                        .with_resistivity(cfg.resistivity);
+                    if root {
+                        ks.with_excision(cfg.excision_radius, cfg.excision_rho_scale, cfg.excision_pre_scale)
+                    } else {
+                        ks
+                    }
+                }
             );
         }
         let n: [usize; $d] = std::array::from_fn(|ax| cfg.n_cells[ax]);
@@ -8468,7 +8468,23 @@ macro_rules! build_and_run_iso_decomposed {
         type Sim = SimDefault<IsoNewtonian, $d, $geom_ty, Isothermal<f64>>;
 
         if cfg.refinement_enabled {
-            return Err("gpus>1 does not yet support mesh refinement; set gpus=1".to_string());
+            // a locally isothermal closure on refined tiles needs each fine level's closure from
+            // the whole patch, which a tile's clipped patch does not hold
+            if cfg.locally_isothermal {
+                return Err(
+                    "a locally isothermal closure with mesh refinement and gpus > 1 awaits the whole-patch \
+                     closure on each tile; run it on one device"
+                        .to_string(),
+                );
+            }
+            let theta = build_theta(cfg);
+            return build_and_run_hydro_decomposed_refined!(
+                cfg, prims, IsoNewtonian, IsoNewtonian, $d, $geom, $geom_ty, Isothermal { cs: cfg.cs }, Isothermal<f64>,
+                prim = |row| PrimG::<f64, $d, IsoModel>::isothermal(Density(row[0]), Tensor::new(std::array::from_fn(|k| row[1 + k]))),
+                // the limiter and the viscosity of every level, as the single isothermal hierarchy
+                // installs them
+                kernels = |s, _root| s.substrate().theta(theta).with_viscosity(cfg.viscosity).with_alpha(cfg.alpha)
+            );
         }
         let n: [usize; $d] = std::array::from_fn(|ax| cfg.n_cells[ax]);
         let total: usize = n.iter().product();

@@ -10,6 +10,9 @@
 #   checkpoint written on the tiles halfway, every level included;
 # - periodic kelvin-helmholtz layers on four tiles whose ragged cuts wrap both
 #   axes, the root closed across its seams, shown to differ from outflow walls.
+# - the refined isothermal blob on two, three uneven and six tiles cut along
+#   both axes through the fine box; a locally isothermal refined run on tiles is
+#   refused by name before any output.
 # a census, which the tiled drivers do not reduce across tiles, is refused by
 # name on host tiles and through `simbi launch` rather than left unrecorded, and
 # so are immersed bodies with nested levels on host tiles.
@@ -60,8 +63,8 @@ class CensusedRefinedBlast(RefinedBlast):
         return [_census()]
 
 
-def _run(cls, out: Path, gpus: int, steps: int = STEPS, **kwargs) -> Path:
-    runner.run(cls(resolution=RESOLUTION, gpus=gpus, data_directory=out, **kwargs), compute_mode="cpu", max_steps=steps)
+def _run(cls, out: Path, gpus: int, steps: int = STEPS, resolution=RESOLUTION, **kwargs) -> Path:
+    runner.run(cls(resolution=resolution, gpus=gpus, data_directory=out, **kwargs), compute_mode="cpu", max_steps=steps)
     files = sorted(out.glob("*final*.h5"))
     assert len(files) == 1, f"expected one final checkpoint in {out}, found {files}"
     return files[0]
@@ -209,3 +212,25 @@ def test_a_periodic_refined_run_on_four_tiles_matches_the_single_hierarchy(tmp_p
         else:
             y = ys[name]
         assert x.shape == y.shape and np.array_equal(x, y), f"four refined tiles wrapping both axes: {name} differs"
+
+
+def test_refined_isothermal_tiles_carry_the_single_hierarchy(tmp_path: Path, host_tiles) -> None:
+    from simbi_configs.examples.isothermal.refined_isothermal_blob import RefinedIsothermalBlob
+
+    # the fine box covers root cells 8..24 of 32 on both axes; every cut lies four or more cells
+    # from its faces
+    resolution = (32, 32)
+    want = _run(RefinedIsothermalBlob, tmp_path / "single", 1, resolution=resolution)
+    assert any(name.startswith("level_1/") for name in _datasets(want)), "the single hierarchy published no fine level"
+    for gpus, decompose in ((2, None), (3, [[12, 20], []]), (6, [[12, 20], [14]])):
+        extra = {} if decompose is None else {"decompose": decompose}
+        got = _run(RefinedIsothermalBlob, tmp_path / f"tiles{gpus}", gpus, resolution=resolution, **extra)
+        _assert_same(got, want, f"refined isothermal blob on {gpus} tiles")
+
+
+def test_a_locally_isothermal_refined_run_on_tiles_is_refused(tmp_path: Path, host_tiles) -> None:
+    from simbi_configs.examples.isothermal.refined_locally_iso import RefinedLocallyIso
+
+    with pytest.raises(Exception, match="a locally isothermal closure with mesh refinement and gpus > 1 awaits the whole-patch closure"):
+        _run(RefinedLocallyIso, tmp_path / "tiles", 2, resolution=(32, 32))
+    assert not list((tmp_path / "tiles").glob("*.h5")), "output was written before the refusal"
