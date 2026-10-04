@@ -3066,6 +3066,25 @@ where
     stage_mass_transport(sim, geometry, layout, inactive, a0, ac, stage, true)
 }
 
+/// one refined level's stage transport on one tile of a decomposed hierarchy: the masked
+/// candidate owners, with the ancestry blend left to the caller, which ranks the level's ids across
+/// every tile once the leavers have crossed to their tiles
+pub fn advance_stage_mass_transport_tile_masked<const D: usize, const DOF: usize, M, Mem>(
+    sim: &mut FieldStore<D, DOF, Mem, f64>,
+    geometry: &symbi_geometry::BlockGeometry<M, f64, D>,
+    layout: TransportLayout<D>,
+    inactive: Option<&symbi_algebra::Domain<D>>,
+    a0: f64,
+    ac: f64,
+    stage: usize,
+) -> Result<(), String>
+where
+    M: symbi_geometry::Metric<f64, D> + Copy,
+    Mem: MemorySpace,
+{
+    stage_mass_transport(sim, geometry, layout, inactive, a0, ac, stage, false)
+}
+
 /// one tile's stage transport on a decomposed grid: the forward-Euler candidate owners under
 /// the stage's convex weights, with the ancestry blend left to the caller, which ranks the whole
 /// population's ids once the leavers have crossed to their tiles

@@ -2634,7 +2634,9 @@ where
 
 /// the union of the tiles' tracer populations in stable id order, the same reassembly a gathered
 /// output state performs: ids and cohorts concatenate, the next free id is the largest any tile
-/// reached, the injection remainders sum, and the one particle weight every tile shares is kept.
+/// reached, the injection remainder is the largest any tile holds (a flat grid's tile 0 holds it and
+/// the others hold none; a refined grid's tiles all hold it), and the one particle weight every tile
+/// shares is kept.
 fn combine_tracer_snaps<const D: usize>(snaps: Vec<TracerSnap>) -> Option<TracerSnap> {
     let mut iter = snaps.into_iter();
     let mut combined = iter.next()?;
@@ -2649,7 +2651,7 @@ fn combine_tracer_snaps<const D: usize>(snaps: Vec<TracerSnap>) -> Option<Tracer
         combined.crossed.extend(snap.crossed);
         combined.crossing_time.extend(snap.crossing_time);
         combined.next_id = combined.next_id.max(snap.next_id);
-        combined.injection_remainder += snap.injection_remainder;
+        combined.injection_remainder = combined.injection_remainder.max(snap.injection_remainder);
     }
     let mut perm: Vec<usize> = (0..combined.n).collect();
     perm.sort_by_key(|&i| combined.id[i]);
@@ -2717,14 +2719,14 @@ mod tracer_snap_tests {
     #[test]
     fn a_tile_holding_no_tracers_ahead_of_the_others_keeps_every_position() {
         let combined = combine_tracer_snaps::<2>(vec![
-            snap(&[], &[], 9, 0.25),
+            snap(&[], &[], 9, 0.0),
             snap(&[5, 2], &[5.0, 5.5, 2.0, 2.5], 9, 0.5),
         ])
         .unwrap();
         assert_eq!(combined.id, vec![2, 5]);
         assert_eq!(combined.x, vec![2.0, 2.5, 5.0, 5.5]);
         assert_eq!(combined.owner, vec![102, 105]);
-        assert_eq!(combined.injection_remainder, 0.75);
+        assert_eq!(combined.injection_remainder, 0.5);
     }
 
     #[test]
@@ -2738,6 +2740,12 @@ mod tracer_snap_tests {
         assert_eq!(combined.id, vec![0, 1, 3, 4]);
         assert_eq!(combined.x, vec![0.0, 1.0, 3.0, 4.0]);
         assert_eq!((combined.next_id, combined.injection_remainder), (6, 0.125));
+    }
+
+    #[test]
+    #[should_panic(expected = "refinement levels disagree on the tracer injection remainder")]
+    fn levels_holding_different_remainders_are_rejected() {
+        union_level_tracer_snaps::<1>(vec![snap(&[0], &[0.0], 2, 0.25), snap(&[1], &[1.0], 2, 0.5)]);
     }
 
     #[test]

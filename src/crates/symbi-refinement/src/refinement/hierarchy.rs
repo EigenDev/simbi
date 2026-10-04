@@ -387,6 +387,13 @@ where
     /// set while `prime` builds the initial state: the fine face halo is left to the first
     /// substep's prolongation, whose parent face stencil is gathered after the root stages
     priming: bool,
+    /// a tile of a decomposed hierarchy: each level's tracer stage leaves the ancestry blend to
+    /// the driver, which ranks the level's ids across every tile
+    blend_across_tiles: bool,
+    /// on such a tile, the coarse-fine interface event a level stage booked, applied by the driver
+    /// once the stage's blend ranked the level's ids across every tile: (level, the stage's first
+    /// receipt, the stage)
+    pending_interface: Option<(usize, usize, usize)>,
 
     /// whether the coarse-fine ghost transfer prolongs departures from the local hydrostatic
     /// equilibrium; when off it prolongs the raw primitive state. `None` follows the kernel set:
@@ -732,42 +739,6 @@ where
                 tracers.injection_remainder = injection_remainder;
             }
         }
-    }
-
-    fn set_tracer_spawn_state(&mut self, next_id: u64, injection_remainder: f64) {
-        for level in &mut self.levels {
-            if let Some(tracers) = level.state.tracers.as_mut() {
-                tracers.next_id = next_id;
-                tracers.injection_remainder = injection_remainder;
-            }
-        }
-    }
-
-    fn spawn_pending_injection(
-        &mut self,
-        level: usize,
-        next_id: u64,
-        injection_remainder: f64,
-    ) -> Result<(u64, f64), String> {
-        if level >= self.levels.len() || !self.levels[level].state.has_tracers() {
-            return Ok((next_id, injection_remainder));
-        }
-        self.set_tracer_spawn_state(next_id, injection_remainder);
-        let ledger = std::mem::take(&mut self.injection_ledger);
-        let layout = self.tracer_layout(level);
-        let geometry = self.levels[level]
-            .state
-            .geom
-            .block_geometry(self.levels[level].state.physics.metric);
-        symbi_sim::tracers::spawn_boundary_injection_store(
-            &mut self.levels[level].state.store,
-            &geometry,
-            layout,
-            ledger,
-        )?;
-        self.sync_tracer_spawn_state(level);
-        let tracers = self.levels[level].state.tracers.as_ref().unwrap();
-        Ok((tracers.next_id, tracers.injection_remainder))
     }
 
     fn tracer_cell_mass(&self, owner: symbi_sim::mass_transport::ContainerId) -> Option<f64> {
@@ -1217,6 +1188,8 @@ where
             face_entry: None,
             level_face_entry: Vec::new(),
             priming: false,
+            blend_across_tiles: false,
+            pending_interface: None,
             balance_aware_transfer: None,
         }
     }
@@ -1699,6 +1672,8 @@ where
             face_entry: None,
             level_face_entry: Vec::new(),
             priming: false,
+            blend_across_tiles: false,
+            pending_interface: None,
             balance_aware_transfer: None,
         })
     }
@@ -3259,35 +3234,55 @@ where
             ));
             injections.retain(|transfer| self.tracer_owner_is_active(transfer.destination));
             symbi_sim::tracers::fold_injection_ledger(&mut self.injection_ledger, injections, ac);
+            let across_tiles = self.blend_across_tiles;
             prof("tracers", || {
                 let coverage = self.levels[level].coverage.clone();
-                symbi_sim::tracers::advance_stage_mass_transport_store_masked(
-                    &mut self.levels[level].state,
-                    &geometry,
-                    layout,
-                    coverage.as_ref(),
-                    a0,
-                    ac,
-                    ii,
-                )
-                .unwrap_or_else(|detail| panic!("tracer transport: {detail}"))
+                let advance = if across_tiles {
+                    symbi_sim::tracers::advance_stage_mass_transport_tile_masked
+                } else {
+                    symbi_sim::tracers::advance_stage_mass_transport_store_masked
+                };
+                advance(&mut self.levels[level].state, &geometry, layout, coverage.as_ref(), a0, ac, ii)
+                    .unwrap_or_else(|detail| panic!("tracer transport: {detail}"))
             });
         }
         if has_coarser && self.levels[level].state.has_tracers() {
-            let transfers = {
-                let ledger = self.tracer_interface_ledgers[level - 1].borrow();
-                ledger[receipt_start..].to_vec()
-            };
-            let epoch = self.levels[level]
-                .state
-                .iteration
-                .wrapping_mul(64)
-                .wrapping_add((level as u64) << 4)
-                .wrapping_add(ii as u64);
-            self.apply_interface_event(&transfers, epoch)
-                .unwrap_or_else(|detail| panic!("tracer interface transport: {detail}"));
+            if self.blend_across_tiles {
+                self.pending_interface = Some((level, receipt_start, ii));
+            } else {
+                self.apply_interface_receipts(level, receipt_start, ii);
+            }
         }
         false
+    }
+
+    /// the coarse-fine interface event of `level`'s stage `ii`: the receipts the stage booked from
+    /// `receipt_start` on, sampled over the records their source cells own
+    fn apply_interface_receipts(&mut self, level: usize, receipt_start: usize, ii: usize) {
+        let transfers = {
+            let ledger = self.tracer_interface_ledgers[level - 1].borrow();
+            ledger[receipt_start..].to_vec()
+        };
+        let epoch = self.levels[level]
+            .state
+            .iteration
+            .wrapping_mul(64)
+            .wrapping_add((level as u64) << 4)
+            .wrapping_add(ii as u64);
+        self.apply_interface_event(&transfers, epoch)
+            .unwrap_or_else(|detail| panic!("tracer interface transport: {detail}"));
+    }
+
+    /// apply the interface event a decomposed stage of `level` left pending, once the driver's
+    /// blend ran; an event another level left (a stage its attempt rejected) waits for that level's
+    /// next stage, which replaces it
+    pub fn apply_pending_interface(&mut self, level: usize) {
+        if let Some((pending, receipt_start, ii)) = self.pending_interface {
+            if pending == level {
+                self.pending_interface = None;
+                self.apply_interface_receipts(level, receipt_start, ii);
+            }
+        }
     }
 
     /// the fold's arguments for stage `ii` of `level`
@@ -5808,6 +5803,111 @@ fn migrate_level_tracers<R, const NDIM: usize, const DOF: usize, M, E, S, Mem, K
     }
 }
 
+/// the ancestry blend of level `level`'s stage `ii` over every tile's records of the level, as the
+/// single hierarchy draws it over the level's one store: the stage's convex weight and the level's
+/// iteration key the draw, and a record not chosen returns to its step-entry owner
+fn blend_level_tracers<R, const NDIM: usize, const DOF: usize, M, E, S, Mem, K>(
+    tiles: &mut [Hierarchy<R, NDIM, DOF, M, E, S, Mem, K>],
+    level: usize,
+    ii: usize,
+) where
+    R: Regime<f64, NDIM> + Copy,
+    M: Metric<f64, NDIM> + Copy + Send + Sync,
+    E: symbi_hydro::eos::EosFor<f64, <R as Regime<f64, NDIM>>::Energy> + Copy + Send + Sync,
+    S: ExecutionSpace,
+    Mem: MemorySpace + Sync,
+    K: KernelSet<NDIM, DOF, Mem, f64>,
+{
+    let Some(first) = tiles.iter().filter_map(|t| t.levels.get(level)).find(|l| l.state.tracers.is_some()) else {
+        return;
+    };
+    let (a0, ac) = first.state.timestepping.stages()[ii];
+    if a0 == 0.0 && ac == 1.0 {
+        return;
+    }
+    let key = symbi_sim::mass_transport::SamplingKey {
+        run_seed: first.state.tracers.as_ref().unwrap().run_seed,
+        epoch: first.state.iteration.wrapping_mul(4).wrapping_add(ii as u64),
+    };
+    let ids: Vec<u64> = tiles
+        .iter()
+        .filter_map(|t| t.levels.get(level).and_then(|l| l.state.tracers.as_ref()))
+        .flat_map(|tracers| tracers.id.iter().copied())
+        .collect();
+    let selections: std::collections::BTreeMap<u64, bool> = symbi_sim::mass_transport::sample_convex_blend(&ids, ac, key)
+        .unwrap_or_else(|detail| panic!("tracer ancestry blend: {detail}"))
+        .into_iter()
+        .collect();
+    for tile in tiles.iter_mut() {
+        let Some(tracers) = tile.levels.get_mut(level).and_then(|l| l.state.tracers.as_mut()) else {
+            continue;
+        };
+        for kk in 0..tracers.len() {
+            if !selections[&tracers.id[kk]] {
+                tracers.owner[kk] = tracers.step_owner[kk];
+                tracers.flags[kk] = tracers.step_flags[kk];
+            }
+        }
+    }
+}
+
+/// the stage's tracer exchange on level `level` of the tiles: the leavers cross to the tiles
+/// holding their cells, the ancestry blend ranks the level's ids across every tile, and the records
+/// it returns to their step-entry cells cross back
+fn exchange_level_tracers<R, const NDIM: usize, const DOF: usize, M, E, S, Mem, K>(
+    tiles: &mut [Hierarchy<R, NDIM, DOF, M, E, S, Mem, K>],
+    level: usize,
+    ii: usize,
+) where
+    R: Regime<f64, NDIM> + Copy,
+    M: Metric<f64, NDIM> + Copy + Send + Sync,
+    E: symbi_hydro::eos::EosFor<f64, <R as Regime<f64, NDIM>>::Energy> + Copy + Send + Sync,
+    S: ExecutionSpace,
+    Mem: MemorySpace + Sync,
+    K: KernelSet<NDIM, DOF, Mem, f64>,
+{
+    migrate_level_tracers(tiles, level);
+    blend_level_tracers(tiles, level, ii);
+    migrate_level_tracers(tiles, level);
+    // every record owned by a cell of the level sits at that cell's centre, as the store's own
+    // transport leaves it after its blend, and the stage's interface event follows, as it follows
+    // the transport on the single hierarchy
+    for tile in tiles.iter_mut() {
+        let Some(tracers) = tile.levels.get(level).and_then(|l| l.state.tracers.as_ref()) else {
+            continue;
+        };
+        let cells: Vec<Option<[isize; NDIM]>> = tracers
+            .owner
+            .iter()
+            .map(|&owner| tile.tracer_cell(owner).and_then(|(lev, coord)| (lev == level).then_some(coord)))
+            .collect();
+        let state = &tile.levels[level].state;
+        let geometry = state.geom.block_geometry(state.physics.metric);
+        let centers: Vec<Option<[f64; NDIM]>> = cells
+            .iter()
+            .map(|cell| cell.map(|coord| {
+                let center = geometry.centroid(coord);
+                std::array::from_fn(|dd| center[dd])
+            }))
+            .collect();
+        let tracers = tile.levels[level].state.tracers.as_mut().unwrap();
+        for (kk, center) in centers.into_iter().enumerate() {
+            if let Some(center) = center {
+                tracers.x[kk] = center;
+            }
+        }
+    }
+    for tile in tiles.iter_mut() {
+        tile.apply_pending_interface(level);
+    }
+}
+
+/// the boundary and source injection of level `level` over every tile, spawned once from the merged
+/// ledger as the single hierarchy spawns its own: ids from the run's next id, the injection
+/// remainder carried, the draw keyed by the level's iteration, and each record placed at its
+/// whole-grid cell's center through the tile holding the cell (every tile places a whole-grid cell
+/// bit for bit) and stored there. the run's next id and the remainder ride every level of every
+/// tile, as they ride every level of the single hierarchy
 fn spawn_decomposed_injections<R, const NDIM: usize, const DOF: usize, M, E, S, Mem, K>(
     tiles: &mut [Hierarchy<R, NDIM, DOF, M, E, S, Mem, K>],
     order: &[usize],
@@ -5820,23 +5920,78 @@ fn spawn_decomposed_injections<R, const NDIM: usize, const DOF: usize, M, E, S, 
     Mem: MemorySpace + Sync,
     K: KernelSet<NDIM, DOF, Mem, f64>,
 {
-    let Some((mut next_id, mut injection_remainder)) =
-        tiles.iter().flat_map(|tile| &tile.levels).find_map(|data| {
-            data.state
-                .tracers
-                .as_ref()
-                .map(|tracers| (tracers.next_id, tracers.injection_remainder))
-        })
-    else {
+    let Some(&holder) = order.iter().find(|&&i| tiles[i].levels.get(level).is_some_and(|l| l.state.tracers.is_some())) else {
         return;
     };
-    for &index in order {
-        (next_id, injection_remainder) = tiles[index]
-            .spawn_pending_injection(level, next_id, injection_remainder)
-            .unwrap_or_else(|detail| panic!("decomposed tracer injection: {detail}"));
+    let next_id = tiles
+        .iter()
+        .flat_map(|t| &t.levels)
+        .filter_map(|l| l.state.tracers.as_ref())
+        .map(|tracers| tracers.next_id)
+        .max()
+        .unwrap_or(0);
+    let remainder = tiles
+        .iter()
+        .flat_map(|t| &t.levels)
+        .filter_map(|l| l.state.tracers.as_ref())
+        .map(|tracers| tracers.injection_remainder)
+        .fold(0.0_f64, f64::max);
+    let mut ledger = std::collections::BTreeMap::new();
+    for &i in order {
+        for (destination, mass) in std::mem::take(&mut tiles[i].injection_ledger) {
+            *ledger.entry(destination).or_insert(0.0) += mass;
+        }
     }
-    for tile in tiles {
-        tile.set_tracer_spawn_state(next_id, injection_remainder);
+    let template = tiles[holder].levels[level].state.tracers.as_ref().unwrap();
+    let mut spawned = symbi_sim::tracers::TracerSet {
+        weight: template.weight,
+        run_seed: template.run_seed,
+        next_id,
+        injection_remainder: remainder,
+        ..Default::default()
+    };
+    let key = symbi_sim::mass_transport::SamplingKey {
+        run_seed: spawned.run_seed,
+        epoch: tiles[holder].levels[level].state.iteration | (1 << 62),
+    };
+    let owner_of = |owner: symbi_sim::mass_transport::ContainerId| -> Option<(usize, [isize; NDIM])> {
+        order.iter().find_map(|&i| {
+            let (lev, coord) = tiles[i].tracer_cell(owner)?;
+            (lev == level).then_some((i, coord))
+        })
+    };
+    symbi_sim::tracers::spawn_injected_tracers(
+        &mut spawned,
+        ledger.into_iter().map(|(destination, mass)| symbi_sim::mass_transport::MassTransfer { destination, mass }),
+        |owner| {
+            let (i, coord) = owner_of(owner).expect("a tile of the level holds every injection destination");
+            let state = &tiles[i].levels[level].state;
+            let center = state.geom.block_geometry(state.physics.metric).centroid(coord);
+            std::array::from_fn(|dd| center[dd])
+        },
+        key,
+    )
+    .unwrap_or_else(|detail| panic!("decomposed tracer injection: {detail}"));
+    let holders: Vec<usize> = (0..spawned.len())
+        .map(|kk| owner_of(spawned.owner[kk]).expect("a tile of the level holds every spawned record").0)
+        .collect();
+    for (kk, &i) in holders.iter().enumerate() {
+        let tracers = tiles[i].levels[level].state.tracers.as_mut().expect("a tile of a traced level carries tracers");
+        tracers.x.push(spawned.x[kk]);
+        tracers.id.push(spawned.id[kk]);
+        tracers.cohort.push(spawned.cohort[kk]);
+        tracers.flags.push(spawned.flags[kk]);
+        tracers.owner.push(spawned.owner[kk]);
+        tracers.step_owner.push(spawned.step_owner[kk]);
+        tracers.step_flags.push(spawned.step_flags[kk]);
+    }
+    for tile in tiles.iter_mut() {
+        for level in &mut tile.levels {
+            if let Some(tracers) = level.state.tracers.as_mut() {
+                tracers.next_id = spawned.next_id;
+                tracers.injection_remainder = spawned.injection_remainder;
+            }
+        }
     }
 }
 
@@ -6079,7 +6234,7 @@ where
             if decomposed_level_stage(tiles, level, &fg.order, fg.counts, &fg.devices, transport, jj, fine_dt, alpha) {
                 return true;
             }
-            migrate_level_tracers(tiles, level);
+            exchange_level_tracers(tiles, level, jj);
             exchange_level_halos(tiles, level, &fg.order, fg.counts, &fg.devices, transport);
             for &i in &fg.order {
                 phase_probe::set_tile(i);
@@ -6167,7 +6322,7 @@ where
                 if retry {
                     break;
                 }
-                migrate_level_tracers(tiles, 0);
+                exchange_level_tracers(tiles, 0, ii);
                 exchange_level_halos(tiles, 0, &root_order, counts, devices, transport);
                 for &i in root_order {
                     phase_probe::set_tile(i);
@@ -6405,6 +6560,9 @@ where
 {
     symbi_sim::retry_guard::assert_one_retry_exclusion(tiles.iter().flat_map(|h| h.levels.iter().map(|l| &l.state.retry_exclusion)));
     let n = tiles.len();
+    for tile in tiles.iter_mut() {
+        tile.blend_across_tiles = true;
+    }
     // the finest-level tail owns the IBM surface physics, and the refined-
     // decomposed step drives the fine tail alone, so a refined run needs at
     // least one tile carrying a fine patch for its bodies to be penalized at

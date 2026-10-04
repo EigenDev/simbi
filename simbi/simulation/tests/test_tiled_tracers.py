@@ -12,8 +12,11 @@
 # tiles leaves a tile with none, which still keys the ancestry blend with the
 # population's seed. both schemes ride a grid graded geometrically along
 # both axes the same way. the traced kelvin-helmholtz example (ito-3, cohorts,
-# doubly periodic) runs on two tiles as on one grid. a population with mesh
-# refinement on tiles is refused by name before any output.
+# doubly periodic) runs on two tiles as on one grid. with one refined box, the
+# discrete population on two, three uneven and six tiles cut through the box
+# publishes the single hierarchy's gas and population bit for bit, records
+# crossing the coarse-fine interface and the cuts included; an ito population
+# with mesh refinement on tiles is refused by name before any output.
 #
 # run: pytest -m simulation simbi/simulation/tests/test_tiled_tracers.py
 # =============================================================================
@@ -253,8 +256,8 @@ def test_tiles_carry_the_traced_kelvin_helmholtz_population(tmp_path: Path) -> N
     _assert_same(run(2, tmp_path / "two"), want, "continuous_tracers", "traced kelvin-helmholtz on two tiles")
 
 
-@pytest.mark.parametrize("problem", ["RefinedDiscreteDrift", "RefinedIto2Drift"])
-def test_a_refined_population_on_tiles_is_refused(tmp_path: Path, variants: Path, problem: str) -> None:
+@pytest.mark.parametrize("problem", ["RefinedIto2Drift"])
+def test_a_refined_ito_population_on_tiles_is_refused(tmp_path: Path, variants: Path, problem: str) -> None:
     out = tmp_path / "tiles"
     snippet = (
         "import sys\n"
@@ -264,7 +267,25 @@ def test_a_refined_population_on_tiles_is_refused(tmp_path: Path, variants: Path
     )
     env = dict(os.environ, SYMBI_GPU_OVERSUBSCRIBE="1")
     done = subprocess.run([sys.executable, "-c", snippet, str(out)], capture_output=True, text=True, timeout=900, env=env)
-    assert done.returncode != 0, f"{problem}: the tiles ran a refined tracer population"
+    assert done.returncode != 0, f"{problem}: the tiles ran a refined ito population"
     flat = " ".join(done.stderr.split())
-    assert "a tracer population with mesh refinement and gpus > 1 awaits its tiled level transport" in flat, done.stderr[-1500:]
+    assert "an ito tracer population with mesh refinement and gpus > 1 awaits its tiled level transport" in flat, done.stderr[-1500:]
     assert not list(out.glob("*.h5")), "output was written before the refusal"
+
+
+# the refined box covers root cells 8..24 of 32 on both axes; every cut lies four or more cells
+# from its faces
+REFINED_LAYOUTS = {2: "", 3: ", decompose=[[12, 20], []]", 6: ", decompose=[[12, 20], [14]]"}
+
+
+def test_refined_tiles_carry_the_single_hierarchy_population(tmp_path: Path, variants: Path) -> None:
+    want = _run("RefinedDiscreteDrift", tmp_path / "single", 1, STEPS)
+    population = _population(want, "tracers")
+    owners = population["owner"]
+    assert np.any(owners >> np.uint64(56) == 1) and np.any(owners >> np.uint64(56) == 0), (
+        "the single hierarchy's records do not span both levels; the comparison is vacuous"
+    )
+    with h5py.File(want, "r") as f:
+        assert int(f["tracers"].attrs["n_tracers"]) > SEEDED, "no tracer was injected; the spawn arm is vacuous"
+    for gpus, extra in REFINED_LAYOUTS.items():
+        _assert_same(_run("RefinedDiscreteDrift", tmp_path / f"tiles{gpus}", gpus, STEPS, extra=extra), want, "tracers", f"refined drift on {gpus} tiles")

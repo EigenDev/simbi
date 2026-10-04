@@ -6550,12 +6550,12 @@ macro_rules! build_and_run_hydro_decomposed_refined {
 
         // the refined decomposition carries plain hydro. the combinations below each need their own
         // cross-level multi-tile handling, so they are refused.
-        // a tracer population on refined tiles needs one ancestry blend and one injection spawn per
-        // level over every tile's records, the root's own tail, and tracers crossing a patch face on
-        // a cut; refused by name before any output
-        if cfg.n_tracers > 0 {
+        // an ito population on refined tiles needs the root's own tail, the coefficients across the
+        // cuts on every level and the relocation onto the finest level across tiles; refused by name
+        // before any output
+        if cfg.n_tracers > 0 && configured_ito_order(cfg)?.is_some() {
             return Err(
-                "a tracer population with mesh refinement and gpus > 1 awaits its tiled level transport; \
+                "an ito tracer population with mesh refinement and gpus > 1 awaits its tiled level transport; \
                  run it on one device"
                     .to_string(),
             );
@@ -6787,6 +6787,37 @@ macro_rules! build_and_run_hydro_decomposed_refined {
         // interiors into it. lives on device 0 (touched only at output).
         let offsets = tile_offsets(&partition);
         let grid = decomposed_grid::<$d>(cfg, tiles[0].levels[0].state.geom.ng);
+        // the discrete population seeds once from the whole seeded hierarchy, as the single
+        // hierarchy seeds its own, and each tile keeps the records its cells own; the whole
+        // hierarchy lives for that seeding alone
+        if cfg.n_tracers > 0 {
+            let global = symbi::symbi_xpu::with_device(0, || -> Result<Hier, String> {
+                let kernels_of = |$s: &Sim, $root: bool| $kernels;
+                let groot = Sim::build($regime, $eos, $geom)
+                    .cells(n)
+                    .ghosts(ghost_width(cfg))
+                    .origin(std::array::from_fn(|ax| cfg.x_lo[ax]))
+                    .spacing(dx)
+                    .coord_maps(axis_maps::<$d>(cfg))
+                    .boundaries(boundaries_nd::<$d>(&cfg.boundaries))
+                    .cfl(cfg.cfl)
+                    .timestepping(cfg.timestepping)
+                    .cyl_plane(cfg.cyl_plane)
+                    .allocate()
+                    .map_err(|e| format!("global seeding allocate: {e:?}"))?
+                    .set_initial_indexed(|idx, _x| {
+                        let $row = &prims[global_lin::<$d>(&[0; $d], &idx, &n)];
+                        $prim
+                    })
+                    .build();
+                let gsub = kernels_of(&groot, false);
+                let gh = Hierarchy::with_refinement(groot, gsub, &regions, prolong, |s: &Sim| kernels_of(s, false))
+                    .map_err(|e| format!("global refinement build: {e:?}"))?;
+                gh.seed_fine_from_coarse().map_err(|e| format!("global fine seed: {e:?}"))?;
+                Ok(gh)
+            })?;
+            symbi::sim::refinement::seed_decomposed_hierarchy_tracers(&global, &mut tiles, cfg.n_tracers);
+        }
         run_refined_decomposed_loop(cfg, tiles, offsets, grid, counts)
     }};
 }
