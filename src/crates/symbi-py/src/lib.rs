@@ -6550,16 +6550,6 @@ macro_rules! build_and_run_hydro_decomposed_refined {
 
         // the refined decomposition carries plain hydro. the combinations below each need their own
         // cross-level multi-tile handling, so they are refused.
-        // an ito population on refined tiles needs the root's own tail, the coefficients across the
-        // cuts on every level and the relocation onto the finest level across tiles; refused by name
-        // before any output
-        if cfg.n_tracers > 0 && configured_ito_order(cfg)?.is_some() {
-            return Err(
-                "an ito tracer population with mesh refinement and gpus > 1 awaits its tiled level transport; \
-                 run it on one device"
-                    .to_string(),
-            );
-        }
 
         let n: [usize; $d] = std::array::from_fn(|ax| cfg.n_cells[ax]);
         let total: usize = n.iter().product();
@@ -6787,9 +6777,9 @@ macro_rules! build_and_run_hydro_decomposed_refined {
         // interiors into it. lives on device 0 (touched only at output).
         let offsets = tile_offsets(&partition);
         let grid = decomposed_grid::<$d>(cfg, tiles[0].levels[0].state.geom.ng);
-        // the discrete population seeds once from the whole seeded hierarchy, as the single
-        // hierarchy seeds its own, and each tile keeps the records its cells own; the whole
-        // hierarchy lives for that seeding alone
+        // the population seeds once from the whole seeded hierarchy, as the single hierarchy seeds
+        // its own, and each tile keeps the records its cells own; the whole hierarchy lives for that
+        // seeding alone
         if cfg.n_tracers > 0 {
             let global = symbi::symbi_xpu::with_device(0, || -> Result<Hier, String> {
                 let kernels_of = |$s: &Sim, $root: bool| $kernels;
@@ -6817,6 +6807,15 @@ macro_rules! build_and_run_hydro_decomposed_refined {
                 Ok(gh)
             })?;
             symbi::sim::refinement::seed_decomposed_hierarchy_tracers(&global, &mut tiles, cfg.n_tracers);
+            // an ito run carries the seeded population as continuous tracers on every level of every
+            // tile, as the single hierarchy converts its own
+            if let Some(order) = configured_ito_order(cfg)? {
+                for tile in &mut tiles {
+                    for level in &mut tile.levels {
+                        convert_seeded_tracers(&mut level.state, order)?;
+                    }
+                }
+            }
         }
         run_refined_decomposed_loop(cfg, tiles, offsets, grid, counts)
     }};

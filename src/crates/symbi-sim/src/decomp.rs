@@ -1834,7 +1834,9 @@ pub fn exchange_grid_cons<const D: usize, const DOF: usize, M: MemorySpace, T: H
     exchange_grid_set(tiles, schedule, devices, transport, ExchangeSet::Cons)
 }
 
-fn exchange_ito_coefficients<const D: usize, const DOF: usize, M: MemorySpace, T: HaloTransport>(
+/// carry every tile's materialized ito coefficients into its neighbors' cut ghosts, so a tracer
+/// interpolating beside a cut reads the neighbor's accepted coefficients
+pub fn exchange_ito_coefficients<const D: usize, const DOF: usize, M: MemorySpace, T: HaloTransport>(
     tiles: &[&FieldStore<D, DOF, M>],
     schedule: &Schedule<D>,
     devices: &[i32],

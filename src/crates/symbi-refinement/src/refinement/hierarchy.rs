@@ -394,6 +394,9 @@ where
     /// once the stage's blend ranked the level's ids across every tile: (level, the stage's first
     /// receipt, the stage)
     pending_interface: Option<(usize, usize, usize)>,
+    /// on such a tile, the whole domain's extent and the boundary each axis presents to a
+    /// continuous tracer: the cut faces of a tile are no domain boundary
+    continuous_domain: Option<([(f64, f64); NDIM], Boundaries<NDIM>)>,
 
     /// whether the coarse-fine ghost transfer prolongs departures from the local hydrostatic
     /// equilibrium; when off it prolongs the raw primitive state. `None` follows the kernel set:
@@ -1190,6 +1193,7 @@ where
             priming: false,
             blend_across_tiles: false,
             pending_interface: None,
+            continuous_domain: None,
             balance_aware_transfer: None,
         }
     }
@@ -1674,6 +1678,7 @@ where
             priming: false,
             blend_across_tiles: false,
             pending_interface: None,
+            continuous_domain: None,
             balance_aware_transfer: None,
         })
     }
@@ -3542,8 +3547,7 @@ where
     pub fn level_tail_pre(&mut self, level: usize, dt: f64) {
         let has_finer = level + 1 < self.run_levels();
         if self.levels[level].state.continuous_tracers.is_some() {
-            let ledger = std::mem::take(&mut self.injection_ledger);
-            self.continuous_injection.insert(level, ledger);
+            self.hold_continuous_injection(level);
         } else if self.levels[level].state.has_tracers() {
             let ledger = std::mem::take(&mut self.injection_ledger);
             let layout = self.tracer_layout(level);
@@ -3665,6 +3669,21 @@ where
         if self.levels[level].state.continuous_tracers.is_some() {
             self.advance_level_continuous_tracers(level, dt);
             self.spawn_level_continuous_injection(level);
+        }
+        self.finish_level_tail_post(level, dt);
+    }
+
+    /// hold the boundary injection the level's stages booked until its continuous tracers have
+    /// advanced, so the injected tracers enter at the step's end
+    fn hold_continuous_injection(&mut self, level: usize) {
+        let ledger = std::mem::take(&mut self.injection_ledger);
+        self.continuous_injection.insert(level, ledger);
+    }
+
+    /// the step tail after the continuous tracers advanced and spawned: their crossing into the
+    /// sinks, the per-level censuses and the level clock
+    fn finish_level_tail_post(&mut self, level: usize, dt: f64) {
+        if self.levels[level].state.continuous_tracers.is_some() {
             if let Some(density_before) = self.continuous_accretion.remove(&level) {
                 let layout = self.tracer_layout(level);
                 let geometry = self.levels[level]
@@ -3861,16 +3880,11 @@ where
             dt,
         )
         .unwrap_or_else(|detail| panic!("ito tracer advancement: {detail}"));
-        let root_bounds = symbi_sim::tracers::map_continuous_tracer_bounds(
-            symbi_sim::tracers::partition_physical_bounds(&self.levels[0].state.geom),
-            scale_end,
-            offset_end,
-        );
-        symbi_sim::tracers::apply_continuous_boundaries_host(
-            &mut tracers,
-            root_bounds,
-            self.levels[0].state.boundaries,
-        )
+        let (bounds, boundaries) = self.continuous_domain.unwrap_or_else(|| {
+            (symbi_sim::tracers::partition_physical_bounds(&self.levels[0].state.geom), self.levels[0].state.boundaries)
+        });
+        let root_bounds = symbi_sim::tracers::map_continuous_tracer_bounds(bounds, scale_end, offset_end);
+        symbi_sim::tracers::apply_continuous_boundaries_host(&mut tracers, root_bounds, boundaries)
         .unwrap_or_else(|detail| panic!("ito tracer boundaries: {detail}"));
         self.levels[level].state.continuous_tracers = Some(tracers);
     }
@@ -5995,6 +6009,291 @@ fn spawn_decomposed_injections<R, const NDIM: usize, const DOF: usize, M, E, S, 
     }
 }
 
+/// the whole domain's extent and the boundary each axis presents to a continuous tracer: the root
+/// tiles' bounds joined, periodic on an axis the root closes into a ring, elsewhere the condition
+/// the outermost root tile carries
+fn whole_continuous_domain<R, const NDIM: usize, const DOF: usize, M, E, S, Mem, K>(
+    tiles: &[Hierarchy<R, NDIM, DOF, M, E, S, Mem, K>],
+) -> ([(f64, f64); NDIM], Boundaries<NDIM>)
+where
+    R: Regime<f64, NDIM> + Copy,
+    M: Metric<f64, NDIM> + Copy + Send + Sync,
+    E: symbi_hydro::eos::EosFor<f64, <R as Regime<f64, NDIM>>::Energy> + Copy + Send + Sync,
+    S: ExecutionSpace,
+    Mem: MemorySpace + Sync,
+    K: KernelSet<NDIM, DOF, Mem, f64>,
+{
+    let bounds_of = |t: &Hierarchy<R, NDIM, DOF, M, E, S, Mem, K>| symbi_sim::tracers::partition_physical_bounds(&t.levels[0].state.geom);
+    let bounds: [(f64, f64); NDIM] = std::array::from_fn(|dd| {
+        tiles.iter().map(|t| bounds_of(t)[dd]).fold((f64::INFINITY, f64::NEG_INFINITY), |(lo, hi), (l, h)| (lo.min(l), hi.max(h)))
+    });
+    let boundaries = Boundaries::per_axis(std::array::from_fn(|dd| {
+        if tiles[0].root_wraps[dd] {
+            return [BoundaryType::Periodic; 2];
+        }
+        let lo = tiles.iter().min_by(|a, b| bounds_of(a)[dd].0.total_cmp(&bounds_of(b)[dd].0)).unwrap().levels[0].state.boundaries.lo(dd);
+        let hi = tiles.iter().max_by(|a, b| bounds_of(a)[dd].1.total_cmp(&bounds_of(b)[dd].1)).unwrap().levels[0].state.boundaries.hi(dd);
+        [lo, hi]
+    }));
+    (bounds, boundaries)
+}
+
+/// level `level`'s materialized ito coefficients across its cuts, after each tile filled its
+/// physical and coarse-fine ghosts
+fn exchange_level_ito<R, const NDIM: usize, const DOF: usize, M, E, S, Mem, K, T>(
+    tiles: &[Hierarchy<R, NDIM, DOF, M, E, S, Mem, K>],
+    level: usize,
+    order: &[usize],
+    counts: [usize; NDIM],
+    devices: &[i32],
+    transport: &T,
+) where
+    R: Regime<f64, NDIM> + Copy,
+    M: Metric<f64, NDIM> + Copy + Send + Sync,
+    E: symbi_hydro::eos::EosFor<f64, <R as Regime<f64, NDIM>>::Energy> + Copy + Send + Sync,
+    S: ExecutionSpace,
+    Mem: MemorySpace + Sync,
+    K: KernelSet<NDIM, DOF, Mem, f64>,
+    T: HaloTransport,
+{
+    drain_devices::<Mem>(devices);
+    let states: Vec<&FieldStore<NDIM, DOF, Mem, f64>> = order.iter().map(|&i| &*tiles[i].levels[level].state).collect();
+    let schedule = schedule_of_tiles(&states, counts, &level_topology(tiles, level, order));
+    symbi_sim::decomp::exchange_ito_coefficients(&states, &schedule, devices, transport);
+    drain_devices::<Mem>(devices);
+}
+
+/// the tile holding level `level`'s cell at `position`, with the cell's local index there
+fn level_cell_holder<R, const NDIM: usize, const DOF: usize, M, E, S, Mem, K>(
+    tiles: &[Hierarchy<R, NDIM, DOF, M, E, S, Mem, K>],
+    level: usize,
+    position: [f64; NDIM],
+) -> Option<(usize, [isize; NDIM])>
+where
+    R: Regime<f64, NDIM> + Copy,
+    M: Metric<f64, NDIM> + Copy + Send + Sync,
+    E: symbi_hydro::eos::EosFor<f64, <R as Regime<f64, NDIM>>::Energy> + Copy + Send + Sync,
+    S: ExecutionSpace,
+    Mem: MemorySpace + Sync,
+    K: KernelSet<NDIM, DOF, Mem, f64>,
+{
+    tiles.iter().enumerate().find_map(|(i, t)| {
+        let geom = &t.levels.get(level)?.state.geom;
+        let bounds = symbi_sim::tracers::partition_physical_bounds(geom);
+        if (0..NDIM).any(|dd| position[dd] < bounds[dd].0 || position[dd] >= bounds[dd].1) {
+            return None;
+        }
+        let coord: [isize; NDIM] = std::array::from_fn(|dd| match geom.maps {
+            Some(maps) => maps[dd].index_at(position[dd]) - geom.index_offset[dd],
+            None => ((position[dd] - geom.x_lo[dd]) / geom.dx[dd]).floor() as isize - geom.index_offset[dd],
+        });
+        geom.interior.contains(coord).then_some((i, coord))
+    })
+}
+
+/// level `level`'s continuous tracers moved to the tile whose level cell holds their position, so
+/// the next substep interpolates them inside that tile's coefficients; a tracer outside every
+/// tile's level stays where it is, as it stays on its level of the single hierarchy
+fn migrate_level_continuous<R, const NDIM: usize, const DOF: usize, M, E, S, Mem, K>(
+    tiles: &mut [Hierarchy<R, NDIM, DOF, M, E, S, Mem, K>],
+    level: usize,
+) where
+    R: Regime<f64, NDIM> + Copy,
+    M: Metric<f64, NDIM> + Copy + Send + Sync,
+    E: symbi_hydro::eos::EosFor<f64, <R as Regime<f64, NDIM>>::Energy> + Copy + Send + Sync,
+    S: ExecutionSpace,
+    Mem: MemorySpace + Sync,
+    K: KernelSet<NDIM, DOF, Mem, f64>,
+{
+    let mut moved = Vec::new();
+    for source in 0..tiles.len() {
+        let Some(len) = tiles[source].levels.get(level).and_then(|l| l.state.continuous_tracers.as_ref()).map(|t| t.len) else {
+            continue;
+        };
+        let mut targets = Vec::with_capacity(len);
+        {
+            let tracers = tiles[source].levels[level].state.continuous_tracers.as_ref().unwrap();
+            for kk in 0..len {
+                let inactive = unsafe {
+                    *tracers.escaped.as_ptr::<u8>().add(kk) != 0 || *tracers.crossed_sink.as_ptr::<u8>().add(kk) != 0
+                };
+                let position: [f64; NDIM] = unsafe { std::array::from_fn(|dd| *tracers.x[dd].as_ptr::<f64>().add(kk)) };
+                targets.push(if inactive { None } else { level_cell_holder(tiles, level, position).map(|(i, _)| i) });
+            }
+        }
+        let tracers = tiles[source].levels[level].state.continuous_tracers.as_mut().unwrap();
+        for kk in (0..len).rev() {
+            if let Some(target) = targets[kk] {
+                if target != source {
+                    let record = tracers.swap_remove_host(kk).unwrap_or_else(|detail| panic!("continuous tracer migration: {detail}"));
+                    moved.push((target, record));
+                }
+            }
+        }
+    }
+    for (target, record) in moved {
+        tiles[target].levels[level]
+            .state
+            .continuous_tracers
+            .as_mut()
+            .expect("a tile of a traced level carries continuous tracers")
+            .push_host(record)
+            .unwrap_or_else(|detail| panic!("continuous tracer migration: {detail}"));
+    }
+}
+
+/// level `level`'s held injection over every tile, spawned once from the merged ledger as the
+/// single hierarchy spawns its own after the level's tracers advanced: ids from the run's next id,
+/// the remainder carried, the draw keyed by the level's iteration, each tracer placed in its
+/// whole-grid cell on the moved mesh through the tile holding the cell and stored there. the next
+/// id and the remainder ride every level of every tile
+fn spawn_decomposed_continuous<R, const NDIM: usize, const DOF: usize, M, E, S, Mem, K>(
+    tiles: &mut [Hierarchy<R, NDIM, DOF, M, E, S, Mem, K>],
+    order: &[usize],
+    level: usize,
+) where
+    R: Regime<f64, NDIM> + Copy,
+    M: Metric<f64, NDIM> + Copy + Send + Sync,
+    E: symbi_hydro::eos::EosFor<f64, <R as Regime<f64, NDIM>>::Energy> + Copy + Send + Sync,
+    S: ExecutionSpace,
+    Mem: MemorySpace + Sync,
+    K: KernelSet<NDIM, DOF, Mem, f64>,
+{
+    let Some(&holder) = order.iter().find(|&&i| tiles[i].levels.get(level).is_some_and(|l| l.state.continuous_tracers.is_some())) else {
+        return;
+    };
+    let mut ledger = std::collections::BTreeMap::new();
+    for &i in order {
+        for (destination, mass) in tiles[i].continuous_injection.remove(&level).unwrap_or_default() {
+            *ledger.entry(destination).or_insert(0.0) += mass;
+        }
+    }
+    let (order_kind, weight, run_seed, next_id, remainder) = {
+        let t = tiles[holder].levels[level].state.continuous_tracers.as_ref().unwrap();
+        (t.order, t.weight, t.run_seed, t.next_id, t.injection_remainder)
+    };
+    let mut spawned = symbi_sim::tracers::ContinuousTracerSet::<NDIM, Mem>::allocate(0, order_kind)
+        .unwrap_or_else(|detail| panic!("continuous tracer injection: {detail}"));
+    spawned.weight = weight;
+    spawned.run_seed = run_seed;
+    spawned.next_id = next_id;
+    spawned.injection_remainder = remainder;
+    let key = symbi_sim::mass_transport::SamplingKey {
+        run_seed,
+        epoch: tiles[holder].levels[level].state.iteration | (1 << 62),
+    };
+    let owner_of = |owner: symbi_sim::mass_transport::ContainerId| -> Option<(usize, [isize; NDIM])> {
+        order.iter().find_map(|&i| {
+            let (lev, coord) = tiles[i].tracer_cell(owner)?;
+            (lev == level).then_some((i, coord))
+        })
+    };
+    symbi_sim::tracers::spawn_continuous_injected_tracers(
+        &mut spawned,
+        ledger.into_iter().map(|(destination, mass)| symbi_sim::mass_transport::MassTransfer { destination, mass }),
+        |owner| {
+            let (i, coord) = owner_of(owner).expect("a tile of the level holds every injection destination");
+            let state = &tiles[i].levels[level].state;
+            let geometry = state.geom.block_geometry(state.physics.metric);
+            let (_, scale_end, _, offset_end) = symbi_sim::tracers::continuous_tracer_mesh_step(&state.store, state.dt);
+            let lo: [f64; NDIM] = state.geom.stagger_coord(coord, [symbi_sim::state::Loc::Face; NDIM]);
+            let width: [f64; NDIM] = std::array::from_fn(|dd| geometry.cell_width(coord, dd));
+            (std::array::from_fn(|dd| scale_end * lo[dd] + offset_end[dd]), width.map(|value| scale_end * value))
+        },
+        key,
+    )
+    .unwrap_or_else(|detail| panic!("decomposed continuous tracer injection: {detail}"));
+    let records: Vec<_> = (0..spawned.len)
+        .map(|kk| {
+            let record = spawned.record_host(kk).unwrap_or_else(|detail| panic!("continuous tracer injection: {detail}"));
+            let (i, _) = owner_of(record.owner).expect("a tile of the level holds every spawned record");
+            (i, record)
+        })
+        .collect();
+    for (i, record) in records {
+        tiles[i].levels[level]
+            .state
+            .continuous_tracers
+            .as_mut()
+            .expect("a tile of a traced level carries continuous tracers")
+            .push_host(record)
+            .unwrap_or_else(|detail| panic!("continuous tracer injection: {detail}"));
+    }
+    for tile in tiles.iter_mut() {
+        for level in &mut tile.levels {
+            if let Some(tracers) = level.state.continuous_tracers.as_mut() {
+                tracers.next_id = spawned.next_id;
+                tracers.injection_remainder = spawned.injection_remainder;
+            }
+        }
+    }
+}
+
+/// the continuous tracers relocated onto the finest level whose cell holds their position, on the
+/// tile holding that cell, once per accepted root step, as the single hierarchy relocates them over
+/// its levels; a tracer outside every level stays where it is
+fn migrate_continuous_to_finest_decomposed<R, const NDIM: usize, const DOF: usize, M, E, S, Mem, K>(
+    tiles: &mut [Hierarchy<R, NDIM, DOF, M, E, S, Mem, K>],
+) where
+    R: Regime<f64, NDIM> + Copy,
+    M: Metric<f64, NDIM> + Copy + Send + Sync,
+    E: symbi_hydro::eos::EosFor<f64, <R as Regime<f64, NDIM>>::Energy> + Copy + Send + Sync,
+    S: ExecutionSpace,
+    Mem: MemorySpace + Sync,
+    K: KernelSet<NDIM, DOF, Mem, f64>,
+{
+    let depth = tiles.iter().map(|t| t.levels.len()).max().unwrap_or(1);
+    let locate = |tiles: &[Hierarchy<R, NDIM, DOF, M, E, S, Mem, K>], position: [f64; NDIM]| {
+        (0..depth).rev().find_map(|level| {
+            let (i, coord) = level_cell_holder(tiles, level, position)?;
+            let layout = tiles[i].tracer_layout(level);
+            let interior = &tiles[i].levels[level].state.geom.interior;
+            let cell: [usize; NDIM] = std::array::from_fn(|dd| layout.tile_offset[dd] + (coord[dd] - interior.spaces[dd].lo) as usize);
+            let owner = symbi_sim::tracers::cell_container_id(symbi_sim::tracers::cell_address(cell, layout.global_cells), layout.level);
+            Some((i, level, owner))
+        })
+    };
+    let mut moved = Vec::new();
+    for source in 0..tiles.len() {
+        for source_level in 0..tiles[source].levels.len() {
+            let Some(len) = tiles[source].levels[source_level].state.continuous_tracers.as_ref().map(|t| t.len) else {
+                continue;
+            };
+            let mut plans = Vec::with_capacity(len);
+            {
+                let tracers = tiles[source].levels[source_level].state.continuous_tracers.as_ref().unwrap();
+                for kk in 0..len {
+                    let inactive = unsafe {
+                        *tracers.escaped.as_ptr::<u8>().add(kk) != 0 || *tracers.crossed_sink.as_ptr::<u8>().add(kk) != 0
+                    };
+                    let position: [f64; NDIM] = unsafe { std::array::from_fn(|dd| *tracers.x[dd].as_ptr::<f64>().add(kk)) };
+                    plans.push(if inactive { None } else { locate(tiles, position) });
+                }
+            }
+            let tracers = tiles[source].levels[source_level].state.continuous_tracers.as_mut().unwrap();
+            for kk in (0..len).rev() {
+                let Some((target, target_level, owner)) = plans[kk] else { continue };
+                if (target, target_level) == (source, source_level) {
+                    unsafe { *tracers.owner.as_mut_ptr::<symbi_sim::mass_transport::ContainerId>().add(kk) = owner };
+                } else {
+                    let mut record = tracers.swap_remove_host(kk).unwrap_or_else(|detail| panic!("continuous tracer refinement transfer: {detail}"));
+                    record.owner = owner;
+                    moved.push((target, target_level, record));
+                }
+            }
+        }
+    }
+    for (target, target_level, record) in moved {
+        tiles[target].levels[target_level]
+            .state
+            .continuous_tracers
+            .as_mut()
+            .expect("every level of a traced tile carries continuous tracers")
+            .push_host(record)
+            .unwrap_or_else(|detail| panic!("continuous tracer refinement transfer: {detail}"));
+    }
+}
+
 /// the one hierarchy march: N tiles advance in lockstep behind an agreed timestep, with
 /// the per-tile watchdog, the step-panic catch, the crash report, and the observer
 /// cadence shared by every shape. a single tile with no decomposition context steps
@@ -6246,6 +6545,12 @@ where
             phase_probe::set_tile(i);
             symbi_xpu::with_device(fg.devices[k], || tiles[i].level_tail_pre(level, fine_dt));
         }
+        // the level's accepted ito coefficients across its cuts, before a finer level prolongs them
+        // and the level's tracers interpolate them
+        let continuous = fg.order.iter().any(|&i| tiles[i].levels[level].state.continuous_tracers.is_some());
+        if continuous {
+            exchange_level_ito(tiles, level, &fg.order, fg.counts, &fg.devices, transport);
+        }
         if let Some(finer) = fine.get(level) {
             if decomposed_subcycle(tiles, level, fine, transport, nstages, fine_dt) {
                 return true;
@@ -6260,9 +6565,23 @@ where
                 phase_probe::sample("restrict", level, &tiles[i].levels[level].state);
             }
         }
-        for (k, &i) in fg.order.iter().enumerate() {
-            phase_probe::set_tile(i);
-            symbi_xpu::with_device(fg.devices[k], || tiles[i].level_tail_post(level, fine_dt));
+        if continuous {
+            // the tail split across the tiles: every tile advances its tracers, the tracers cross to
+            // the tiles holding their cells, the held injection spawns once, then each tile finishes
+            for (k, &i) in fg.order.iter().enumerate() {
+                symbi_xpu::with_device(fg.devices[k], || tiles[i].advance_level_continuous_tracers(level, fine_dt));
+            }
+            migrate_level_continuous(tiles, level);
+            spawn_decomposed_continuous(tiles, &fg.order, level);
+            for (k, &i) in fg.order.iter().enumerate() {
+                phase_probe::set_tile(i);
+                symbi_xpu::with_device(fg.devices[k], || tiles[i].finish_level_tail_post(level, fine_dt));
+            }
+        } else {
+            for (k, &i) in fg.order.iter().enumerate() {
+                phase_probe::set_tile(i);
+                symbi_xpu::with_device(fg.devices[k], || tiles[i].level_tail_post(level, fine_dt));
+            }
         }
     }
     false
@@ -6361,6 +6680,17 @@ where
                         }
                     });
                 }
+                // the root's continuous tracers, as the root's tail holds them on the single
+                // hierarchy: the injection held until they advance, and the root's accepted ito
+                // coefficients across the cuts before the fine level prolongs them
+                let continuous = tiles.iter().any(|t| t.levels[0].state.continuous_tracers.is_some());
+                if continuous {
+                    for i in 0..n {
+                        tiles[i].hold_continuous_injection(0);
+                        symbi_xpu::with_device(devices[i], || tiles[i].prepare_level_ito_coefficients(0));
+                    }
+                    exchange_level_ito(tiles, 0, &root_order, counts, devices, transport);
+                }
                 // the refined levels, subcycled across their tiles, then each refined tile's root
                 // takes the restriction and reflux of level 1, and the root halos carry the
                 // restricted covered cells: the next step's prolongation snapshot and the
@@ -6380,6 +6710,16 @@ where
                             phase_probe::sample("restrict", 0, &tiles[i].levels[0].state);
                         }
                     }
+                }
+                // the root's continuous tracers advance over the root step after the fine subcycle and
+                // its restriction, cross to the tiles holding their cells, and the held injection
+                // spawns once
+                if !retry && continuous {
+                    for i in 0..n {
+                        symbi_xpu::with_device(devices[i], || tiles[i].advance_level_continuous_tracers(0, gdt));
+                    }
+                    migrate_level_continuous(tiles, 0);
+                    spawn_decomposed_continuous(tiles, &root_order, 0);
                 }
                 // the root clock; the root post-step carries no mesh motion.
                 if !retry {
@@ -6445,6 +6785,10 @@ where
     symbi_sim::retry_guard::accept(&guard, &mut streak, &ledger, gdt).unwrap_or_else(|failure| panic!("{failure}"));
     for tile in tiles.iter_mut() {
         tile.levels[0].state.severe_streak = streak;
+    }
+    // the continuous tracers onto the finest level holding them, once per accepted root step
+    if tiles.iter().any(|t| t.levels.iter().any(|l| l.state.continuous_tracers.is_some())) {
+        migrate_continuous_to_finest_decomposed(tiles);
     }
     gdt
 }
@@ -6562,6 +6906,12 @@ where
     let n = tiles.len();
     for tile in tiles.iter_mut() {
         tile.blend_across_tiles = true;
+    }
+    if tiles.iter().any(|t| t.levels.iter().any(|l| l.state.continuous_tracers.is_some())) {
+        let domain = whole_continuous_domain(tiles);
+        for tile in tiles.iter_mut() {
+            tile.continuous_domain = Some(domain);
+        }
     }
     // the finest-level tail owns the IBM surface physics, and the refined-
     // decomposed step drives the fine tail alone, so a refined run needs at
