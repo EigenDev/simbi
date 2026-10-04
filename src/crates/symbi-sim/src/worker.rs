@@ -156,13 +156,14 @@ impl From<FabricError> for WorkerError {
     }
 }
 
-/// the first-release scope: 2D and 3D newtonian and relativistic hydro and MHD,
-/// adiabatic or globally isothermal, with or without a passive scalar and immersed bodies, on
-/// the cartesian, spherical and cylindrical charts of a flat spacetime, in host memory, on a
-/// static mesh, without horizon bodies, tracers, or excision.
+/// the launched worker's scope: 1D to 3D grids in host memory, a curved spacetime only where
+/// `curved` admits it (the flat relativistic gas), without a horizon body, and with tracers on the
+/// cartesian chart of a flat spacetime alone. the charts and settings a launch admits are decided
+/// at the launch's front door.
 pub fn refuse<const D: usize, const DOF: usize, M: MemorySpace, K: KernelSet<D, DOF, M, f64>>(
     stores: &[&FieldStore<D, DOF, M, f64>],
-    kernels: &[&K],
+    _kernels: &[&K],
+    curved: bool,
 ) -> Result<(), WorkerError> {
     let refused = |reason: &str| {
         WorkerError::Refused(format!("{reason} is outside the distributed first release"))
@@ -173,19 +174,18 @@ pub fn refuse<const D: usize, const DOF: usize, M: MemorySpace, K: KernelSet<D, 
     if M::IS_DEVICE_ACCESSIBLE {
         return Err(refused("device memory"));
     }
-    for (store, kernel) in stores.iter().zip(kernels) {
-        let reason = if store.geom.spacetime != symbi_geometry::Spacetime::Minkowski {
+    for store in stores {
+        let flat = store.geom.spacetime == symbi_geometry::Spacetime::Minkowski;
+        let reason = if !flat && !curved {
             Some(format!("the {:?} spacetime", store.geom.spacetime))
         } else if crate::driver::horizon_request(store).is_some() {
             Some("a horizon body".to_string())
+        } else if (store.tracers.is_some() || store.continuous_tracers.is_some()) && !flat {
+            Some(format!("a tracer population on the {:?} spacetime", store.geom.spacetime))
         } else if store.continuous_tracers.is_some() && store.geom.coords != symbi_geometry::Geometry::Cartesian {
             Some("an Ito tracer population on a curvilinear chart".to_string())
         } else if store.tracers.is_some() && store.geom.coords != symbi_geometry::Geometry::Cartesian {
             Some("a tracer population on a curvilinear chart".to_string())
-        } else if let Some(property) = crate::stage::post_step_refresh_needed(store, *kernel) {
-            // the launched path carries no post-step exchange point, so an operation that
-            // leaves the cut halos stale is refused by the recipe's own declaration
-            Some(property.to_string())
         } else {
             None
         };
@@ -420,6 +420,10 @@ struct WorkerStep<'a, 'p, const D: usize, K, T, L: Link> {
     deadline: Duration,
     spent: &'a mut Duration,
     failure: Option<FabricError>,
+    /// the stage whose excision this context refreshes, the stage count for the post-step
+    excise_at: u8,
+    /// the excision sweep count every worker agreed at the session's start
+    excise_passes: usize,
 }
 
 impl<'a, 'p, const D: usize, const DOF: usize, M, K, T, L> crate::stage::StepContext<D, DOF, M>
@@ -433,13 +437,24 @@ where
     fn on_tile(&self, k: usize, f: &mut dyn FnMut()) {
         with_device(self.devices[self.tiles[k].0 as usize], || f())
     }
+    /// the excision sweep count, the only count the recipe combines: fixed by the run's radius
+    /// and agreed by every worker at the session's start
     fn combine_max(&mut self, local: usize) -> usize {
-        local
+        debug_assert!(local <= self.excise_passes, "a tile sweeps more often than the agreed count");
+        self.excise_passes
     }
-    fn refresh_halos(&mut self, stores: &[&FieldStore<D, DOF, M, f64>]) {
+    fn refresh_halos(&mut self, stores: &[&FieldStore<D, DOF, M, f64>], at: crate::stage::RefreshAt) {
+        use crate::stage::RefreshAt;
         if self.failure.is_some() {
             return;
         }
+        // one sweep per excision, agreed at the session's start: each refresh has its own point
+        let point = match at {
+            RefreshAt::Phase => ExchangePoint::PostStep,
+            RefreshAt::ExciseSweep(0) => ExchangePoint::ExciseSweep(self.excise_at),
+            RefreshAt::ExciseSweep(pass) => unreachable!("excision sweep {pass} beyond the agreed single sweep"),
+            RefreshAt::ExciseRebuild => ExchangePoint::ExciseRebuild(self.excise_at),
+        };
         let moved = exchange_point(
             self.exchange,
             self.tiles,
@@ -448,7 +463,7 @@ where
             self.devices,
             self.transport,
             self.fabric,
-            ExchangePoint::PostStep,
+            point,
             self.step,
             self.attempt,
             self.deadline,
@@ -869,7 +884,7 @@ where
     }
     {
         let sh = shared!();
-        refuse(&sh, kernels).map_err(|e| fail(fabric, e))?;
+        refuse(&sh, kernels, cfg.regime == crate::substrate_seam::RegimeKind::Rhd).map_err(|e| fail(fabric, e))?;
         // a rejection replays the step from its entry, which needs the whole entry state kept
         if !cfg.injection.reject_at.is_empty() {
             for (store, kernel) in sh.iter().zip(kernels) {
@@ -974,12 +989,15 @@ where
 
     // prime: primitives and physical ghosts, the cut halos, the physical ghosts again at the
     // cut corners, the audit of every shared interface face as the workers seeded it, then
-    // the initial-condition check.
+    // the initial-condition check. a resumed tile keeps the primitives its checkpoint stored,
+    // as the single grid's resume does
     {
         let sh = shared!();
         for k in 0..n {
             with_device(dev(k), || {
-                kernels[k].c2p(sh[k]);
+                if !sh[k].primitives_loaded {
+                    kernels[k].c2p(sh[k]);
+                }
                 kernels[k].ghost_fill(sh[k]);
             });
         }
@@ -1027,6 +1045,30 @@ where
         let sh = shared!();
         agree_retry_guard(&sh, fabric, cfg.deadline).map_err(|e| fail(fabric, e))?;
     }
+    // the horizon excision's sweep count is fixed by the run's radius: every worker holds the
+    // same one, checked from both sides, and the excision points are named for a single sweep
+    let excise_passes = {
+        let local = {
+            let sh = shared!();
+            (0..n).map(|k| kernels[k].excise_pass_count(sh[k])).max().unwrap_or(0)
+        };
+        let mut vote = |flag: bool| -> Result<bool, WorkerError> {
+            Ok(fabric.collective(OpKind::Any, u64::from(flag), cfg.deadline).map_err(|e| fail(fabric, e.into()))? != 0)
+        };
+        let sweeping = vote(local > 0)?;
+        let still = vote(local == 0)?;
+        let repeated = vote(local > 1)?;
+        if sweeping && still {
+            return Err(fail(fabric, WorkerError::Refused("the workers disagree on whether the run excises".into())));
+        }
+        if repeated {
+            return Err(fail(
+                fabric,
+                WorkerError::Refused("an excision of more than one sweep per step is outside the distributed first release".into()),
+            ));
+        }
+        usize::from(sweeping)
+    };
     let mut t = cfg.start_time;
     let mut iter: u64 = 0;
     while t < cfg.t_final && (cfg.max_steps == 0 || iter < cfg.max_steps) {
@@ -1242,6 +1284,33 @@ where
                 if reject != 0 {
                     rejected = true;
                     break;
+                }
+                // the excision of the accepted stage, its sweep and rebuild refreshed at their own
+                // points, before the stage's halos move
+                if excise_passes > 0 {
+                    let mut step = WorkerStep {
+                        exchange,
+                        tiles,
+                        n_tiles,
+                        devices,
+                        transport,
+                        fabric: &mut *fabric,
+                        kernels,
+                        step: iter,
+                        attempt,
+                        deadline,
+                        spent: &mut timing.exchange,
+                        failure: None,
+                        excise_at: stage.index as u8,
+                        excise_passes,
+                    };
+                    let folded = crate::stage::fold_stage_excision(&sh, kernels, &mut step);
+                    if let Some(e) = step.failure.take() {
+                        return Err(fail(fabric, e.into()));
+                    }
+                    if let Err(e) = folded {
+                        return Err(fail(fabric, WorkerError::Numerics(e.to_string())));
+                    }
                 }
                 exchange_point(
                     exchange,
@@ -1487,6 +1556,8 @@ where
                 deadline,
                 spent: &mut timing.exchange,
                 failure: None,
+                excise_at: exchange.table().stages(),
+                excise_passes,
             };
             let folded = crate::stage::fold_post_step(&sh, kernels, dt, &mut step, |_| true);
             let failure = step.failure.take();

@@ -1432,7 +1432,7 @@ where
     fn combine_max(&mut self, local: usize) -> usize {
         local
     }
-    fn refresh_halos(&mut self, stores: &[&FieldStore<D, DOF, M, f64>]) {
+    fn refresh_halos(&mut self, stores: &[&FieldStore<D, DOF, M, f64>], _at: crate::stage::RefreshAt) {
         drain_devices::<M>(self.devices);
         exchange_grid(stores, self.schedule, self.devices, self.transport);
         flip_polar_bands(stores, self.kernels, self.schedule, self.devices);
@@ -2719,12 +2719,15 @@ where
         sh.iter().any(|s| !crate::axis_ring::axis_rings(*s).is_empty())
     };
 
-    // prime prim + ghosts (the stage entry contract), then seed the cut halos.
+    // prime prim + ghosts (the stage entry contract), then seed the cut halos. a resumed tile
+    // keeps the primitives its checkpoint stored, as the single grid's resume does
     {
         let sh = shared!();
         for i in 0..n {
             symbi_xpu::with_device(devices[i], || {
-                kernels[i].c2p(sh[i]);
+                if !sh[i].primitives_loaded {
+                    kernels[i].c2p(sh[i]);
+                }
                 kernels[i].ghost_fill(sh[i]);
             });
         }

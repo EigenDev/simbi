@@ -814,6 +814,16 @@ impl std::fmt::Display for PostStepError {
     }
 }
 
+/// the refresh of the cut halos a post-step operation asks for: after a phase's operation and
+/// recovery, after excision sweep `pass`, or after the excision rebuild. a driver whose
+/// exchanges are named points maps each to its own point
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RefreshAt {
+    Phase,
+    ExciseSweep(usize),
+    ExciseRebuild,
+}
+
 /// what a driver supplies under the post-step recipe: where each tile's work runs, how a
 /// per-tile count is combined across every tile the step spans, and how the cut halos are
 /// made current after an operation wrote its interior.
@@ -822,8 +832,8 @@ pub trait StepContext<const D: usize, const DOF: usize, Mem: MemorySpace> {
     fn on_tile(&self, k: usize, f: &mut dyn FnMut());
     /// the largest of a per-tile count over every tile the step spans
     fn combine_max(&mut self, local: usize) -> usize;
-    /// every tile's cut halo made current from its neighbors' interiors
-    fn refresh_halos(&mut self, stores: &[&FieldStore<D, DOF, Mem, f64>]);
+    /// every tile's cut halo made current from its neighbors' interiors, for the refresh `at`
+    fn refresh_halos(&mut self, stores: &[&FieldStore<D, DOF, Mem, f64>], at: RefreshAt);
 }
 
 /// the context of a step over one grid: the work runs in place, a count is its own maximum,
@@ -837,7 +847,7 @@ impl<const D: usize, const DOF: usize, Mem: MemorySpace> StepContext<D, DOF, Mem
     fn combine_max(&mut self, local: usize) -> usize {
         local
     }
-    fn refresh_halos(&mut self, _stores: &[&FieldStore<D, DOF, Mem, f64>]) {}
+    fn refresh_halos(&mut self, _stores: &[&FieldStore<D, DOF, Mem, f64>], _at: RefreshAt) {}
 }
 
 /// fold the canonical post-step recipe over `stores`, `select` choosing the operators this
@@ -864,8 +874,9 @@ where
 /// into the next stage's flux sweep; with it, every flux sweep and the first-order redo's stage
 /// input read the vacuum floor across the excised region. the fill writes the live conserved and
 /// primitive fields alone: the step-entry and stage-input snapshots keep their meaning, and the
-/// staggered faces stay with the constrained transport. a no-op on every tile without an excision
-/// region, so an unexcised run issues no call.
+/// staggered faces stay with the constrained transport. the sweep count is combined over every
+/// tile the step spans, so a step with no excision region anywhere issues no call, and a tile
+/// without one takes every refresh its neighbors take.
 pub fn fold_stage_excision<const D: usize, const DOF: usize, Mem, K>(
     stores: &[&FieldStore<D, DOF, Mem, f64>],
     kernels: &[&K],
@@ -875,7 +886,8 @@ where
     Mem: MemorySpace,
     K: KernelSet<D, DOF, Mem, f64> + ?Sized,
 {
-    if !(0..stores.len()).any(|k| kernels[k].excise_pass_count(stores[k]) > 0) {
+    let local = (0..stores.len()).map(|k| kernels[k].excise_pass_count(stores[k])).max().unwrap_or(0);
+    if cx.combine_max(local) == 0 {
         return Ok(());
     }
     fold_post_step(stores, kernels, 0.0, cx, |op| op == StepOp::Excise)?;
@@ -904,11 +916,14 @@ where
 {
     let n = stores.len();
     for phase in table {
-        if !select(phase.op) || !(0..n).any(|k| phase.applies(stores[k], kernels[k])) {
+        if !select(phase.op) {
             continue;
         }
         match phase.op {
             StepOp::Viscous => {
+                if !(0..n).any(|k| phase.applies(stores[k], kernels[k])) {
+                    continue;
+                }
                 for k in 0..n {
                     cx.on_tile(k, &mut || prof("viscous", || kernels[k].viscous(stores[k], dt)));
                 }
@@ -916,28 +931,30 @@ where
                     recover_primitives(phase, stores, kernels, cx)?;
                 }
                 if phase.refresh != Refresh::None {
-                    cx.refresh_halos(stores);
+                    cx.refresh_halos(stores, RefreshAt::Phase);
                 }
             }
+            // the sweep count is combined over every tile the step spans, so a tile without an
+            // excision region takes every refresh its neighbors take
             StepOp::Excise => {
                 let local = (0..n).map(|k| kernels[k].excise_pass_count(stores[k])).max().unwrap_or(0);
                 let passes = cx.combine_max(local);
                 if passes == 0 {
                     continue;
                 }
-                for _ in 0..passes {
+                for pass in 0..passes {
                     for k in 0..n {
                         cx.on_tile(k, &mut || kernels[k].excise_sweep(stores[k]));
                     }
                     if phase.refresh == Refresh::HalosPerPass {
-                        cx.refresh_halos(stores);
+                        cx.refresh_halos(stores, RefreshAt::ExciseSweep(pass));
                     }
                 }
                 for k in 0..n {
                     cx.on_tile(k, &mut || kernels[k].excise_finalize(stores[k]));
                 }
                 if phase.refresh != Refresh::None {
-                    cx.refresh_halos(stores);
+                    cx.refresh_halos(stores, RefreshAt::ExciseRebuild);
                 }
             }
         }
@@ -969,22 +986,5 @@ where
         cx.on_tile(k, &mut || prof("ghost_fill", || kernels[k].ghost_fill(stores[k])));
     }
     Ok(())
-}
-
-/// the property of the first post-step operation on `store` that refreshes the cut halos more
-/// than once per step: a driver whose post-step exchange point runs once refuses it by name
-pub fn post_step_refresh_needed<const D: usize, const DOF: usize, Mem, K>(
-    store: &FieldStore<D, DOF, Mem, f64>,
-    kernel: &K,
-) -> Option<&'static str>
-where
-    Mem: MemorySpace,
-    K: KernelSet<D, DOF, Mem, f64> + ?Sized,
-{
-    POST_STEP_PIPELINE
-        .iter()
-        .filter(|phase| phase.refresh == Refresh::HalosPerPass)
-        .find(|phase| phase.applies(store, kernel))
-        .map(|phase| phase.property)
 }
 

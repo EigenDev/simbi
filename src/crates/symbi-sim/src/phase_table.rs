@@ -113,8 +113,15 @@ impl PhaseTable {
             phases.push(Phase { point: ExchangePoint::Primed, skippable: false, init_only: true });
         }
         phases.push(Phase { point: ExchangePoint::Audit(AuditAt::Prime), skippable: true, init_only: true });
+        // a flat run's horizon excision refreshes the cut halos after its sweep and its rebuild,
+        // at the end of every stage and after the post-step; a run without excision passes them
+        let excising = substeps == 0;
         for k in 0..stages {
             phases.push(skippable(ExchangePoint::Troubled(k)));
+            if excising {
+                phases.push(skippable(ExchangePoint::ExciseSweep(k)));
+                phases.push(skippable(ExchangePoint::ExciseRebuild(k)));
+            }
             phases.push(mandatory(ExchangePoint::Stage(k)));
             phases.push(skippable(ExchangePoint::Audit(AuditAt::Stage(k))));
         }
@@ -141,6 +148,10 @@ impl PhaseTable {
         // the last phase every worker opens, the phase before it
         phases.push(skippable(ExchangePoint::TracerCoefficients));
         phases.push(skippable(ExchangePoint::PostStep));
+        if excising {
+            phases.push(skippable(ExchangePoint::ExciseSweep(stages)));
+            phases.push(skippable(ExchangePoint::ExciseRebuild(stages)));
+        }
         phases.push(skippable(ExchangePoint::PostBody));
         phases.push(skippable(ExchangePoint::Rollback));
         phases.push(skippable(ExchangePoint::Audit(AuditAt::Rollback)));
@@ -279,13 +290,19 @@ mod tests {
                 ExchangePoint::Prime,
                 ExchangePoint::Audit(AuditAt::Prime),
                 ExchangePoint::Troubled(0),
+                ExchangePoint::ExciseSweep(0),
+                ExchangePoint::ExciseRebuild(0),
                 ExchangePoint::Stage(0),
                 ExchangePoint::Audit(AuditAt::Stage(0)),
                 ExchangePoint::Troubled(1),
+                ExchangePoint::ExciseSweep(1),
+                ExchangePoint::ExciseRebuild(1),
                 ExchangePoint::Stage(1),
                 ExchangePoint::Audit(AuditAt::Stage(1)),
                 ExchangePoint::TracerCoefficients,
                 ExchangePoint::PostStep,
+                ExchangePoint::ExciseSweep(2),
+                ExchangePoint::ExciseRebuild(2),
                 ExchangePoint::PostBody,
                 ExchangePoint::Rollback,
                 ExchangePoint::Audit(AuditAt::Rollback),

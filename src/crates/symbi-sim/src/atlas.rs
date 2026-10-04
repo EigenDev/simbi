@@ -354,6 +354,13 @@ pub enum ExchangePoint {
     /// at initialization, before level `level >= 2` is seeded by prolongation: the conserved
     /// halos of level `level - 1` cross its cuts
     Seed { level: u8 },
+    /// after the horizon-excision sweep of stage `k`, or of the accepted step's post-step
+    /// operations when `k` is the stage count: the cut halos carry the swept cells before the
+    /// rebuild reads them
+    ExciseSweep(u8),
+    /// after the excision rebuild of stage `k`, or of the post-step when `k` is the stage count:
+    /// the cut halos carry the rebuilt cells before the stage exchange or the next step reads them
+    ExciseRebuild(u8),
 }
 
 /// the points of one fine substep, in order
@@ -453,6 +460,8 @@ impl ExchangePoint {
             }
             ExchangePoint::NestedRestrict { level, path } => (25, (level as u32) << 5 | path as u32, 0),
             ExchangePoint::Seed { level } => (26, level as u32, 0),
+            ExchangePoint::ExciseSweep(k) => (31, k as u32, 0),
+            ExchangePoint::ExciseRebuild(k) => (32, k as u32, 0),
         };
         kind << 16 | a << 8 | b
     }

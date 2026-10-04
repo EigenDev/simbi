@@ -2355,6 +2355,11 @@ pub struct FieldStore<
     /// the thresholds the checkpoint this run resumed from recorded; the configured `retry_guard`
     /// applies and the recorded streak carries over, and the opening report names any change
     pub retry_guard_recorded: Option<crate::retry_guard::RetryGuard>,
+    /// the primitives hold a checkpoint's accepted state, read with the conserved fields. a
+    /// resumed run primes its ghosts and halos from them without recovering them again: an
+    /// operation that writes primitives directly (the excision floor) leaves stored primitives
+    /// that a recovery from the conserved state does not reproduce bit for bit
+    pub primitives_loaded: bool,
 
     /// discrete mass-transport tracers. position is derived output state;
     /// material ownership is authoritative.
@@ -3116,6 +3121,7 @@ where
                 retry_guard: crate::retry_guard::RetryGuard::default(),
                 severe_streak: 0,
                 retry_guard_recorded: None,
+                primitives_loaded: false,
                 // seeding writes the conserved state; the primitives stay meaningless
                 // until the recovery has run.
                 primitives_recovered: std::sync::atomic::AtomicBool::new(false),

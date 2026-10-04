@@ -11180,8 +11180,21 @@ fn validate_launch_scope(cfg: &Config) -> Result<(), String> {
     if !matches!(cfg.dims, 1..=3) {
         return refused(&format!("a {}-dimensional grid", cfg.dims));
     }
+    // a curved spacetime carries the relativistic gas on the kerr-schild charts, with or without
+    // excision, on a static unrefined mesh without bodies or tracers
     if cfg.spacetime != "minkowski" {
-        return refused(&format!("the {} spacetime", cfg.spacetime));
+        if cfg.regime != "rhd" {
+            return refused(&format!("the {} spacetime with the {} regime", cfg.spacetime, cfg.regime));
+        }
+        if cfg.refinement_enabled {
+            return refused(&format!("the {} spacetime with mesh refinement", cfg.spacetime));
+        }
+        if !cfg.bodies.is_empty() || cfg.bonded_assembly.is_some() {
+            return refused(&format!("immersed bodies on the {} spacetime", cfg.spacetime));
+        }
+        if cfg.n_tracers > 0 {
+            return refused(&format!("a tracer population on the {} spacetime", cfg.spacetime));
+        }
     }
 
     if cfg.refinement_enabled {
@@ -12350,7 +12363,8 @@ fn run_worker_process(
                     .with_solver(solver)
                     .map_err(|e| format!("tile {flat} substrate/solver: {e:?}"))?
                     .with_viscosity(cfg.viscosity)
-                    .with_alpha(cfg.alpha);
+                    .with_alpha(cfg.alpha)
+                    .with_excision(cfg.excision_radius, cfg.excision_rho_scale, cfg.excision_pre_scale);
                 // the user sources, per tile: pointwise, each tile evaluating them at its own
                 // global coordinates, as the single decomposed path attaches them
                 let sub = attach_configured_sources(
@@ -12856,12 +12870,36 @@ fn run_worker_process(
                 other => Err(format!("the {other} chart is outside the distributed first release")),
             }
         };
+        // a gas regime also on the horizon-penetrating charts of a black hole: the kerr-schild box
+        // in two and three dimensions and the radial line, the charts the single grid bakes with
+        // one momentum per axis
         ($arm:ident, $regime:expr, $regime_ty:ty) => {
-            match cfg.coord_system.as_str() {
-                "cartesian" => $arm!(Cartesian, Cartesian, $regime, $regime_ty),
-                "spherical" => $arm!(Spherical, Spherical, $regime, $regime_ty),
-                "cylindrical" => $arm!(Cylindrical, Cylindrical, $regime, $regime_ty),
-                other => Err(format!("the {other} chart is outside the distributed first release")),
+            match (cfg.coord_system.as_str(), cfg.spacetime.as_str(), $d) {
+                ("cartesian", "minkowski", _) => $arm!(Cartesian, Cartesian, $regime, $regime_ty),
+                ("spherical", "minkowski", _) => $arm!(Spherical, Spherical, $regime, $regime_ty),
+                ("cylindrical", "minkowski", _) => $arm!(Cylindrical, Cylindrical, $regime, $regime_ty),
+                ("cartesian", "schwarzschild_ks", 2 | 3) => $arm!(
+                    SchwarzschildKSCartesian { mass: cfg.schwarzschild_mass },
+                    SchwarzschildKSCartesian<f64>,
+                    $regime,
+                    $regime_ty
+                ),
+                ("cartesian", "kerr_ks", 2 | 3) => $arm!(
+                    KerrKSCartesian { mass: cfg.schwarzschild_mass, spin: cfg.kerr_spin },
+                    KerrKSCartesian<f64>,
+                    $regime,
+                    $regime_ty
+                ),
+                ("spherical", "schwarzschild_ks", 1) => $arm!(
+                    SchwarzschildKS { mass: cfg.schwarzschild_mass },
+                    SchwarzschildKS<f64>,
+                    $regime,
+                    $regime_ty
+                ),
+                (chart, "minkowski", _) => Err(format!("the {chart} chart is outside the distributed first release")),
+                (chart, spacetime, d) => Err(format!(
+                    "the {spacetime} spacetime on the {d}-dimensional {chart} chart is outside the distributed first release"
+                )),
             }
         };
     }
@@ -13682,6 +13720,12 @@ fn launch_worker(
     cfg.chi_ic = drain_dye(chi_field)?;
     cfg.cohort_ic = drain_cohort(cohort_field)?;
     sample_scale_factor(&mut cfg, a, adot)?;
+    // the excision floors scale with the whole grid's initial atmosphere, as on the single grid:
+    // every worker reads the same rows, fresh or resumed
+    if cfg.excision_radius > 0.0 {
+        (cfg.excision_rho_scale, cfg.excision_pre_scale) =
+            initial_excision_scales(&prims).map_err(PyValueError::new_err)?;
+    }
     let drained = drain_clock.elapsed();
     py.detach(|| run_worker_process(&cfg, &prims, &bufs, &params, drained))
         .map_err(PyRuntimeError::new_err)

@@ -45,6 +45,8 @@ fn moving(point: ExchangePoint) -> Vec<(TransferId, WorkerId, WorkerId)> {
         | ExchangePoint::EquilibriumPrime
         | ExchangePoint::Stage(_)
         | ExchangePoint::PostStep
+        | ExchangePoint::ExciseSweep(_)
+        | ExchangePoint::ExciseRebuild(_)
         | ExchangePoint::PostBody
         | ExchangePoint::Rollback
         | ExchangePoint::Restrict => vec![(t(0), A, B), (t(1), B, A), (t(2), B, C), (t(3), C, B)],

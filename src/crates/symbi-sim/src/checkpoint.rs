@@ -3530,6 +3530,7 @@ where
         };
         read_region(file, &dataset_path, field, &cell_region, &cell_file_of, budget)?;
     }
+    sim.store.primitives_loaded = true;
     if let Some(mhd) = sim.fields.mhd.as_ref() {
         let face_file_of = |ax: usize, c: isize| (c + shift[ax]) as usize;
         for d in 0..D {

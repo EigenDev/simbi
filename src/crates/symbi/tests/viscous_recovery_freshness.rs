@@ -19,7 +19,7 @@ use std::f64::consts::PI;
 use symbi::regimes::substrate_newton::AdiabaticSubstrateKernelSet;
 use symbi::sim::decomp::{LocalCopy, Partition, Schedule, Topology, exchange_grid, unflatten};
 use symbi_sim::stage::{
-    FieldSet, PostStepError, Recover, Refresh, StepContext, StepOp, StepPhase, fold_post_step_with,
+    FieldSet, PostStepError, Recover, Refresh, RefreshAt, StepContext, StepOp, StepPhase, fold_post_step_with,
     fold_stage, StageArgs,
 };
 use symbi::sim::state::*;
@@ -110,7 +110,7 @@ impl<'a> StepContext<2, 2, HostMemory> for TilesStep<'a> {
     fn combine_max(&mut self, local: usize) -> usize {
         local
     }
-    fn refresh_halos(&mut self, stores: &[&Store]) {
+    fn refresh_halos(&mut self, stores: &[&Store], _at: RefreshAt) {
         let devices = vec![0i32; stores.len()];
         exchange_grid(stores, self.schedule, &devices, &LocalCopy);
         for (k, store) in stores.iter().enumerate() {
