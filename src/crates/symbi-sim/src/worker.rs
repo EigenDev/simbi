@@ -234,6 +234,82 @@ where
     exchange_point_fields(exchange, &fields, devices, transport, fabric, point, step, attempt, deadline, spent)
 }
 
+/// one forward-euler stage of length `dt` over the held tiles, before the prime of a run that
+/// declares a stationary target: the seeded target's halos cross the cuts at the
+/// equilibrium-prime point, every tile marks its troubled cells, the workers agree whether any
+/// did and carry the flags across the cuts, and every tile corrects; the workers agree whether
+/// any tile's redo rejected the stage, an error on every worker. the stage clocks stand at their
+/// entry afterwards. the caller saves and restores the state.
+#[allow(clippy::too_many_arguments)]
+pub fn probe_equilibrium<const D: usize, const DOF: usize, M, K, T, L>(
+    exchange: &PlanExchange<'_, D>,
+    tiles: &[TileId],
+    stores: &[&FieldStore<D, DOF, M, f64>],
+    kernels: &[&K],
+    devices: &[i32],
+    transport: &T,
+    fabric: &mut Fabric<L>,
+    deadline: Duration,
+    dt_of: &mut dyn FnMut(&mut Fabric<L>) -> Result<f64, WorkerError>,
+) -> Result<f64, WorkerError>
+where
+    M: MemorySpace,
+    K: KernelSet<D, DOF, M, f64>,
+    T: HaloTransport,
+    L: Link,
+{
+    let n_tiles = devices.len();
+    let dev = |k: usize| devices[tiles[k].0 as usize];
+    let mut spent = Duration::ZERO;
+    for k in 0..stores.len() {
+        with_device(dev(k), || {
+            kernels[k].c2p(stores[k]);
+            kernels[k].ghost_fill(stores[k]);
+        });
+    }
+    exchange_point(exchange, tiles, stores, n_tiles, devices, transport, fabric, ExchangePoint::EquilibriumPrime, 0, 0, deadline, &mut spent)?;
+    flip_polar_bands(exchange, tiles, stores, kernels, devices);
+    for k in 0..stores.len() {
+        with_device(dev(k), || kernels[k].ghost_fill(stores[k]));
+    }
+    // the caller anchors the primed target before the fluxes are evaluated
+    let dt = dt_of(fabric)?;
+    let args = crate::stage::StageArgs {
+        dt,
+        a0: 0.0,
+        ac: 1.0,
+        stage: 0,
+        n_stages: 1,
+        injection_weight: 1.0,
+        allow_elision: false,
+        exit_fraction: 1.0,
+    };
+    let mut troubled = 0u64;
+    for k in 0..stores.len() {
+        troubled += with_device(dev(k), || fold_stage_through_mark(stores[k], kernels[k], args, &mut |_| {}));
+    }
+    let any_troubled = fabric.collective(OpKind::Any, u64::from(troubled > 0), deadline)?;
+    let mut cut_trouble = vec![false; stores.len()];
+    if any_troubled != 0 {
+        exchange_point(exchange, tiles, stores, n_tiles, devices, transport, fabric, ExchangePoint::EquilibriumTroubled, 0, 0, deadline, &mut spent)?;
+        for k in 0..stores.len() {
+            cut_trouble[k] = with_device(dev(k), || {
+                exchange.trouble_regions(tiles[k]).iter().any(|region| kernels[k].fofc_flags_in(stores[k], region) > 0)
+            });
+        }
+    }
+    let mut rejected = false;
+    for k in 0..stores.len() {
+        let outcome = with_device(dev(k), || fold_stage_from_correction(stores[k], kernels[k], args, cut_trouble[k], &mut |_| {}));
+        rejected |= outcome != StageOutcome::Accepted;
+        stores[k].reset_state_clock();
+    }
+    if fabric.collective(OpKind::Any, u64::from(rejected), deadline)? != 0 {
+        return Err(WorkerError::Numerics("the stationary target's probe stage was rejected by the admissibility redo".into()));
+    }
+    Ok(dt)
+}
+
 /// one plan's share of a phase several plans open together: the plan, the fields of the
 /// tiles it moves (in its schema order, indexed by its tile ids) and the device per tile
 pub struct PlanPart<'a, const D: usize, M: MemorySpace> {
@@ -740,7 +816,7 @@ where
         &mut Fabric<L>,
     ) -> Result<ControlFlow<()>, WorkerError>,
 {
-    evolve_worker_traced(tiles, stores, kernels, devices, exchange, transport, fabric, cfg, None, on_step)
+    evolve_worker_traced(tiles, stores, kernels, devices, exchange, transport, fabric, cfg, None, &mut |_, _, _, _| {}, on_step)
 }
 
 /// what a continuous-tracer population needs beyond the state plan: the plan that carries its
@@ -764,6 +840,7 @@ pub fn evolve_worker_traced<const D: usize, const DOF: usize, M, K, T, L, F>(
     fabric: &mut Fabric<L>,
     cfg: &WorkerConfig,
     continuous: Option<&ContinuousTracerContext<'_, D>>,
+    stage_hook: &mut crate::decomp::TileStageHook<'_, D, DOF, M>,
     mut on_step: F,
 ) -> Result<WorkerReport, WorkerError>
 where
@@ -1064,7 +1141,7 @@ where
                     // the stage's complete EMF and its curl: every worker supplies the copies its
                     // tiles own to one assembled vector and reconciles the rings it holds from it
                     for k in 0..n {
-                        with_device(dev(k), || fold_stage_through_emf(sh[k], kernels[k], args, &mut |_| {}));
+                        with_device(dev(k), || fold_stage_through_emf(sh[k], kernels[k], args, &mut |hp| stage_hook(k, sh[k], hp, args)));
                     }
                     let entries: Vec<(u64, u64)> =
                         (0..n).flat_map(|k| crate::axis_ring::ring_entries(sh[k], n_cells)).collect();
@@ -1075,12 +1152,12 @@ where
                     timing.collectives += clock.elapsed();
                     for k in 0..n {
                         crate::axis_ring::apply_assembled(sh[k], n_cells, &assembled, symbi_fabric::ABSENT);
-                        troubled += with_device(dev(k), || fold_stage_curl_through_mark(sh[k], kernels[k], args, &mut |_| {}));
+                        troubled += with_device(dev(k), || fold_stage_curl_through_mark(sh[k], kernels[k], args, &mut |hp| stage_hook(k, sh[k], hp, args)));
                     }
                 } else {
                     for k in 0..n {
                         troubled += with_device(dev(k), || {
-                            fold_stage_through_mark(sh[k], kernels[k], args, &mut |_| {})
+                            fold_stage_through_mark(sh[k], kernels[k], args, &mut |hp| stage_hook(k, sh[k], hp, args))
                         });
                     }
                 }
@@ -1146,7 +1223,7 @@ where
                             kernels[k],
                             args,
                             cut_trouble[k],
-                            &mut |_| {},
+                            &mut |hp| stage_hook(k, sh[k], hp, args),
                         )
                     });
                     retry |= outcome == StageOutcome::RetryStep;

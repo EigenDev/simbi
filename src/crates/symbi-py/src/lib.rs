@@ -5823,6 +5823,35 @@ where
 /// the tiles' stationary-target residuals when the run declares a target: each tile's interior is
 /// seeded from the declared expression at its cell centres (t = 0; the whole-grid origin and
 /// index offset place a whole-grid cell bit for bit), the tiled probe reads the imbalance off,
+/// the declared stationary target's expression for a `$d`-dimensional run (`None` when the run
+/// declares none): parsed, its component count and dimension checked against the run, and a
+/// passive scalar refused, as the single hierarchy refuses them
+macro_rules! declared_equilibrium {
+    ($cfg:expr, $d:literal, $has_energy:expr) => {{
+        let cfg: &Config = $cfg;
+        match cfg.equilibrium_json.as_ref() {
+            None => None,
+            Some(target) => {
+                if !cfg.chi_ic.is_empty() {
+                    return Err("the passive scalar carries no declared target concentration, so its interface flux has nothing to difference against".to_string());
+                }
+                let declared = symbi_source_compile::EquilibriumConfig::from_json(target)
+                    .map_err(|e| format!("stationary target parse: {e}"))?;
+                let expected = 1 + $d + usize::from($has_energy);
+                if declared.outputs.len() != expected || declared.dim != $d {
+                    return Err(format!(
+                        "the declared stationary target supplies {} primitive components on a {}-dimensional grid; this run needs {expected} on a {}-dimensional grid",
+                        declared.outputs.len(),
+                        declared.dim,
+                        $d
+                    ));
+                }
+                Some(declared.to_expression().map_err(|e| format!("the declared stationary target does not load: {e:?}"))?)
+            }
+        }
+    }};
+}
+
 /// and the tiles' own state comes back; a fresh start seeded from the target takes the anchor.
 macro_rules! tiled_equilibrium {
     ($tiles:expr, $cfg:expr, $counts:expr, $d:literal) => {{
@@ -11027,8 +11056,19 @@ fn validate_launch_scope(cfg: &Config) -> Result<(), String> {
     }
     // the dye rides the launched gas and isothermal tiles under the single grid's admission
     validate_passive_scalar(cfg)?;
+    // the flat gas and isothermal workers read a stationary target's residual off a probe stage of
+    // the launched pipeline; the refined and magnetized workers carry none, and the builders lay a
+    // perturbation before the session seeds the target
     if cfg.equilibrium_json.is_some() {
-        return refused("an equilibrium prescription");
+        if cfg.refinement_enabled {
+            return refused("an equilibrium prescription with mesh refinement");
+        }
+        if !matches!(cfg.regime.as_str(), "newtonian" | "rhd" | "isothermal") {
+            return refused(&format!("an equilibrium prescription with the {} regime", cfg.regime));
+        }
+        if cfg.seed_from_equilibrium && cfg.perturbation_json.is_some() {
+            return refused("a perturbation over a state seeded from the equilibrium prescription");
+        }
     }
     // the launched workers carry no cross-tile census reduction
     if !cfg.census_jsons.is_empty() {
@@ -12022,7 +12062,6 @@ fn run_worker_process(
     use symbi::sim::decomp::unflatten;
     use symbi_fabric::WorkerId;
     use symbi_sim::atlas::{Placement, TileId};
-    use symbi_sim::checkpoint::load_partitioned_level;
 
     validate_launch_scope(cfg)?;
     let fault = LaunchFault::from_env(launch.worker)?;
@@ -12079,14 +12118,11 @@ fn run_worker_process(
     // the fabric session over the built tiles
     macro_rules! session_over {
         ($regime_ty:ty, $dof:literal, $tiles:ident) => {{
+            session_over!($regime_ty, $dof, $tiles, None)
+        }};
+        ($regime_ty:ty, $dof:literal, $tiles:ident, $seed:expr) => {{
             let ng = $tiles[0].0.geom.ng;
             let grid = decomposed_grid::<$d>(cfg, ng);
-            if let Some(path) = cfg.restart_path.as_deref() {
-                for (&flat, (sim, _)) in mine.iter().zip($tiles.iter_mut()) {
-                    load_partitioned_level(sim, path, 0, offsets[flat], &grid)
-                        .map_err(|e| format!("restart of tile {flat} from '{path}': {e}"))?;
-                }
-            }
             for (sim, _) in $tiles.iter_mut() {
                 sim.time = cfg.start_time;
                 sim.max_dt = cfg.max_dt;
@@ -12096,7 +12132,7 @@ fn run_worker_process(
             }
             let built = build_clock.elapsed();
             worker_session::<$regime_ty, _, _, _, $d, $dof>(
-                cfg, launch, fault, drained, built, &partition, placement, &topology, me, &mine, &offsets, $tiles,
+                cfg, launch, fault, drained, built, &partition, placement, &topology, me, &mine, &offsets, $tiles, $seed,
             )
         }};
     }
@@ -12206,7 +12242,19 @@ fn run_worker_process(
                     }
                 }
             }
-            session_over!($regime_ty, $d, tiles)
+            // the declared stationary target, seeded on each tile at its cell centres (t = 0) for the
+            // probe the session runs before the restart restores the state
+            let has_energy = tiles[0].0.fields.cons.has_energy();
+            let expression = declared_equilibrium!(cfg, $d, has_energy);
+            let seed = expression.as_ref().map(|expression| {
+                move |sim: &Sim| {
+                    sim.seed_cells(|x| {
+                        let at = |aa: usize| x.get(aa).copied().unwrap_or(0.0);
+                        symbi_hydro::state::PrimFromSlots::from_slots(&expression.eval(at(0), at(1), at(2), 0.0))
+                    })
+                }
+            });
+            session_over!($regime_ty, $d, tiles, seed.as_ref().map(|f| f as &dyn Fn(&Sim)))
         }};
     }
     macro_rules! nmhd_tiles {
@@ -12514,7 +12562,19 @@ fn run_worker_process(
                     }
                 }
             }
-            session_over!(IsoNewtonian, $d, tiles)
+            // the declared stationary target, seeded on each tile at its cell centres (t = 0) for the
+            // probe the session runs before the restart restores the state
+            let has_energy = tiles[0].0.fields.cons.has_energy();
+            let expression = declared_equilibrium!(cfg, $d, has_energy);
+            let seed = expression.as_ref().map(|expression| {
+                move |sim: &Sim| {
+                    sim.seed_cells(|x| {
+                        let at = |aa: usize| x.get(aa).copied().unwrap_or(0.0);
+                        symbi_hydro::state::PrimFromSlots::from_slots(&expression.eval(at(0), at(1), at(2), 0.0))
+                    })
+                }
+            });
+            session_over!(IsoNewtonian, $d, tiles, seed.as_ref().map(|f| f as &dyn Fn(&Sim)))
         }};
     }
     macro_rules! imhd_tiles {
@@ -12675,6 +12735,7 @@ fn worker_session<R, G, E, K, const D: usize, const DOF: usize>(
     mine: &[usize],
     offsets: &[[isize; D]],
     mut tiles: Vec<(SimDefaultGeneric<R, D, DOF, G, E>, K)>,
+    seed_target: Option<&dyn Fn(&SimDefaultGeneric<R, D, DOF, G, E>)>,
 ) -> Result<(), String>
 where
     symbi::symbi_geometry::Cartesian: symbi::symbi_geometry::Metric<f64, D>,
@@ -12791,6 +12852,98 @@ where
         },
     });
     let devices = vec![0i32; partition.n_tiles()];
+    let ng_session = tiles[0].0.geom.ng;
+    let restart_grid = decomposed_grid::<D>(cfg, ng_session);
+    // a declared stationary target's imbalance, read off one probe stage of the launched pipeline
+    // before the restart restores the state, as the single hierarchy reads its level's: the
+    // tiles hold the target, the probe primes and advances it at the smallest cfl step of any
+    // tile, and the tiles' own state comes back
+    let residuals: Option<Vec<symbi_sim::state::ConsFieldsGeneric<D, DOF, DefaultMemory>>> = match seed_target {
+        None => None,
+        Some(seed) => {
+            use symbi::sim::refinement::equilibrium::{imbalance_from_stage, overwrite, restore_gas_state, save_gas_state};
+            if symbi_sim::guard_ledger::scope_is_open() {
+                return Err("the stationary target's probe ran inside a guard scope, where its acts would be booked".to_string());
+            }
+            let saved = tiles
+                .iter()
+                .map(|(s, _)| save_gas_state(&**s))
+                .collect::<Result<Vec<_>, _>>()
+                .map_err(|e| format!("stationary target save: {e:?}"))?;
+            for (sim, _) in tiles.iter() {
+                seed(sim);
+            }
+            let tile_ids: Vec<TileId> = mine.iter().map(|&f| TileId(f as u32)).collect();
+            let sh: Vec<&symbi_sim::state::FieldStore<D, DOF, DefaultMemory, f64>> = tiles.iter().map(|(s, _)| &**s).collect();
+            let kernels: Vec<&K> = tiles.iter().map(|(_, k)| k).collect();
+            let deadline = std::time::Duration::from_secs(600);
+            let mut anchors = Vec::new();
+            let probe_dt = symbi_sim::worker::probe_equilibrium(
+                &exchange,
+                &tile_ids,
+                &sh,
+                &kernels,
+                &devices,
+                &LocalCopy,
+                &mut fabric,
+                deadline,
+                &mut |fabric: &mut Fabric<_>| {
+                    anchors = sh
+                        .iter()
+                        .map(|s| save_gas_state(*s))
+                        .collect::<Result<Vec<_>, _>>()
+                        .map_err(|e| WorkerError::Numerics(format!("stationary target anchor: {e:?}")))?;
+                    for (store, kernel) in sh.iter().zip(&kernels) {
+                        kernel.wave_speeds(*store);
+                        for dd in 0..D {
+                            kernel.flux(*store, dd);
+                        }
+                    }
+                    let local = sh.iter().zip(&kernels).map(|(store, kernel)| kernel.cfl(*store)).fold(f64::INFINITY, f64::min);
+                    let agreed = f64::from_bits(fabric.collective(symbi_fabric::OpKind::Min, local.to_bits(), deadline)?);
+                    if !(agreed.is_finite() && agreed > 0.0) {
+                        return Err(WorkerError::Numerics(format!(
+                            "the stationary target has no finite cfl step ({agreed:.3e}), so it cannot be advanced to read off its imbalance"
+                        )));
+                    }
+                    Ok(agreed)
+                },
+            )
+            .map_err(|e| format!("the stationary target is not a state the scheme can carry: {e}"))?;
+            // every worker learns whether any tile's probe left an unrecoverable state
+            let unrecoverable = sh.iter().any(|store| symbi_sim::hydro_ops::scan_c2p_errors(*store).is_err());
+            if fabric.collective(symbi_fabric::OpKind::Any, u64::from(unrecoverable), deadline).map_err(|e| e.to_string())? != 0 {
+                return Err("advancing the stationary target by one cfl step left an unrecoverable state, so its imbalance cannot be read off a linear response".to_string());
+            }
+            if sh.iter().any(|store| store.immersed.as_ref().is_some_and(|im| !im.diagnostics.consolidate().is_empty())) {
+                return Err("the stationary target's probe booked a body delta".to_string());
+            }
+            eprintln!("SIMBI equilibrium probe: level=0 dt_bits={:016x}", probe_dt.to_bits());
+            let residuals = sh
+                .iter()
+                .zip(&anchors)
+                .map(|(store, anchor)| imbalance_from_stage(anchor.cons(), &store.fields.cons, &store.geom.allocated, probe_dt))
+                .collect::<Result<Vec<_>, _>>()
+                .map_err(|e| format!("stationary target residual: {e:?}"))?;
+            for ((s, _), state) in tiles.iter().zip(&saved) {
+                restore_gas_state(&**s, state);
+            }
+            // a restart restores the checkpoint below, so the seed applies only to a fresh start
+            if cfg.seed_from_equilibrium {
+                for ((s, _), anchor) in tiles.iter().zip(&anchors) {
+                    overwrite(anchor.cons(), &s.fields.cons, &s.geom.allocated);
+                }
+            }
+            Some(residuals)
+        }
+    };
+    // the restart from a partitioned checkpoint, after the stationary target's probe
+    if let Some(path) = cfg.restart_path.as_deref() {
+        for (&flat, (sim, _)) in mine.iter().zip(tiles.iter_mut()) {
+            symbi_sim::checkpoint::load_partitioned_level(sim, path, 0, offsets[flat], &restart_grid)
+                .map_err(|e| format!("restart of tile {flat} from '{path}': {e}"))?;
+        }
+    }
 
     // the coordinator reports through the decomposed table
     let slabs: Vec<Vec<usize>> = (0..D)
@@ -12943,6 +13096,20 @@ where
             &mut fabric,
             &worker_cfg,
             continuous_context.as_ref(),
+            // the declared target's residual, added back before the recovery of every stage
+            &mut |tile: usize,
+                  store: &symbi_sim::state::FieldStore<D, DOF, DefaultMemory, f64>,
+                  point: symbi_sim::stage::HookPoint,
+                  args: symbi_sim::stage::StageArgs| {
+                if let (symbi_sim::stage::HookPoint::BeforeC2p, Some(residuals)) = (point, residuals.as_ref()) {
+                    symbi::sim::refinement::equilibrium::accumulate(
+                        &residuals[tile],
+                        &store.fields.cons,
+                        &store.geom.interior,
+                        args.ac * args.dt,
+                    );
+                }
+            },
             |iter, time, sh, fabric| {
                 if fault.exit_after == Some(iter) {
                     // the process ends here as a lost node would: no relay, no unwinding, the

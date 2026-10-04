@@ -97,7 +97,13 @@ impl PhaseTable {
         }
         let mandatory = |point| Phase { point, skippable: false, init_only: false };
         let skippable = |point| Phase { point, skippable: true, init_only: false };
-        let mut phases = vec![Phase { point: ExchangePoint::Prime, skippable: false, init_only: true }];
+        // a declared stationary target's probe, before the prime: its seeded halos, then its
+        // troubled flags; a run without a target passes both
+        let mut phases = vec![
+            Phase { point: ExchangePoint::EquilibriumPrime, skippable: true, init_only: true },
+            Phase { point: ExchangePoint::EquilibriumTroubled, skippable: true, init_only: true },
+            Phase { point: ExchangePoint::Prime, skippable: false, init_only: true },
+        ];
         // the conserved halos of each level above a nested one, before its seed; a resumed run
         // loads every level and passes them
         for level in 2..depth {
@@ -268,6 +274,8 @@ mod tests {
         assert_eq!(
             order,
             vec![
+                ExchangePoint::EquilibriumPrime,
+                ExchangePoint::EquilibriumTroubled,
                 ExchangePoint::Prime,
                 ExchangePoint::Audit(AuditAt::Prime),
                 ExchangePoint::Troubled(0),
@@ -318,8 +326,8 @@ mod tests {
         let b = |p| t.byte_of(p).unwrap() as usize;
         assert!(r.init_only[b(ExchangePoint::Primed)] && !r.skippable[b(ExchangePoint::Primed)]);
         assert_eq!(PhaseTable::flat(2).unwrap().byte_of(ExchangePoint::Primed), None, "a flat table primes no refined level");
-        // 3 + 3 * 2 + 2 * (1 + 3 * 2 + 2) + 3 + 6
-        assert_eq!(t.len(), 36);
+        // 5 + 3 * 2 + 2 * (1 + 3 * 2 + 2) + 3 + 6
+        assert_eq!(t.len(), 38);
         let flat = PhaseTable::flat(2).unwrap();
         assert_ne!(flat.digest(), t.digest());
         assert_eq!(PhaseTable::flat(2).unwrap().digest(), flat.digest());

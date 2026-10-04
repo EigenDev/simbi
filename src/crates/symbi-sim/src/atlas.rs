@@ -323,6 +323,11 @@ pub enum ExchangePoint {
     /// physical ghosts filled: the cut ghosts carry the neighbors' coefficients before the
     /// tracers interpolate them
     TracerCoefficients,
+    /// before the prime of a run that declares a stationary target: the target seeded on every
+    /// tile crosses the cuts, so the probe stage that reads its imbalance off sees whole stencils
+    EquilibriumPrime,
+    /// the probe stage's troubled flags across the cuts
+    EquilibriumTroubled,
     Rollback,
     /// after the named exchange: each tile below a cut sends its copy of the shared
     /// interface face to the tile above, which compares it with its own bit for bit. the
@@ -416,6 +421,8 @@ impl ExchangePoint {
             ExchangePoint::PostStep => (3, 0, 0),
             ExchangePoint::PostBody => (27, 0, 0),
             ExchangePoint::TracerCoefficients => (28, 0, 0),
+            ExchangePoint::EquilibriumPrime => (29, 0, 0),
+            ExchangePoint::EquilibriumTroubled => (30, 0, 0),
             ExchangePoint::Rollback => (4, 0, 0),
             ExchangePoint::Audit(AuditAt::Prime) => (5, 0, 0),
             ExchangePoint::Audit(AuditAt::Stage(k)) => (6, k as u32, 0),
@@ -1235,7 +1242,7 @@ impl<const D: usize> ExchangePlan<D> {
             | ExchangePoint::Seed { .. }
             | ExchangePoint::TracerCoefficients => false,
             ExchangePoint::Audit(_) => transfer.audit,
-            ExchangePoint::Troubled(_) => banded,
+            ExchangePoint::Troubled(_) | ExchangePoint::EquilibriumTroubled => banded,
             _ => !banded && !transfer.audit,
         }
     }

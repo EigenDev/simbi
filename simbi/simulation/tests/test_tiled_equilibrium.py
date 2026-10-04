@@ -1,15 +1,16 @@
 # =============================================================================
 # test_tiled_equilibrium.py
 #
-# a declared stationary target on host tiles. the isentropic atmosphere in a
-# point mass's gravity, adiabatic and isothermal, on one unrefined grid: its
-# discrete imbalance is read off one tiled probe stage and added back at every
-# stage, so two tiles and three uneven tiles publish the single grid's state
-# bit for bit, fresh and resumed from a checkpoint written on two tiles. the
-# target changes the run (the same atmosphere without it lands elsewhere), and
-# the tiles probe at the single grid's own timestep, bit for bit. a
-# refined target and a perturbation over a seeded target on tiles are refused
-# by name before any output.
+# a declared stationary target on host tiles and launched workers. the
+# isentropic atmosphere in a point mass's gravity, adiabatic and isothermal, on
+# one unrefined grid: its discrete imbalance is read off one probe stage of the
+# decomposed pipeline and added back at every stage, so two tiles and three
+# uneven tiles publish the single grid's state bit for bit, fresh and resumed
+# from a checkpoint written on two tiles; two and three uneven launched workers
+# likewise, resumed onto three. the target changes the run (the same atmosphere
+# without it lands elsewhere), and every decomposition probes at the single
+# grid's own timestep, bit for bit. a perturbation over a seeded target, on
+# tiles and on launch, is refused by name before any output.
 #
 # run: pytest -m simulation simbi/simulation/tests/test_tiled_equilibrium.py
 # =============================================================================
@@ -149,3 +150,56 @@ def test_a_perturbation_over_a_seeded_target_on_tiles_is_refused(tmp_path: Path,
     assert done.returncode != 0, "the tiles ran a perturbation over a seeded target"
     assert "the tiles lay the perturbation before the target is seeded" in " ".join(done.stderr.split()), done.stderr[-1500:]
     assert not list((tmp_path / "tiles").glob("*.h5")), "output was written before the refusal"
+
+
+def _launch_probed(variants: Path, problem: str, out: Path, layout: Path, steps: int, checkpoint: Path | None = None) -> tuple[Path, set[str]]:
+    script = variants.parent / f"launched_{problem.lower()}.py"
+    script.write_text(f"from variants import {problem} as Base\n\n\nclass Launched{problem}(Base):\n    pass\n")
+    cmd = [sys.executable, "-m", "simbi.cli", "launch", str(script), "--layout", str(layout), "--max-steps", str(steps),
+           "--resolution", str(CELLS), "--data-directory", str(out), "--checkpoint-interval", "1e9"]
+    if checkpoint is not None:
+        cmd += ["--checkpoint", str(checkpoint)]
+    env = dict(os.environ)
+    env.pop("SIMBI_LAUNCH_EXPERIMENTAL", None)
+    done = subprocess.run(cmd, capture_output=True, text=True, timeout=900, env=env)
+    assert done.returncode == 0, f"launch failed:\nstdout:\n{done.stdout}\nstderr:\n{done.stderr[-3000:]}"
+    files = sorted(out.glob("*final*.h5"))
+    assert len(files) == 1, f"expected one final checkpoint in {out}, found {files}"
+    return files[0], set(PROBE.findall(done.stderr))
+
+
+@pytest.mark.parametrize("problem", ["Atmosphere", "IsothermalAtmosphere"])
+def test_launched_workers_hold_the_declared_target_as_the_single_grid(tmp_path: Path, variants: Path, problem: str) -> None:
+    from simbi.simulation.tests.test_launch import _layout
+
+    want, probe = _run_probed(problem, tmp_path / "single", 1)
+    two = _layout(tmp_path / "two.toml", workers=2, shape=(2,))
+    got, got_probe = _launch_probed(variants, problem, tmp_path / "two", two, STEPS)
+    assert got_probe == probe, f"{problem}: two workers probed at {got_probe}, the single grid at {probe}"
+    _assert_same(got, want, f"{problem}: two workers")
+    three = _layout(tmp_path / "three.toml", workers=3, cuts=[[30, 70]])
+    got, got_probe = _launch_probed(variants, problem, tmp_path / "three", three, STEPS)
+    assert got_probe == probe, f"{problem}: three uneven workers probed at {got_probe}, the single grid at {probe}"
+    _assert_same(got, want, f"{problem}: three uneven workers")
+    # resumed from a two-worker checkpoint: the probe reads the build-time target before the
+    # restart restores the state, as the single grid does
+    first, _ = _launch_probed(variants, problem, tmp_path / "first", two, STEPS // 2)
+    resumed, _ = _launch_probed(variants, problem, tmp_path / "resumed", three, STEPS - _iteration(first), checkpoint=first)
+    assert _iteration(resumed) == STEPS
+    _assert_same(resumed, want, f"{problem}: resumed onto three uneven workers")
+
+
+def test_a_perturbation_over_a_seeded_target_on_launch_is_refused(tmp_path: Path, variants: Path) -> None:
+    from simbi.simulation.tests.test_launch import _layout
+
+    script = variants.parent / "launched_perturbedatmosphere.py"
+    script.write_text("from variants import PerturbedAtmosphere as Base\n\n\nclass LaunchedPerturbedAtmosphere(Base):\n    pass\n")
+    two = _layout(tmp_path / "two.toml", workers=2, shape=(2,))
+    cmd = [sys.executable, "-m", "simbi.cli", "launch", str(script), "--layout", str(two), "--max-steps", "1",
+           "--resolution", str(CELLS), "--data-directory", str(tmp_path / "out"), "--checkpoint-interval", "1e9"]
+    env = dict(os.environ)
+    env.pop("SIMBI_LAUNCH_EXPERIMENTAL", None)
+    done = subprocess.run(cmd, capture_output=True, text=True, timeout=600, env=env)
+    assert done.returncode != 0, f"the launch succeeded:\n{done.stdout}"
+    assert "a perturbation over a state seeded from the equilibrium prescription is outside the distributed first release" in " ".join(done.stderr.split()), done.stderr[-2000:]
+    assert not list((tmp_path / "out").glob("*.h5")), "a checkpoint was published"
