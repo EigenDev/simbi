@@ -7769,7 +7769,7 @@ macro_rules! build_and_run_mhd_decomposed {
                         }
                         let row = &prims[lin];
                         let gidx: [isize; $d] =
-                            std::array::from_fn(|ax| (tc[ax] * m[ax]) as isize + idx[ax]);
+                            std::array::from_fn(|ax| tile_lo[ax] as isize + idx[ax]);
                         let mag_arr: [f64; 3] = std::array::from_fn(|k| {
                             if k < $d { face_avg_cell_b::<$d>(&bufs[k], k, gidx, n) } else { bufs[k][lin] }
                         });
@@ -7965,7 +7965,7 @@ macro_rules! build_and_run_imhd_decomposed {
                         }
                         let row = &prims[lin];
                         let gidx: [isize; $d] =
-                            std::array::from_fn(|ax| (tc[ax] * m[ax]) as isize + idx[ax]);
+                            std::array::from_fn(|ax| tile_lo[ax] as isize + idx[ax]);
                         let mag_arr: [f64; 3] = std::array::from_fn(|k| {
                             if k < $d { face_avg_cell_b::<$d>(&bufs[k], k, gidx, n) } else { bufs[k][lin] }
                         });
