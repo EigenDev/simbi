@@ -6547,6 +6547,16 @@ macro_rules! build_and_run_hydro_decomposed_refined {
 
         // the refined decomposition carries plain hydro. the combinations below each need their own
         // cross-level multi-tile handling, so they are refused.
+        // a tracer population on refined tiles needs one ancestry blend and one injection spawn per
+        // level over every tile's records, the root's own tail, and tracers crossing a patch face on
+        // a cut; refused by name before any output
+        if cfg.n_tracers > 0 {
+            return Err(
+                "a tracer population with mesh refinement and gpus > 1 awaits its tiled level transport; \
+                 run it on one device"
+                    .to_string(),
+            );
+        }
 
         let n: [usize; $d] = std::array::from_fn(|ax| cfg.n_cells[ax]);
         let total: usize = n.iter().product();
@@ -6767,73 +6777,6 @@ macro_rules! build_and_run_hydro_decomposed_refined {
         // interiors into it. lives on device 0 (touched only at output).
         let offsets = tile_offsets(&partition);
         let grid = decomposed_grid::<$d>(cfg, tiles[0].levels[0].state.geom.ng);
-        // the tracer population seeds once from the whole hierarchy and splits across the
-        // tiles; the whole hierarchy lives for that seeding alone.
-        if cfg.n_tracers > 0 {
-        let mut global = symbi::symbi_xpu::with_device(0, || -> Result<Hier, String> {
-            let groot = Sim::build($regime, host_eos(cfg), $geom)
-                .cells(n)
-                .ghosts(ghost_width(cfg))
-                .origin(std::array::from_fn(|ax| cfg.x_lo[ax]))
-                .spacing(dx)
-                .coord_maps(axis_maps::<$d>(cfg))
-                .boundaries(boundaries_nd::<$d>(&cfg.boundaries))
-                .cfl(cfg.cfl)
-                .timestepping(cfg.timestepping)
-                .cyl_plane(cfg.cyl_plane)
-                .allocate()
-                .map_err(|e| format!("global output allocate: {e:?}"))?
-                .set_initial_indexed(|idx, _x| {
-                    let mut lin = 0usize;
-                    let mut stride = 1usize;
-                    for ax in 0..$d {
-                        lin += idx[ax] as usize * stride;
-                        stride *= n[ax];
-                    }
-                    let row = &prims[lin];
-                    Prim::adiabatic(Density(row[0]), Tensor::new(std::array::from_fn(|k| row[1 + k])), Pressure(row[1 + $d]))
-                })
-                .build();
-            let gsub = groot
-                .substrate()
-                .theta(theta)
-                .with_solver(solver)
-                .map_err(|e| format!("global substrate/solver: {e:?}"))?;
-            let make = |s: &Sim| {
-                // same non-ideal knobs as the base (the viscous pass runs on the finest
-                // level only).
-                s.substrate()
-                    .theta(theta)
-                    .with_solver(solver)
-                    .expect("fine kernel set")
-                    .with_viscosity(cfg.viscosity).with_alpha(cfg.alpha)
-                    .with_resistivity(cfg.resistivity)
-            };
-            let gh = Hierarchy::with_refinement(groot, gsub, &regions, prolong, make)
-                .map_err(|e| format!("global refinement build: {e:?}"))?;
-            gh.seed_fine_from_coarse()
-                .map_err(|e| format!("global fine seed: {e:?}"))?;
-            Ok(gh)
-        })?;
-        if cfg.n_tracers > 0 {
-            symbi::sim::refinement::seed_decomposed_hierarchy_tracers(
-                &global,
-                &mut tiles,
-                cfg.n_tracers,
-            );
-            global.attach_mass_tracers(cfg.n_tracers);
-            if let Some(order) = configured_ito_order(cfg)? {
-                for tile in &mut tiles {
-                    for level in &mut tile.levels {
-                        convert_seeded_tracers(&mut level.state, order)?;
-                    }
-                }
-                for level in &mut global.levels {
-                    convert_seeded_tracers(&mut level.state, order)?;
-                }
-            }
-        }
-        }
         run_refined_decomposed_loop(cfg, tiles, offsets, grid, counts)
     }};
 }

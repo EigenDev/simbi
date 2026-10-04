@@ -12,7 +12,8 @@
 # tiles leaves a tile with none, which still keys the ancestry blend with the
 # population's seed. both schemes ride a grid graded geometrically along
 # both axes the same way. the traced kelvin-helmholtz example (ito-3, cohorts,
-# doubly periodic) runs on two tiles as on one grid.
+# doubly periodic) runs on two tiles as on one grid. a population with mesh
+# refinement on tiles is refused by name before any output.
 #
 # run: pytest -m simulation simbi/simulation/tests/test_tiled_tracers.py
 # =============================================================================
@@ -123,6 +124,14 @@ class SparseIto2Drift(Ito2Drift):
     @property
     def n_tracers(self) -> int:
         return 2
+
+
+class RefinedDiscreteDrift(DiscreteDrift):
+    refinement_enabled: Annotated[bool, ProblemParam(True, description="refined")]
+
+
+class RefinedIto2Drift(Ito2Drift):
+    refinement_enabled: Annotated[bool, ProblemParam(True, description="refined")]
 '''
 GROUP = {
     "DiscreteDrift": "tracers",
@@ -242,3 +251,20 @@ def test_tiles_carry_the_traced_kelvin_helmholtz_population(tmp_path: Path) -> N
 
     want = run(1, tmp_path / "single")
     _assert_same(run(2, tmp_path / "two"), want, "continuous_tracers", "traced kelvin-helmholtz on two tiles")
+
+
+@pytest.mark.parametrize("problem", ["RefinedDiscreteDrift", "RefinedIto2Drift"])
+def test_a_refined_population_on_tiles_is_refused(tmp_path: Path, variants: Path, problem: str) -> None:
+    out = tmp_path / "tiles"
+    snippet = (
+        "import sys\n"
+        "from simbi.simulation import runner\n"
+        f"from variants import {problem}\n"
+        f"runner.run({problem}(resolution={RESOLUTION!r}, gpus=2, checkpoint_interval=1e9, data_directory=sys.argv[1]), compute_mode='cpu', max_steps=1)\n"
+    )
+    env = dict(os.environ, SYMBI_GPU_OVERSUBSCRIBE="1")
+    done = subprocess.run([sys.executable, "-c", snippet, str(out)], capture_output=True, text=True, timeout=900, env=env)
+    assert done.returncode != 0, f"{problem}: the tiles ran a refined tracer population"
+    flat = " ".join(done.stderr.split())
+    assert "a tracer population with mesh refinement and gpus > 1 awaits its tiled level transport" in flat, done.stderr[-1500:]
+    assert not list(out.glob("*.h5")), "output was written before the refusal"

@@ -398,3 +398,73 @@ fn refined_neumann_inflow_spawns_only_the_accepted_entering_mass() {
     );
     assert!((represented_added - (composite_mass - 1.0)).abs() < 1.0e-12);
 }
+
+#[test]
+fn a_refined_checkpoint_records_the_tracers_of_every_level() {
+    let build = || {
+        Sim::build(Newtonian, IdealGas { gamma: GAMMA }, Cartesian)
+            .cells([32])
+            .bounds([0.0], [1.0])
+            .boundaries(BoundaryType::Periodic)
+            .cfl(CFL)
+            .timestepping(Timestepping::Rk2)
+            .allocate()
+            .unwrap()
+            .set_initial(|_| Prim::adiabatic(Density(1.0), Tensor::new([0.4]), Pressure(1.0)))
+            .build()
+    };
+    let coarse = build();
+    let kernels = Kern::new(GAMMA, CFL, &coarse.geom.allocated);
+    let mut hierarchy = Hierarchy::with_refinement(
+        coarse,
+        kernels,
+        &[RefinementRegion {
+            x_lo: [0.25],
+            x_hi: [0.75],
+        }],
+        ProlongOrder::Ppm,
+        |state| Kern::new(GAMMA, CFL, &state.geom.allocated),
+    )
+    .unwrap();
+    hierarchy.seed_fine_from_coarse().unwrap();
+    hierarchy.attach_mass_tracers(256);
+    hierarchy.evolve_steps(2).unwrap();
+    let held: Vec<usize> = hierarchy
+        .levels
+        .iter()
+        .map(|level| level.state.tracers.as_ref().unwrap().len())
+        .collect();
+    assert!(
+        held.iter().all(|&n| n > 0),
+        "every level must hold tracers for the union to be exercised, held {held:?}"
+    );
+    let mut want: Vec<(u64, u64, u64)> = hierarchy
+        .levels
+        .iter()
+        .flat_map(|level| {
+            let tracers = level.state.tracers.as_ref().unwrap();
+            (0..tracers.len()).map(move |ii| (tracers.id[ii], tracers.owner[ii].0, tracers.x[ii][0].to_bits()))
+        })
+        .collect();
+    want.sort_unstable();
+    let (next_id, remainder) = {
+        let root = hierarchy.levels[0].state.tracers.as_ref().unwrap();
+        (root.next_id, root.injection_remainder)
+    };
+
+    let dir = std::env::temp_dir().join(format!("refined_tracer_checkpoint_{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("chkpt.h5");
+    let levels: Vec<&Sim> = hierarchy.levels.iter().map(|l| &l.state).collect();
+    symbi_sim::checkpoint::write_hierarchy_checkpoint(&levels, path.to_str().unwrap(), &Default::default()).unwrap();
+    let mut resumed = build();
+    symbi_sim::checkpoint::load_checkpoint(&mut resumed, path.to_str().unwrap()).unwrap();
+    let _ = std::fs::remove_dir_all(&dir);
+
+    let read = resumed.tracers.as_ref().expect("the checkpoint carries the tracer population");
+    let got: Vec<(u64, u64, u64)> =
+        (0..read.len()).map(|ii| (read.id[ii], read.owner[ii].0, read.x[ii][0].to_bits())).collect();
+    assert_eq!(got, want, "the checkpoint population differs from the union of the levels in id order");
+    assert_eq!(read.next_id, next_id);
+    assert_eq!(read.injection_remainder.to_bits(), remainder.to_bits());
+}

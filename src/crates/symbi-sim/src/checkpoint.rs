@@ -2635,10 +2635,10 @@ where
 /// the union of the tiles' tracer populations in stable id order, the same reassembly a gathered
 /// output state performs: ids and cohorts concatenate, the next free id is the largest any tile
 /// reached, the injection remainders sum, and the one particle weight every tile shares is kept.
-fn combine_tracer_snaps(snaps: Vec<TracerSnap>) -> Option<TracerSnap> {
+fn combine_tracer_snaps<const D: usize>(snaps: Vec<TracerSnap>) -> Option<TracerSnap> {
     let mut iter = snaps.into_iter();
     let mut combined = iter.next()?;
-    let d = if combined.n > 0 { combined.x.len() / combined.n } else { 0 };
+    let d = D;
     for snap in iter {
         combined.n += snap.n;
         combined.x.extend(snap.x);
@@ -2667,6 +2667,84 @@ fn combine_tracer_snaps(snaps: Vec<TracerSnap>) -> Option<TracerSnap> {
     combined.crossed = take(&combined.crossed);
     combined.crossing_time = take(&combined.crossing_time);
     Some(combined)
+}
+
+/// the population of a refined hierarchy: each level holds the records seeded or spawned in its own
+/// leaf cells, and every level carries the same next free id and injection remainder, so the union
+/// concatenates the records in id order and keeps the shared spawn state once. a single level
+/// writes its records in their own order.
+fn union_level_tracer_snaps<const D: usize>(levels: Vec<TracerSnap>) -> Option<TracerSnap> {
+    let first = levels.first()?;
+    let (next_id, remainder) = (first.next_id, first.injection_remainder);
+    for level in &levels {
+        assert_eq!(level.next_id, next_id, "refinement levels disagree on the next tracer id");
+        assert_eq!(
+            level.injection_remainder.to_bits(),
+            remainder.to_bits(),
+            "refinement levels disagree on the tracer injection remainder"
+        );
+    }
+    if levels.len() == 1 {
+        return levels.into_iter().next();
+    }
+    let mut combined = combine_tracer_snaps::<D>(levels)?;
+    combined.injection_remainder = remainder;
+    Some(combined)
+}
+
+#[cfg(test)]
+mod tracer_snap_tests {
+    use super::*;
+
+    fn snap(ids: &[u64], x: &[f64], next_id: u64, injection_remainder: f64) -> TracerSnap {
+        let n = ids.len();
+        TracerSnap {
+            n,
+            x: x.to_vec(),
+            id: ids.to_vec(),
+            cohort: vec![0; n],
+            owner: ids.iter().map(|id| id + 100).collect(),
+            run_seed: 7,
+            next_id,
+            injection_remainder,
+            escaped: vec![0.0; n],
+            crossed: vec![0.0; n],
+            crossing_time: vec![0.0; n],
+            weight: vec![0.5],
+        }
+    }
+
+    #[test]
+    fn a_tile_holding_no_tracers_ahead_of_the_others_keeps_every_position() {
+        let combined = combine_tracer_snaps::<2>(vec![
+            snap(&[], &[], 9, 0.25),
+            snap(&[5, 2], &[5.0, 5.5, 2.0, 2.5], 9, 0.5),
+        ])
+        .unwrap();
+        assert_eq!(combined.id, vec![2, 5]);
+        assert_eq!(combined.x, vec![2.0, 2.5, 5.0, 5.5]);
+        assert_eq!(combined.owner, vec![102, 105]);
+        assert_eq!(combined.injection_remainder, 0.75);
+    }
+
+    #[test]
+    fn levels_join_in_id_order_and_keep_their_shared_spawn_state_once() {
+        let combined = union_level_tracer_snaps::<1>(vec![
+            snap(&[3, 0], &[3.0, 0.0], 6, 0.125),
+            snap(&[], &[], 6, 0.125),
+            snap(&[4, 1], &[4.0, 1.0], 6, 0.125),
+        ])
+        .unwrap();
+        assert_eq!(combined.id, vec![0, 1, 3, 4]);
+        assert_eq!(combined.x, vec![0.0, 1.0, 3.0, 4.0]);
+        assert_eq!((combined.next_id, combined.injection_remainder), (6, 0.125));
+    }
+
+    #[test]
+    #[should_panic(expected = "refinement levels disagree on the next tracer id")]
+    fn levels_disagreeing_on_the_next_id_are_rejected() {
+        union_level_tracer_snaps::<1>(vec![snap(&[0], &[0.0], 2, 0.0), snap(&[1], &[1.0], 3, 0.0)]);
+    }
 }
 
 /// write a checkpoint from the tiles of every level, streaming each tile's owned block of every
@@ -2879,16 +2957,19 @@ impl CheckpointStream {
     // a population gathered from every worker's tiles stands in for the tiles this file holds.
     let gathered = population.and_then(|sets| {
         let snaps: Vec<TracerSnap> = sets.iter().map(tracer_snap).collect();
-        if snaps.len() == 1 { snaps.into_iter().next() } else { combine_tracer_snaps(snaps) }
+        if snaps.len() == 1 { snaps.into_iter().next() } else { combine_tracer_snaps::<D>(snaps) }
     });
-    let tracers = gathered.or_else(|| levels
-        .iter()
-        .find(|l| l.tiles.iter().any(|t| t.state.tracers.is_some()))
-        .and_then(|l| {
-            let snaps: Vec<TracerSnap> =
-                l.tiles.iter().filter_map(|t| t.state.tracers.as_ref().map(tracer_snap)).collect();
-            if snaps.len() == 1 { snaps.into_iter().next() } else { combine_tracer_snaps(snaps) }
-        }));
+    let tracers = gathered.or_else(|| {
+        let per_level: Vec<TracerSnap> = levels
+            .iter()
+            .filter_map(|l| {
+                let snaps: Vec<TracerSnap> =
+                    l.tiles.iter().filter_map(|t| t.state.tracers.as_ref().map(tracer_snap)).collect();
+                if snaps.len() == 1 { snaps.into_iter().next() } else { combine_tracer_snaps::<D>(snaps) }
+            })
+            .collect();
+        union_level_tracer_snaps::<D>(per_level)
+    });
     if let Some(ts) = tracers.as_ref() {
         root.push_group(tracer_group::<D>(ts));
     }
