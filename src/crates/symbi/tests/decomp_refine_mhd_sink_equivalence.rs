@@ -2,19 +2,21 @@
 // decomp_refine_mhd_sink_equivalence.rs
 //
 // a magnetized sink x refinement x decomposition: per-tile 2-level hierarchies carrying the same
-// draining point mass at its global position, driven through `evolve_hierarchy_decomposed`,
-// reproduce the monolithic refined run to round-off in the composite density, the composite
-// stored primitive density, and the cell field. the finest level owns the drain, which relaxes
-// each cell at its local Alfven rate and is followed by the primitive recovery in the level step
-// tail; the fine cut halos are refreshed before the next fine substep. two placements: the sink
-// inside one tile's fine patch, and the sink straddling a root cut with the patch spanning both
-// tiles.
+// draining point mass at its global position, seeded from their parents after the root cut halos
+// are exchanged and driven through `evolve_hierarchy_decomposed`, reproduce the monolithic refined
+// run bit for bit in the composite conserved fields, the stored primitives and the cell field.
+// the finest level owns the drain, which relaxes each cell at its local Alfven rate and is
+// followed by the primitive recovery in the level step tail; the fine cut halos are refreshed
+// before the next fine substep. two placements: the sink inside one tile's fine patch, and the
+// sink straddling a root cut with the patch spanning both tiles. without a body, a pressure blob
+// on the cut under a sheared, divergence-free field drives flow across the cut and the
+// coarse-fine boundary.
 // =============================================================================
 
 use symbi::regimes::substrate_newtonian_mhd::NewtonianMhdSubstrateKernelSet;
 use symbi::sim::decomp::{LocalCopy, unflatten};
 use symbi::sim::refinement::{
-    Hierarchy, ProlongOrder, RefinementRegion, evolve_hierarchy_decomposed,
+    Hierarchy, ProlongOrder, RefinementRegion, evolve_hierarchy_decomposed, seed_decomposed_fine_from_coarse,
 };
 use symbi::sim::state::*;
 use symbi_algebra::Tensor;
@@ -33,6 +35,22 @@ const N: usize = 96;
 const DX: f64 = 3.0 / N as f64;
 const T_FINAL: f64 = 0.04;
 const B0: [f64; 3] = [0.5, 0.25, 0.2];
+
+/// the initial gas and field: uniform, or a pressure blob beside the cut under a sheared field
+#[derive(Clone, Copy)]
+enum Setup {
+    Uniform,
+    Shaped,
+}
+
+// face-normal components each independent of their own axis: discretely divergence-free
+fn bx(y: f64) -> f64 {
+    B0[0] + 0.3 * (2.0 * std::f64::consts::PI * y / 3.0).sin()
+}
+
+fn by(x: f64) -> f64 {
+    B0[1] + 0.3 * (2.0 * std::f64::consts::PI * x / 3.0).cos()
+}
 
 type Sim = SimStateGeneric<NewtonianMhd, 2, 3, Cartesian, IdealGas<f64>, CpuSpace, HostMemory, f64>;
 type Kern = NewtonianMhdSubstrateKernelSet<HostMemory, f64, 2>;
@@ -61,7 +79,8 @@ fn sink_at(pos: [f64; 2]) -> BodyCollection<f64, 2> {
     )
 }
 
-fn build_root(cells: [usize; 2], origin: [f64; 2], bnd: Boundaries<2>) -> Sim {
+fn build_root(cells: [usize; 2], origin: [f64; 2], bnd: Boundaries<2>, setup: Setup) -> Sim {
+    let shaped = matches!(setup, Setup::Shaped);
     Sim::build(NewtonianMhd, IdealGas { gamma: GAMMA }, Cartesian)
         .cells(cells)
         .spacing([DX; 2])
@@ -71,13 +90,23 @@ fn build_root(cells: [usize; 2], origin: [f64; 2], bnd: Boundaries<2>) -> Sim {
         .timestepping(Timestepping::Rk2)
         .allocate()
         .expect("root sim construction failed")
-        .set_initial(|_| {
+        .set_initial(|x| {
+            let r2 = (x[0] - 1.5).powi(2) + (x[1] - 1.1).powi(2);
+            let (pre, b) = if shaped {
+                (1.0 + 4.0 * (-r2 / 0.02).exp(), [bx(x[1]), by(x[0]), B0[2]])
+            } else {
+                (1.0, B0)
+            };
             MhdPrim::new(
-                Prim::adiabatic(Density(1.0), Tensor::new([0.0, 0.0, 0.0]), Pressure(1.0)),
-                Tensor::new(B0),
+                Prim::adiabatic(Density(1.0), Tensor::new([0.0, 0.0, 0.0]), Pressure(pre)),
+                Tensor::new(b),
             )
         })
-        .seed_faces_uniform([B0[0], B0[1]])
+        .seed_faces(|d, x| match (shaped, d) {
+            (false, _) => B0[d],
+            (true, 0) => bx(x[1]),
+            (true, _) => by(x[0]),
+        })
         .build()
 }
 
@@ -101,11 +130,12 @@ fn clip(
     Some(RefinementRegion { x_lo: lo, x_hi: hi })
 }
 
-fn build_mono(region: &RefinementRegion<2>, sink_pos: Option<[f64; 2]>) -> Hier {
+fn build_mono(region: &RefinementRegion<2>, sink_pos: Option<[f64; 2]>, setup: Setup) -> Hier {
     let root = build_root(
         [N, N],
         [0.0, 0.0],
         Boundaries::uniform(BoundaryType::Outflow),
+        setup,
     );
     let k = kset(&root);
     let h = Hier::with_refinement(
@@ -129,6 +159,7 @@ fn build_tiles(
     counts: [usize; 2],
     region: &RefinementRegion<2>,
     sink_pos: Option<[f64; 2]>,
+    setup: Setup,
 ) -> Vec<Hier> {
     let m: [usize; 2] = std::array::from_fn(|a| N / counts[a]);
     let total: usize = counts.iter().product();
@@ -149,28 +180,35 @@ fn build_tiles(
             };
             [lo, hi]
         }));
-        let root = build_root(m, origin, bnd);
+        let root = build_root(m, origin, bnd, setup);
         let h = match clip(region, origin, m) {
             Some(r) => {
                 let k = kset(&root);
-                let h = Hier::with_refinement_of(root, k, &[r], &[*region], ProlongOrder::Ppm, kset)
-                    .expect("tile hierarchy");
-                h.seed_fine_from_coarse().expect("seed fine");
-                h
+                Hier::with_refinement_of(root, k, &[r], &[*region], ProlongOrder::Ppm, kset)
+                    .expect("tile hierarchy")
             }
             None => {
                 let k = kset(&root);
                 Hier::single(root, k)
             }
         };
-        let mut h = match sink_pos {
-            Some(pos) => h.with_bodies(sink_at(pos)),
-            None => h,
-        };
-        h.prime();
         tiles.push(h);
     }
+    // the fine levels seed from their parents after the root cut halos are exchanged, as the
+    // tiled run seeds them
+    let devices = vec![0; tiles.len()];
+    seed_decomposed_fine_from_coarse(&tiles, counts, &devices, &LocalCopy).expect("decomposed fine seed");
     tiles
+        .into_iter()
+        .map(|h| {
+            let mut h = match sink_pos {
+                Some(pos) => h.with_bodies(sink_at(pos)),
+                None => h,
+            };
+            h.prime();
+            h
+        })
+        .collect()
 }
 
 fn run_decomposed(tiles: &mut [Hier], counts: [usize; 2]) {
@@ -249,8 +287,8 @@ fn accreted(h: &Hier) -> f64 {
 
 type Store = FieldStore<2, 3, HostMemory, f64>;
 
-fn assert_matches(counts: [usize; 2], region: RefinementRegion<2>, sink_pos: Option<[f64; 2]>) {
-    let mut mono = build_mono(&region, sink_pos);
+fn assert_matches(counts: [usize; 2], region: RefinementRegion<2>, sink_pos: Option<[f64; 2]>, setup: Setup) {
+    let mut mono = build_mono(&region, sink_pos, setup);
     mono.evolve(T_FINAL).expect("mono evolve");
     let mono_acc = accreted(&mono);
     if sink_pos.is_some() {
@@ -264,7 +302,7 @@ fn assert_matches(counts: [usize; 2], region: RefinementRegion<2>, sink_pos: Opt
         "the run took one root step; the cut halo state carried across steps goes untested"
     );
 
-    let mut tiles = build_tiles(counts, &region, sink_pos);
+    let mut tiles = build_tiles(counts, &region, sink_pos, setup);
     run_decomposed(&mut tiles, counts);
     // every tile carries the global accreted-mass tally; the tally sums the tiles' partials, so
     // it agrees with the monolithic reduction to the summation-order roundoff.
@@ -351,6 +389,7 @@ fn magnetized_gas_without_a_body_matches() {
             x_hi: [1.97, 1.97],
         },
         None,
+        Setup::Uniform,
     );
 }
 
@@ -366,6 +405,7 @@ fn magnetized_sink_inside_one_tiles_patch() {
             x_hi: [1.22, 1.22],
         },
         Some([0.75, 0.75]),
+        Setup::Uniform,
     );
 }
 
@@ -378,5 +418,21 @@ fn magnetized_sink_straddling_a_cut_with_the_patch_spanning_tiles() {
             x_hi: [1.97, 1.97],
         },
         Some([1.5, 1.5]),
+        Setup::Uniform,
+    );
+}
+
+#[test]
+fn a_pressure_blob_beside_the_cut_under_a_sheared_field_matches() {
+    // the blob sits on the cut, 0.07 inside the patch's lower edge, so the flow it drives crosses
+    // the cut and the coarse-fine boundary within the run
+    assert_matches(
+        [2, 1],
+        RefinementRegion {
+            x_lo: [1.03, 1.03],
+            x_hi: [1.97, 1.97],
+        },
+        None,
+        Setup::Shaped,
     );
 }
