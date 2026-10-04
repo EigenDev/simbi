@@ -12,7 +12,9 @@
 # single hierarchy's every level bit for bit. the refined 3d vortex (newtonian
 # and isothermal under the contact EMF, relativistic under the upwind EMF) runs
 # on eight tiles, and the isothermal vortex with a second nested box on two and
-# four tiles, both cut through the boxes, every level bit for bit. a locally
+# four tiles, both cut through the boxes, every level bit for bit. the refined
+# blast carrying a discrete or a second-order ito population on two and three
+# uneven tiles publishes the single hierarchy's population as well. a locally
 # isothermal refined run on tiles is refused by name before any output.
 #
 # run: pytest -m simulation simbi/simulation/tests/test_decomposed_mhd.py
@@ -210,3 +212,51 @@ def test_nested_refined_tiles_carry_the_single_hierarchy(tmp_path: Path) -> None
     for gpus, decompose in ((2, None), (4, [[15], [17]])):
         got = _run_variant(where, tmp_path / f"tiles{gpus}", resolution, gpus, decompose)
         _assert_same(got, want, f"nested isothermal vortex on {gpus} refined tiles")
+
+
+TRACED = {
+    "discrete": ("tracers", []),
+    "ito2": ("continuous_tracers", ["@computed_field", "@property", "def tracer_scheme(self) -> TracerScheme:", "    return TracerScheme.ITO2"]),
+}
+
+
+def _population(path: Path, group: str) -> dict[str, np.ndarray]:
+    import h5py
+
+    with h5py.File(path, "r") as f:
+        g = f[group]
+        order = np.argsort(g["id"][:], kind="stable")
+        out = {f"attr/{k}": np.asarray(v) for k, v in g.attrs.items()}
+        for name, ds in g.items():
+            data = ds[:]
+            out[name] = data[order] if data.shape[:1] == (len(order),) else data
+    return out
+
+
+@pytest.mark.parametrize("scheme", list(TRACED))
+def test_refined_magnetized_tiles_carry_the_single_hierarchy_population(tmp_path: Path, scheme: str) -> None:
+    group, lines = TRACED[scheme]
+    (tmp_path / "variant.py").write_text(
+        "from pydantic import computed_field\n"
+        "from simbi.types import TracerScheme\n"
+        "from simbi_configs.examples.newtonian.refined_mhd_blast import RefinedMhdBlast as Base\n\n\n"
+        "class Variant(Base):\n"
+        "    @computed_field\n"
+        "    @property\n"
+        "    def n_tracers(self) -> int:\n"
+        "        return 400\n"
+        + "".join(f"\n    {line}" for line in lines)
+        + "\n"
+    )
+    resolution = (32, 32, 1)
+    want = _run_variant(tmp_path, tmp_path / "single", resolution, 1)
+    population = _population(want, group)
+    levels = population["owner"].astype(np.uint64) >> np.uint64(56)
+    assert {0, 1} <= set(levels.tolist()), f"{scheme}: the records do not span both levels; the comparison is vacuous"
+    for gpus, decompose in ((2, None), (3, [[12, 20], []])):
+        got = _run_variant(tmp_path, tmp_path / f"tiles{gpus}", resolution, gpus, decompose)
+        _assert_same(got, want, f"traced blast ({scheme}) on {gpus} refined tiles")
+        tiled = _population(got, group)
+        assert tiled.keys() == population.keys(), f"{scheme}: tracer fields differ"
+        for name, values in population.items():
+            np.testing.assert_array_equal(tiled[name], values, err_msg=f"{scheme} on {gpus} tiles: {group}/{name}")

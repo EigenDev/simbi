@@ -6834,17 +6834,9 @@ macro_rules! build_and_run_magnetized_decomposed_refined {
         let bufs: &[Vec<f64>] = $bufs;
         type Sim = SimDefaultGeneric<$regime_ty, $d, 3, $geom_ty, $eos_ty>;
 
-        // the single magnetized hierarchy refuses user sources; a tracer population on refined
-        // tiles needs its tiled level transport: both refused by name before any output
+        // the single magnetized hierarchy refuses user sources: refused by name before any output
         if !cfg.source_jsons.is_empty() {
             return Err("user source expressions are not yet supported with mesh refinement".to_string());
-        }
-        if cfg.n_tracers > 0 {
-            return Err(
-                "a tracer population with mesh refinement and gpus > 1 awaits its tiled level transport; \
-                 run it on one device"
-                    .to_string(),
-            );
         }
         let n: [usize; $d] = std::array::from_fn(|ax| cfg.n_cells[ax]);
         let total: usize = n.iter().product();
@@ -6982,6 +6974,47 @@ macro_rules! build_and_run_magnetized_decomposed_refined {
         }
         let offsets = tile_offsets(&partition);
         let grid = decomposed_grid::<$d>(cfg, tiles[0].levels[0].state.geom.ng);
+        // the population seeds once from the whole seeded hierarchy, as the single hierarchy seeds
+        // its own, and each tile keeps the records its cells own; the whole hierarchy lives for that
+        // seeding alone
+        if cfg.n_tracers > 0 {
+            let global = {
+                let groot = Sim::build($regime, $eos, $geom)
+                    .cells(n)
+                    .ghosts(ghost_width(cfg))
+                    .origin(std::array::from_fn(|ax| cfg.x_lo[ax]))
+                    .spacing(dx)
+                    .coord_maps(axis_maps::<$d>(cfg))
+                    .boundaries(boundaries_nd::<$d>(&cfg.boundaries))
+                    .cfl(cfg.cfl)
+                    .timestepping(cfg.timestepping)
+                    .cyl_plane(cfg.cyl_plane)
+                    .allocate()
+                    .map_err(|e| format!("global seeding allocate: {e:?}"))?
+                    .set_initial_indexed(|idx, _x| {
+                        let lin = global_lin::<$d>(&[0; $d], &idx, &n);
+                        let mag: [f64; 3] = std::array::from_fn(|k| {
+                            if k < $d { face_avg_cell_b::<$d>(&bufs[k], k, idx, n) } else { bufs[k][lin] }
+                        });
+                        $prim(&prims[lin], mag)
+                    })
+                    .seed_faces_indexed(&bufs[0..$d])
+                    .build();
+                let gsub = kernels_of(&groot);
+                let gh = Hierarchy::with_refinement(groot, gsub, &regions, prolong, kernels_of)
+                    .map_err(|e| format!("global refinement build: {e:?}"))?;
+                gh.seed_fine_from_coarse().map_err(|e| format!("global fine seed: {e:?}"))?;
+                gh
+            };
+            symbi::sim::refinement::seed_decomposed_hierarchy_tracers(&global, &mut tiles, cfg.n_tracers);
+            if let Some(order) = configured_ito_order(cfg)? {
+                for tile in &mut tiles {
+                    for level in &mut tile.levels {
+                        convert_seeded_tracers(&mut level.state, order)?;
+                    }
+                }
+            }
+        }
         run_refined_decomposed_loop(cfg, tiles, offsets, grid, counts)
     }};
 }
