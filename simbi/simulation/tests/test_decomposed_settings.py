@@ -4,7 +4,7 @@
 # the settings a decomposed hydro run must honor or refuse. a viscous run on
 # two devices equals the viscous single-grid run and differs from the inviscid
 # one; an excised relativistic run on two devices equals the excised
-# single-grid run at the decomposition's roundoff bound; the synge perfect gas
+# single-grid run bit for bit and differs from the unexcised one; the synge perfect gas
 # on two devices equals the synge single-grid run and differs from the ideal
 # gas; the balanced reconstruction on several devices is refused by name. every arm runs as a
 # fresh process through the public command, the decomposed ones as host tiles
@@ -49,6 +49,12 @@ def _density(path: Path) -> tuple[np.ndarray, int]:
         return data[(slice(ng, -ng),) * data.ndim], int(level.attrs["iteration"])
 
 
+def _conserved(path: Path) -> tuple[dict[str, np.ndarray], int]:
+    with h5py.File(path, "r") as f:
+        level = f["level_0"]
+        return {name: data[()] for name, data in level["conserved"].items()}, int(level.attrs["iteration"])
+
+
 def test_a_viscous_run_on_two_devices_is_viscous(tmp_path: Path) -> None:
     base = ["--resolution", "32,32,1", "--end-time", "0.05"]
     viscous_1, steps_1 = _density(_run(VISCOUS, tmp_path / "v1", 1, base + ["--nu", "0.05"]))
@@ -60,15 +66,17 @@ def test_a_viscous_run_on_two_devices_is_viscous(tmp_path: Path) -> None:
 
 
 def test_an_excised_run_on_two_devices_is_excised(tmp_path: Path) -> None:
-    base = ["--resolution", "24,24,24", "--end-time", "0.6", "--domain-radius", "0.12", "--excision-radius", "1.6"]
-    one, steps_1 = _density(_run(BONDI, tmp_path / "e1", 1, base))
-    two, steps_2 = _density(_run(BONDI, tmp_path / "e2", 2, base))
+    base = ["--resolution", "24,24,24", "--end-time", "0.6", "--domain-radius", "0.12"]
+    one, steps_1 = _conserved(_run(BONDI, tmp_path / "e1", 1, base + ["--excision-radius", "1.6"]))
+    bare, _ = _conserved(_run(BONDI, tmp_path / "n1", 1, base + ["--excision-radius", "0.0"]))
+    assert not np.array_equal(one["den"], bare["den"]), "excision does not act on this setup; the gate is vacuous"
+    two, steps_2 = _conserved(_run(BONDI, tmp_path / "e2", 2, base + ["--excision-radius", "1.6"]))
     assert steps_1 == steps_2
-    # each tile evaluates the metric from its own origin, so the decomposed relativistic march
-    # follows the single grid at roundoff: the bound the decomposed restart gates hold
-    scale = max(np.abs(one).max(), np.abs(two).max())
-    worst = np.abs(one - two).max()
-    assert worst <= 1e-12 * scale, f"excised densities differ by {worst:.3e} against scale {scale:.3e}"
+    # every tile evaluates the metric at whole-grid cell centers (the global origin plus its index
+    # offset), so the excised relativistic march is the single grid's, bit for bit
+    assert one.keys() == two.keys()
+    for name, field in one.items():
+        np.testing.assert_array_equal(two[name], field, err_msg=f"excised {name}")
 
 
 def test_the_synge_gas_on_two_devices_is_the_synge_gas(tmp_path: Path) -> None:
