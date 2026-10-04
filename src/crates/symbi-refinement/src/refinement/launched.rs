@@ -2059,12 +2059,14 @@ where
         ids_by_level.push(ids);
         // the level's template is this worker's own tile of the level when it holds one: its field
         // set, and the finest level's body state and history the file records; a worker holding
-        // no tile of the level names the root's
+        // no tile of the level names its first tile's deepest level, which carries the full bodies
+        // and books the global body delta every tile applies (coarser levels hold gravity-only
+        // proxies)
         let template = tiles
             .iter()
             .zip(held.level_ids(level))
             .find_map(|(h, id)| id.map(|_| &h.levels[level].state))
-            .unwrap_or(&tiles[0].levels[0].state);
+            .unwrap_or(&tiles[0].levels[tiles[0].levels.len() - 1].state);
         levels.push(LevelTiles {
             tiles: level_tiles,
             grid: grid.clone(),

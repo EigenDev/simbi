@@ -21,6 +21,8 @@
 #   test_tiled_body_ledger[refined]); three workers, one holding no fine tile;
 #   and a late fine-substep rejection against its capped clean control, which
 #   must publish no contribution of the rejected attempt.
+# - an accreting bondi sink under two nested fine levels on three workers, two
+#   of them holding level 1 without level 2, against the single hierarchy.
 # a magnetized wall takes its shape (a box and a sphere leave different flows),
 # and a bonded fragment assembly with mesh refinement is refused on launch by
 # name.
@@ -39,6 +41,7 @@ import pytest
 
 from simbi.simulation.tests.test_launch import _layout, bounded_processes  # noqa: F401  the autouse process guard
 from simbi.simulation.tests.test_launch_refined_numerics import _all_levels
+from simbi.simulation.tests.test_tiled_body_ledger import U, _pull
 
 pytestmark = pytest.mark.simulation
 
@@ -121,6 +124,18 @@ class RefinedBondi(Bondi):
     refinement_max_levels: Annotated[int, ProblemParam(2, description="levels")]
     refinement_regions: Annotated[list[list[float]] | None, ProblemParam([[-2.5, 2.5, -2.5, 2.5, -2.5, 2.5]], description="box")]
     refinement_ratios: Annotated[list[int] | None, ProblemParam([2], description="ratios")]
+
+
+class NestedBondi(Bondi):
+    """the bondi sink under two nested fine levels, the sink inside the finest"""
+
+    refinement_enabled: Annotated[bool, ProblemParam(True, description="refined")]
+
+    def setup(self) -> None:
+        super().setup()
+        self.refinement_max_levels = 3
+        self.refinement_regions = self.refinement_regions[:2]
+        self.refinement_ratios = self.refinement_ratios[:2]
 
 
 class RefinedRubble(RubbleWind):
@@ -370,6 +385,54 @@ def test_a_worker_holding_no_fine_tile_joins_the_refined_body_step(tmp_path: Pat
             f"{arm}: the coordinator published no body history after the restart"
         )
     _assert_same(resumed, tiles_resumed, f"{arm}: resumed on three workers, the coordinator without a fine tile")
+
+
+# root cells of the 24-cell nested bondi grid: level 1 spans 6..18, level 2 spans 9..15; the cuts
+# at 8 and 16 leave the first and third workers holding level 1 without level 2
+NESTED_CUTS = [[8, 16], [], []]
+
+
+def _level_root_span(path: Path, level: str) -> tuple[float, float]:
+    with h5py.File(path, "r") as f:
+        dim = f[level]["mesh/geometry/dim_0"].attrs
+        return float(dim["start"]), float(dim["end"])
+
+
+def test_workers_holding_fewer_levels_publish_the_single_hierarchy_nested_sink(tmp_path: Path, variants: Path) -> None:
+    # every tile applies the global body delta on its own finest level, gravity-only proxies below;
+    # a worker without the run's finest level publishes the bodies and history from its deepest
+    # level. the grid matches the single hierarchy bit for bit: the drain acts on the finest level,
+    # which one worker holds whole. the body state and history take the reassociation bound of the
+    # cross-tile body sums (test_tiled_body_ledger)
+    want = _single("NestedBondi", None, tmp_path / "single", STEPS)
+    lo, hi = _level_root_span(want, "level_2")
+    root_lo, root_hi = _level_root_span(want, "level_0")
+    width = (root_hi - root_lo) / 24
+    fine_cells = (round((lo - root_lo) / width), round((hi - root_lo) / width))
+    assert NESTED_CUTS[0][0] <= fine_cells[0] and fine_cells[1] <= NESTED_CUTS[0][1], (
+        f"level 2 spans root cells {fine_cells}; a cut crosses it and every worker holds the finest level"
+    )
+    with h5py.File(want, "r") as f:
+        assert float(f["bodies/total_accreted_mass"][0]) > 0.0, "the sink accreted nothing; the gate is vacuous"
+    three = _layout(tmp_path / "three.toml", workers=3, cuts=NESTED_CUTS)
+    got = _launch(variants, "NestedBondi", None, tmp_path / "launched", three, STEPS)
+    xs, ys = _all_levels(got), _all_levels(want)
+    assert xs.keys() == ys.keys(), f"datasets {sorted(set(xs) ^ set(ys))} differ"
+    for name, x in xs.items():
+        np.testing.assert_array_equal(x, ys[name], err_msg=f"nested sink: {name}")
+    bx, by = _body_groups(got), _body_groups(want)
+    assert bx.keys() == by.keys(), f"body datasets {sorted(set(bx) ^ set(by))} differ"
+    for name in ("body_diagnostics/time", "body_diagnostics/dt"):
+        np.testing.assert_array_equal(bx[name], by[name], err_msg=name)
+    with h5py.File(want, "r") as f:
+        cells = sum(int(np.prod([s - 2 * int(f[k]["mesh"].attrs["halo_width"]) for s in f[k]["conserved/den"].shape]))
+                    for k in f if k.startswith("level_"))
+    pull, arm = _pull(want)
+    for name, y in by.items():
+        y = y.astype(float)
+        scale = pull if "force" in name else pull * arm if "torque" in name else np.abs(y).max()
+        worst = np.abs(bx[name].astype(float) - y).max()
+        assert worst <= cells * U * scale, f"nested sink: {name} differs by {worst:.3e} against {cells * U:.1e} of {scale:.3e}"
 
 
 REJECTIONS = __import__("re").compile(r"SIMBI launch: worker=\d+/\d+ steps=\d+ rejections=(\d+)")
