@@ -46,6 +46,7 @@ use symbi_xpu::{ExecutionSpace, MemorySpace, with_device};
 use symbi_geometry::Metric;
 
 use super::hierarchy::{Hierarchy, RATIO, StageMark};
+use super::launched_tracers::{LevelAtlas, exchange_level_tracers, spawn_level_injection};
 
 /// the three plans of a refined session and the fabric they share
 pub struct RefinedPlans<'p, const D: usize> {
@@ -116,15 +117,15 @@ pub struct Held<'a> {
 
 impl Held<'_> {
     /// the tile ids of refined level `level >= 1`, parallel over the held root tiles
-    fn level_ids(&self, level: usize) -> &[Option<TileId>] {
+    pub(crate) fn level_ids(&self, level: usize) -> &[Option<TileId>] {
         if level == 1 { self.fine_ids } else { &self.nested[level - 2].ids }
     }
 
-    fn level_tiles(&self, level: usize) -> usize {
+    pub(crate) fn level_tiles(&self, level: usize) -> usize {
         if level == 1 { self.n_fine } else { self.nested[level - 2].n }
     }
 
-    fn level_devices(&self, level: usize) -> &[i32] {
+    pub(crate) fn level_devices(&self, level: usize) -> &[i32] {
         if level == 1 { self.fine_devices } else { &self.nested[level - 2].devices }
     }
 }
@@ -737,6 +738,17 @@ where
         audit_levels!(ExchangePoint::Audit(AuditAt::Prime), 0, 0);
     }
 
+    // a discrete population: every level stage leaves its ancestry blend to the exchange below, and
+    // the level atlas maps any owner to its tile on every worker
+    let atlas = if tiles.iter().any(|h| h.levels[0].state.tracers.is_some()) {
+        for h in tiles.iter_mut() {
+            h.set_blend_across_tiles();
+        }
+        Some(LevelAtlas::agree(tiles, held, depth, fabric, deadline).map_err(|e| fail(fabric, e.into()))?)
+    } else {
+        None
+    };
+
     let guard_scope = symbi_sim::guard_ledger::open_scope();
     // every worker resumes the same retry guard: the streak a checkpoint recorded and the
     // configured thresholds, on every held tile's root
@@ -848,6 +860,9 @@ where
                     rejected = true;
                     break;
                 }
+                if let Some(atlas) = atlas.as_ref() {
+                    exchange_level_tracers(tiles, held, atlas, 0, ii, fabric, deadline).map_err(|e| fail(fabric, e.into()))?;
+                }
                 if ii + 1 == nstages && plans.stencil.is_some() {
                     // the last root stage point also gathers every refined tile's parent face
                     // stencil at both time levels, the faces final for the fine subcycle
@@ -877,6 +892,9 @@ where
                 }
             }
             if !rejected {
+                if let Some(atlas) = atlas.as_ref() {
+                    spawn_level_injection(tiles, held, atlas, 0, fabric, deadline).map_err(|e| fail(fabric, e.into()))?;
+                }
                 for (k, h) in tiles.iter().enumerate() {
                     with_device(root_dev(k), || {
                         h.level_tail_emf(0, dt);
@@ -946,10 +964,16 @@ where
                             rejected = true;
                             break 'subcycle;
                         }
+                        if let Some(atlas) = atlas.as_ref() {
+                            exchange_level_tracers(tiles, held, atlas, 1, jj, fabric, deadline).map_err(|e| fail(fabric, e.into()))?;
+                        }
                         fine_stage_point!(sub, jj, iter, attempt);
                         if base.audit_every_point {
                             audit!(plans.fine, fine_fields!(), ExchangePoint::Fine { substep: sub as u8, point: FinePoint::Audit(jj as u8) }, iter, attempt);
                         }
+                    }
+                    if let Some(atlas) = atlas.as_ref() {
+                        spawn_level_injection(tiles, held, atlas, 1, fabric, deadline).map_err(|e| fail(fabric, e.into()))?;
                     }
                     // the fine tail on the globally finest level, then its recovery and halo
                     // refresh at the post-tail point before any later reader
@@ -961,7 +985,7 @@ where
                         for &k in &refined {
                             with_device(fine_dev(k), || tiles[k].level_tail_pre(1, fine_dt));
                         }
-                        let nested = NestedStep { held, plans, transport, deadline, nstages, depth, audit_every: base.audit_every_point, step: iter, attempt };
+                        let nested = NestedStep { held, plans, transport, deadline, nstages, depth, audit_every: base.audit_every_point, step: iter, attempt, atlas: atlas.as_ref() };
                         if nested_subcycle(tiles, &nested, fabric, &mut timing, &mut report, 2, sub as u8, fine_dt)? {
                             rejected = true;
                             break 'subcycle;
@@ -1168,6 +1192,8 @@ struct NestedStep<'a, 'p, const D: usize, T> {
     audit_every: bool,
     step: u64,
     attempt: u16,
+    /// the discrete population's level atlas, when the run carries one
+    atlas: Option<&'a LevelAtlas<D>>,
 }
 
 /// the subcycle of nested level `level >= 2` across its tiles within one step `dt` of its parent's
@@ -1277,6 +1303,9 @@ where
             if vote_retry(fabric, retry, deadline, timing)? {
                 return Ok(true);
             }
+            if let Some(atlas) = cx.atlas {
+                exchange_level_tracers(tiles, cx.held, atlas, level, jj, fabric, deadline).map_err(|e| fail(fabric, e.into()))?;
+            }
             let child_stencil = cx.plans.nested.get(level - 1).and_then(|n| n.stencil.as_ref()).filter(|_| jj + 1 == cx.nstages);
             if let Some((old, new)) = child_stencil {
                 // the last stage also gathers the next level's parent face stencils from this
@@ -1320,6 +1349,9 @@ where
                 exchange(tiles, fabric, timing, at(FinePoint::Stage(jj as u8)))?;
             }
             audit(tiles, fabric, report, at(FinePoint::Audit(jj as u8)))?;
+        }
+        if let Some(atlas) = cx.atlas {
+            spawn_level_injection(tiles, cx.held, atlas, level, fabric, deadline).map_err(|e| fail(fabric, e.into()))?;
         }
         for (r, &k) in mine.iter().enumerate() {
             with_device(dev(r), || tiles[k].level_tail_pre(level, level_dt));

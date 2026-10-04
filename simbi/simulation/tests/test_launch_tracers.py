@@ -17,7 +17,9 @@
 # and ito alike. the newtonian, relativistic and isothermal magnetized
 # orszag-tang vortices carry the discrete population, and the newtonian one
 # the ito-3 population, on host tiles and launched workers as on one grid.
-# tracers with mesh refinement are refused by name before any output.
+# with mesh refinement, the discrete population on two workers, a 2x2 launch and
+# three uneven workers publishes the single hierarchy's population bit for bit;
+# an ito population with refinement is refused by name before any output.
 #
 # run: pytest -m simulation simbi/simulation/tests/test_launch_tracers.py
 # =============================================================================
@@ -274,7 +276,7 @@ def test_tracers_cross_into_a_sink_on_tiles_and_workers_as_on_the_single_grid(tm
 @pytest.mark.parametrize(
     ("problem", "reason"),
     [
-        ("RefinedTracedDrift", "a tracer population with mesh refinement"),
+        ("RefinedIto2Drift", "an ito tracer population with mesh refinement"),
     ],
 )
 def test_a_tracer_setting_the_workers_do_not_carry_is_refused(tmp_path: Path, variants: Path, problem: str, reason: str) -> None:
@@ -284,3 +286,18 @@ def test_a_tracer_setting_the_workers_do_not_carry_is_refused(tmp_path: Path, va
     flat = " ".join(done.stderr.split())
     assert f"{reason} is outside the distributed first release" in flat, done.stderr[-2000:]
     assert not list((tmp_path / "out").glob("*.h5")), "a checkpoint was published"
+
+
+def test_launched_refined_workers_carry_the_single_hierarchy_population(tmp_path: Path, variants: Path) -> None:
+    want = _run("RefinedDiscreteDrift", tmp_path / "single", 1, STEPS)
+    with h5py.File(want, "r") as f:
+        levels = (f["tracers"]["owner"][:].astype(np.uint64) >> np.uint64(56)).tolist()
+        assert {0, 1} <= set(levels), "the records do not span both levels; the comparison is vacuous"
+        assert int(f["tracers"].attrs["n_tracers"]) > 400, "no tracer was injected; the spawn arm is vacuous"
+    layouts = [
+        ("two", _layout(tmp_path / "two.toml", workers=2, shape=(2, 1))),
+        ("four", _layout(tmp_path / "four.toml", workers=4, shape=(2, 2))),
+        ("three", _layout(tmp_path / "three.toml", workers=3, cuts=[[12, 20], []])),
+    ]
+    for name, layout in layouts:
+        _assert_same(_launch(variants, "RefinedDiscreteDrift", tmp_path / name, layout, STEPS), want, "tracers", f"refined drift on {name} workers")

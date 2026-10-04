@@ -373,18 +373,24 @@ where
             .position(|(l, _, p)| *l == li && p == path)
             .expect("the walker names a declared dataset")
     };
-    // the tracer population of every worker's tiles, gathered so the coordinator writes it whole;
-    // every tile of a traced run carries one, so each worker joins the gather
-    let local: Vec<(usize, &crate::tracers::TracerSet<D>)> = plans[0]
-        .tile_ids
-        .iter()
-        .zip(&levels[0].tiles)
-        .filter_map(|(tile, view)| view.state.tracers.as_ref().map(|set| (tile.0 as usize, set)))
-        .collect();
-    let population = if local.is_empty() {
+    // the tracer population of every worker's tiles on every level, gathered level by level so the
+    // coordinator writes it whole; every tile of a traced run carries one on each of its levels, and
+    // every worker holds root tiles, so the root decides for every worker whether the gathers run
+    let traced = levels[0].tiles.iter().any(|view| view.state.tracers.is_some());
+    let population = if !traced {
         None
     } else {
-        Some(crate::worker_tracers::gather_discrete(fabric, plans[0].plan.n_tiles(), &local, req.deadline)?)
+        let mut sets = Vec::new();
+        for (plan, level) in plans.iter().zip(levels) {
+            let local: Vec<(usize, &crate::tracers::TracerSet<D>)> = plan
+                .tile_ids
+                .iter()
+                .zip(&level.tiles)
+                .filter_map(|(tile, view)| view.state.tracers.as_ref().map(|set| (tile.0 as usize, set)))
+                .collect();
+            sets.extend(crate::worker_tracers::gather_discrete(fabric, plan.plan.n_tiles(), &local, req.deadline)?);
+        }
+        Some(sets)
     };
     let local: Vec<(usize, &crate::tracers::ContinuousTracerSet<D, Mem>)> = plans[0]
         .tile_ids

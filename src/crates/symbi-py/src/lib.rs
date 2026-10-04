@@ -11312,8 +11312,10 @@ fn validate_launch_scope(cfg: &Config) -> Result<(), String> {
     // the launched gas, isothermal and magnetized tiles carry the discrete and the ito
     // populations on a flat grid
     if cfg.n_tracers > 0 {
-        if cfg.refinement_enabled {
-            return refused("a tracer population with mesh refinement");
+        // the refined workers carry the discrete population; an ito population needs its
+        // coefficients across every level's cuts on the launched path
+        if cfg.refinement_enabled && configured_ito_order(cfg)?.is_some() {
+            return refused("an ito tracer population with mesh refinement");
         }
         if !matches!(cfg.regime.as_str(), "newtonian" | "rhd" | "isothermal" | "nmhd" | "rmhd" | "imhd") {
             return refused(&format!("a tracer population with the {} regime", cfg.regime));
@@ -11466,6 +11468,34 @@ fn refined_layout<const D: usize>(cfg: &Config, launch: &WorkerLaunch, cells: us
 /// face on a cut as a contributing register face), or the receiving register of the shell beside
 /// the patch; a magnetized tile carries the step-entry faces its neighbors' parent face stencils
 /// gather, and a refined one the stencil itself
+/// a refined worker's share of the discrete population: the population seeds once from the whole
+/// seeded hierarchy, built from `whole` with the levels' kernels, as the single hierarchy seeds its
+/// own, and the held tiles keep the records their cells own
+fn seed_refined_worker_tracers<R, const D: usize, const DOF: usize, E, K>(
+    cfg: &Config,
+    tiles: &mut [Hierarchy<R, D, DOF, Cartesian, E, DefaultSpace, DefaultMemory, K>],
+    whole: impl FnOnce() -> Result<SimDefaultGeneric<R, D, DOF, Cartesian, E>, String>,
+    kernels_of: impl Fn(&SimDefaultGeneric<R, D, DOF, Cartesian, E>) -> K,
+) -> Result<(), String>
+where
+    R: Regime<f64, D> + Copy,
+    Cartesian: Metric<f64, D>,
+    E: symbi_hydro::eos::EosFor<f64, <R as Regime<f64, D>>::Energy> + Copy + Send + Sync,
+    K: KernelSet<D, DOF, DefaultMemory, f64>,
+{
+    if cfg.n_tracers == 0 {
+        return Ok(());
+    }
+    let sim = whole()?;
+    let regions = refinement_regions_nd::<D>(&cfg.refinement_regions)?;
+    let sub = kernels_of(&sim);
+    let global = Hierarchy::with_refinement(sim, sub, &regions, prolong_order_for(&cfg.reconstruction_name), |s| kernels_of(s))
+        .map_err(|e| format!("tracer seeding hierarchy: {e:?}"))?;
+    global.seed_fine_from_coarse().map_err(|e| format!("tracer seeding fine seed: {e:?}"))?;
+    symbi::sim::refinement::seed_held_hierarchy_tracers(&global, tiles, cfg.n_tracers);
+    Ok(())
+}
+
 fn refined_tile<R, const D: usize, const DOF: usize, E, K>(
     cfg: &Config,
     layout: &RefinedLayout<D>,
@@ -11516,6 +11546,12 @@ where
     }
     h.enable_face_stencil().map_err(|e| format!("tile {flat} face stencil: {e:?}"))?;
     h.enable_nested_face_stencils(1 + regions.len()).map_err(|e| format!("tile {flat} nested face stencils: {e:?}"))?;
+    // the tracer containers address the whole root lattice from the tile's first cell, the root
+    // closed across its periodic seams
+    let counts = layout.partition.counts();
+    let ext = layout.partition.tile_extents(symbi::sim::decomp::unflatten(flat, counts));
+    let ring = wrap_topology(&boundaries_nd::<D>(&cfg.boundaries), counts);
+    h.set_root_layout(layout.n, std::array::from_fn(|ax| ext[ax].0), std::array::from_fn(|ax| ring.is_periodic(ax)));
     Ok(h)
 }
 
@@ -11599,6 +11635,23 @@ fn run_refined_worker_process(
                         let sim = with_tile_dye!(sim, cfg, tile_lo, n, flat);
                         tiles.push(refined_tile(cfg, &layout, flat, origin, m, sim, kernels_of)?);
                     }
+                    seed_refined_worker_tracers(cfg, &mut tiles, || {
+                        Ok(Sim::build($regime, host_eos(cfg), Cartesian)
+                            .cells(n)
+                            .ghosts(ghost_width(cfg))
+                            .origin(std::array::from_fn(|ax| cfg.x_lo[ax]))
+                            .spacing(dx)
+                            .boundaries(phys)
+                            .cfl(cfg.cfl)
+                            .timestepping(cfg.timestepping)
+                            .allocate()
+                            .map_err(|e| format!("tracer seeding allocate: {e:?}"))?
+                            .set_initial_indexed(|idx, _x| {
+                                let row = &prims[global_lin::<$d>(&[0; $d], &idx, &n)];
+                                Prim::adiabatic(Density(row[0]), Tensor::new(std::array::from_fn(|k| row[1 + k])), Pressure(row[1 + $d]))
+                            })
+                            .build())
+                    }, kernels_of)?;
                     // the declared stationary target, seeded on every held level for the probe the
                     // session runs once the levels are seeded; a fresh run seeded from it starts there
                     let has_energy = tiles[0].levels[0].state.fields.cons.has_energy();
@@ -11675,6 +11728,26 @@ fn run_refined_worker_process(
                             .map_err(|e| format!("tile {flat} rollback snapshot: {e:?}"))?;
                         tiles.push(refined_tile(cfg, &layout, flat, origin, m, sim, kernels_of)?);
                     }
+                    seed_refined_worker_tracers(cfg, &mut tiles, || {
+                        Ok(Sim::build($regime, host_eos(cfg), Cartesian)
+                            .cells(n)
+                            .ghosts(ghost_width(cfg))
+                            .origin(std::array::from_fn(|ax| cfg.x_lo[ax]))
+                            .spacing(dx)
+                            .boundaries(phys)
+                            .cfl(cfg.cfl)
+                            .timestepping(cfg.timestepping)
+                            .allocate()
+                            .map_err(|e| format!("tracer seeding allocate: {e:?}"))?
+                            .set_initial_indexed(|idx, _x| {
+                                let lin = global_lin::<$d>(&[0; $d], &idx, &n);
+                                let row = &prims[lin];
+                                let mag: [f64; 3] = std::array::from_fn(|k| if k < $d { face_avg_cell_b::<$d>(&bufs[k], k, idx, n) } else { bufs[k][lin] });
+                                MhdPrim::new(Prim::adiabatic(Density(row[0]), Tensor::new([row[1], row[2], row[3]]), Pressure(row[4])), Tensor::new(mag))
+                            })
+                            .seed_faces_indexed(&bufs[0..$d])
+                            .build())
+                    }, kernels_of)?;
                     refined_session(cfg, launch, fault, drained, build_clock, &layout, tiles, None, |_| Ok(()))
                 }};
             }
@@ -11722,6 +11795,23 @@ fn run_refined_worker_process(
                         let sim = with_tile_dye!(sim, cfg, tile_lo, n, flat);
                         tiles.push(refined_tile(cfg, &layout, flat, origin, m, sim, kernels_of)?);
                     }
+                    seed_refined_worker_tracers(cfg, &mut tiles, || {
+                        Ok(Sim::build(IsoNewtonian, Isothermal { cs: cfg.cs }, Cartesian)
+                            .cells(n)
+                            .ghosts(ghost_width(cfg))
+                            .origin(std::array::from_fn(|ax| cfg.x_lo[ax]))
+                            .spacing(dx)
+                            .boundaries(phys)
+                            .cfl(cfg.cfl)
+                            .timestepping(cfg.timestepping)
+                            .allocate()
+                            .map_err(|e| format!("tracer seeding allocate: {e:?}"))?
+                            .set_initial_indexed(|idx, _x| {
+                                let row = &prims[global_lin::<$d>(&[0; $d], &idx, &n)];
+                                PrimG::<f64, $d, IsoModel>::isothermal(Density(row[0]), Tensor::new(std::array::from_fn(|k| row[1 + k])))
+                            })
+                            .build())
+                    }, kernels_of)?;
                     let expression = declared_equilibrium!(cfg, $d, false);
                     let mut seed = |h: &Hierarchy<IsoNewtonian, $d, $d, Cartesian, Isothermal<f64>, DefaultSpace, DefaultMemory, _>| -> Result<(), String> {
                         let Some(expression) = expression.as_ref() else { return Ok(()) };
@@ -11790,6 +11880,26 @@ fn run_refined_worker_process(
                             .map_err(|e| format!("tile {flat} rollback snapshot: {e:?}"))?;
                         tiles.push(refined_tile(cfg, &layout, flat, origin, m, sim, kernels_of)?);
                     }
+                    seed_refined_worker_tracers(cfg, &mut tiles, || {
+                        Ok(Sim::build(IsothermalMhd, Isothermal { cs: cfg.cs }, Cartesian)
+                            .cells(n)
+                            .ghosts(ghost_width(cfg))
+                            .origin(std::array::from_fn(|ax| cfg.x_lo[ax]))
+                            .spacing(dx)
+                            .boundaries(phys)
+                            .cfl(cfg.cfl)
+                            .timestepping(cfg.timestepping)
+                            .allocate()
+                            .map_err(|e| format!("tracer seeding allocate: {e:?}"))?
+                            .set_initial_indexed(|idx, _x| {
+                                let lin = global_lin::<$d>(&[0; $d], &idx, &n);
+                                let row = &prims[lin];
+                                let mag: [f64; 3] = std::array::from_fn(|k| if k < $d { face_avg_cell_b::<$d>(&bufs[k], k, idx, n) } else { bufs[k][lin] });
+                                MhdPrimG::<f64, 3, IsoModel>::new(PrimG::isothermal(Density(row[0]), Tensor::new([row[1], row[2], row[3]])), Tensor::new(mag))
+                            })
+                            .seed_faces_indexed(&bufs[0..$d])
+                            .build())
+                    }, kernels_of)?;
                     refined_session(cfg, launch, fault, drained, build_clock, &layout, tiles, None, |_| Ok(()))
                 }
                 other => Err(format!("the {other} regime with mesh refinement is outside the distributed first release")),

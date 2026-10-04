@@ -26,6 +26,7 @@ pub mod equilibrium;
 pub mod flux_register;
 pub mod hierarchy;
 pub mod launched;
+pub mod launched_tracers;
 pub mod phase_probe;
 pub mod tracer_interface;
 pub mod transfer;
@@ -35,7 +36,7 @@ pub use equilibrium::EquilibriumFlux;
 pub use flux_register::{FaceRole, FluxRegister};
 pub use hierarchy::{
     FineSubgrid, Hierarchy, LevelData, RefinementRegion, evolve_hierarchy_decomposed, fine_subgrid, fine_subgrid_of_level,
-    gather_decomposed_hierarchy_tracers, seed_decomposed_fine_from_coarse, with_equilibrium_decomposed,
+    gather_decomposed_hierarchy_tracers, seed_decomposed_fine_from_coarse, seed_held_hierarchy_tracers, with_equilibrium_decomposed,
     seed_decomposed_hierarchy_tracers,
 };
 pub use tracer_interface::{

@@ -77,7 +77,8 @@ fn unpack(words: [u64; 2]) -> TracerFlags {
     }
 }
 
-fn encode<const D: usize>(set: &TracerSet<D>, ii: usize, out: &mut Vec<u64>) {
+/// append record `ii` of `set` to `out` in `record_words(D)` words
+pub fn encode<const D: usize>(set: &TracerSet<D>, ii: usize, out: &mut Vec<u64>) {
     out.extend(set.x[ii].iter().map(|v| v.to_bits()));
     out.push(set.id[ii]);
     out.push(u64::from(set.cohort[ii]));
@@ -87,7 +88,8 @@ fn encode<const D: usize>(set: &TracerSet<D>, ii: usize, out: &mut Vec<u64>) {
     out.extend(pack(set.step_flags[ii]));
 }
 
-fn push_decoded<const D: usize>(set: &mut TracerSet<D>, words: &[u64]) {
+/// push the record `words` encodes onto `set`
+pub fn push_decoded<const D: usize>(set: &mut TracerSet<D>, words: &[u64]) {
     set.x.push(std::array::from_fn(|dd| f64::from_bits(words[dd])));
     set.id.push(words[D]);
     set.cohort.push(words[D + 1] as u16);

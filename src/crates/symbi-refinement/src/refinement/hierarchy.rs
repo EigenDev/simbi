@@ -658,7 +658,7 @@ where
         Ok(count)
     }
 
-    fn tracer_cell(
+    pub(crate) fn tracer_cell(
         &self,
         owner: symbi_sim::mass_transport::ContainerId,
     ) -> Option<(usize, [isize; NDIM])> {
@@ -684,7 +684,7 @@ where
             .then_some((level, coord))
     }
 
-    fn tracer_layout(&self, level: usize) -> symbi_sim::tracers::TransportLayout<NDIM> {
+    pub(crate) fn tracer_layout(&self, level: usize) -> symbi_sim::tracers::TransportLayout<NDIM> {
         let scale = 1usize << level;
         let interior = &self.levels[level].state.geom.interior;
         symbi_sim::tracers::TransportLayout {
@@ -3278,6 +3278,22 @@ where
             .unwrap_or_else(|detail| panic!("tracer interface transport: {detail}"));
     }
 
+    /// mark this hierarchy a tile of a decomposed run, whose level stages leave the tracer blend to
+    /// the driver
+    pub(crate) fn set_blend_across_tiles(&mut self) {
+        self.blend_across_tiles = true;
+    }
+
+    /// the boundary and source injection this tile's level stages booked, taken for a merged spawn
+    pub(crate) fn take_injection_ledger(&mut self) -> std::collections::BTreeMap<symbi_sim::mass_transport::ContainerId, f64> {
+        std::mem::take(&mut self.injection_ledger)
+    }
+
+    /// the cell counts of the whole root lattice the tracer containers address
+    pub(crate) fn tracer_root_cells(&self) -> [usize; NDIM] {
+        self.tracer_root_global_cells
+    }
+
     /// apply the interface event a decomposed stage of `level` left pending, once the driver's
     /// blend ran; an event another level left (a stage its attempt rejected) waits for that level's
     /// next stage, which replaces it
@@ -5518,6 +5534,39 @@ pub fn seed_decomposed_hierarchy_tracers<R, const NDIM: usize, const DOF: usize,
     Mem: MemorySpace + Sync,
     K: KernelSet<NDIM, DOF, Mem, f64>,
 {
+    seed_tiles_from_hierarchy(global, tiles, count, true);
+}
+
+/// `seed_decomposed_hierarchy_tracers` on the tiles one worker holds: every tile's levels take the
+/// population's metadata and the records whose cells the held tiles own, the rest held elsewhere
+pub fn seed_held_hierarchy_tracers<R, const NDIM: usize, const DOF: usize, M, E, S, Mem, K>(
+    global: &Hierarchy<R, NDIM, DOF, M, E, S, Mem, K>,
+    tiles: &mut [Hierarchy<R, NDIM, DOF, M, E, S, Mem, K>],
+    count: usize,
+) where
+    R: Regime<f64, NDIM> + Copy,
+    M: Metric<f64, NDIM> + Copy + Send + Sync,
+    E: symbi_hydro::eos::EosFor<f64, <R as Regime<f64, NDIM>>::Energy> + Copy + Send + Sync,
+    S: ExecutionSpace,
+    Mem: MemorySpace + Sync,
+    K: KernelSet<NDIM, DOF, Mem, f64>,
+{
+    seed_tiles_from_hierarchy(global, tiles, count, false);
+}
+
+fn seed_tiles_from_hierarchy<R, const NDIM: usize, const DOF: usize, M, E, S, Mem, K>(
+    global: &Hierarchy<R, NDIM, DOF, M, E, S, Mem, K>,
+    tiles: &mut [Hierarchy<R, NDIM, DOF, M, E, S, Mem, K>],
+    count: usize,
+    every_owner_held: bool,
+) where
+    R: Regime<f64, NDIM> + Copy,
+    M: Metric<f64, NDIM> + Copy + Send + Sync,
+    E: symbi_hydro::eos::EosFor<f64, <R as Regime<f64, NDIM>>::Energy> + Copy + Send + Sync,
+    S: ExecutionSpace,
+    Mem: MemorySpace + Sync,
+    K: KernelSet<NDIM, DOF, Mem, f64>,
+{
     let seeded = global.seed_mass_tracers(count);
     for tile in tiles.iter_mut() {
         for level in &mut tile.levels {
@@ -5531,10 +5580,10 @@ pub fn seed_decomposed_hierarchy_tracers<R, const NDIM: usize, const DOF: usize,
     }
     for ii in 0..seeded.len() {
         let owner = seeded.owner[ii];
-        let destination = tiles
-            .iter()
-            .position(|tile| tile.tracer_owner_is_active(owner))
-            .expect("composite tracer seed has no decomposed owner");
+        let Some(destination) = tiles.iter().position(|tile| tile.tracer_owner_is_active(owner)) else {
+            assert!(!every_owner_held, "composite tracer seed has no decomposed owner");
+            continue;
+        };
         let (level, coord) = tiles[destination]
             .tracer_cell(owner)
             .expect("decomposed tracer owner must resolve");
