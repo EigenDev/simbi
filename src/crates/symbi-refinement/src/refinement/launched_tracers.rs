@@ -32,10 +32,13 @@ use symbi_geometry::Metric;
 use super::hierarchy::{Hierarchy, RATIO};
 use super::launched::Held;
 
-/// every tile's box of each level in that level's whole-grid cells, by the level's tile id
+/// every tile's box of each level in that level's whole-grid cells, by the level's tile id, and the
+/// root lattice every level refines
 pub struct LevelAtlas<const D: usize> {
     boxes: Vec<Vec<([usize; D], [usize; D])>>,
     root_cells: [usize; D],
+    x_lo: [f64; D],
+    dx: [f64; D],
 }
 
 /// the id on level `level`'s plan of held root tile `k`'s tile of the level
@@ -85,7 +88,32 @@ impl<const D: usize> LevelAtlas<D> {
                     .collect(),
             );
         }
-        Ok(Self { boxes, root_cells })
+        let geom = &tiles[0].levels[0].state.geom;
+        Ok(Self { boxes, root_cells, x_lo: geom.x_lo, dx: geom.dx })
+    }
+
+    /// the whole-grid cell of level `level` holding `position`, inside the level's lattice
+    fn level_cell(&self, level: usize, position: [f64; D]) -> Option<[usize; D]> {
+        let scale = RATIO.pow(level as u32);
+        let mut cell = [0usize; D];
+        for ax in 0..D {
+            let index = ((position[ax] - self.x_lo[ax]) / (self.dx[ax] / scale as f64)).floor();
+            if !(index >= 0.0 && (index as usize) < self.root_cells[ax] * scale) {
+                return None;
+            }
+            cell[ax] = index as usize;
+        }
+        Some(cell)
+    }
+
+    /// the level tile id whose box holds level `level`'s cell at `position`, with the cell
+    fn holder_at(&self, level: usize, position: [f64; D]) -> Option<(usize, [usize; D])> {
+        let cell = self.level_cell(level, position)?;
+        self.boxes
+            .get(level)?
+            .iter()
+            .position(|(lo, hi)| (0..D).all(|ax| cell[ax] >= lo[ax] && cell[ax] < hi[ax]))
+            .map(|id| (id, cell))
     }
 
     /// the level and the level tile id whose box holds the cell `owner` names
@@ -397,6 +425,317 @@ where
             if let Some(tracers) = data.state.tracers.as_mut() {
                 tracers.next_id = spawned.next_id;
                 tracers.injection_remainder = spawned.injection_remainder;
+            }
+        }
+    }
+    Ok(())
+}
+
+// ---- the continuous (ito) population ----------------------------------------------------
+
+/// level `level`'s accepted ito coefficients across its cuts at the level's coefficient point
+#[allow(clippy::too_many_arguments)]
+pub fn exchange_level_coefficients<R, const D: usize, const DOF: usize, M, E, S, Mem, K, T, L>(
+    tiles: &[Hierarchy<R, D, DOF, M, E, S, Mem, K>],
+    held: &Held<'_>,
+    plan: &symbi_sim::plan_exchange::PlanExchange<'_, D>,
+    level: usize,
+    point: symbi_sim::atlas::ExchangePoint,
+    step: u64,
+    attempt: u16,
+    transport: &T,
+    fabric: &mut Fabric<L>,
+    deadline: Duration,
+    spent: &mut Duration,
+) -> Result<(), FabricError>
+where
+    R: Regime<f64, D> + Copy,
+    M: Metric<f64, D> + Copy + Send + Sync,
+    E: symbi_hydro::eos::EosFor<f64, <R as Regime<f64, D>>::Energy> + Copy + Send + Sync,
+    S: ExecutionSpace,
+    Mem: MemorySpace + Sync,
+    K: KernelSet<D, DOF, Mem, f64>,
+    T: symbi_sim::decomp::HaloTransport,
+    L: Link,
+{
+    let mut fields: Vec<Vec<&symbi_grid::Field<f64, D, Mem>>> = (0..plan.plan().n_tiles()).map(|_| Vec::new()).collect();
+    for (k, tile) in tiles.iter().enumerate() {
+        let Some(id) = level_id(held, level, k) else { continue };
+        let c = tile.levels[level].state.ito_coefficients.as_ref().expect("ito coefficients were materialized");
+        fields[id.0 as usize] = c.drift.iter().chain(c.variance.iter()).chain(c.third.iter()).collect();
+    }
+    let devices = if level == 0 { held.root_devices } else { held.level_devices(level) };
+    let part = symbi_sim::worker::PlanPart { plan, fields: &fields, devices, fault: None, dst_fields: None };
+    symbi_sim::worker::exchange_point_plans(&[part], transport, fabric, point, step, attempt, deadline, spent)
+}
+
+/// level `level`'s continuous tracers cross to the tile whose level cell holds their position, over
+/// every worker; a tracer outside the level's tiles stays, as it stays on its level of the single
+/// hierarchy
+pub fn migrate_level_continuous<R, const D: usize, const DOF: usize, M, E, S, Mem, K, L>(
+    tiles: &mut [Hierarchy<R, D, DOF, M, E, S, Mem, K>],
+    held: &Held<'_>,
+    atlas: &LevelAtlas<D>,
+    level: usize,
+    fabric: &mut Fabric<L>,
+    deadline: Duration,
+) -> Result<(), FabricError>
+where
+    R: Regime<f64, D> + Copy,
+    M: Metric<f64, D> + Copy + Send + Sync,
+    E: symbi_hydro::eos::EosFor<f64, <R as Regime<f64, D>>::Energy> + Copy + Send + Sync,
+    S: ExecutionSpace,
+    Mem: MemorySpace + Sync,
+    K: KernelSet<D, DOF, Mem, f64>,
+    L: Link,
+{
+    use symbi_sim::worker_tracers::{continuous_words, decode_continuous, encode_continuous};
+    let width = 1 + continuous_words(D);
+    let mut local = Vec::new();
+    for k in 0..tiles.len() {
+        let Some(id) = level_id(held, level, k) else { continue };
+        let source = id.0 as usize;
+        let mut words = Vec::new();
+        if let Some(tracers) = tiles[k].levels[level].state.continuous_tracers.as_mut() {
+            for kk in (0..tracers.len).rev() {
+                let (inactive, position) = unsafe {
+                    (
+                        *tracers.escaped.as_ptr::<u8>().add(kk) != 0 || *tracers.crossed_sink.as_ptr::<u8>().add(kk) != 0,
+                        std::array::from_fn(|dd| *tracers.x[dd].as_ptr::<f64>().add(kk)),
+                    )
+                };
+                if inactive {
+                    continue;
+                }
+                let Some((target, _)) = atlas.holder_at(level, position) else { continue };
+                if target == source {
+                    continue;
+                }
+                let record = tracers.swap_remove_host(kk).unwrap_or_else(|detail| panic!("continuous tracer migration: {detail}"));
+                words.push(target as u64);
+                encode_continuous(&record, &mut words);
+            }
+        }
+        local.push((source, words));
+    }
+    let blocks = assemble_blocks(fabric, level_count(held, level), &local, width, deadline)?;
+    for block in &blocks {
+        for record in block.chunks_exact(width) {
+            let target = record[0] as usize;
+            if let Some(k) = (0..tiles.len()).find(|&k| level_id(held, level, k).is_some_and(|id| id.0 as usize == target)) {
+                tiles[k].levels[level]
+                    .state
+                    .continuous_tracers
+                    .as_mut()
+                    .expect("every level of a traced tile carries continuous tracers")
+                    .push_host(decode_continuous::<D>(&record[1..]))
+                    .unwrap_or_else(|detail| panic!("continuous tracer migration: {detail}"));
+            }
+        }
+    }
+    Ok(())
+}
+
+/// level `level`'s held continuous injection over every worker, spawned once from the gathered
+/// ledgers after the level's tracers advanced, as the single hierarchy spawns its own: ids from the
+/// run's next id, the remainder carried, the draw keyed by the level's iteration, each tracer placed
+/// in its cell on the moved mesh; every worker keeps the tracers its tiles own. the next id and the
+/// remainder ride every held level
+pub fn spawn_level_continuous<R, const D: usize, const DOF: usize, M, E, S, Mem, K, L>(
+    tiles: &mut [Hierarchy<R, D, DOF, M, E, S, Mem, K>],
+    held: &Held<'_>,
+    atlas: &LevelAtlas<D>,
+    level: usize,
+    fabric: &mut Fabric<L>,
+    deadline: Duration,
+) -> Result<(), FabricError>
+where
+    R: Regime<f64, D> + Copy,
+    M: Metric<f64, D> + Copy + Send + Sync,
+    E: symbi_hydro::eos::EosFor<f64, <R as Regime<f64, D>>::Energy> + Copy + Send + Sync,
+    S: ExecutionSpace,
+    Mem: MemorySpace + Sync,
+    K: KernelSet<D, DOF, Mem, f64>,
+    L: Link,
+{
+    let me = fabric.me();
+    let n_level = level_count(held, level);
+    let mut ledgers = Vec::new();
+    let mut clocks = Vec::new();
+    for k in 0..tiles.len() {
+        let Some(id) = level_id(held, level, k) else { continue };
+        let ledger = tiles[k].take_continuous_injection(level);
+        ledgers.push((id.0 as usize, ledger.iter().flat_map(|(dest, mass)| [dest.0, mass.to_bits()]).collect::<Vec<u64>>()));
+        clocks.push((id.0 as usize, [tiles[k].levels[level].state.iteration]));
+    }
+    let blocks = assemble_blocks(fabric, n_level, &ledgers, 2, deadline)?;
+    let clocks = assemble_headers(fabric, n_level, &clocks, deadline)?;
+    let mut injections = BTreeMap::new();
+    for block in &blocks {
+        for pair in block.chunks_exact(2) {
+            *injections.entry(ContainerId(pair[0])).or_insert(0.0) += f64::from_bits(pair[1]);
+        }
+    }
+    if injections.is_empty() {
+        return Ok(());
+    }
+    let iteration = clocks
+        .iter()
+        .map(|c| c[0])
+        .find(|&w| w != ABSENT)
+        .ok_or_else(|| FabricError::protocol(me, format!("no tile of level {level} published its clock")))?;
+    let (order, weight, run_seed, next_id, remainder) = {
+        let t = tiles[0].levels[0].state.continuous_tracers.as_ref().expect("a traced tile carries continuous tracers");
+        (t.order, t.weight, t.run_seed, t.next_id, t.injection_remainder)
+    };
+    let mut spawned = symbi_sim::tracers::ContinuousTracerSet::<D, Mem>::allocate(0, order)
+        .unwrap_or_else(|detail| panic!("continuous tracer injection: {detail}"));
+    spawned.weight = weight;
+    spawned.run_seed = run_seed;
+    spawned.next_id = next_id;
+    spawned.injection_remainder = remainder;
+    let key = SamplingKey { run_seed, epoch: iteration | (1 << 62) };
+    let place = |owner: ContainerId| -> ([f64; D], [f64; D]) {
+        for (k, tile) in tiles.iter().enumerate() {
+            if level_id(held, level, k).is_none() {
+                continue;
+            }
+            if let Some((lev, coord)) = tile.tracer_cell(owner) {
+                if lev == level {
+                    let state = &tile.levels[level].state;
+                    let geometry = state.geom.block_geometry(state.physics.metric);
+                    let (_, scale_end, _, offset_end) = symbi_sim::tracers::continuous_tracer_mesh_step(&state.store, state.dt);
+                    let lo: [f64; D] = state.geom.stagger_coord(coord, [symbi_sim::state::Loc::Face; D]);
+                    let width: [f64; D] = std::array::from_fn(|dd| geometry.cell_width(coord, dd));
+                    return (std::array::from_fn(|dd| scale_end * lo[dd] + offset_end[dd]), width.map(|value| scale_end * value));
+                }
+            }
+        }
+        // a cell another worker holds: that worker places the tracer
+        ([0.0; D], [1.0; D])
+    };
+    symbi_sim::tracers::spawn_continuous_injected_tracers(
+        &mut spawned,
+        injections.into_iter().map(|(destination, mass)| symbi_sim::mass_transport::MassTransfer { destination, mass }),
+        place,
+        key,
+    )
+    .unwrap_or_else(|detail| panic!("launched refined continuous tracer injection: {detail}"));
+    for kk in 0..spawned.len {
+        let record = spawned.record_host(kk).unwrap_or_else(|detail| panic!("continuous tracer injection: {detail}"));
+        let Some((_, target)) = atlas.holder(record.owner) else { continue };
+        if let Some(k) = (0..tiles.len()).find(|&k| level_id(held, level, k).is_some_and(|id| id.0 as usize == target)) {
+            tiles[k].levels[level]
+                .state
+                .continuous_tracers
+                .as_mut()
+                .expect("a traced level carries continuous tracers")
+                .push_host(record)
+                .unwrap_or_else(|detail| panic!("continuous tracer injection: {detail}"));
+        }
+    }
+    for tile in tiles.iter_mut() {
+        for data in &mut tile.levels {
+            if let Some(tracers) = data.state.continuous_tracers.as_mut() {
+                tracers.next_id = spawned.next_id;
+                tracers.injection_remainder = spawned.injection_remainder;
+            }
+        }
+    }
+    Ok(())
+}
+
+/// the continuous tracers relocated onto the finest level whose cell holds their position, on the
+/// tile holding that cell, over every worker, once per accepted root step, as the single hierarchy
+/// relocates them over its levels; a tracer outside every level stays where it is
+pub fn relocate_continuous_to_finest<R, const D: usize, const DOF: usize, M, E, S, Mem, K, L>(
+    tiles: &mut [Hierarchy<R, D, DOF, M, E, S, Mem, K>],
+    held: &Held<'_>,
+    atlas: &LevelAtlas<D>,
+    depth: usize,
+    fabric: &mut Fabric<L>,
+    deadline: Duration,
+) -> Result<(), FabricError>
+where
+    R: Regime<f64, D> + Copy,
+    M: Metric<f64, D> + Copy + Send + Sync,
+    E: symbi_hydro::eos::EosFor<f64, <R as Regime<f64, D>>::Energy> + Copy + Send + Sync,
+    S: ExecutionSpace,
+    Mem: MemorySpace + Sync,
+    K: KernelSet<D, DOF, Mem, f64>,
+    L: Link,
+{
+    use symbi_sim::worker_tracers::{continuous_words, decode_continuous, encode_continuous};
+    let locate = |position: [f64; D]| {
+        (0..depth).rev().find_map(|level| {
+            let (id, cell) = atlas.holder_at(level, position)?;
+            let scale = RATIO.pow(level as u32);
+            let cells: [usize; D] = std::array::from_fn(|ax| atlas.root_cells[ax] * scale);
+            let owner = symbi_sim::tracers::cell_container_id(symbi_sim::tracers::cell_address(cell, cells), level as u8);
+            Some((level, id, owner))
+        })
+    };
+    let held_at = |tiles: &[Hierarchy<R, D, DOF, M, E, S, Mem, K>], level: usize, id: usize| {
+        (0..tiles.len()).find(|&k| level < tiles[k].levels.len() && level_id(held, level, k).is_some_and(|t| t.0 as usize == id))
+    };
+    let width = 2 + continuous_words(D);
+    let mut local = Vec::new();
+    let mut kept = Vec::new();
+    for k in 0..tiles.len() {
+        let mut words = Vec::new();
+        for source_level in 0..tiles[k].levels.len() {
+            let Some(len) = tiles[k].levels[source_level].state.continuous_tracers.as_ref().map(|t| t.len) else { continue };
+            for kk in (0..len).rev() {
+                let tracers = tiles[k].levels[source_level].state.continuous_tracers.as_mut().unwrap();
+                let (inactive, position) = unsafe {
+                    (
+                        *tracers.escaped.as_ptr::<u8>().add(kk) != 0 || *tracers.crossed_sink.as_ptr::<u8>().add(kk) != 0,
+                        std::array::from_fn(|dd| *tracers.x[dd].as_ptr::<f64>().add(kk)),
+                    )
+                };
+                if inactive {
+                    continue;
+                }
+                let Some((level, id, owner)) = locate(position) else { continue };
+                let here = level_id(held, level, k).is_some_and(|t| t.0 as usize == id);
+                if here && level == source_level {
+                    unsafe { *tracers.owner.as_mut_ptr::<ContainerId>().add(kk) = owner };
+                    continue;
+                }
+                let mut record = tracers.swap_remove_host(kk).unwrap_or_else(|detail| panic!("continuous tracer refinement transfer: {detail}"));
+                record.owner = owner;
+                if let Some(target) = held_at(tiles, level, id) {
+                    kept.push((target, level, record));
+                } else {
+                    words.push(level as u64);
+                    words.push(id as u64);
+                    encode_continuous(&record, &mut words);
+                }
+            }
+        }
+        local.push((held.root_ids[k].0 as usize, words));
+    }
+    for (target, level, record) in kept {
+        tiles[target].levels[level]
+            .state
+            .continuous_tracers
+            .as_mut()
+            .expect("every level of a traced tile carries continuous tracers")
+            .push_host(record)
+            .unwrap_or_else(|detail| panic!("continuous tracer refinement transfer: {detail}"));
+    }
+    let blocks = assemble_blocks(fabric, held.n_root, &local, width, deadline)?;
+    for block in &blocks {
+        for words in block.chunks_exact(width) {
+            let (level, id) = (words[0] as usize, words[1] as usize);
+            if let Some(k) = held_at(tiles, level, id) {
+                tiles[k].levels[level]
+                    .state
+                    .continuous_tracers
+                    .as_mut()
+                    .expect("every level of a traced tile carries continuous tracers")
+                    .push_host(decode_continuous::<D>(&words[2..]))
+                    .unwrap_or_else(|detail| panic!("continuous tracer refinement transfer: {detail}"));
             }
         }
     }

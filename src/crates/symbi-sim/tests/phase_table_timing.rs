@@ -63,7 +63,8 @@ fn moving(point: ExchangePoint) -> Vec<(TransferId, WorkerId, WorkerId)> {
         | ExchangePoint::NestedRestrict { .. }
         | ExchangePoint::Seed { .. }
         | ExchangePoint::TracerCoefficients
-        | ExchangePoint::EquilibriumLevel { .. } => vec![],
+        | ExchangePoint::EquilibriumLevel { .. }
+        | ExchangePoint::RootCoefficients => vec![],
     }
 }
 

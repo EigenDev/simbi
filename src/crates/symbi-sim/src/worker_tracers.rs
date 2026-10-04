@@ -398,7 +398,8 @@ pub const fn continuous_words(d: usize) -> usize {
     2 * d + 7
 }
 
-fn encode_continuous<const D: usize>(record: &ContinuousTracerRecord<D>, out: &mut Vec<u64>) {
+/// append the continuous record to `out` in `continuous_words(D)` words
+pub fn encode_continuous<const D: usize>(record: &ContinuousTracerRecord<D>, out: &mut Vec<u64>) {
     out.extend(record.x.iter().map(|v| v.to_bits()));
     out.extend(record.step_x.iter().map(|v| v.to_bits()));
     out.push(record.id);
@@ -410,7 +411,8 @@ fn encode_continuous<const D: usize>(record: &ContinuousTracerRecord<D>, out: &m
     out.push(record.random_counter);
 }
 
-fn decode_continuous<const D: usize>(words: &[u64]) -> ContinuousTracerRecord<D> {
+/// the continuous record `words` encodes
+pub fn decode_continuous<const D: usize>(words: &[u64]) -> ContinuousTracerRecord<D> {
     ContinuousTracerRecord {
         x: std::array::from_fn(|dd| f64::from_bits(words[dd])),
         step_x: std::array::from_fn(|dd| f64::from_bits(words[D + dd])),

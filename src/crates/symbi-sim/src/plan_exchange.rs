@@ -57,6 +57,10 @@ pub enum PlanRole {
     /// nested level `level`'s parent face stencil gathered from the faces' owners on the parent's
     /// partition: every transfer moves at the parent's last stage point of each of its substeps
     NestedFaceStencil { level: u8 },
+    /// the continuous-tracer coefficients of level `level` on a refined run: every transfer moves
+    /// at the level's coefficient point (the root after its stages, a refined level in each of its
+    /// substeps)
+    LevelCoefficients { level: u8 },
 }
 
 /// a fault injected into one plan's staging at one point, for the gates of the
@@ -134,6 +138,7 @@ impl<'p, const D: usize> PlanExchange<'p, D> {
                         FinePoint::Prolong | FinePoint::Stage(_) | FinePoint::PostTail => ExchangePoint::Stage(0),
                         FinePoint::Troubled(_) => ExchangePoint::Troubled(0),
                         FinePoint::Audit(_) | FinePoint::AuditTail => ExchangePoint::Audit(AuditAt::Prime),
+                        FinePoint::Coefficients => return false,
                     };
                     self.plan.moves_at(t, as_root)
                 }
@@ -156,6 +161,7 @@ impl<'p, const D: usize> PlanExchange<'p, D> {
                         FinePoint::Prolong | FinePoint::Stage(_) | FinePoint::PostTail => ExchangePoint::Stage(0),
                         FinePoint::Troubled(_) => ExchangePoint::Troubled(0),
                         FinePoint::Audit(_) | FinePoint::AuditTail => ExchangePoint::Audit(AuditAt::Prime),
+                        FinePoint::Coefficients => return false,
                     };
                     self.plan.moves_at(t, as_root)
                 }
@@ -187,6 +193,15 @@ impl<'p, const D: usize> PlanExchange<'p, D> {
             ),
             PlanRole::CorrectedFace => point == ExchangePoint::CorrectedFaces,
             PlanRole::FaceStencil => point == ExchangePoint::Stage(self.table.stages() - 1),
+            PlanRole::LevelCoefficients { level } => {
+                let at_level = match point {
+                    ExchangePoint::RootCoefficients => level == 0,
+                    ExchangePoint::Fine { point: FinePoint::Coefficients, .. } => level == 1,
+                    ExchangePoint::Nested { level: l, point: FinePoint::Coefficients, .. } => l == level,
+                    _ => false,
+                };
+                at_level && self.plan.moves_at(t, ExchangePoint::Stage(0))
+            }
         }
     }
 

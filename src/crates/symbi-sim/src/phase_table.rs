@@ -135,6 +135,12 @@ impl PhaseTable {
             phases.push(mandatory(ExchangePoint::Stage(k)));
             phases.push(skippable(ExchangePoint::Audit(AuditAt::Stage(k))));
         }
+        // a refined run's continuous tracers: the root's coefficients across its cuts after its
+        // stages, and each refined level's after the stages of each of its substeps; a run without
+        // them passes the points
+        if substeps > 0 {
+            phases.push(skippable(ExchangePoint::RootCoefficients));
+        }
         for s in 0..substeps {
             phases.push(mandatory(ExchangePoint::Fine { substep: s, point: FinePoint::Prolong }));
             for k in 0..fine_stages {
@@ -142,6 +148,7 @@ impl PhaseTable {
                 phases.push(mandatory(ExchangePoint::Fine { substep: s, point: FinePoint::Stage(k) }));
                 phases.push(skippable(ExchangePoint::Fine { substep: s, point: FinePoint::Audit(k) }));
             }
+            phases.push(skippable(ExchangePoint::Fine { substep: s, point: FinePoint::Coefficients }));
             if depth > 2 {
                 nested_phases(&mut phases, 2, s, substeps, fine_stages, depth)?;
                 phases.push(mandatory(ExchangePoint::NestedRestrict { level: 1, path: s }));
@@ -274,6 +281,7 @@ fn nested_phases(
             phases.push(mandatory(ExchangePoint::Nested { level, path, point: FinePoint::Stage(k) }));
             phases.push(skippable(ExchangePoint::Nested { level, path, point: FinePoint::Audit(k) }));
         }
+        phases.push(skippable(ExchangePoint::Nested { level, path, point: FinePoint::Coefficients }));
         if level + 1 < depth {
             nested_phases(phases, level + 1, path, substeps, stages, depth)?;
             phases.push(mandatory(ExchangePoint::NestedRestrict { level, path }));
@@ -361,8 +369,18 @@ mod tests {
         assert!(probe(1, true) < bytes(ExchangePoint::Primed));
         assert!(r.init_only[b(ExchangePoint::EquilibriumLevel { level: 1, troubled: true })]);
         assert!(r.skippable[b(ExchangePoint::EquilibriumLevel { level: 1, troubled: true })]);
-        // 5 + 2 * 2 + 3 * 2 + 2 * (1 + 3 * 2 + 2) + 3 + 6
-        assert_eq!(t.len(), 42);
+        // the continuous tracers' coefficients: the root's after its stages and before the first
+        // fine substep, each substep's after its stages and before its post-tail
+        assert!(bytes(ExchangePoint::Stage(1)) < bytes(ExchangePoint::RootCoefficients));
+        assert!(bytes(ExchangePoint::RootCoefficients) < bytes(ExchangePoint::Fine { substep: 0, point: FinePoint::Prolong }));
+        for s in 0..2 {
+            let coefficients = bytes(ExchangePoint::Fine { substep: s, point: FinePoint::Coefficients });
+            assert!(bytes(ExchangePoint::Fine { substep: s, point: FinePoint::Audit(1) }) < coefficients);
+            assert!(coefficients < bytes(ExchangePoint::Fine { substep: s, point: FinePoint::PostTail }));
+            assert!(r.skippable[coefficients as usize]);
+        }
+        // 5 + 2 * 2 + 3 * 2 + 1 + 2 * (1 + 3 * 2 + 1 + 2) + 3 + 6
+        assert_eq!(t.len(), 45);
         let flat = PhaseTable::flat(2).unwrap();
         assert_ne!(flat.digest(), t.digest());
         assert_eq!(PhaseTable::flat(2).unwrap().digest(), flat.digest());

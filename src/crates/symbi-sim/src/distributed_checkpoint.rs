@@ -392,19 +392,24 @@ where
         }
         Some(sets)
     };
-    let local: Vec<(usize, &crate::tracers::ContinuousTracerSet<D, Mem>)> = plans[0]
-        .tile_ids
-        .iter()
-        .zip(&levels[0].tiles)
-        .filter_map(|(tile, view)| view.state.continuous_tracers.as_ref().map(|set| (tile.0 as usize, set)))
-        .collect();
-    let continuous = if local.is_empty() {
+    let continuous_traced = levels[0].tiles.iter().any(|view| view.state.continuous_tracers.is_some());
+    let continuous = if !continuous_traced {
         None
     } else {
-        Some(
-            crate::worker_tracers::gather_continuous(fabric, plans[0].plan.n_tiles(), &local, req.deadline)
-                .map_err(|e| CheckpointError::Refused(format!("continuous tracer gather: {e}")))?,
-        )
+        let mut sets = Vec::new();
+        for (plan, level) in plans.iter().zip(levels) {
+            let local: Vec<(usize, &crate::tracers::ContinuousTracerSet<D, Mem>)> = plan
+                .tile_ids
+                .iter()
+                .zip(&level.tiles)
+                .filter_map(|(tile, view)| view.state.continuous_tracers.as_ref().map(|set| (tile.0 as usize, set)))
+                .collect();
+            sets.extend(
+                crate::worker_tracers::gather_continuous(fabric, plan.plan.n_tiles(), &local, req.deadline)
+                    .map_err(|e| CheckpointError::Refused(format!("continuous tracer gather: {e}")))?,
+            );
+        }
+        Some(sets)
     };
     if fabric.is_coordinator() {
         let opened = CheckpointStream::open::<R, D, DOF, Mem>(

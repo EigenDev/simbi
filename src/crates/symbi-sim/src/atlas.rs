@@ -365,6 +365,9 @@ pub enum ExchangePoint {
     /// is seeded: level `level`'s primed target crosses its cuts, or, `troubled`, its probe
     /// stage's troubled flags do
     EquilibriumLevel { level: u8, troubled: bool },
+    /// after the root stages of a refined run carrying continuous tracers: the root's accepted ito
+    /// coefficients cross the cuts before the fine level prolongs them
+    RootCoefficients,
 }
 
 /// the points of one fine substep, in order
@@ -380,6 +383,9 @@ pub enum FinePoint {
     PostTail,
     /// the interface audit of the post-tail exchange
     AuditTail,
+    /// after the substep's stages of a run carrying continuous tracers: the level's accepted ito
+    /// coefficients cross its cuts before a finer level prolongs them and its tracers read them
+    Coefficients,
 }
 
 /// the exchange an interface audit follows.
@@ -449,6 +455,7 @@ impl ExchangePoint {
                 FinePoint::Audit(k) => (14, substep as u32, k as u32),
                 FinePoint::PostTail => (15, substep as u32, 0),
                 FinePoint::AuditTail => (16, substep as u32, 0),
+                FinePoint::Coefficients => (34, substep as u32, 0),
             },
             // the level in the high bits of `a`, the path in its low five
             ExchangePoint::Nested { level, path, point } => {
@@ -460,6 +467,7 @@ impl ExchangePoint {
                     FinePoint::Audit(k) => (22, a, k as u32),
                     FinePoint::PostTail => (23, a, 0),
                     FinePoint::AuditTail => (24, a, 0),
+                    FinePoint::Coefficients => (35, a, 0),
                 }
             }
             ExchangePoint::NestedRestrict { level, path } => (25, (level as u32) << 5 | path as u32, 0),
@@ -467,6 +475,7 @@ impl ExchangePoint {
             ExchangePoint::ExciseSweep(k) => (31, k as u32, 0),
             ExchangePoint::ExciseRebuild(k) => (32, k as u32, 0),
             ExchangePoint::EquilibriumLevel { level, troubled } => (33, level as u32, troubled as u32),
+            ExchangePoint::RootCoefficients => (36, 0, 0),
         };
         kind << 16 | a << 8 | b
     }
@@ -1254,7 +1263,8 @@ impl<const D: usize> ExchangePlan<D> {
             | ExchangePoint::Nested { .. }
             | ExchangePoint::NestedRestrict { .. }
             | ExchangePoint::Seed { .. }
-            | ExchangePoint::TracerCoefficients => false,
+            | ExchangePoint::TracerCoefficients
+            | ExchangePoint::RootCoefficients => false,
             ExchangePoint::Audit(_) => transfer.audit,
             ExchangePoint::Troubled(_)
             | ExchangePoint::EquilibriumTroubled

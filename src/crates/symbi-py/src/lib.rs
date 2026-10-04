@@ -11312,11 +11312,7 @@ fn validate_launch_scope(cfg: &Config) -> Result<(), String> {
     // the launched gas, isothermal and magnetized tiles carry the discrete and the ito
     // populations on a flat grid
     if cfg.n_tracers > 0 {
-        // the refined workers carry the discrete population; an ito population needs its
-        // coefficients across every level's cuts on the launched path
-        if cfg.refinement_enabled && configured_ito_order(cfg)?.is_some() {
-            return refused("an ito tracer population with mesh refinement");
-        }
+        // the refined workers carry the discrete and the ito populations
         if !matches!(cfg.regime.as_str(), "newtonian" | "rhd" | "isothermal" | "nmhd" | "rmhd" | "imhd") {
             return refused(&format!("a tracer population with the {} regime", cfg.regime));
         }
@@ -11493,6 +11489,18 @@ where
         .map_err(|e| format!("tracer seeding hierarchy: {e:?}"))?;
     global.seed_fine_from_coarse().map_err(|e| format!("tracer seeding fine seed: {e:?}"))?;
     symbi::sim::refinement::seed_held_hierarchy_tracers(&global, tiles, cfg.n_tracers);
+    // an ito run carries the seeded population as continuous tracers, advancing against the whole
+    // domain's extent and boundaries where a tile's own faces include cuts
+    if let Some(order) = configured_ito_order(cfg)? {
+        let bounds: [(f64, f64); D] = std::array::from_fn(|ax| (cfg.x_lo[ax], cfg.x_lo[ax] + cfg.n_cells[ax] as f64 * cfg.dx[ax]));
+        let boundaries = boundaries_nd::<D>(&cfg.boundaries);
+        for tile in tiles.iter_mut() {
+            tile.set_continuous_domain(bounds, boundaries);
+            for level in &mut tile.levels {
+                convert_seeded_tracers(&mut level.state, order)?;
+            }
+        }
+    }
     Ok(())
 }
 
@@ -12094,6 +12102,26 @@ where
                 .map_err(|e| e.to_string())
         })
         .collect::<Result<_, _>>()?;
+    // a continuous population's ito coefficients cross every level's cuts through their own plans,
+    // each on its level's partition with the level's own ghost width
+    let continuous_traced = cfg.n_tracers > 0 && configured_ito_order(cfg)?.is_some();
+    let coefficient_plans: Vec<ExchangePlan<D>> = if continuous_traced {
+        let coefficient_schema = (0..3 * D).fold(symbi_sim::atlas::FieldSchema::new(), |schema, ii| schema.cell(&format!("ito_coefficient_{ii}")));
+        let mut plans = vec![
+            ExchangePlan::compile(partition, &wrap, &coefficient_schema, ng).map_err(|e| e.to_string())?,
+            ExchangePlan::compile_shifted(&fine_partition.partition, &open, &coefficient_schema, ng + 1, &fine_lo).map_err(|e| e.to_string())?,
+        ];
+        for i in 0..nested_parts.len() {
+            let frames = &nested_frames[i];
+            plans.push(
+                ExchangePlan::compile_shifted(&nested_parts[i].partition, &open, &coefficient_schema, ng + 1, &|t: TileId| frames[t.0 as usize])
+                    .map_err(|e| e.to_string())?,
+            );
+        }
+        plans
+    } else {
+        Vec::new()
+    };
     let nested_seed_plans: Vec<ExchangePlan<D>> = (0..nested_parts.len())
         .map(|i| {
             let (parent_part, frames) =
@@ -12205,6 +12233,19 @@ where
         });
         nested_plans.push(NestedPlans { state, seed, stencil });
     }
+    // the coefficient plans take the ids after every level's plans
+    let coefficients: Vec<_> = coefficient_plans
+        .iter()
+        .enumerate()
+        .map(|(level, plan)| {
+            let placement = match level {
+                0 => placement,
+                1 => &fine_placement,
+                _ => &nested_placements[level - 2],
+            };
+            next(plan, placement, PlanRole::LevelCoefficients { level: level as u8 })
+        })
+        .collect();
     let plan_digest = {
         let mut h = Fnv::new();
         for d in digests {
@@ -12250,6 +12291,7 @@ where
             all.extend([old, new]);
         }
     }
+    all.extend(coefficients.iter());
     let max_payload = (all.iter().flat_map(|p| p.lens()).max().unwrap_or(0) * 8).max(credit as usize);
     let built = build_clock.elapsed();
     let connect_clock = std::time::Instant::now();
@@ -12267,7 +12309,7 @@ where
         let _ = std::io::stderr().write_all(line.as_bytes());
     }
     let mut fabric = fabric_for(&all, link, session).with_block_credit(credit);
-    let plans = RefinedPlans { root, seed, fine, flux, emf, faces, corrected, stencil, nested: nested_plans };
+    let plans = RefinedPlans { root, seed, fine, flux, emf, faces, corrected, stencil, nested: nested_plans, coefficients };
     let root_devices = vec![0i32; n_root];
     let fine_devices = vec![0i32; n_fine];
     let nested_held: Vec<NestedHeld> = nested_ids

@@ -46,7 +46,10 @@ use symbi_xpu::{ExecutionSpace, MemorySpace, with_device};
 use symbi_geometry::Metric;
 
 use super::hierarchy::{Hierarchy, RATIO, StageMark};
-use super::launched_tracers::{LevelAtlas, exchange_level_tracers, spawn_level_injection};
+use super::launched_tracers::{
+    LevelAtlas, exchange_level_coefficients, exchange_level_tracers, migrate_level_continuous, relocate_continuous_to_finest,
+    spawn_level_continuous, spawn_level_injection,
+};
 
 /// the three plans of a refined session and the fabric they share
 pub struct RefinedPlans<'p, const D: usize> {
@@ -75,6 +78,9 @@ pub struct RefinedPlans<'p, const D: usize> {
     /// the plans of every nested level, the level `l` at `l - 2`: absent on a run of one
     /// refined level
     pub nested: Vec<NestedPlans<'p, D>>,
+    /// the continuous tracers' ito coefficients of every level, the level `l` at `l`, at the
+    /// level's coefficient points: empty on a run without them
+    pub coefficients: Vec<PlanExchange<'p, D>>,
 }
 
 /// the plans of one nested refined level (two or deeper): its patch faces lie off every cut,
@@ -740,7 +746,7 @@ where
 
     // a discrete population: every level stage leaves its ancestry blend to the exchange below, and
     // the level atlas maps any owner to its tile on every worker
-    let atlas = if tiles.iter().any(|h| h.levels[0].state.tracers.is_some()) {
+    let atlas = if tiles.iter().any(|h| h.levels[0].state.tracers.is_some() || h.levels[0].state.continuous_tracers.is_some()) {
         for h in tiles.iter_mut() {
             h.set_blend_across_tiles();
         }
@@ -748,6 +754,10 @@ where
     } else {
         None
     };
+    // a continuous population: the levels' coefficients cross their cuts at their own points
+    let continuous = !plans.coefficients.is_empty();
+    // the discrete population's stage exchanges and spawns, on a run that carries one
+    let discrete_atlas = atlas.as_ref().filter(|_| tiles.iter().any(|h| h.levels[0].state.tracers.is_some()));
 
     let guard_scope = symbi_sim::guard_ledger::open_scope();
     // every worker resumes the same retry guard: the streak a checkpoint recorded and the
@@ -860,7 +870,7 @@ where
                     rejected = true;
                     break;
                 }
-                if let Some(atlas) = atlas.as_ref() {
+                if let Some(atlas) = discrete_atlas {
                     exchange_level_tracers(tiles, held, atlas, 0, ii, fabric, deadline).map_err(|e| fail(fabric, e.into()))?;
                 }
                 if ii + 1 == nstages && plans.stencil.is_some() {
@@ -892,7 +902,7 @@ where
                 }
             }
             if !rejected {
-                if let Some(atlas) = atlas.as_ref() {
+                if let Some(atlas) = discrete_atlas {
                     spawn_level_injection(tiles, held, atlas, 0, fabric, deadline).map_err(|e| fail(fabric, e.into()))?;
                 }
                 for (k, h) in tiles.iter().enumerate() {
@@ -907,6 +917,19 @@ where
                             level.kernels.penalize(&level.state, dt);
                         }
                     });
+                }
+                // the root's continuous tracers: the injection held until they advance, the root's
+                // accepted ito coefficients across the cuts before the fine level prolongs them
+                if continuous {
+                    for (k, h) in tiles.iter_mut().enumerate() {
+                        h.hold_continuous_injection(0);
+                        with_device(root_dev(k), || h.prepare_level_ito_coefficients(0));
+                    }
+                    exchange_level_coefficients(
+                        tiles, held, &plans.coefficients[0], 0, ExchangePoint::RootCoefficients, iter, attempt, transport, fabric, deadline,
+                        &mut timing.exchange,
+                    )
+                    .map_err(|e| fail(fabric, e.into()))?;
                 }
                 // the fine subcycle: every worker walks its phases, a worker without fine
                 // tiles with no local work
@@ -964,7 +987,7 @@ where
                             rejected = true;
                             break 'subcycle;
                         }
-                        if let Some(atlas) = atlas.as_ref() {
+                        if let Some(atlas) = discrete_atlas {
                             exchange_level_tracers(tiles, held, atlas, 1, jj, fabric, deadline).map_err(|e| fail(fabric, e.into()))?;
                         }
                         fine_stage_point!(sub, jj, iter, attempt);
@@ -972,7 +995,7 @@ where
                             audit!(plans.fine, fine_fields!(), ExchangePoint::Fine { substep: sub as u8, point: FinePoint::Audit(jj as u8) }, iter, attempt);
                         }
                     }
-                    if let Some(atlas) = atlas.as_ref() {
+                    if let Some(atlas) = discrete_atlas {
                         spawn_level_injection(tiles, held, atlas, 1, fabric, deadline).map_err(|e| fail(fabric, e.into()))?;
                     }
                     // the fine tail on the globally finest level, then its recovery and halo
@@ -985,7 +1008,14 @@ where
                         for &k in &refined {
                             with_device(fine_dev(k), || tiles[k].level_tail_pre(1, fine_dt));
                         }
-                        let nested = NestedStep { held, plans, transport, deadline, nstages, depth, audit_every: base.audit_every_point, step: iter, attempt, atlas: atlas.as_ref() };
+                        if continuous {
+                            exchange_level_coefficients(
+                                tiles, held, &plans.coefficients[1], 1, ExchangePoint::Fine { substep: sub as u8, point: FinePoint::Coefficients },
+                                iter, attempt, transport, fabric, deadline, &mut timing.exchange,
+                            )
+                            .map_err(|e| fail(fabric, e.into()))?;
+                        }
+                        let nested = NestedStep { held, plans, transport, deadline, nstages, depth, audit_every: base.audit_every_point, step: iter, attempt, atlas: atlas.as_ref(), discrete: discrete_atlas.is_some() };
                         if nested_subcycle(tiles, &nested, fabric, &mut timing, &mut report, 2, sub as u8, fine_dt)? {
                             rejected = true;
                             break 'subcycle;
@@ -1002,11 +1032,27 @@ where
                                 .map_err(|e| fail(fabric, e.into()))?;
                         }
                         for &k in &refined {
-                            with_device(fine_dev(k), || {
-                                tiles[k].levels[1].kernels.ghost_fill(&tiles[k].levels[1].state);
-                                tiles[k].level_tail_post(1, fine_dt);
-                            });
+                            with_device(fine_dev(k), || tiles[k].levels[1].kernels.ghost_fill(&tiles[k].levels[1].state));
                         }
+                        if continuous {
+                            continuous_tail(tiles, held, atlas.as_ref().unwrap(), 1, fine_dt, fabric, deadline)?;
+                        } else {
+                            for &k in &refined {
+                                with_device(fine_dev(k), || tiles[k].level_tail_post(1, fine_dt));
+                            }
+                        }
+                    } else if continuous {
+                        // the finest fine level's tail split around its coefficients and its tracers'
+                        // crossing, as the single hierarchy runs it
+                        for &k in &refined {
+                            with_device(fine_dev(k), || tiles[k].level_tail_pre(1, fine_dt));
+                        }
+                        exchange_level_coefficients(
+                            tiles, held, &plans.coefficients[1], 1, ExchangePoint::Fine { substep: sub as u8, point: FinePoint::Coefficients },
+                            iter, attempt, transport, fabric, deadline, &mut timing.exchange,
+                        )
+                        .map_err(|e| fail(fabric, e.into()))?;
+                        continuous_tail(tiles, held, atlas.as_ref().unwrap(), 1, fine_dt, fabric, deadline)?;
                     } else {
                         for &k in &refined {
                             retry |= with_device(fine_dev(k), || tiles[k].level_step_tail(1, fine_dt, alpha));
@@ -1050,6 +1096,17 @@ where
                 root_point!(ExchangePoint::Restrict, iter, attempt);
                 if base.audit_every_point {
                     audit!(plans.root, root_fields!(), ExchangePoint::Audit(AuditAt::Restrict), iter, attempt);
+                }
+                // the root's continuous tracers advance over the root step after the fine subcycle
+                // and its restriction, cross to the tiles holding their cells, and the held
+                // injection spawns once
+                if continuous {
+                    let atlas = atlas.as_ref().unwrap();
+                    for (k, h) in tiles.iter_mut().enumerate() {
+                        with_device(root_dev(k), || h.advance_level_continuous_tracers(0, dt));
+                    }
+                    migrate_level_continuous(tiles, held, atlas, 0, fabric, deadline).map_err(|e| fail(fabric, e.into()))?;
+                    spawn_level_continuous(tiles, held, atlas, 0, fabric, deadline).map_err(|e| fail(fabric, e.into()))?;
                 }
                 for (k, h) in tiles.iter_mut().enumerate() {
                     with_device(root_dev(k), || {
@@ -1136,6 +1193,10 @@ where
                 h.levels[0].state.severe_streak = streak;
             }
         }
+        // the continuous tracers onto the finest level holding them, once per accepted root step
+        if continuous {
+            relocate_continuous_to_finest(tiles, held, atlas.as_ref().unwrap(), depth, fabric, deadline).map_err(|e| fail(fabric, e.into()))?;
+        }
         if tiles.iter().any(|h| h.levels[0].state.has_bodies()) {
             refined_body_step(tiles, held, plans, fabric, dt, deadline).map_err(|e| fail(fabric, e))?;
         }
@@ -1192,8 +1253,10 @@ struct NestedStep<'a, 'p, const D: usize, T> {
     audit_every: bool,
     step: u64,
     attempt: u16,
-    /// the discrete population's level atlas, when the run carries one
+    /// the tracer population's level atlas, when the run carries one
     atlas: Option<&'a LevelAtlas<D>>,
+    /// the run carries a discrete population, whose stages exchange and spawn here
+    discrete: bool,
 }
 
 /// the subcycle of nested level `level >= 2` across its tiles within one step `dt` of its parent's
@@ -1303,7 +1366,7 @@ where
             if vote_retry(fabric, retry, deadline, timing)? {
                 return Ok(true);
             }
-            if let Some(atlas) = cx.atlas {
+            if let Some(atlas) = cx.atlas.filter(|_| cx.discrete) {
                 exchange_level_tracers(tiles, cx.held, atlas, level, jj, fabric, deadline).map_err(|e| fail(fabric, e.into()))?;
             }
             let child_stencil = cx.plans.nested.get(level - 1).and_then(|n| n.stencil.as_ref()).filter(|_| jj + 1 == cx.nstages);
@@ -1350,11 +1413,17 @@ where
             }
             audit(tiles, fabric, report, at(FinePoint::Audit(jj as u8)))?;
         }
-        if let Some(atlas) = cx.atlas {
+        if let Some(atlas) = cx.atlas.filter(|_| cx.discrete) {
             spawn_level_injection(tiles, cx.held, atlas, level, fabric, deadline).map_err(|e| fail(fabric, e.into()))?;
         }
         for (r, &k) in mine.iter().enumerate() {
             with_device(dev(r), || tiles[k].level_tail_pre(level, level_dt));
+        }
+        if let Some(plan) = cx.plans.coefficients.get(level) {
+            exchange_level_coefficients(
+                tiles, cx.held, plan, level, at(FinePoint::Coefficients), step, attempt, cx.transport, fabric, deadline, &mut timing.exchange,
+            )
+            .map_err(|e| fail(fabric, e.into()))?;
         }
         if level + 1 < cx.depth {
             if nested_subcycle(tiles, cx, fabric, timing, report, level + 1, path, level_dt)? {
@@ -1367,8 +1436,12 @@ where
             }
             exchange(tiles, fabric, timing, ExchangePoint::NestedRestrict { level: level as u8, path })?;
         }
-        for (r, &k) in mine.iter().enumerate() {
-            with_device(dev(r), || tiles[k].level_tail_post(level, level_dt));
+        if !cx.plans.coefficients.is_empty() {
+            continuous_tail(tiles, cx.held, cx.atlas.expect("a continuous population carries its level atlas"), level, level_dt, fabric, deadline)?;
+        } else {
+            for (r, &k) in mine.iter().enumerate() {
+                with_device(dev(r), || tiles[k].level_tail_post(level, level_dt));
+            }
         }
         exchange(tiles, fabric, timing, at(FinePoint::PostTail))?;
         audit(tiles, fabric, report, at(FinePoint::AuditTail))?;
@@ -1550,6 +1623,41 @@ where
             restore_gas_state(&level.state, state);
         }
         tile.install_declared_target(anchors, fluxes, residuals);
+    }
+    Ok(())
+}
+
+/// the tail of refined level `level` after its coefficients crossed the cuts, on a run carrying
+/// continuous tracers: every held tile advances its tracers, the tracers cross to the tiles holding
+/// their cells, the held injection spawns once, and every held tile finishes its tail
+#[allow(clippy::too_many_arguments)]
+fn continuous_tail<R, const D: usize, const DOF: usize, M, E, S, Mem, K, L>(
+    tiles: &mut [Hierarchy<R, D, DOF, M, E, S, Mem, K>],
+    held: &Held<'_>,
+    atlas: &LevelAtlas<D>,
+    level: usize,
+    dt: f64,
+    fabric: &mut Fabric<L>,
+    deadline: Duration,
+) -> Result<(), WorkerError>
+where
+    R: Regime<f64, D> + Copy,
+    M: Metric<f64, D> + Copy + Send + Sync,
+    E: symbi_hydro::eos::EosFor<f64, <R as Regime<f64, D>>::Energy> + Copy + Send + Sync,
+    S: ExecutionSpace,
+    Mem: MemorySpace + Sync,
+    K: KernelSet<D, DOF, Mem, f64>,
+    L: Link,
+{
+    let mine: Vec<usize> = (0..tiles.len()).filter(|&k| held.level_ids(level)[k].is_some()).collect();
+    let device = |k: usize| held.level_devices(level)[held.level_ids(level)[k].unwrap().0 as usize];
+    for &k in &mine {
+        with_device(device(k), || tiles[k].advance_level_continuous_tracers(level, dt));
+    }
+    migrate_level_continuous(tiles, held, atlas, level, fabric, deadline).map_err(|e| fail(fabric, e.into()))?;
+    spawn_level_continuous(tiles, held, atlas, level, fabric, deadline).map_err(|e| fail(fabric, e.into()))?;
+    for &k in &mine {
+        with_device(device(k), || tiles[k].finish_level_tail_post(level, dt));
     }
     Ok(())
 }

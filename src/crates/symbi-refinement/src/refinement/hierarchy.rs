@@ -3289,6 +3289,17 @@ where
         std::mem::take(&mut self.injection_ledger)
     }
 
+    /// the held boundary injection of `level`'s continuous tracers, taken for a merged spawn
+    pub(crate) fn take_continuous_injection(&mut self, level: usize) -> std::collections::BTreeMap<symbi_sim::mass_transport::ContainerId, f64> {
+        self.continuous_injection.remove(&level).unwrap_or_default()
+    }
+
+    /// the whole domain's extent and the boundary each axis presents to this tile's continuous
+    /// tracers, where the tile's own faces include cuts
+    pub fn set_continuous_domain(&mut self, bounds: [(f64, f64); NDIM], boundaries: Boundaries<NDIM>) {
+        self.continuous_domain = Some((bounds, boundaries));
+    }
+
     /// the cell counts of the whole root lattice the tracer containers address
     pub(crate) fn tracer_root_cells(&self) -> [usize; NDIM] {
         self.tracer_root_global_cells
@@ -3691,14 +3702,14 @@ where
 
     /// hold the boundary injection the level's stages booked until its continuous tracers have
     /// advanced, so the injected tracers enter at the step's end
-    fn hold_continuous_injection(&mut self, level: usize) {
+    pub(crate) fn hold_continuous_injection(&mut self, level: usize) {
         let ledger = std::mem::take(&mut self.injection_ledger);
         self.continuous_injection.insert(level, ledger);
     }
 
     /// the step tail after the continuous tracers advanced and spawned: their crossing into the
     /// sinks, the per-level censuses and the level clock
-    fn finish_level_tail_post(&mut self, level: usize, dt: f64) {
+    pub(crate) fn finish_level_tail_post(&mut self, level: usize, dt: f64) {
         if self.levels[level].state.continuous_tracers.is_some() {
             if let Some(density_before) = self.continuous_accretion.remove(&level) {
                 let layout = self.tracer_layout(level);
@@ -3761,7 +3772,7 @@ where
 
     /// derive one level's accepted-step coefficients before its finer level
     /// subcycles so fine coarse/fine ghosts can sample the parent field.
-    fn prepare_level_ito_coefficients(&mut self, level: usize) {
+    pub(crate) fn prepare_level_ito_coefficients(&mut self, level: usize) {
         let geometry = self.levels[level]
             .state
             .geom
@@ -3873,7 +3884,7 @@ where
         }
     }
 
-    fn advance_level_continuous_tracers(&mut self, level: usize, dt: f64) {
+    pub(crate) fn advance_level_continuous_tracers(&mut self, level: usize, dt: f64) {
         let mut tracers = self.levels[level]
             .state
             .continuous_tracers
