@@ -42,7 +42,10 @@ pytestmark = pytest.mark.simulation
 def bounded_processes():
     """every gate here re-executes the command line: the descendants of this test process are
     bounded, and a gate that passes the bound fails with its processes killed."""
-    with ProcessGuard(limit=16) as guard:
+    # the steady-state bound is 16 descendants; each process's h5py platform probe (`uname -p`)
+    # is budgeted above it during the process's first ten seconds, which covers interpreter start
+    # and the imports on a loaded machine
+    with ProcessGuard(limit=16, startup=10.0) as guard:
         yield guard
     assert not guard.tripped, (
         f"the test started more than {guard.limit} processes (peak {guard.peak}):\n" + "\n".join(guard.report)
