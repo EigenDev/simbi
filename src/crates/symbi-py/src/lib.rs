@@ -6781,6 +6781,168 @@ macro_rules! build_and_run_hydro_decomposed_refined {
     }};
 }
 
+/// the refined magnetized tiles (newtonian, relativistic or isothermal MHD): each tile hierarchy is
+/// its root slab seeded from its slice of the global staggered faces and the refinement regions
+/// clipped to it, with the numerics the single hierarchy installs on every level; the fine levels
+/// seed from their parents after the root cut halos are exchanged. `$prim` builds a cell's primitive
+/// from its row and its cell field.
+macro_rules! build_and_run_magnetized_decomposed_refined {
+    ($cfg:expr, $prims:expr, $bufs:expr, $regime:expr, $regime_ty:ty, $d:literal, $geom:expr, $geom_ty:ty, $eos:expr, $eos_ty:ty, $prim:expr) => {{
+        use symbi::sim::decomp::unflatten;
+        let cfg: &Config = $cfg;
+        let prims: &[Vec<f64>] = $prims;
+        let bufs: &[Vec<f64>] = $bufs;
+        type Sim = SimDefaultGeneric<$regime_ty, $d, 3, $geom_ty, $eos_ty>;
+
+        // the single magnetized hierarchy refuses user sources; a tracer population on refined
+        // tiles needs its tiled level transport: both refused by name before any output
+        if !cfg.source_jsons.is_empty() {
+            return Err("user source expressions are not yet supported with mesh refinement".to_string());
+        }
+        if cfg.n_tracers > 0 {
+            return Err(
+                "a tracer population with mesh refinement and gpus > 1 awaits its tiled level transport; \
+                 run it on one device"
+                    .to_string(),
+            );
+        }
+        let n: [usize; $d] = std::array::from_fn(|ax| cfg.n_cells[ax]);
+        let total: usize = n.iter().product();
+        if prims.len() != total {
+            return Err(format!("prim_gen yielded {} cells, expected {total}", prims.len()));
+        }
+        if bufs.len() < 3 {
+            return Err(format!("mhd needs 3 staggered b-field generators, got {}", bufs.len()));
+        }
+        let partition = tile_partition(n, cfg)?;
+        let counts = partition.counts();
+        let dx: [f64; $d] = std::array::from_fn(|ax| cfg.dx[ax]);
+        let ntiles: usize = counts.iter().product();
+        let theta = build_theta(cfg);
+        let solver = cfg.solver;
+        let ct = cfg.ct_method;
+        let prolong = prolong_order_for(&cfg.reconstruction_name);
+        let regions = refinement_regions_nd::<$d>(&cfg.refinement_regions)?;
+        if regions.len() > 1 && !cfg.bodies.is_empty() {
+            return Err(format!(
+                "immersed bodies with {} nested refinement levels and gpus > 1: a tile holding fewer \
+                 levels than the run would couple the bodies on a coarser level than the single \
+                 hierarchy; run on one device or keep one refinement region",
+                regions.len() + 1
+            ));
+        }
+        // the kernels the single magnetized hierarchy installs on every level: the solver, the edge
+        // EMF method, the viscosity, the resistivity and the driven boundaries in Driven-id order
+        let kernels_of = |s: &Sim| {
+            let mut ks = s
+                .substrate()
+                .theta(theta)
+                .with_solver(solver)
+                .expect("refined kernel set")
+                .ct_method(ct)
+                .with_viscosity(cfg.viscosity).with_alpha(cfg.alpha)
+                .with_resistivity(cfg.resistivity);
+            for json in &cfg.driven_exprs {
+                let bcfg = symbi_source_compile::SourceConfig::from_json(json).expect("tile boundary parse");
+                let built = symbi_source_compile::expr_bridge::build_boundary_dag(
+                    &bcfg,
+                    <$regime_ty as Regime<f64, $d>>::SPEC,
+                )
+                .expect("tile boundary lower");
+                ks = ks.with_driven_boundary(built, bcfg.params.clone()).0;
+            }
+            ks
+        };
+
+        let mut tiles = Vec::with_capacity(ntiles);
+        for flat in 0..ntiles {
+            let tc = unflatten(flat, counts);
+            let ext = partition.tile_extents(tc);
+            let tile_lo: [usize; $d] = std::array::from_fn(|ax| ext[ax].0);
+            let m: [usize; $d] = std::array::from_fn(|ax| ext[ax].1);
+            let origin: [f64; $d] = tile_origin::<$d>(cfg, tile_lo);
+            let phys = boundaries_nd::<$d>(&cfg.boundaries);
+            let bnd = tile_boundaries(&phys, tc, counts);
+            let tile_maps: [symbi_geometry::AxisMap; $d] = tile_axis_maps::<$d>(cfg, tile_lo)
+                .unwrap_or_else(|| std::array::from_fn(|ax| symbi_geometry::AxisMap::Uniform {
+                    start: origin[ax], dx: dx[ax],
+                }));
+            let tile_regions = clip_regions_to_tile::<$d>(&regions, origin, m, &tile_maps);
+            let dev = flat as i32;
+            let built = symbi::symbi_xpu::with_device(dev, || -> Result<_, String> {
+                // the tile's slice of each global face buffer: a face shared by two tiles reads the
+                // same global value in both
+                let tile_faces: Vec<Vec<f64>> =
+                    (0..$d).map(|d| tile_face_buffer::<$d>(&bufs[d], n, m, tile_lo, d)).collect();
+                let mut sim = Sim::build($regime, $eos, $geom)
+                    .cells(m)
+                    .ghosts(ghost_width(cfg))
+                    .origin(origin)
+                    .spacing(dx)
+                    .coord_maps(tile_axis_maps::<$d>(cfg, tile_lo))
+                    .boundaries(bnd)
+                    .cfl(cfg.cfl)
+                    .timestepping(cfg.timestepping)
+                    .cyl_plane(cfg.cyl_plane)
+                    .allocate()
+                    .map_err(|e| format!("tile {flat} allocate: {e:?}"))?
+                    .set_initial_indexed(|idx, _x| {
+                        let lin = global_lin::<$d>(&tile_lo, &idx, &n);
+                        let gidx: [isize; $d] = std::array::from_fn(|ax| tile_lo[ax] as isize + idx[ax]);
+                        let mag: [f64; 3] = std::array::from_fn(|k| {
+                            if k < $d { face_avg_cell_b::<$d>(&bufs[k], k, gidx, n) } else { bufs[k][lin] }
+                        });
+                        $prim(&prims[lin], mag)
+                    })
+                    .seed_faces_indexed(&tile_faces)
+                    .build();
+                // the physical clock and the user timestep clamp ride on the root, as on the single
+                // hierarchy
+                sim.time = cfg.start_time;
+                sim.max_dt = cfg.max_dt;
+                let sub = kernels_of(&sim).with_excision(
+                    cfg.excision_radius,
+                    cfg.excision_rho_scale,
+                    cfg.excision_pre_scale,
+                );
+                let mut h = if tile_regions.is_empty() {
+                    Hierarchy::single(sim, sub)
+                } else {
+                    let (clipped, whole): (Vec<_>, Vec<_>) = tile_regions.iter().copied().unzip();
+                    Hierarchy::with_refinement_of(sim, sub, &clipped, &whole, prolong, kernels_of)
+                        .map_err(|e| format!("tile {flat} refinement build: {e:?}"))?
+                };
+                // the sinks on each tile's finest level at their global positions, gravity-only
+                // proxies below, as on the single hierarchy
+                if !cfg.bodies.is_empty() {
+                    h = h.try_with_bodies(build_bodies_and_horizon::<$d>(cfg)).map_err(|e| format!("tile {flat}: {e}"))?;
+                }
+                let ring = wrap_topology(&phys, counts);
+                h.set_root_layout(n, tile_lo, std::array::from_fn(|ax| ring.is_periodic(ax)));
+                Ok(h)
+            })?;
+            tiles.push(built);
+        }
+        // the fine levels seed from their parents once every tile exists and the root cut halos are
+        // exchanged; prime audits each level's recovery after the seed
+        {
+            let devices: Vec<i32> = (0..tiles.len() as i32).collect();
+            #[cfg(feature = "gpu")]
+            let seed_transport = symbi::sim::decomp::PeerCopy;
+            #[cfg(not(feature = "gpu"))]
+            let seed_transport = symbi::sim::decomp::LocalCopy;
+            symbi::sim::refinement::seed_decomposed_fine_from_coarse(&tiles, counts, &devices, &seed_transport)
+                .map_err(|e| format!("decomposed fine seed: {e:?}"))?;
+            for (k, h) in tiles.iter_mut().enumerate() {
+                symbi::symbi_xpu::with_device(devices[k], || h.prime());
+            }
+        }
+        let offsets = tile_offsets(&partition);
+        let grid = decomposed_grid::<$d>(cfg, tiles[0].levels[0].state.geom.ng);
+        run_refined_decomposed_loop(cfg, tiles, offsets, grid, counts)
+    }};
+}
+
 /// the multi-gpu (gpus>1) hydro path. decompose the domain into
 /// `cfg.n_gpus` tiles, bind each tile to a device, evolve them in lockstep with halo exchange
 /// (`decomp::evolve_decomposed`), and for output gather the tiles into one
@@ -7703,10 +7865,14 @@ macro_rules! build_and_run_mhd_decomposed {
         let bufs: &[Vec<f64>] = $bufs;
         type Sim = SimDefaultGeneric<$regime_ty, $d, 3, $geom_ty, EosSelect<f64>>;
 
-        // multi-gpu MHD is single-level: refinement needs its own cross-level multi-tile
-        // handling, so it is refused.
         if cfg.refinement_enabled {
-            return Err("gpus>1 does not yet support mesh refinement; set gpus=1 or disable refinement".to_string());
+            return build_and_run_magnetized_decomposed_refined!(
+                cfg, prims, bufs, $regime, $regime_ty, $d, $geom, $geom_ty, host_eos(cfg), EosSelect<f64>,
+                |row: &Vec<f64>, mag: [f64; 3]| MhdPrim::new(
+                    Prim::adiabatic(Density(row[0]), Tensor::new([row[1], row[2], row[3]]), Pressure(row[4])),
+                    Tensor::new(mag),
+                )
+            );
         }
 
         let n: [usize; $d] = std::array::from_fn(|ax| cfg.n_cells[ax]);
@@ -7907,7 +8073,22 @@ macro_rules! build_and_run_imhd_decomposed {
         type Sim = SimDefaultGeneric<IsothermalMhd, $d, 3, $geom_ty, Isothermal<f64>>;
 
         if cfg.refinement_enabled {
-            return Err("gpus>1 does not yet support mesh refinement; set gpus=1 or disable refinement".to_string());
+            // a locally isothermal closure on refined tiles needs each fine level's closure from
+            // the whole patch, which a tile's clipped patch does not hold
+            if cfg.locally_isothermal {
+                return Err(
+                    "a locally isothermal closure with mesh refinement and gpus > 1 awaits the whole-patch \
+                     closure on each tile; run it on one device"
+                        .to_string(),
+                );
+            }
+            return build_and_run_magnetized_decomposed_refined!(
+                cfg, prims, bufs, IsothermalMhd, IsothermalMhd, $d, $geom, $geom_ty, Isothermal { cs: cfg.cs }, Isothermal<f64>,
+                |row: &Vec<f64>, mag: [f64; 3]| MhdPrimG::<f64, 3, IsoModel>::new(
+                    PrimG::isothermal(Density(row[0]), Tensor::new([row[1], row[2], row[3]])),
+                    Tensor::new(mag),
+                )
+            );
         }
 
         let n: [usize; $d] = std::array::from_fn(|ax| cfg.n_cells[ax]);
