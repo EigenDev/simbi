@@ -19,7 +19,11 @@
 # the ito-3 population, on host tiles and launched workers as on one grid.
 # with mesh refinement, the discrete and the second-order ito populations on two
 # workers, a 2x2 launch and three uneven workers publish the single hierarchy's
-# population bit for bit.
+# population bit for bit. across regimes, schemes and depths (isothermal and
+# relativistic gas, ito-3, two nested boxes with workers holding level 1
+# without level 2, newtonian magnetized ito-2, relativistic and isothermal
+# magnetized discrete), two and three uneven host tiles and launched workers
+# publish the single hierarchy's population.
 #
 # run: pytest -m simulation simbi/simulation/tests/test_launch_tracers.py
 # =============================================================================
@@ -44,6 +48,9 @@ EXTRA = '''
 from simbi_configs.examples.isothermal.imhd_orszag_tang import IsothermalOrszagTang
 from simbi_configs.examples.newtonian.nmhd_orszag_tang import NewtonianOrszagTang
 from simbi_configs.examples.srmhd.rmhd_orszag_tang import OrszagTang as RmhdOrszagTang
+from simbi_configs.examples.newtonian.refined_mhd_blast import RefinedMhdBlast
+from simbi_configs.examples.srmhd.refined_rmhd_blast import RefinedRmhdBlast
+from simbi_configs.examples.isothermal.refined_imhd_orszag_tang import RefinedIsothermalOrszagTang
 
 class SinkDrift(DiscreteDrift):
     """the drift through an accreting point mass at the box center: tracers in the drained cells
@@ -101,6 +108,72 @@ class Ito3Nmhd(TracedNmhd):
     @property
     def tracer_scheme(self) -> TracerScheme:
         return TracerScheme.ITO3
+
+
+class RefinedIsoDrift(IsoDrift):
+    refinement_enabled: Annotated[bool, ProblemParam(True, description="refined")]
+
+
+class RefinedIto3Drift(Ito3Drift):
+    refinement_enabled: Annotated[bool, ProblemParam(True, description="refined")]
+
+
+class RefinedRhdDrift(Drift):
+    """the drift at relativistic speeds: v_x = 0.5, a cross flow of 0.1"""
+
+    regime: Annotated[Regime, ProblemParam(Regime.RHD, description="relativistic")]
+    refinement_enabled: Annotated[bool, ProblemParam(True, description="refined")]
+
+    def initial_primitive_state(self):
+        def gas():
+            nx, ny, _ = self.resolution
+            for jj in range(ny):
+                for ii in range(nx):
+                    x, y = (ii + 0.5) / nx, (jj + 0.5) / ny
+                    yield (1.0 + 0.3 * math.sin(2.0 * math.pi * y), 0.5, 0.1 * math.sin(2.0 * math.pi * x), 1.0)
+
+        return gas
+
+
+class NestedDiscreteDrift(DiscreteDrift):
+    """the drift under two nested fine boxes: level 1 over root cells 8..24, level 2 over 12..20"""
+
+    refinement_enabled: Annotated[bool, ProblemParam(True, description="refined")]
+    refinement_max_levels: Annotated[int, ProblemParam(3, description="levels")]
+    refinement_regions: Annotated[list[list[float]], ProblemParam([[-0.25, 0.25, -0.25, 0.25], [-0.125, 0.125, -0.125, 0.125]], description="boxes")]
+    refinement_ratios: Annotated[list[int], ProblemParam([2, 2], description="ratios")]
+
+
+class NestedIto2Drift(NestedDiscreteDrift, Ito2Drift):
+    """the ito drift under the nested boxes"""
+
+
+class TracedRefinedNmhd(RefinedMhdBlast):
+    @computed_field
+    @property
+    def n_tracers(self) -> int:
+        return 400
+
+
+class TracedRefinedNmhdIto2(TracedRefinedNmhd):
+    @computed_field
+    @property
+    def tracer_scheme(self) -> TracerScheme:
+        return TracerScheme.ITO2
+
+
+class TracedRefinedRmhd(RefinedRmhdBlast):
+    @computed_field
+    @property
+    def n_tracers(self) -> int:
+        return 400
+
+
+class TracedRefinedImhd(RefinedIsothermalOrszagTang):
+    @computed_field
+    @property
+    def n_tracers(self) -> int:
+        return 400
 
 
 class DiagonalIto3Drift(Ito3Drift):
@@ -287,3 +360,36 @@ def test_launched_refined_workers_carry_the_single_hierarchy_population(tmp_path
     ]
     for name, layout in layouts:
         _assert_same(_launch(variants, problem, tmp_path / name, layout, STEPS), want, group, f"{problem} on {name} workers")
+
+
+# refined populations across regimes, schemes and depths: (group, levels the records span, whether
+# the inflow injects, three-worker cuts). the single boxes cover root cells 8..24 of 32; the nested
+# level 2 covers 12..20, and the cuts at 10 and 22 leave the first and third workers holding level 1
+# without level 2
+REFINED_REGIMES = {
+    "RefinedIsoDrift": ("tracers", {0, 1}, True, [[12, 20], []]),
+    "RefinedRhdDrift": ("tracers", {0, 1}, True, [[12, 20], []]),
+    "RefinedIto3Drift": ("continuous_tracers", {0, 1}, True, [[12, 20], []]),
+    "NestedDiscreteDrift": ("tracers", {0, 1, 2}, True, [[10, 22], []]),
+    "NestedIto2Drift": ("continuous_tracers", {0, 1, 2}, True, [[10, 22], []]),
+    "TracedRefinedNmhdIto2": ("continuous_tracers", {0, 1}, False, [[12, 20], []]),
+    "TracedRefinedRmhd": ("tracers", {0, 1}, False, [[12, 20], []]),
+    "TracedRefinedImhd": ("tracers", {0, 1}, False, [[12, 20], []]),
+}
+
+
+@pytest.mark.parametrize("problem", list(REFINED_REGIMES))
+def test_refined_tiles_and_workers_carry_the_single_hierarchy_population_across_regimes(tmp_path: Path, variants: Path, problem: str) -> None:
+    group, levels, injects, cuts = REFINED_REGIMES[problem]
+    want = _run(problem, tmp_path / "single", 1, STEPS)
+    with h5py.File(want, "r") as f:
+        spanned = set((f[group]["owner"][:].astype(np.uint64) >> np.uint64(56)).tolist())
+        assert levels <= spanned, f"{problem}: the records span levels {sorted(spanned)}, short of {sorted(levels)}; the comparison is vacuous"
+        if injects:
+            assert int(f[group].attrs["n_tracers"]) > 400, f"{problem}: no tracer was injected; the spawn arm is vacuous"
+    _assert_same(_run(problem, tmp_path / "tiles2", 2, STEPS), want, group, f"{problem} on two host tiles")
+    _assert_same(_run(problem, tmp_path / "tiles3", 3, STEPS, extra=f", decompose={cuts!r}"), want, group, f"{problem} on three uneven host tiles")
+    two = _layout(tmp_path / "two.toml", workers=2, shape=(2, 1))
+    _assert_same(_launch(variants, problem, tmp_path / "two", two, STEPS), want, group, f"{problem} on two workers")
+    three = _layout(tmp_path / "three.toml", workers=3, cuts=cuts)
+    _assert_same(_launch(variants, problem, tmp_path / "three", three, STEPS), want, group, f"{problem} on three uneven workers")
