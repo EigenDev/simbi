@@ -2,7 +2,8 @@
 # test_process_guard.py
 #
 # the process guard's startup budget. the attribution rule is checked on
-# synthetic process tables (the exec'd `uname`, the pre-exec fork, one child
+# synthetic process tables (the exec'd `uname`, `(uname)` mid-exec, the
+# pre-exec fork, one child
 # per parent, leaves only, the window); live arms check that budgeted startup
 # children keep a run under the bound while every process is still counted,
 # and that excess processes, a second child, and a child lingering past the
@@ -11,6 +12,7 @@
 from __future__ import annotations
 
 import os
+import shutil
 import subprocess
 import sys
 import time
@@ -26,9 +28,9 @@ def _rows(*rows: tuple[int, int, str]) -> list[tuple[int, int, str, str]]:
 
 
 def test_the_exec_and_the_pre_exec_probe_are_budgeted_while_the_parent_is_young() -> None:
-    rows = _rows((10, 1, PY), (11, 10, "uname -p"), (20, 1, PY), (21, 20, "(Python)"))
-    seen = {10: 0.0, 11: 0.0, 20: 0.0, 21: 0.0}
-    assert budgeted_startup_children(rows, seen, now=5.0, startup=10.0) == {11, 21}
+    rows = _rows((10, 1, PY), (11, 10, "uname -p"), (20, 1, PY), (21, 20, "(Python)"), (30, 1, PY), (31, 30, "(uname)"))
+    seen = {10: 0.0, 11: 0.0, 20: 0.0, 21: 0.0, 30: 0.0, 31: 0.0}
+    assert budgeted_startup_children(rows, seen, now=5.0, startup=10.0) == {11, 21, 31}
     assert budgeted_startup_children(rows, seen, now=10.0, startup=10.0) == set(), "the window is not bounded"
     assert budgeted_startup_children(rows, seen, now=5.0, startup=0.0) == set(), "a zero window budgets a child"
 
@@ -44,9 +46,14 @@ def test_only_attributed_leaf_children_are_budgeted_one_per_parent() -> None:
 
 
 def _uname(tmp: Path) -> str:
-    """a long-lived stand-in for the platform probe: `sleep` under the file name `uname`"""
+    """a long-lived stand-in for the platform probe: a copy of `sleep` whose image is named `uname`,
+    so the process table shows it as the probe in every phase of its exec. macOS runs a copied
+    system binary only under a fresh (ad hoc) signature"""
     path = tmp / "uname"
-    path.symlink_to("/bin/sleep")
+    shutil.copyfile("/bin/sleep", path)
+    path.chmod(0o755)
+    if sys.platform == "darwin":
+        subprocess.run(["codesign", "-s", "-", "-f", str(path)], check=True, capture_output=True)
     return str(path)
 
 

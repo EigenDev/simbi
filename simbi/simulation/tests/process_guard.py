@@ -11,8 +11,9 @@
 # every descendant is counted. a startup window budgets one attributed child
 # per process on top of the limit: importing h5py calls platform.processor(),
 # which on macOS runs `uname -p` in a child, so each launched worker briefly
-# holds that child (seen as the exec'd `uname` or as the worker's own fork
-# before the exec, `(<image>)`). the child is budgeted only while it is a
+# holds that child (seen as the exec'd `uname`, as `(uname)` while its exec
+# completes, or as the worker's own fork before the exec, `(<image>)`). the
+# child is budgeted only while it is a
 # leaf and its parent is younger than the window; a second child, a child
 # with children of its own, or one outliving the window counts against the
 # limit.
@@ -69,7 +70,7 @@ def budgeted_startup_children(rows: list[tuple[int, int, str, str]], first_seen:
         parent = by_pid.get(ppid)
         if parent is None or pid in parents or ppid in budgeted:
             continue
-        probe = _image(command) == "uname" or command == f"({_image(parent[3])})"
+        probe = _image(command) == "uname" or command in ("(uname)", f"({_image(parent[3])})")
         young = now - first_seen.get(ppid, now) < startup
         if probe and young:
             budgeted[ppid] = pid
