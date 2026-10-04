@@ -7310,6 +7310,22 @@ macro_rules! build_and_run_hydro_decomposed {
     }};
 }
 
+/// the (dims, chart, spacetime) combinations with a baked GR-hydro kernel: the single source of
+/// truth for the dispatch guard and the launch scope
+fn baked_gr_hydro(dims: usize, coords: &str, spacetime: &str) -> bool {
+    matches!(
+        (dims, coords, spacetime),
+        (3, "cartesian", "schwarzschild_ks")
+            | (3, "cartesian", "kerr_ks")
+            | (1, "spherical", "schwarzschild_ks")
+            | (2, "spherical", "kerr_ks")
+            | (2, "spherical", "schwarzschild_ks")
+            | (2, "cylindrical", "schwarzschild_ks")
+            | (3, "cylindrical", "schwarzschild_ks")
+            | (3, "cylindrical", "kerr_ks")
+    )
+}
+
 /// expand the (geometry x dims) arms for one hydro regime. cartesian / spherical
 /// / cylindrical are all wired across 1/2/3d (each is a unit-struct `Metric`).
 macro_rules! hydro_dispatch {
@@ -7317,22 +7333,10 @@ macro_rules! hydro_dispatch {
         match ($cfg.dims, $cfg.coord_system.as_str()) {
             // fail-loud guard: a non-minkowski spacetime that is not one of the baked GR
             // combinations below would otherwise fall through to a flat `(dims, coords)` arm and run
-            // silently on a Minkowski metric (wrong physics, zero warning). the matches! set is the
+            // silently on a Minkowski metric (wrong physics, zero warning). baked_gr_hydro is the
             // single source of truth for the baked GR-hydro arms; `test_dispatch_rejects_unbaked_gr`
             // asserts it stays in lockstep with the actual arms (guarded-arm-or-Err, never silent-flat).
-            (d, c)
-                if $cfg.spacetime != "minkowski"
-                    && !matches!(
-                        (d, c, $cfg.spacetime.as_str()),
-                        (3, "cartesian", "schwarzschild_ks")
-                            | (3, "cartesian", "kerr_ks")
-                            | (1, "spherical", "schwarzschild_ks")
-                            | (2, "spherical", "kerr_ks")
-                            | (2, "spherical", "schwarzschild_ks")
-                            | (2, "cylindrical", "schwarzschild_ks")
-                            | (3, "cylindrical", "schwarzschild_ks")
-                            | (3, "cylindrical", "kerr_ks")
-                    ) =>
+            (d, c) if $cfg.spacetime != "minkowski" && !baked_gr_hydro(d, c, &$cfg.spacetime) =>
             {
                 Err(format!(
                     "no baked GR-hydro kernel for (dims={d}, coords={c}, spacetime={}): refusing to \
@@ -11281,6 +11285,10 @@ fn validate_launch_scope(cfg: &Config) -> Result<(), String> {
         if cfg.regime != "rhd" {
             return refused(&format!("the {} spacetime with the {} regime", cfg.spacetime, cfg.regime));
         }
+        // the single grid runs the baked GR-hydro combinations alone
+        if !baked_gr_hydro(cfg.dims, &cfg.coord_system, &cfg.spacetime) {
+            return refused(&format!("the {} spacetime on the {}-dimensional {} chart", cfg.spacetime, cfg.dims, cfg.coord_system));
+        }
         if cfg.refinement_enabled {
             return refused(&format!("the {} spacetime with mesh refinement", cfg.spacetime));
         }
@@ -13146,21 +13154,20 @@ fn run_worker_process(
                 other => Err(format!("the {other} chart is outside the distributed first release")),
             }
         };
-        // a gas regime also on the horizon-penetrating charts of a black hole: the kerr-schild box
-        // in two and three dimensions and the radial line, the charts the single grid bakes with
-        // one momentum per axis
+        // a gas regime also on the horizon-penetrating charts of a black hole: the three-dimensional
+        // kerr-schild box and the radial line, charts the single grid bakes with one momentum per axis
         ($arm:ident, $regime:expr, $regime_ty:ty) => {
             match (cfg.coord_system.as_str(), cfg.spacetime.as_str(), $d) {
                 ("cartesian", "minkowski", _) => $arm!(Cartesian, Cartesian, $regime, $regime_ty),
                 ("spherical", "minkowski", _) => $arm!(Spherical, Spherical, $regime, $regime_ty),
                 ("cylindrical", "minkowski", _) => $arm!(Cylindrical, Cylindrical, $regime, $regime_ty),
-                ("cartesian", "schwarzschild_ks", 2 | 3) => $arm!(
+                ("cartesian", "schwarzschild_ks", 3) => $arm!(
                     SchwarzschildKSCartesian { mass: cfg.schwarzschild_mass },
                     SchwarzschildKSCartesian<f64>,
                     $regime,
                     $regime_ty
                 ),
-                ("cartesian", "kerr_ks", 2 | 3) => $arm!(
+                ("cartesian", "kerr_ks", 3) => $arm!(
                     KerrKSCartesian { mass: cfg.schwarzschild_mass, spin: cfg.kerr_spin },
                     KerrKSCartesian<f64>,
                     $regime,

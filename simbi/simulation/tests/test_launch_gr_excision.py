@@ -9,7 +9,10 @@
 # bit; the excision changes the run. host tiles resumed from a checkpoint keep
 # its stored primitives, the excision floor included, as the single grid does.
 # a tracer population on the curved spacetime is refused by name before any
-# output.
+# output. the box on a hole spinning at a = 0.5 M (kerr-schild, excised)
+# launches, resumes and matches the single grid; the spin and the excision
+# change the run. the z = 0 plane of the box (2d cartesian kerr-schild) has no
+# baked kernel on the single grid and is refused on launch by name.
 #
 # run: pytest -m simulation simbi/simulation/tests/test_launch_gr_excision.py
 # =============================================================================
@@ -152,3 +155,116 @@ def test_excised_host_tiles_resume_on_the_stored_primitives(tmp_path: Path) -> N
     assert 0 < written_at < STEPS
     # a resumed run on tiles takes `max_steps` further steps
     _assert_same(_tiles(tmp_path / "resumed", 3, STEPS - written_at, checkpoint=first, decompose=[[40, 90]]), want, "resumed onto three uneven host tiles")
+
+
+# the bondi box on a spinning hole, and the unexcised z = 0 plane of the box
+GR_VARIANTS = """
+from typing import Annotated
+
+from pydantic import computed_field
+
+import simbi.expression as expr
+from simbi import ProblemParam
+from simbi.types import BoundaryCondition, Spacetime
+from simbi_configs.examples.grhd.gr_bondi_cartesian import GrBondiCartesian
+
+
+class KerrBondiBox(GrBondiCartesian):
+    \"\"\"the bondi box on a hole spinning at a = 0.5 M about +z, r_+ = 1.866 M\"\"\"
+
+    spacetime: Annotated[Spacetime, ProblemParam(Spacetime.KERR_KS, description="spinning")]
+    kerr_spin: Annotated[float, ProblemParam(0.5, description="spin")]
+
+
+class BondiPlane(GrBondiCartesian):
+    \"\"\"the z = 0 plane of the bondi box, unexcised, its faces held at the ambient gas at rest\"\"\"
+
+    resolution: Annotated[tuple[int, int], ProblemParam((48, 48), cli=True, description="grid")]
+    excision_radius: Annotated[float, ProblemParam(0.0, cli=True, description="unexcised")]
+    boundary_conditions: Annotated[list[str], ProblemParam([BoundaryCondition.DYNAMIC] * 4, description="driven")]
+
+    def setup(self) -> None:
+        super().setup()
+        self.bounds = self.bounds[:2]
+
+    def _reservoir(self) -> dict:
+        return expr.boundary([self.rho_ambient, 0.0, 0.0, self.p_ambient], dim=2)
+
+    @computed_field
+    @property
+    def bx3_inner_expressions(self) -> dict | None:
+        return None
+
+    @computed_field
+    @property
+    def bx3_outer_expressions(self) -> dict | None:
+        return None
+
+    def initial_primitive_state(self):
+        nx, ny = self.resolution
+
+        def gas():
+            for _ in range(nx * ny):
+                yield (self.rho_ambient, 0.0, 0.0, self.p_ambient)
+
+        return gas
+"""
+# name: (class, resolution, launch fields, uneven cuts, whether the run excises)
+VARIANT_CASES = {
+    "kerr-box": ("KerrBondiBox", BOX_RESOLUTION, BOX_FIELDS, [[11], [13], []], True),
+}
+
+
+@pytest.fixture
+def gr_variants(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    (tmp_path / "gr_variants.py").write_text(GR_VARIANTS)
+    monkeypatch.setenv("PYTHONPATH", os.pathsep.join([str(tmp_path), os.getcwd(), os.environ.get("PYTHONPATH", "")]))
+    return tmp_path / "gr_variants.py"
+
+
+@pytest.mark.parametrize("case", list(VARIANT_CASES))
+def test_a_spinning_box_launches_as_the_single_grid(tmp_path: Path, gr_variants: Path, case: str) -> None:
+    cls, resolution, fields, uneven, excised = VARIANT_CASES[case]
+    script = tmp_path / f"launched_{cls.lower()}.py"
+    script.write_text(f"from gr_variants import {cls} as Base\n\n\nclass Launched{cls}(Base):\n    pass\n")
+    want = _script_reference("gr_variants", cls, resolution, tmp_path / "single", STEPS, fields=_kwargs(fields))
+    den = _all_levels(want)["level_0/conserved/den"]
+    assert not np.all(den == den.flat[0]), f"{case}: the gas never moved off the uniform start; the comparison is vacuous"
+    if excised:
+        bare = _script_reference("gr_variants", cls, resolution, tmp_path / "bare", STEPS, fields=_kwargs({**fields, "excision_radius": "0.0"}))
+        assert not np.array_equal(den, _all_levels(bare)["level_0/conserved/den"]), f"{case}: the excision left the run unchanged"
+        module, base = BOX
+        static = _script_reference(module, base, resolution, tmp_path / "static", STEPS, fields=_kwargs(fields))
+        assert not np.array_equal(den, _all_levels(static)["level_0/conserved/den"]), f"{case}: the spin left the run unchanged"
+    shape = (2,) + (1,) * (len(resolution) - 1)
+    two = _layout(tmp_path / "two.toml", workers=2, shape=shape)
+    _assert_same(_script_launch(str(script), resolution, tmp_path / "two", two, STEPS, workers=2, flags=_flags(fields)), want, f"{case}: two workers")
+    workers = int(np.prod([len(cuts) + 1 for cuts in uneven]))
+    many = _layout(tmp_path / "uneven.toml", workers=workers, cuts=uneven)
+    _assert_same(
+        _script_launch(str(script), resolution, tmp_path / "uneven", many, STEPS, workers=workers, flags=_flags(fields)), want, f"{case}: {workers} uneven workers"
+    )
+    first = _script_launch(str(script), resolution, tmp_path / "first", two, STEPS // 2, workers=2, flags=_flags(fields))
+    written_at = _iteration(first)
+    assert 0 < written_at < STEPS
+    resumed = _script_launch(str(script), resolution, tmp_path / "resumed", many, STEPS - written_at, workers=workers, checkpoint=first, flags=_flags(fields))
+    _assert_same(resumed, want, f"{case}: resumed onto {workers} uneven workers")
+
+
+def test_the_plane_of_the_box_is_refused_on_launch_as_on_the_single_grid(tmp_path: Path, gr_variants: Path) -> None:
+    # the single grid bakes no GR-hydro kernel for the 2d cartesian chart; the launch refuses the
+    # same combination by name before any output
+    with pytest.raises(AssertionError, match="no baked GR-hydro kernel"):
+        _script_reference("gr_variants", "BondiPlane", (48, 48), tmp_path / "single", 1)
+    script = tmp_path / "launched_bondiplane.py"
+    script.write_text("from gr_variants import BondiPlane as Base\n\n\nclass LaunchedBondiPlane(Base):\n    pass\n")
+    layout = _layout(tmp_path / "two.toml", workers=2, shape=(2, 1))
+    cmd = [sys.executable, "-m", "simbi.cli", "launch", str(script), "--layout", str(layout), "--max-steps", "1",
+           "--resolution", "48,48", "--data-directory", str(tmp_path / "out"), "--checkpoint-interval", "1e9"]
+    env = dict(os.environ)
+    env.pop("SIMBI_LAUNCH_EXPERIMENTAL", None)
+    done = subprocess.run(cmd, capture_output=True, text=True, timeout=600, env=env)
+    assert done.returncode != 0, f"the launch ran the 2d cartesian kerr-schild plane:\n{done.stdout}"
+    flat = " ".join((done.stdout + done.stderr).split())
+    assert "the schwarzschild_ks spacetime on the 2-dimensional cartesian chart is outside the distributed first release" in flat, flat[-2000:]
+    assert not list((tmp_path / "out").glob("*.h5")), "a checkpoint was published"
