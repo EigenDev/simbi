@@ -1,16 +1,18 @@
 // =============================================================================
-// refine_gpu.rs
+// refinement_gpu.rs
 //
 // the amr gpu gate: the full 2-level berger-oliger driver (subcycle, prolong,
 // restrict, flux-register reflux, mhd staggered transfer + emf reflux) on the
 // CUDA backend (CudaSpace / UnifiedMemory), asserting the same invariants the
-// cpu gates pin and bitwise-comparable agreement with a host run of the
-// identical problem. on the device backend the snapshots run the field_copy
-// kernel and the flux register the field_fill / field_axpy_shift /
-// refine_acc_face kernels — no per-cell host touch during compute (the emf
-// register's codim-2 edge skeleton excepted).
+// cpu gates pin and the interior density of a host run of the identical
+// problem to 1e-9 (a bound recorded without a device measurement). on the
+// device backend the snapshots run the field_copy kernel and the flux register
+// the field_fill / field_axpy_shift / refine_acc_face kernels — no per-cell
+// host touch during compute (the emf register's codim-2 edge skeleton
+// excepted). the file compiles under the cuda feature alone: a cpu-only test
+// run lists no test from it.
 //
-// run: cargo test -p symbi --features cuda --test refine_gpu
+// run: cargo test -p symbi --features cuda --test refinement_gpu
 // =============================================================================
 
 #![cfg(feature = "cuda")]

@@ -602,6 +602,14 @@ fn assert_cut_matches_uncut(
     assert_all_ok(&reference, "uncut");
     let want = assemble(&reference, "uncut", magnetized);
     let clean_grid = assemble(&clean, "clean", magnetized);
+    if magnetized && ct != "contact" {
+        // premise: the edge EMF under test changes the run against contact, so a silent fallback
+        // to contact cannot pass for it
+        let contact = vec![("W_REGIME", regime.to_string()), ("W_CT", "contact".to_string())];
+        let contact_run = run_arm(test, &format!("clean_contact_against_{ct}_{stage}"), &uncut(), &contact);
+        assert_all_ok(&contact_run, "clean contact");
+        assert!(differing(&clean_grid, &assemble(&contact_run, "clean contact", magnetized)) > 0, "{label}: {ct} and contact evolve the same run; the {ct} arms test nothing contact does not");
+    }
     assert!(
         differing(&want, &clean_grid) > 0,
         "{label}: the flag left the one-worker run unchanged; the gate is vacuous"

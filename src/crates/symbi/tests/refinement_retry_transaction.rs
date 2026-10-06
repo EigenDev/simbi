@@ -209,8 +209,8 @@ fn decomposed_rejection_rolls_every_tile_back_collectively() {
         .with_bodies(BodyCollection::new().add(Body::horizon(0, 0.01, 0.1)));
         tiles.push(hierarchy);
     }
-    // Calls 1-2 are the two roots; call 3 is fine substep one. Reject the refined tile on its
-    // second fine substep after it has already booked the first receipt.
+    // calls 1-2 are the two roots; call 3 is fine substep one. the refined tile rejects its second
+    // fine substep after it has booked the first receipt.
     let devices = [0, 0];
     evolve_hierarchy_decomposed(
         &mut tiles,
@@ -223,8 +223,17 @@ fn decomposed_rejection_rolls_every_tile_back_collectively() {
         u64::MAX,
         |_, _, _| std::ops::ControlFlow::Continue(()),
     );
-    for (tile, hierarchy) in tiles.iter().enumerate().take(1) {
-        let body = hierarchy.levels[1]
+    // premises: the fourth correction pass ran and rejected, and the replay took two accepted root
+    // steps at the halved dt (a run without the rejection reaches t = 0.05 in one step)
+    assert!(calls.load(Ordering::SeqCst) >= 4, "the rejecting correction pass never ran");
+    for hierarchy in &tiles {
+        assert_eq!(hierarchy.levels[0].state.iteration, 2, "the root did not replay the rejected step at half the timestep");
+    }
+    // the run's finest level owns the horizon's receipts: the refined tile's fine level holds the
+    // accepted steps' receipts alone, the other tile (its root below the run's finest level) none
+    for (tile, hierarchy) in tiles.iter().enumerate() {
+        let want = if tile == 0 { 0.05 } else { 0.0 };
+        let body = hierarchy.levels[hierarchy.levels.len() - 1]
             .state
             .immersed
             .as_ref()
@@ -240,9 +249,9 @@ fn decomposed_rejection_rolls_every_tile_back_collectively() {
             unreachable!()
         };
         assert!(
-            (total_accreted_mass - 0.05).abs() < 8.0 * f64::EPSILON,
-            "tile {tile} retained a rejected receipt: {total_accreted_mass}"
+            (total_accreted_mass - want).abs() < 8.0 * f64::EPSILON,
+            "tile {tile} holds {total_accreted_mass}, the accepted steps' receipts are {want}"
         );
-        assert!((total_accreted_energy - 0.1).abs() < 8.0 * f64::EPSILON);
+        assert!((total_accreted_energy - 2.0 * want).abs() < 8.0 * f64::EPSILON);
     }
 }

@@ -7,10 +7,12 @@
 // the hydro prims + the cell B; the staggered face B rides the CT ghost fill and the
 // transverse halo exchange.
 //
-// the inflow is position-dependent (rho = 2 + 0.2*y, the cell's global y) and carries an
-// out-of-plane B_z (cell-centered, div-free by construction — no CT face sub-problem). the
-// cut-along-the-face tiling is the decisive case: a tile evaluating the prescription at its
-// tile-local y injects the wrong profile on every non-origin tile.
+// the inflow is position-dependent (rho = 2 + 0.2*y, the cell's global y) and carries a uniform
+// in-plane B_x and an out-of-plane B_z, div-free; the transverse flow the density gradient drives
+// makes E_z = v_x B_y - v_y B_x nonzero, so the staggered faces evolve and cross the cuts. the run
+// lasts until the inflow reaches the cut half a domain from the driven face. the
+// cut-along-the-face tiling is the decisive case for the prescription: a tile evaluating it at
+// its tile-local y injects the wrong profile on every non-origin tile.
 // =============================================================================
 
 use symbi::regimes::substrate_rmhd::RmhdSubstrateKernelSet;
@@ -33,6 +35,9 @@ const CFL: f64 = 0.4;
 const N: usize = 32; // cells per axis
 const DX: f64 = 1.0 / N as f64;
 const T_FINAL: f64 = 0.02;
+/// the relativistic arms run until the inflow crosses the cut half a domain from the driven face
+const T_REACH: f64 = 0.6;
+const BX0: f64 = 0.2;
 const BZ0: f64 = 0.3;
 
 type Sim = SimStateGeneric<Rmhd, 2, 3, Cartesian, IdealGas<f64>, CpuSpace, HostMemory>;
@@ -40,9 +45,9 @@ type Kern = RmhdSubstrateKernelSet<HostMemory, f64, 2>;
 
 fn boundary_json() -> String {
     // the rmhd prescription [rho, v1, v2, v3, pre, B1, B2, B3]:
-    // rho = 2 + 0.2*y (VARIABLE_X2 -> global y), v = (0.5, 0, 0), p = 3, B = (0, 0, 0.5).
+    // rho = 2 + 0.2*y (VARIABLE_X2 -> global y), v = (0.5, 0, 0), p = 3, B = (0.2, 0, 0.5).
     r#"{
-        "kind": "dirichlet", "dim": 3, "outputs": [4, 5, 6, 6, 7, 6, 6, 8], "params": [],
+        "kind": "dirichlet", "dim": 3, "outputs": [4, 5, 6, 6, 7, 1, 6, 8], "params": [],
         "nodes": [ {"op": "VARIABLE_X2"}, {"op": "CONSTANT", "value": 0.2},
                    {"op": "MULTIPLY", "left": 0, "right": 1}, {"op": "CONSTANT", "value": 2.0},
                    {"op": "ADD", "left": 3, "right": 2},
@@ -52,7 +57,7 @@ fn boundary_json() -> String {
     .to_string()
 }
 
-// quiescent interior with a uniform out-of-plane B (div-free, zero in-plane face field),
+// quiescent interior with a uniform field (B_x on the faces, B_z out of plane; div-free),
 // distinct from the inflow so the ghost state provably comes from the DAG.
 fn make(cells: [usize; 2], origin: [f64; 2], bnd: Boundaries<2>) -> (Sim, Kern) {
     let sim = Sim::build(Rmhd, IdealGas { gamma: GAMMA }, Cartesian)
@@ -67,10 +72,10 @@ fn make(cells: [usize; 2], origin: [f64; 2], bnd: Boundaries<2>) -> (Sim, Kern) 
         .set_initial(|_| {
             MhdPrim::new(
                 Prim::adiabatic(Density(1.0), Tensor::new([0.0, 0.0, 0.0]), Pressure(1.0)),
-                Tensor::new([0.0, 0.0, BZ0]),
+                Tensor::new([BX0, 0.0, BZ0]),
             )
         })
-        .seed_faces_uniform([0.0, 0.0])
+        .seed_faces_uniform([BX0, 0.0])
         .build();
     let cfg = SourceConfig::from_json(&boundary_json()).expect("parse boundary config");
     let built = build_boundary_dag(&cfg, &RMHD_SPEC).expect("lower rmhd boundary dag");
@@ -124,7 +129,7 @@ fn run(tiles: &mut [(Sim, Kern)], counts: [usize; 2]) {
         &devices,
         Timestepping::Rk2,
         0.0,
-        T_FINAL,
+        T_REACH,
         u64::MAX,
         &LocalCopy,
         |_, _, _| std::ops::ControlFlow::Continue(()),
@@ -177,6 +182,7 @@ fn assert_driven_mhd_matches(counts: [usize; 2]) {
     let den = |s: &Sim, c: [isize; 2]| *s.fields.cons.den.view().at(c);
     let momx = |s: &Sim, c: [isize; 2]| *s.fields.cons.mom[0].view().at(c);
     let bz = |s: &Sim, c: [isize; 2]| *s.fields.mhd.as_ref().unwrap().bcell[2].view().at(c);
+    let bx = |s: &Sim, c: [isize; 2]| *s.fields.mhd.as_ref().unwrap().bcell[0].view().at(c);
 
     let mut mono = grid_tiles([1, 1]);
     run(&mut mono, [1, 1]);
@@ -209,6 +215,13 @@ fn assert_driven_mhd_matches(counts: [usize; 2]) {
         bz_shift > 1e-6,
         "the ghost B_z never influenced the interior ({bz_shift:e}); test is vacuous"
     );
+    // the in-plane field evolved under CT, and the inflow reached the cut columns at x = 1/2
+    let (mono_bx, dec_bx) = (global_field(&mono, [1, 1], bx), global_field(&dec, counts, bx));
+    let bx_shift: f64 = mono_bx.iter().map(|v| (v - BX0).abs()).sum();
+    assert!(bx_shift > 1e-6, "the in-plane field never evolved ({bx_shift:e}); the CT path is untested");
+    let cut_momx: f64 = (0..N).map(|j| mono_momx[flatten([N / 2 - 1, j], [N; 2])].abs() + mono_momx[flatten([N / 2, j], [N; 2])].abs()).sum();
+    assert!(cut_momx > 1e-6, "the inflow never reached the cut columns ({cut_momx:e}); the cut carries no signal");
+    assert!(max_err(&mono_bx, &dec_bx) < 1e-12, "{counts:?} bcell_x diverged");
 
     assert!(
         max_err(&mono_den, &dec_den) < 1e-12,

@@ -500,6 +500,18 @@ fn assert_cut_matches_uncut(test: &str, arm: Arm, cell: (usize, usize), neighbor
     assert_all_ok(&reference, "uncut");
     let want = assemble(&reference, "uncut");
     let clean_grid = assemble(&clean, "clean");
+    if ct != "contact" {
+        // premise: the edge EMF under test changes the run against contact, so a silent fallback
+        // to contact cannot pass for it
+        let mut contact = vec![("W_CT", "contact".to_string())];
+        contact.extend(extra.iter().cloned());
+        let contact_run = run_arm(test, &format!("clean_contact_against_{ct}_{stage}"), &uncut(), &contact);
+        assert_all_ok(&contact_run, "clean contact");
+        let contact_grid = assemble(&contact_run, "clean contact");
+        let apart = clean_grid.den.iter().zip(&contact_grid.den).filter(|(a, b)| a != b).count()
+            + (0..2).map(|d| clean_grid.faces[d].iter().zip(&contact_grid.faces[d]).filter(|(a, b)| a != b).count()).sum::<usize>();
+        assert!(apart > 0, "{label}: {ct} and contact evolve the same run; the {ct} arms test nothing contact does not");
+    }
     let changed = want.den.iter().zip(&clean_grid.den).filter(|(a, b)| a != b).count()
         + (0..2).map(|d| want.faces[d].iter().zip(&clean_grid.faces[d]).filter(|(a, b)| a != b).count()).sum::<usize>();
     assert!(changed > 0, "{label}: the flag left the one-worker run unchanged; the gate is vacuous");

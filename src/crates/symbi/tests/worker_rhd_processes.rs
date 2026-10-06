@@ -534,9 +534,11 @@ fn uncut() -> Arm {
     }
 }
 
+/// three tiles, two on worker 0: the cut at 28 lies inside the band the collision at 32/33 reaches
+/// leftward within the run, so its local copy carries changing state
 fn uneven() -> Arm {
     Arm {
-        cuts0: vec![20, 32],
+        cuts0: vec![28, 32],
         cuts1: vec![],
         periodic: [true, true],
         owner: vec![0, 0, 1],
@@ -557,6 +559,11 @@ fn a_natural_correction_against_the_cut_matches_one_worker() {
     let one_report = one[0].report.clone().expect("report");
     assert!(one_report.troubled > 0, "the collision never tripped the correction; the gate is vacuous");
     assert_eq!(one_report.frozen, 0, "the freeze tier acted; the corrected update is no longer conservative");
+    // premise: the collision's state reached both sides of the uneven arm's cut at 28 (density 1
+    // at the start)
+    for column in [27usize, 28] {
+        assert!((0..N).any(|j| f64::from_bits(want[column * N + j]) != 1.0), "column {column} kept its initial density; the cut at 28 carries no signal");
+    }
     for (label, arm) in [("two workers", even()), ("three tiles on two workers", uneven())] {
         let outcomes = run_arm(test, label.split(' ').next().unwrap(), &arm, &[]);
         assert_all_ok(&outcomes);

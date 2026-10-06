@@ -10,9 +10,10 @@
 // tiles; the flag is raised on a cell at a pole against an azimuth cut.
 // every arm compares its assembled cells and faces bit for bit with the
 // one-worker run, whose pole band is its own half-turn, asserts the two
-// copies of every shared face agree, that div B is unchanged from the seed's
-// to round-off per tile and on the assembled grid, that no cell froze, and
-// that every worker audited its shared faces after every exchange.
+// copies of every shared face agree, that every cell's magnetic flux under the
+// constrained-transport face weights is the seed's to round-off on every tile,
+// that no cell froze, and that every worker audited its shared faces after
+// every exchange.
 //
 // run: cargo test -p symbi --test worker_mhd_polar_processes
 // =============================================================================
@@ -209,23 +210,31 @@ fn dump(sims: &[Sim], mine: &[usize], arm: &Arm) -> Vec<u8> {
     out
 }
 
-/// the largest coordinate divergence sum_d (B_d(hi) - B_d(lo)) over a tile's interior cells
-/// from its own faces; on the spherical grid the seed's value is a fixed number the
-/// constrained transport preserves, so the arms compare it with one worker's exactly
-fn tile_div(sim: &Sim) -> f64 {
-    let mhd = sim.fields.mhd.as_ref().unwrap();
-    let b: Vec<_> = (0..3).map(|d| mhd.bface.b[d].view()).collect();
-    let mut worst = 0.0f64;
-    for c in sim.geom.interior.iter() {
-        let mut div = 0.0;
-        for d in 0..3 {
-            let mut up = c;
-            up[d] += 1;
-            div += *b[d].at(up) - *b[d].at(c);
-        }
-        worst = worst.max(div.abs());
-    }
-    worst
+/// the unnormalized magnetic flux out of every interior cell with the constrained-transport face
+/// weights, the quantity the CT curl preserves cell by cell
+fn cell_flux(sim: &Sim) -> Vec<f64> {
+    let bg = sim.geom.block_geometry(sim.physics.metric);
+    let m = sim.fields.mhd.as_ref().unwrap();
+    sim.geom
+        .interior
+        .iter()
+        .map(|c| {
+            (0..3)
+                .map(|d| {
+                    let mut up = c;
+                    up[d] += 1;
+                    bg.ct_face_weight(up, d) * *m.bface.b[d].view().at(up) - bg.ct_face_weight(c, d) * *m.bface.b[d].view().at(c)
+                })
+                .sum()
+        })
+        .collect()
+}
+
+/// the largest weighted face flux of a tile, the scale a flux change is round-off against
+fn flux_scale(sim: &Sim) -> f64 {
+    let bg = sim.geom.block_geometry(sim.physics.metric);
+    let m = sim.fields.mhd.as_ref().unwrap();
+    sim.geom.interior.iter().flat_map(|c| (0..3).map(move |d| (c, d))).map(|(c, d)| (bg.ct_face_weight(c, d) * *m.bface.b[d].view().at(c)).abs()).fold(0.0, f64::max)
 }
 
 fn run_worker(arm: &Arm, me: WorkerId, out: PathBuf) -> Result<(), WorkerError> {
@@ -292,6 +301,7 @@ fn run_worker(arm: &Arm, me: WorkerId, out: PathBuf) -> Result<(), WorkerError> 
         injection,
         audit_every_point: true,
     };
+    let seed: Vec<(Vec<f64>, f64)> = built.iter().map(|s| (cell_flux(s), flux_scale(s))).collect();
     let mut stores: Vec<&mut FieldStore<3, 3, HostMemory, f64>> = built.iter_mut().map(|s| &mut **s).collect();
     let kernel_refs: Vec<_> = kernels.iter().collect();
     let report = evolve_worker(
@@ -308,7 +318,12 @@ fn run_worker(arm: &Arm, me: WorkerId, out: PathBuf) -> Result<(), WorkerError> 
     fabric.finish(TRANSFER_DEADLINE)?;
     drop(stores);
     std::fs::write(&out, dump(&built, &mine, arm)).unwrap();
-    let div = built.iter().map(tile_div).fold(0.0, f64::max);
+    // the largest change of a cell's weighted flux from the seed's, relative to the tile's flux scale
+    let div = built
+        .iter()
+        .zip(&seed)
+        .map(|(s, (flux, scale))| cell_flux(s).iter().zip(flux).map(|(a, b)| (a - b).abs()).fold(0.0, f64::max) / scale)
+        .fold(0.0, f64::max);
     println!(
         "REPORT steps={} exchanges={} neighbor={} troubled={} frozen={} audits={} div={}",
         report.steps,
@@ -475,25 +490,6 @@ fn assemble(outcomes: &[Outcome], label: &str) -> Assembled {
     }
 }
 
-fn assembled_div(a: &Assembled) -> f64 {
-    let mut worst = 0.0f64;
-    for i in 0..N {
-        for j in 0..N {
-            for k in 0..N {
-                let g = [i, j, k];
-                let mut div = 0.0;
-                for d in 0..3 {
-                    let mut up = g;
-                    up[d] += 1;
-                    div += f64::from_bits(a.faces[d][at(up)]) - f64::from_bits(a.faces[d][at(g)]);
-                }
-                worst = worst.max(div.abs());
-            }
-        }
-    }
-    worst
-}
-
 fn differing(a: &Assembled, b: &Assembled) -> usize {
     a.den.iter().zip(&b.den).filter(|(x, y)| x != y).count()
         + (0..3).map(|d| a.faces[d].iter().zip(&b.faces[d]).filter(|(x, y)| x != y).count()).sum::<usize>()
@@ -553,9 +549,11 @@ fn assert_cut_matches_uncut(test: &str, case: Case) {
     assert!(differing(&want, &assemble(&clean, "clean")) > 0, "{label}: the flag left the one-worker run unchanged; the gate is vacuous");
     let reference_report = reference[0].report.clone().expect("report");
     assert_eq!((reference_report.troubled, reference_report.frozen), (1, 0), "{label}: uncut census");
-    // the seed's coordinate divergence on the spherical grid, which the constrained
-    // transport preserves; every arm must hold the one worker's value exactly
-    let seed_div = reference_report.div;
+    // the CT curl keeps every cell's weighted flux: STEPS x 2 stages = 12 curl updates, each moving
+    // a cell's six-face sum by at most six round-offs of the flux scale, bound the change by 72 u
+    // (measured 5.4 u to 6.0 u over the pole band and both cuts)
+    let bound = 72.0 * 0.5 * f64::EPSILON;
+    assert!(reference_report.div <= bound, "{label}: one worker's cell flux moved by {:e} of its scale", reference_report.div);
 
     let outcomes = run_arm(test, "cut", &case.arm, &inject);
     assert_all_ok(&outcomes, &label);
@@ -567,10 +565,9 @@ fn assert_cut_matches_uncut(test: &str, case: Case) {
         assert_eq!(r.troubled, u64::from(w == case.holder), "{label}: worker {w} troubled cells");
         assert_eq!(r.neighbor > 0, case.neighbors.contains(&w), "{label}: worker {w} clean-tile corrections {}", r.neighbor);
         assert_eq!(r.audits, 1 + 2 * STEPS, "{label}: worker {w} audits");
-        assert!(r.div <= seed_div, "{label}: worker {w} tile-local div B {:e} above the seed's {seed_div:e}", r.div);
+        assert!(r.div <= bound, "{label}: worker {w} moved a cell's weighted flux by {:e} of its scale", r.div);
     }
     let got = assemble(&outcomes, &label);
-    assert_eq!(assembled_div(&got).to_bits(), assembled_div(&want).to_bits(), "{label}: assembled div B differs from the one worker's");
     let n = differing(&got, &want);
     assert_eq!(n, 0, "{label}: {n} cells or faces differ from the one-worker run");
 }

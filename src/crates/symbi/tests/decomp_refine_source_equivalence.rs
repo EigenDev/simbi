@@ -6,8 +6,10 @@
 // round-off through the production `evolve_hierarchy_decomposed` loop. the source is the
 // position-dependent force a = [x, 0] (VARIABLE_X1 -> the cell's global x): a tile or fine
 // level evaluating it at a local coordinate diverges at every cut and level seam, and only a
-// position-dependent force exposes either bug. the canonical per-level stage drives the additive
-// source_apply on every level of every tile.
+// position-dependent force exposes either bug. the refined patch lies in the last tile, away from
+// the origin on every cut axis, and every tile is placed as production places it (the whole
+// grid's origin and an index offset) on 48 cells a side, a spacing no power of two divides. the
+// canonical per-level stage drives the additive source_apply on every level of every tile.
 // =============================================================================
 
 use symbi::regimes::substrate_newton::AdiabaticSubstrateKernelSet;
@@ -29,7 +31,8 @@ use symbi_xpu::{CpuSpace, HostMemory};
 
 const GAMMA: f64 = 1.4;
 const CFL: f64 = 0.4;
-const N: usize = 32;
+/// cells per axis: no power of two divides the spacing 1/48
+const N: usize = 48;
 const DX: f64 = 1.0 / N as f64;
 const T_FINAL: f64 = 0.04;
 
@@ -49,24 +52,26 @@ fn kset(sim: &Sim) -> Kern {
     Kern::new(GAMMA, CFL, &sim.geom.allocated).with_runtime_source(built, cfg.params.clone())
 }
 
-// a smooth bump in the bottom-left quadrant; the refined patch covers it and stays inside
-// tile 0 for every tested topology (cuts at x = 0.5 and/or y = 0.5).
+// a smooth bump in the top-right quadrant; the refined patch covers it and lies inside the last
+// tile for every tested topology (cuts at x = 0.5 and/or y = 0.5), away from the origin
 fn bump(x: f64, y: f64) -> f64 {
-    0.3 * (-(((x - 0.25) / 0.08).powi(2) + ((y - 0.25) / 0.08).powi(2))).exp()
+    0.3 * (-(((x - 0.75) / 0.08).powi(2) + ((y - 0.75) / 0.08).powi(2))).exp()
 }
 
 fn patch() -> RefinementRegion<2> {
     RefinementRegion {
-        x_lo: [0.125, 0.125],
-        x_hi: [0.375, 0.375],
+        x_lo: [0.625, 0.625],
+        x_hi: [0.875, 0.875],
     }
 }
 
-fn build_root(cells: [usize; 2], origin: [f64; 2], bnd: Boundaries<2>) -> Sim {
+/// a root grid of `cells` placed at the whole grid's origin and the index offset of its first cell
+fn build_root(cells: [usize; 2], offset: [usize; 2], bnd: Boundaries<2>) -> Sim {
     Sim::build(Newtonian, IdealGas { gamma: GAMMA }, Cartesian)
         .cells(cells)
         .spacing([DX; 2])
-        .origin(origin)
+        .origin([0.0, 0.0])
+        .index_offset([offset[0] as isize, offset[1] as isize])
         .boundaries(bnd)
         .cfl(CFL)
         .timestepping(Timestepping::Euler)
@@ -82,7 +87,7 @@ fn build_root(cells: [usize; 2], origin: [f64; 2], bnd: Boundaries<2>) -> Sim {
 fn build_mono() -> Hier {
     let root = build_root(
         [N, N],
-        [0.0, 0.0],
+        [0, 0],
         Boundaries::uniform(BoundaryType::Outflow),
     );
     let k = kset(&root);
@@ -99,7 +104,8 @@ fn build_tiles(counts: [usize; 2]) -> Vec<Hier> {
     let mut tiles = Vec::with_capacity(total);
     for flat in 0..total {
         let tc = unflatten(flat, counts);
-        let origin = std::array::from_fn(|a| tc[a] as f64 * m[a] as f64 * DX);
+        let offset: [usize; 2] = std::array::from_fn(|a| tc[a] * m[a]);
+        let origin: [f64; 2] = std::array::from_fn(|a| offset[a] as f64 * DX);
         let bnd = Boundaries(std::array::from_fn(|a| {
             let lo = if tc[a] == 0 {
                 BoundaryType::Outflow
@@ -113,7 +119,7 @@ fn build_tiles(counts: [usize; 2]) -> Vec<Hier> {
             };
             [lo, hi]
         }));
-        let root = build_root(m, origin, bnd);
+        let root = build_root(m, offset, bnd);
         let owns_patch = (0..2).all(|a| {
             origin[a] <= patch().x_lo[a] && origin[a] + m[a] as f64 * DX >= patch().x_hi[a]
         });
@@ -178,9 +184,12 @@ fn composite_fine(
         if h.levels.len() > 1 {
             let fine = &h.levels[1].state;
             let flo: [isize; 2] = std::array::from_fn(|a| fine.geom.interior.spaces[a].lo);
+            // the fine level indexes its cells from its own index offset, the tile's root offset
+            // refined: a cell's whole-grid fine index is its local index plus that offset
+            let off = fine.geom.index_offset;
             for c in fine.geom.interior.iter() {
-                let fx = (c[0] - flo[0]) as usize + (flo[0] as usize);
-                let fy = (c[1] - flo[1]) as usize + (flo[1] as usize);
+                let fx = ((c[0] - flo[0]) + flo[0] + off[0]) as usize;
+                let fy = ((c[1] - flo[1]) + flo[1] + off[1]) as usize;
                 out[fy * fn_n + fx] = pick(fine, c);
             }
         }
@@ -223,12 +232,14 @@ fn assert_matches(counts: [usize; 2]) {
         .zip(&dec_momx)
         .map(|(a, b)| (a - b).abs())
         .fold(0.0_f64, f64::max);
+    // every tile places its cells at the single grid's centers, so the decomposed march is the
+    // single hierarchy's bit for bit
     assert!(
-        de < 1e-12,
+        de == 0.0,
         "{counts:?}: density diverged under refined+decomposed source: {de:e}"
     );
     assert!(
-        me < 1e-12,
+        me == 0.0,
         "{counts:?}: mom_x diverged under refined+decomposed source: {me:e}"
     );
 }

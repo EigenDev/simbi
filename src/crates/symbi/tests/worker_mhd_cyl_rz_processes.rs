@@ -625,6 +625,17 @@ fn assert_cut_matches_uncut(
     assert_all_ok(&reference, "uncut");
     let want = assemble(&reference, "uncut");
     let clean_grid = assemble(&clean, "clean");
+    if ct != "contact" {
+        // premise: the edge EMF under test changes the run against contact, so a silent fallback
+        // to contact cannot pass for it
+        let mut contact = vec![("W_CT", "contact".to_string())];
+        contact.extend(extra.iter().cloned());
+        let contact_run = run_arm(test, &format!("clean_contact_against_{ct}_{stage}"), &uncut(), &contact);
+        assert_all_ok(&contact_run, "clean contact");
+        let contact_grid = assemble(&contact_run, "clean contact");
+        let apart = clean_grid.den.iter().zip(&contact_grid.den).filter(|(a, b)| a != b).count() + differing_faces(&clean_grid, &contact_grid);
+        assert!(apart > 0, "{label}: {ct} and contact evolve the same run; the {ct} arms test nothing contact does not");
+    }
     let changed = want
         .den
         .iter()

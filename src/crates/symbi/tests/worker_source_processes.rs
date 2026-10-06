@@ -5,8 +5,11 @@
 // independently parameterized forces sum to a = [x, 0] with the position leaf
 // reading the cell's global x, so a tile that evaluated its source at a
 // tile-local coordinate would depart from the one-worker run at every cut.
-// two workers, four, and three tiles owned unevenly reach the one-worker
-// state bit for bit, and the sources changed the run.
+// tiles are placed as production places them (the whole grid's origin and an
+// index offset) on 60 cells a side, a spacing no power of two divides, so a
+// tile-local coordinate or a per-tile origin lands an ulp or a cut away. two
+// workers, four, and three tiles owned unevenly reach the one-worker state bit
+// for bit, and the sources changed the run.
 //
 // run: cargo test -p symbi --test worker_source_processes
 // =============================================================================
@@ -44,7 +47,8 @@ type Kern = AdiabaticSubstrateKernelSet<HostMemory, f64, 2>;
 type Store = FieldStore<2, 2, HostMemory, f64>;
 
 const ROLE: &str = "SYMBI_FABRIC_TEST_ROLE";
-const N: usize = 64;
+/// cells per axis: no power of two divides the spacing 1/60
+const N: usize = 60;
 const DX: f64 = 1.0 / N as f64;
 const GAMMA: f64 = 1.4;
 const CFL: f64 = 0.4;
@@ -164,7 +168,10 @@ fn tile(arm: &Arm, flat: usize) -> (Sim, Kern) {
     let sim = Sim::build(Newtonian, IdealGas { gamma: GAMMA }, Cartesian)
         .cells([ext[0].1, ext[1].1])
         .spacing([DX; 2])
-        .origin([ext[0].0 as f64 * DX, ext[1].0 as f64 * DX])
+        // the production placement: the whole grid's origin and the tile's index offset, so every
+        // cell center is the single grid's to the bit on a spacing no power of two divides
+        .origin([0.0, 0.0])
+        .index_offset([ext[0].0 as isize, ext[1].0 as isize])
         .boundaries(bnd)
         .timestepping(Timestepping::Rk2)
         .allocate()
