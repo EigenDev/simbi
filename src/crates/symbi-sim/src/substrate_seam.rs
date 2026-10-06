@@ -408,6 +408,18 @@ where
         false
     }
 
+    /// the consecutive substages of this kernel set's level that ended with a freeze outside any
+    /// excision region: the count the FOFC halt reads. it advances on every executed substage, a
+    /// rejected attempt's included, and starts at zero in each session. a tiled march agrees one
+    /// level-wide value: it sets every tile's count before the correction pass and advances the
+    /// agreed value when any tile froze. default: no count.
+    fn freeze_streak(&self) -> u32 {
+        0
+    }
+
+    /// the freeze count the next correction pass advances from
+    fn set_freeze_streak(&self, _streak: u32) {}
+
     /// whether the isothermal closure's sound speed field varies over `store`, in which case a
     /// cut ghost filled by continuation from the tile's own interior holds another cell's
     /// temperature and the tile cannot stand for the whole grid. false where the closure is

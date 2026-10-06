@@ -647,6 +647,14 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize, const
         true
     }
 
+    fn freeze_streak(&self) -> u32 {
+        self.freeze_streak.load(std::sync::atomic::Ordering::Relaxed)
+    }
+
+    fn set_freeze_streak(&self, streak: u32) {
+        self.freeze_streak.store(streak, std::sync::atomic::Ordering::Relaxed);
+    }
+
     fn rollback_snapshot_is_complete(&self, sim: &FieldStore<D, DOF, Mem, Sc>) -> bool {
         crate::regimes::fofc::gas_rollback_snapshot_is_complete(sim)
     }

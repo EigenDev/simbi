@@ -171,7 +171,7 @@ macro_rules! matrix_tests {
                 }
                 Hook::Unrecoverable(cell) => {
                     if s.geom.interior.contains(local(cell)) {
-                        *s.workspace.unrecoverable_once.lock().unwrap() = Some((1, 0, local(cell), false));
+                        *s.workspace.unrecoverable_once.lock().unwrap() = vec![(1, 0, local(cell), false)];
                     }
                 }
             }

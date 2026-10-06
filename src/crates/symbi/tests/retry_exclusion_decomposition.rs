@@ -87,7 +87,7 @@ fn tile(ext: [(usize, usize); 3], bnd: Boundaries<3>, policy: RetryExclusion) ->
         s.geom.interior.spaces[a].lo + CELL[a] as isize - ext[a].0 as isize
     });
     if s.geom.interior.contains(local) {
-        *s.workspace.unrecoverable_once.lock().unwrap() = Some((POISON_STEP, 0, local, false));
+        *s.workspace.unrecoverable_once.lock().unwrap() = vec![(POISON_STEP, 0, local, false)];
     }
     s
 }

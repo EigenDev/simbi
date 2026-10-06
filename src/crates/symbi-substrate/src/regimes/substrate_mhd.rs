@@ -898,6 +898,14 @@ where
         true
     }
 
+    fn freeze_streak(&self) -> u32 {
+        self.freeze_streak.load(std::sync::atomic::Ordering::Relaxed)
+    }
+
+    fn set_freeze_streak(&self, streak: u32) {
+        self.freeze_streak.store(streak, std::sync::atomic::Ordering::Relaxed);
+    }
+
     fn isothermal_closure_varies(&self, sim: &FieldStore<D, 3, Mem, Sc>) -> bool {
         sim.fields.cs2.as_ref().is_some_and(|cs2| {
             let cs2 = cs2.view();

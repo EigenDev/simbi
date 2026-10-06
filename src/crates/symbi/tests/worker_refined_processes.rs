@@ -499,7 +499,7 @@ fn run_worker(arm: &Arm, me: WorkerId, out: PathBuf) -> Result<(), WorkerError> 
         for (k, id) in fine_ids.iter().enumerate() {
             if let Some(local) = id.and_then(|id| fine.local_cell(id, cell)) {
                 *tiles[k].levels[1].state.workspace.unrecoverable_once.lock().unwrap() =
-                    Some((freeze[0], freeze[1] as usize, local, false));
+                    vec![(freeze[0], freeze[1] as usize, local, false)];
             }
         }
     }

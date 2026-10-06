@@ -1258,6 +1258,8 @@ where
                         });
                     }
                 }
+                // every tile, on every worker, holds the level's agreed freeze count between passes
+                let prior_streak = kernels[0].freeze_streak();
                 for k in 0..n {
                     let outcome = with_device(dev(k), || {
                         fold_stage_from_correction(
@@ -1270,6 +1272,15 @@ where
                     });
                     retry |= outcome == StageOutcome::RetryStep;
                     report.neighbor_corrections += u64::from(cut_trouble[k] && clean[k]);
+                }
+                let clock = Instant::now();
+                let froze = fabric
+                    .collective(OpKind::Any, u64::from((0..n).any(|k| kernels[k].freeze_streak() > 0)), deadline)
+                    .map_err(|e| fail(fabric, e.into()))?;
+                timing.collectives += clock.elapsed();
+                let streak = crate::stage::agreed_freeze_streak(prior_streak, froze != 0);
+                for k in 0..n {
+                    kernels[k].set_freeze_streak(streak);
                 }
                 if attempt == 0 && cfg.injection.reject_at.contains(&(iter, stage.index)) {
                     retry = true;

@@ -307,6 +307,17 @@ pub struct StageArgs {
     pub exit_fraction: f64,
 }
 
+/// the freeze count of one level that a tiled march agrees after every correction pass, so the FOFC
+/// halt reads the level-wide streak a single grid reads: the consecutive substages that ended with a
+/// freeze outside any excision region anywhere on the level. it advances on every executed
+/// substage, a rejected attempt's included, and starts at zero in each session. every tile's kernel
+/// holds the agreed count between passes, so a tile that freezes advances it to the level-wide
+/// value and makes the halt and retry decisions there. `prior` is the count the tiles held before
+/// the pass, `any_froze` whether any tile of the level, on any worker, left it with a nonzero count.
+pub fn agreed_freeze_streak(prior: u32, any_froze: bool) -> u32 {
+    if any_froze { prior + 1 } else { 0 }
+}
+
 #[must_use]
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum StageOutcome {
@@ -456,21 +467,21 @@ where
     1
 }
 
-/// the store's one-shot unrecoverable cell, applied at `point` of the stage it names: a deeply
+/// the store's scheduled unrecoverable cell for this stage, applied at `point`: a deeply
 /// negative energy (the density, on a regime without an energy field) into the stage input after the
 /// fluxes, at the cell wherever the store holds it, halo included, so every tile sharing the cell
 /// restarts its redo from the same input; and into the stage output before the recovery, on the
-/// interior, where the slot is marked fired.
+/// interior, where its entry is marked fired.
 fn apply_unrecoverable<const D: usize, const DOF: usize, Mem, Sc>(sim: &FieldStore<D, DOF, Mem, Sc>, stage: usize, point: HookPoint)
 where
     Mem: MemorySpace,
     Sc: Scalar + OrderedNumeric,
 {
-    let mut slot = sim.workspace.unrecoverable_once.lock().expect("the unrecoverable-cell slot");
-    let Some((iteration, at_stage, cell, fired)) = *slot else { return };
-    if fired || (iteration, at_stage) != (sim.iteration, stage) {
+    let mut slots = sim.workspace.unrecoverable_once.lock().expect("the unrecoverable-cell slots");
+    let Some(slot) = slots.iter_mut().find(|(iteration, at_stage, _, fired)| !fired && (*iteration, *at_stage) == (sim.iteration, stage)) else {
         return;
-    }
+    };
+    let (iteration, at_stage, cell, _) = *slot;
     // the poisoned conserved: the total energy, or the density of a regime without an energy field
     fn poisoned<const D: usize, const DOF: usize, Mem: MemorySpace, Sc: Scalar + OrderedNumeric>(
         u: &ConsFieldsGeneric<D, DOF, Mem, Sc>,
@@ -480,7 +491,7 @@ where
     let field = match point {
         HookPoint::AfterFlux => poisoned(sim.stage_input()),
         HookPoint::BeforeC2p => {
-            *slot = Some((iteration, at_stage, cell, true));
+            *slot = (iteration, at_stage, cell, true);
             // the stage output carries state on the interior alone
             if !sim.geom.interior.contains(cell) {
                 return;
@@ -520,14 +531,15 @@ where
     // the stage input: flag it and skip the copy — `stage_input()` binds u_n
     // for this stage. forward-Euler takes no per-step snapshot, so the copy
     // stands there.
-    // a stage the one-shot unrecoverable cell arms takes its own snapshot, so the negative energy
+    // a stage a scheduled unrecoverable cell arms takes its own snapshot, so the negative energy
     // lands in the redo's input alone and leaves the step snapshot u_n whole, on every driver
     let unrecoverable_armed = sim
         .workspace
         .unrecoverable_once
         .lock()
-        .expect("the unrecoverable-cell slot")
-        .is_some_and(|(iteration, stage, _, _)| (iteration, stage) == (sim.iteration, args.stage));
+        .expect("the unrecoverable-cell slots")
+        .iter()
+        .any(|&(iteration, stage, _, _)| (iteration, stage) == (sim.iteration, args.stage));
     let stage_input_is_un = args.stage == 0
         && args.n_stages > 1
         && args.allow_elision

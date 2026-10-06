@@ -856,12 +856,19 @@ where
                     ExchangePoint::Troubled(ii as u8), iter, attempt, transport, fabric, deadline, &mut timing,
                     &mut report.troubled_exchanges,
                 )?;
+                // every held root tile holds the root's agreed freeze count between passes
+                let prior_streak = tiles[0].levels[0].kernels.freeze_streak();
                 let mut retry = false;
                 for k in 0..n {
                     report.neighbor_corrections += u64::from(cut_trouble[k] && marks[k].troubled == 0);
                     retry |= with_device(root_dev(k), || {
                         tiles[k].level_stage_from_correction(0, ii, dt, 0.0, cut_trouble[k], marks[k].receipt_start)
                     });
+                }
+                let froze = (0..n).any(|k| tiles[k].levels[0].kernels.freeze_streak() > 0);
+                let streak = vote_freeze_streak(fabric, prior_streak, froze, deadline, &mut timing)?;
+                for k in 0..n {
+                    tiles[k].levels[0].kernels.set_freeze_streak(streak);
                 }
                 if attempt == 0 && base.injection.reject_at.contains(&(iter, ii)) {
                     retry = true;
@@ -976,12 +983,18 @@ where
                             ExchangePoint::Fine { substep: sub as u8, point: FinePoint::Troubled(jj as u8) },
                             iter, attempt, transport, fabric, deadline, &mut timing, &mut report.fine_troubled_exchanges,
                         )?;
+                        let prior_streak = refined.first().map_or(0, |&k| tiles[k].levels[1].kernels.freeze_streak());
                         let mut retry = false;
                         for (r, &k) in refined.iter().enumerate() {
                             report.fine_neighbor_corrections += u64::from(cut_trouble[r] && marks[r].troubled == 0);
                             retry |= with_device(fine_dev(k), || {
                                 tiles[k].level_stage_from_correction(1, jj, fine_dt, alpha, cut_trouble[r], marks[r].receipt_start)
                             });
+                        }
+                        let froze = refined.iter().any(|&k| tiles[k].levels[1].kernels.freeze_streak() > 0);
+                        let streak = vote_freeze_streak(fabric, prior_streak, froze, deadline, &mut timing)?;
+                        for &k in &refined {
+                            tiles[k].levels[1].kernels.set_freeze_streak(streak);
                         }
                         if vote_retry(fabric, retry, deadline, &mut timing)? {
                             rejected = true;
@@ -1356,12 +1369,18 @@ where
                 tiles, level, &mine, plan, &ids, devices, troubled, at(FinePoint::Troubled(jj as u8)),
                 step, attempt, cx.transport, fabric, deadline, timing, &mut report.fine_troubled_exchanges,
             )?;
+            let prior_streak = mine.first().map_or(0, |&k| tiles[k].levels[level].kernels.freeze_streak());
             let mut retry = false;
             for (r, &k) in mine.iter().enumerate() {
                 report.fine_neighbor_corrections += u64::from(cut_trouble[r] && marks[r].troubled == 0);
                 retry |= with_device(dev(r), || {
                     tiles[k].level_stage_from_correction(level, jj, level_dt, alpha, cut_trouble[r], marks[r].receipt_start)
                 });
+            }
+            let froze = mine.iter().any(|&k| tiles[k].levels[level].kernels.freeze_streak() > 0);
+            let streak = vote_freeze_streak(fabric, prior_streak, froze, deadline, timing)?;
+            for &k in &mine {
+                tiles[k].levels[level].kernels.set_freeze_streak(streak);
             }
             if vote_retry(fabric, retry, deadline, timing)? {
                 return Ok(true);
@@ -1660,6 +1679,24 @@ where
         with_device(device(k), || tiles[k].finish_level_tail_post(level, dt));
     }
     Ok(())
+}
+
+/// the level's agreed freeze count after a correction pass, voted across the workers: the count
+/// every held tile of the level held before the pass, advanced when any tile of the level on any
+/// worker froze (`symbi_sim::stage::agreed_freeze_streak`)
+fn vote_freeze_streak<L: Link>(
+    fabric: &mut Fabric<L>,
+    prior: u32,
+    froze: bool,
+    deadline: Duration,
+    timing: &mut WorkerTiming,
+) -> Result<u32, WorkerError> {
+    let clock = Instant::now();
+    let any = fabric
+        .collective(OpKind::Any, u64::from(froze), deadline)
+        .map_err(|e| fail(fabric, e.into()))?;
+    timing.collectives += clock.elapsed();
+    Ok(symbi_sim::stage::agreed_freeze_streak(prior, any != 0))
 }
 
 fn vote_retry<L: Link>(

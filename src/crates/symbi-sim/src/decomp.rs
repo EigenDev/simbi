@@ -2896,6 +2896,8 @@ where
                         });
                     }
                 }
+                // every tile holds the level's agreed freeze count between passes
+                let prior_streak = kernels[0].freeze_streak();
                 for i in 0..n {
                     let outcome = symbi_xpu::with_device(devices[i], || {
                         crate::stage::fold_stage_from_correction(
@@ -2907,6 +2909,10 @@ where
                         )
                     });
                     retry |= outcome == crate::stage::StageOutcome::RetryStep;
+                }
+                let streak = crate::stage::agreed_freeze_streak(prior_streak, (0..n).any(|i| kernels[i].freeze_streak() > 0));
+                for i in 0..n {
+                    kernels[i].set_freeze_streak(streak);
                 }
                 if retry {
                     break;

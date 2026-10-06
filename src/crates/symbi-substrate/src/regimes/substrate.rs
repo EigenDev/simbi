@@ -661,6 +661,14 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize> Kerne
         true
     }
 
+    fn freeze_streak(&self) -> u32 {
+        self.freeze_streak.load(std::sync::atomic::Ordering::Relaxed)
+    }
+
+    fn set_freeze_streak(&self, streak: u32) {
+        self.freeze_streak.store(streak, std::sync::atomic::Ordering::Relaxed);
+    }
+
     fn isothermal_closure_varies(&self, sim: &FieldStore<D, D, Mem, Sc>) -> bool {
         let cs2 = self.cs2.view();
         let mut cells = sim.geom.allocated.iter();

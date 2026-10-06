@@ -774,6 +774,14 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize, const
         DOF == D
     }
 
+    fn freeze_streak(&self) -> u32 {
+        self.freeze_streak.load(std::sync::atomic::Ordering::Relaxed)
+    }
+
+    fn set_freeze_streak(&self, streak: u32) {
+        self.freeze_streak.store(streak, std::sync::atomic::Ordering::Relaxed);
+    }
+
     fn is_viscous(&self) -> bool {
         self.viscosity != 0.0 || self.alpha != 0.0
     }

@@ -5743,11 +5743,18 @@ where
             });
         }
     }
+    // every tile holding the level holds its agreed freeze count between passes
+    let prior_streak = order.first().map_or(0, |&i| tiles[i].levels[level].kernels.freeze_streak());
     let mut retry = false;
     for (k, &i) in order.iter().enumerate() {
         retry |= symbi_xpu::with_device(devices[k], || {
             tiles[i].level_stage_from_correction(level, ii, dt, alpha0, cut_trouble[k], marks[k].receipt_start)
         });
+    }
+    let froze = order.iter().any(|&i| tiles[i].levels[level].kernels.freeze_streak() > 0);
+    let streak = symbi_sim::stage::agreed_freeze_streak(prior_streak, froze);
+    for &i in order {
+        tiles[i].levels[level].kernels.set_freeze_streak(streak);
     }
     retry
 }
