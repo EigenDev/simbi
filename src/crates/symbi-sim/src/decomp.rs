@@ -21,7 +21,7 @@
 
 use crate::atlas::FieldLayout;
 use crate::driver::{advance_state_clock, book_horizon_receipt, horizon_request, prof};
-use crate::state::{BoundaryType, FieldStore, PartitionGeometry, Timestepping};
+use crate::state::{Boundaries, BoundaryType, FieldStore, PartitionGeometry, Timestepping};
 use crate::substrate_seam::KernelSet;
 use std::ops::ControlFlow;
 use symbi_algebra::{Domain, Side};
@@ -1487,6 +1487,26 @@ pub fn schedule_of_tiles<const D: usize, const DOF: usize, M: MemorySpace>(
     Schedule::derive(counts, tiles[0].geom.ng, topology)
 }
 
+/// a periodic face on a tile refills its ghosts from that tile's own opposite interior, which
+/// is the far side of the domain only on an uncut axis. on a cut axis the domain seam is closed
+/// by the schedule's end-to-end legs and its two faces are cuts, so a tile declaring a periodic
+/// face there is refused before the march begins.
+pub fn assert_cut_axes_declare_cuts<'a, const D: usize>(
+    boundaries: impl IntoIterator<Item = &'a Boundaries<D>>,
+    counts: [usize; D],
+) {
+    for bnd in boundaries {
+        for ax in (0..D).filter(|&ax| counts[ax] > 1) {
+            assert!(
+                bnd.lo(ax) != BoundaryType::Periodic && bnd.hi(ax) != BoundaryType::Periodic,
+                "axis {ax} is cut into {} tiles and a tile declares a periodic face on it; the \
+                 domain seam of a cut axis is a cut filled by the schedule's wrap legs",
+                counts[ax]
+            );
+        }
+    }
+}
+
 /// the four regions a leg moves: the `lo` tile's hi-ghost strip with the `hi`-tile source that
 /// fills it, and the `hi` tile's lo-ghost strip with the `lo`-tile source that fills it. every
 /// index comes from the field layouts' own spans, so unequal tiles need no special case.
@@ -2655,6 +2675,7 @@ where
 {
     crate::retry_guard::assert_one_retry_exclusion(stores.iter().map(|s| &s.retry_exclusion));
     let counts = schedule.counts();
+    assert_cut_axes_declare_cuts(stores.iter().map(|s| &s.boundaries), counts);
     let stages = ts.stages();
     let multistage = crate::driver::needs_step_snapshot(stages);
     let n = stores.len();

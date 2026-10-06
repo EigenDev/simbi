@@ -9,25 +9,27 @@
 // on a cylindrical (r, z) or spherical (r, theta) grid the wave speeds, the
 // geometric source, and the face areas all depend on r. so a radial cut hands
 // each tile a different r-range: a tile is not a translate of its neighbor the
-// way a cartesian tile is. the only thing that makes the decomposed run
-// reproduce the monolithic one is a per-tile radial origin placed so the tile's
-// local cell i sits at the same physical r as the undecomposed grid's global
-// cell tc*m + i, plus the halo exchange feeding each cut face the neighbor's
-// interior.
+// way a cartesian tile is. each tile is placed as production places it: the
+// whole grid's origin and coordinate maps plus the index offset of its first
+// cell, so the tile's local cell i evaluates the same physical r as the
+// undecomposed grid's global cell lo + i; the halo exchange feeds each cut face
+// the neighbor's interior.
 //
 // a smooth radial pulse (density + pressure) launches waves that cross the radial
-// cut; the decomposed density must match the monolithic density to round-off, and
+// cut; the decomposed density must match the monolithic density bit for bit, and
 // a non-vacuity guard requires the pulse to have actually moved (else a broken
 // exchange would match a frozen field trivially).
 //
 // r starts at R_LO > 0: the axis r = 0 is a coordinate singularity and no cut is
-// placed on it. the harness drives the production `evolve_decomposed` loop, the
-// same one the multi-gpu python entry runs.
+// placed on it. the harness drives the production `evolve_scheduled` loop with the
+// transverse axis wrapping across the tiles, the loop the multi-gpu python entry runs.
 // =============================================================================
 
 use symbi::regimes::substrate_gpu::device_sync;
 use symbi::regimes::substrate_newton::AdiabaticSubstrateKernelSet;
-use symbi::sim::decomp::{LocalCopy, Partition, evolve_decomposed, flatten, unflatten};
+use symbi::sim::decomp::{
+    LocalCopy, Partition, Schedule, Topology, evolve_decomposed, evolve_scheduled, flatten, unflatten,
+};
 use symbi::sim::state::*;
 use symbi_algebra::Tensor;
 use symbi_geometry::{AxisMap, Cylindrical, Spherical};
@@ -59,55 +61,37 @@ fn log_slope() -> f64 {
     (R_HI / R_LO).log10() / NR as f64
 }
 
-// the per-tile radial origin and coordinate maps for a tile whose first radial cell is the
-// global cell `lo0`. uniform: the radial axis starts at R_LO + tc0*m0*dr and the builder's
-// origin+spacing define the geometry (maps = None). log: the start is advanced
-// multiplicatively (R_LO * 10^(tile_lo*slope)) and a shifted Log map with the same slope carries
-// the geometry -- mirroring the production per-tile map shift, so a tile's local cell i sits at
-// the identical physical r as the undecomposed grid's global cell tc0*m0 + i.
-fn tile_radial(mode: u8, lo0: usize, z0: f64) -> (f64, Option<[AxisMap; 2]>) {
+// the whole grid's coordinate maps, shared by every tile. uniform: the builder's origin and
+// spacing define the geometry (maps = None). log: face(i) = R_LO * 10^(i*slope). geometric:
+// widths grow by `ratio` per cell from R_LO. a tile evaluates these maps at its whole-grid
+// index (local index + index offset), so its local cell i sits at the identical physical r as
+// the undecomposed grid's global cell lo + i.
+fn whole_maps(mode: u8) -> Option<[AxisMap; 2]> {
+    let transverse = AxisMap::Uniform {
+        start: 0.0,
+        dx: DT_AX,
+    };
     if mode == 1 {
-        let slope = log_slope();
-        let r_start = R_LO * 10.0_f64.powf(lo0 as f64 * slope);
-        (
-            r_start,
-            Some([
-                AxisMap::Log {
-                    start: r_start,
-                    log_slope: slope,
-                },
-                AxisMap::Uniform {
-                    start: z0,
-                    dx: DT_AX,
-                },
-            ]),
-        )
+        Some([
+            AxisMap::Log {
+                start: R_LO,
+                log_slope: log_slope(),
+            },
+            transverse,
+        ])
     } else if mode == 2 {
         let ratio = 0.98_f64;
         let width = (R_HI - R_LO) * (ratio - 1.0) / (ratio.powf(NR as f64) - 1.0);
-        let offset = lo0 as f64;
-        let global = AxisMap::Geometric {
-            start: R_LO,
-            width,
-            ratio,
-        };
-        let start = global.face(offset as isize);
-        (
-            start,
-            Some([
-                AxisMap::Geometric {
-                    start,
-                    width: width * ratio.powf(offset),
-                    ratio,
-                },
-                AxisMap::Uniform {
-                    start: z0,
-                    dx: DT_AX,
-                },
-            ]),
-        )
+        Some([
+            AxisMap::Geometric {
+                start: R_LO,
+                width,
+                ratio,
+            },
+            transverse,
+        ])
     } else {
-        (R_LO + lo0 as f64 * DR, None)
+        None
     }
 }
 
@@ -130,25 +114,27 @@ macro_rules! curvilinear_harness {
                 }
             }
 
+            // a tile placed as production places it: the whole grid's origin and maps and the
+            // index offset of its first cell
             fn make(
                 cells: [usize; 2],
-                origin: [f64; 2],
-                maps: Option<[AxisMap; 2]>,
+                offset: [usize; 2],
                 bnd: Boundaries<2>,
                 ts: Timestepping,
             ) -> (Sim, Kern) {
                 let sim = Sim::build(Newtonian, IdealGas { gamma: GAMMA }, $chart_val)
                     .cells(cells)
-                    .origin(origin)
+                    .origin([R_LO, 0.0])
                     .spacing([DR, DT_AX])
-                    .coord_maps(maps)
+                    .coord_maps(whole_maps(MAP_MODE))
+                    .index_offset(std::array::from_fn(|a| offset[a] as isize))
                     .boundaries(bnd)
                     .timestepping(ts)
                     .allocate()
                     .expect("curvilinear sim construction failed")
                     .set_initial(|x| {
-                        // x[0] is the physical radius of this cell (origin + i*dr), identical
-                        // for the monolithic grid and the tile that owns the cell.
+                        // x[0] is the physical radius of this cell at its whole-grid index,
+                        // identical for the monolithic grid and the tile that owns the cell.
                         let b = pulse(x[0]);
                         Prim::adiabatic(
                             Density(1.0 + b),
@@ -163,9 +149,10 @@ macro_rules! curvilinear_harness {
 
             // each tile's radial and transverse extents come from the partition, so unequal
             // cuts are as ordinary as even ones. a tile gets a CoarseFine face wherever it
-            // borders a neighbor; the radial ends are outflow and the transverse ends are
-            // periodic (a z-uniform / theta-uniform pulse never reaches them, so periodic and
-            // outflow agree, and periodic avoids any ghost-extrapolation asymmetry at a cut).
+            // borders a neighbor; the radial ends are outflow and the transverse axis is
+            // periodic. on an uncut transverse axis the one tile wraps onto itself; on a cut one
+            // the two seam faces are cuts too, filled by the schedule's end-to-end legs, as
+            // production declares them.
             fn grid_tiles(partition: &Partition<2>, ts: Timestepping) -> Vec<(Sim, Kern)> {
                 let counts = partition.counts();
                 (0..partition.n_tiles())
@@ -173,9 +160,7 @@ macro_rules! curvilinear_harness {
                         let tc = unflatten(flat, counts);
                         let ext = partition.tile_extents(tc);
                         let m: [usize; 2] = [ext[0].1, ext[1].1];
-                        let z0 = ext[1].0 as f64 * DT_AX;
-                        let (r0, maps) = tile_radial(MAP_MODE, ext[0].0, z0);
-                        let origin = [r0, z0];
+                        let offset = [ext[0].0, ext[1].0];
                         let bnd = Boundaries::per_axis([
                             [
                                 if tc[0] == 0 {
@@ -190,19 +175,19 @@ macro_rules! curvilinear_harness {
                                 },
                             ],
                             [
-                                if tc[1] == 0 {
+                                if tc[1] == 0 && counts[1] == 1 {
                                     BoundaryType::Periodic
                                 } else {
                                     BoundaryType::CoarseFine
                                 },
-                                if tc[1] == counts[1] - 1 {
+                                if tc[1] == counts[1] - 1 && counts[1] == 1 {
                                     BoundaryType::Periodic
                                 } else {
                                     BoundaryType::CoarseFine
                                 },
                             ],
                         ]);
-                        with_device(tile_device(flat), || make(m, origin, maps, bnd, ts))
+                        with_device(tile_device(flat), || make(m, offset, bnd, ts))
                     })
                     .collect()
             }
@@ -215,10 +200,13 @@ macro_rules! curvilinear_harness {
                     stores.push(&mut **s);
                     kernels.push(&*k);
                 }
-                evolve_decomposed(
+                // the transverse axis closes into a ring across the tiles
+                let schedule =
+                    Schedule::derive(counts, stores[0].geom.ng, &Topology::wrapping([false, true]));
+                evolve_scheduled(
                     &mut stores,
                     &kernels,
-                    counts,
+                    &schedule,
                     &devices,
                     ts,
                     0.0,
@@ -247,7 +235,7 @@ macro_rules! curvilinear_harness {
             }
 
             // run mono (counts = [1, 1]) and the requested decomposition, then assert the global
-            // density grids agree to round-off -- the whole point on a curvilinear chart, where
+            // density grids agree bit for bit -- the whole point on a curvilinear chart, where
             // each tile carries its own r-range and metric.
             pub fn assert_matches(counts: [usize; 2], ts: Timestepping) {
                 let partition =
@@ -294,7 +282,7 @@ macro_rules! curvilinear_harness {
                     .map(|(a, b)| (a - b).abs())
                     .fold(0.0_f64, f64::max);
                 assert!(
-                    max_err < 1e-12,
+                    max_err == 0.0,
                     "curvilinear decomposition {counts:?} ({ts:?}) vs monolithic density max err \
                      {max_err:e} (pulse moved {max_move:e})"
                 );
@@ -305,8 +293,8 @@ macro_rules! curvilinear_harness {
 
 curvilinear_harness!(cyl, Cylindrical, Cylindrical, 0);
 curvilinear_harness!(sph, Spherical, Spherical, 0);
-// log radial: the disk/accretor case, where the per-tile origin is advanced multiplicatively
-// and the coordinate-map arithmetic (not just a shifted linear extent) has to be right.
+// log radial: the disk/accretor case, where every tile evaluates the whole grid's log map at
+// its whole-grid index and the coordinate-map arithmetic has to be right.
 curvilinear_harness!(cyl_log, Cylindrical, Cylindrical, 1);
 curvilinear_harness!(sph_log, Spherical, Spherical, 1);
 curvilinear_harness!(sph_geometric, Spherical, Spherical, 2);
@@ -362,7 +350,7 @@ fn sph_geometric_radial_four_tile_rk2() {
 }
 
 // ragged radial cuts: tiles of 11, 18 and 19 cells span different r-ranges AND different
-// widths, so a tile's radial origin can only come from the partition's own extents. the
+// widths, so a tile's radial index offset can only come from the partition's own extents. the
 // transverse cut is unequal too (7 and 17 cells), which exercises the corner ghosts between
 // tiles that share no edge length.
 #[test]
@@ -373,8 +361,9 @@ fn cyl_ragged_six_tile_rk2() {
     cyl::assert_matches_partition(&ragged, Timestepping::Rk2);
 }
 
-// the log chart under ragged cuts: each tile's map start is R_LO * 10^(lo0 * slope) with lo0
-// read from the partition, so unequal tile widths land every cell at its monolithic radius.
+// the log chart under ragged cuts: each tile's index offset lo0 is read from the partition and
+// the whole grid's map places its cell i at R_LO * 10^((lo0 + i) * slope), so unequal tile
+// widths land every cell at its monolithic radius.
 #[test]
 fn cyl_log_ragged_six_tile_rk2() {
     let ragged = Partition::explicit([NR, NT], [vec![11, 29], vec![7]])
@@ -382,8 +371,9 @@ fn cyl_log_ragged_six_tile_rk2() {
     cyl_log::assert_matches_partition(&ragged, Timestepping::Rk2);
 }
 
-// the geometric chart under ragged cuts: the tile's first width is width * ratio^lo0, which
-// is wrong by a factor of ratio for every cell if tile extents are assumed even.
+// the geometric chart under ragged cuts: the tile's first width is width * ratio^lo0 with lo0
+// read from the partition, which is wrong by a factor of ratio for every cell if tile extents
+// are assumed even.
 #[test]
 fn sph_geometric_ragged_radial_rk2() {
     let ragged = Partition::explicit([NR, NT], [vec![11, 29], Vec::new()])
@@ -422,16 +412,19 @@ mod swirl {
         0.3 * (-((r - 1.5) / 0.1).powi(2)).exp()
     }
 
+    // a tile placed as production places it: the whole grid's origin and the index offset of
+    // its first cell
     fn make(
-        origin: [f64; 2],
+        offset: [usize; 2],
         bnd: Boundaries<2>,
         cells: [usize; 2],
         ts: Timestepping,
     ) -> (Sim, Kern) {
         let sim = Sim::build(Newtonian, IdealGas { gamma: GAMMA }, Cylindrical)
             .cells(cells)
-            .origin(origin)
+            .origin([R_LO, 0.0])
             .spacing([DR, DT_AX])
+            .index_offset(std::array::from_fn(|a| offset[a] as isize))
             .boundaries(bnd)
             .timestepping(ts)
             .allocate()
@@ -456,10 +449,7 @@ mod swirl {
         (0..total)
             .map(|flat| {
                 let tc = unflatten(flat, counts);
-                let origin = [
-                    R_LO + (tc[0] * m[0]) as f64 * DR,
-                    (tc[1] * m[1]) as f64 * DT_AX,
-                ];
+                let offset = [tc[0] * m[0], tc[1] * m[1]];
                 let bnd = Boundaries::per_axis([
                     [
                         if tc[0] == 0 {
@@ -486,7 +476,7 @@ mod swirl {
                         },
                     ],
                 ]);
-                with_device(tile_device(flat), || make(origin, bnd, m, ts))
+                with_device(tile_device(flat), || make(offset, bnd, m, ts))
             })
             .collect()
     }
@@ -563,7 +553,7 @@ mod swirl {
             .map(|(a, b)| (a - b).abs())
             .fold(0.0_f64, f64::max);
         assert!(
-            max_err < 1e-12,
+            max_err == 0.0,
             "swirl decomposition {counts:?} ({ts:?}) vs monolithic S_phi max err {max_err:e} \
              (moved {max_move:e})"
         );

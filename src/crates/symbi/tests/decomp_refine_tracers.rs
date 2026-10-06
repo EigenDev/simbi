@@ -75,10 +75,11 @@ fn gradient_kernels(sim: &Sim) -> Kern {
         .0
 }
 
-fn root(cells: usize, origin: f64, boundaries: Boundaries<1>) -> Sim {
+fn root(cells: usize, offset: usize, boundaries: Boundaries<1>) -> Sim {
     Sim::build(Newtonian, IdealGas { gamma: GAMMA }, Cartesian)
         .cells([cells])
-        .origin([origin])
+        .origin([0.0])
+        .index_offset([offset as isize])
         .spacing([1.0 / N as f64])
         .boundaries(boundaries)
         .cfl(CFL)
@@ -89,10 +90,11 @@ fn root(cells: usize, origin: f64, boundaries: Boundaries<1>) -> Sim {
         .build()
 }
 
-fn resting_root(cells: usize, origin: f64, boundaries: Boundaries<1>) -> Sim {
+fn resting_root(cells: usize, offset: usize, boundaries: Boundaries<1>) -> Sim {
     Sim::build(Newtonian, IdealGas { gamma: GAMMA }, Cartesian)
         .cells([cells])
-        .origin([origin])
+        .origin([0.0])
+        .index_offset([offset as isize])
         .spacing([1.0 / N as f64])
         .boundaries(boundaries)
         .cfl(CFL)
@@ -111,10 +113,10 @@ fn region() -> RefinementRegion<1> {
 }
 
 fn global() -> Hier {
-    let coarse = root(N, 0.0, Boundaries::uniform(BoundaryType::Periodic));
+    let coarse = root(N, 0, Boundaries::uniform(BoundaryType::Periodic));
     let hierarchy = Hier::with_refinement(
         coarse,
-        kernels(&root(N, 0.0, Boundaries::uniform(BoundaryType::Periodic))),
+        kernels(&root(N, 0, Boundaries::uniform(BoundaryType::Periodic))),
         &[region()],
         ProlongOrder::Ppm,
         kernels,
@@ -125,7 +127,7 @@ fn global() -> Hier {
 }
 
 fn source_global() -> Hier {
-    let coarse = root(N, 0.0, Boundaries::uniform(BoundaryType::Periodic));
+    let coarse = root(N, 0, Boundaries::uniform(BoundaryType::Periodic));
     let coarse_kernels = source_kernels(&coarse);
     let hierarchy = Hier::with_refinement(
         coarse,
@@ -141,7 +143,7 @@ fn source_global() -> Hier {
 
 fn driven_global() -> Hier {
     let boundaries = Boundaries([[BoundaryType::Driven(0), BoundaryType::Outflow]]);
-    let coarse = resting_root(N, 0.0, boundaries);
+    let coarse = resting_root(N, 0, boundaries);
     let coarse_kernels = driven_kernels(&coarse);
     let hierarchy = Hier::with_refinement(
         coarse,
@@ -157,7 +159,7 @@ fn driven_global() -> Hier {
 
 fn gradient_global() -> Hier {
     let boundaries = Boundaries([[BoundaryType::Neumann(0), BoundaryType::Outflow]]);
-    let coarse = resting_root(N, 0.0, boundaries);
+    let coarse = resting_root(N, 0, boundaries);
     let coarse_kernels = gradient_kernels(&coarse);
     let hierarchy = Hier::with_refinement(
         coarse,
@@ -174,12 +176,10 @@ fn gradient_global() -> Hier {
 fn tiles() -> Vec<Hier> {
     let mut result = Vec::new();
     for tile in 0..2 {
-        let boundaries = if tile == 0 {
-            Boundaries([[BoundaryType::Periodic, BoundaryType::CoarseFine]])
-        } else {
-            Boundaries([[BoundaryType::CoarseFine, BoundaryType::Periodic]])
-        };
-        let coarse = root(N / 2, tile as f64 * 0.5, boundaries);
+        // the periodic axis is cut, so both domain-seam faces are cuts filled by the
+        // schedule's end-to-end legs, as production declares them
+        let boundaries = Boundaries([[BoundaryType::CoarseFine; 2]]);
+        let coarse = root(N / 2, tile * (N / 2), boundaries);
         let coarse_kernels = kernels(&coarse);
         let mut hierarchy = if tile == 0 {
             let hierarchy = Hier::with_refinement(
@@ -195,7 +195,7 @@ fn tiles() -> Vec<Hier> {
         } else {
             Hier::single(coarse, coarse_kernels)
         };
-        hierarchy.set_root_layout([N], [tile * (N / 2)], [false]);
+        hierarchy.set_root_layout([N], [tile * (N / 2)], [true]);
         hierarchy.prime();
         result.push(hierarchy);
     }
@@ -205,12 +205,10 @@ fn tiles() -> Vec<Hier> {
 fn source_tiles() -> Vec<Hier> {
     let mut result = Vec::new();
     for tile in 0..2 {
-        let boundaries = if tile == 0 {
-            Boundaries([[BoundaryType::Periodic, BoundaryType::CoarseFine]])
-        } else {
-            Boundaries([[BoundaryType::CoarseFine, BoundaryType::Periodic]])
-        };
-        let coarse = root(N / 2, tile as f64 * 0.5, boundaries);
+        // the periodic axis is cut, so both domain-seam faces are cuts filled by the
+        // schedule's end-to-end legs, as production declares them
+        let boundaries = Boundaries([[BoundaryType::CoarseFine; 2]]);
+        let coarse = root(N / 2, tile * (N / 2), boundaries);
         let coarse_kernels = source_kernels(&coarse);
         let mut hierarchy = if tile == 0 {
             let hierarchy = Hier::with_refinement(
@@ -226,7 +224,7 @@ fn source_tiles() -> Vec<Hier> {
         } else {
             Hier::single(coarse, coarse_kernels)
         };
-        hierarchy.set_root_layout([N], [tile * (N / 2)], [false]);
+        hierarchy.set_root_layout([N], [tile * (N / 2)], [true]);
         hierarchy.prime();
         result.push(hierarchy);
     }
@@ -241,7 +239,7 @@ fn driven_tiles() -> Vec<Hier> {
         } else {
             Boundaries([[BoundaryType::CoarseFine, BoundaryType::Outflow]])
         };
-        let coarse = resting_root(N / 2, tile as f64 * 0.5, boundaries);
+        let coarse = resting_root(N / 2, tile * (N / 2), boundaries);
         let coarse_kernels = driven_kernels(&coarse);
         let mut hierarchy = if tile == 0 {
             let hierarchy = Hier::with_refinement(
@@ -272,7 +270,7 @@ fn gradient_tiles() -> Vec<Hier> {
         } else {
             Boundaries([[BoundaryType::CoarseFine, BoundaryType::Outflow]])
         };
-        let coarse = resting_root(N / 2, tile as f64 * 0.5, boundaries);
+        let coarse = resting_root(N / 2, tile * (N / 2), boundaries);
         let coarse_kernels = gradient_kernels(&coarse);
         let mut hierarchy = if tile == 0 {
             let hierarchy = Hier::with_refinement(
@@ -452,10 +450,11 @@ fn decomposed_refined_source_spawning_matches_composite_added_mass() {
         "represented source mass {represented_added:e} != analytic source integral \
          {expected_added:e}"
     );
-    // the decomposed periodic halo reduction closes the fluid budget to about
-    // 2.5e-11 on this grid; tracer apportionment above remains exact.
+    // the wrap legs close the periodic seam, so the fluid budget is conservative to the
+    // round-off of summing the composite mass: N cells of mass 1/N each accumulate at most
+    // N eps = 7e-15 (measured 7e-18)
     assert!(
-        (fluid_added - expected_added).abs() < 1.0e-10,
+        (fluid_added - expected_added).abs() < 1.0e-14,
         "composite fluid addition {fluid_added:e} != analytic source integral \
          {expected_added:e}"
     );

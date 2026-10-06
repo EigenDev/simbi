@@ -6970,6 +6970,7 @@ where
     F: FnMut(u64, f64, &[Hierarchy<R, NDIM, DOF, M, E, S, Mem, K>]) -> ControlFlow<()>,
 {
     symbi_sim::retry_guard::assert_one_retry_exclusion(tiles.iter().flat_map(|h| h.levels.iter().map(|l| &l.state.retry_exclusion)));
+    symbi_sim::decomp::assert_cut_axes_declare_cuts(tiles.iter().map(|h| &h.levels[0].state.boundaries), counts);
     let n = tiles.len();
     for tile in tiles.iter_mut() {
         tile.blend_across_tiles = true;
