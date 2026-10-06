@@ -82,11 +82,14 @@ fn attach_fragments(sim: Sim) -> Sim {
     sim
 }
 
-fn make(cells: [usize; 2], origin: [f64; 2], bnd: Boundaries<2>, ts: Timestepping) -> (Sim, Kern) {
+// a tile of `cells` placed as production places it: the whole grid's origin and the index offset
+// of its first cell
+fn make(cells: [usize; 2], offset: [usize; 2], bnd: Boundaries<2>, ts: Timestepping) -> (Sim, Kern) {
     let sim = Sim::build(Newtonian, IdealGas { gamma: GAMMA }, Cartesian)
         .cells(cells)
         .spacing([DX; 2])
-        .origin(origin)
+        .origin([-L; 2])
+        .index_offset([offset[0] as isize, offset[1] as isize])
         .boundaries(bnd)
         .cfl(CFL)
         .timestepping(ts)
@@ -105,7 +108,7 @@ fn grid_tiles(counts: [usize; 2], ts: Timestepping) -> Vec<(Sim, Kern)> {
     (0..total)
         .map(|flat| {
             let tc = unflatten(flat, counts);
-            let origin = std::array::from_fn(|a| -L + tc[a] as f64 * m[a] as f64 * DX);
+            let offset: [usize; 2] = std::array::from_fn(|a| tc[a] * m[a]);
             let bnd = Boundaries(std::array::from_fn(|a| {
                 let lo = if tc[a] == 0 {
                     BoundaryType::Outflow
@@ -119,7 +122,7 @@ fn grid_tiles(counts: [usize; 2], ts: Timestepping) -> Vec<(Sim, Kern)> {
                 };
                 [lo, hi]
             }));
-            make(m, origin, bnd, ts)
+            make(m, offset, bnd, ts)
         })
         .collect()
 }

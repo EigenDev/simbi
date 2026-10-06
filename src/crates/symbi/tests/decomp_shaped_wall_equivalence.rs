@@ -4,7 +4,7 @@
 // the shaped rigid-wall correctness contract under domain decomposition: a domain
 // split into tiles, each carrying the same shaped (CSG) rigid wall at the global
 // position, evolved through `evolve_decomposed`, must reproduce the monolithic run
-// to round-off for the fluid (den/mom/nrg).
+// bit for bit for the fluid (den/mom/nrg).
 //
 // the shaped penalization is pointwise (each cell relaxes its momentum toward the
 // wall from the body's global position via the mask at that cell), and the per-body
@@ -45,12 +45,14 @@ const T_FINAL: f64 = 0.03;
 type Sim = SimState<Newtonian, 2, Cartesian, IdealGas<f64>, CpuSpace, HostMemory>;
 type Kern = AdiabaticSubstrateKernelSet<HostMemory, f64, 2>;
 
-// a fresh sealed capped-cylinder rigid wall at the global origin, per tile.
-fn make(cells: [usize; 2], origin: [f64; 2], bnd: Boundaries<2>, ts: Timestepping) -> (Sim, Kern) {
+// a fresh sealed capped-cylinder rigid wall at the global origin, per tile. the tile sits at the
+// whole grid's origin plus the index offset of its first cell, as production places it.
+fn make(cells: [usize; 2], offset: [usize; 2], bnd: Boundaries<2>, ts: Timestepping) -> (Sim, Kern) {
     let mut sim = Sim::build(Newtonian, IdealGas { gamma: GAMMA }, Cartesian)
         .cells(cells)
         .spacing([DX; 2])
-        .origin(origin)
+        .origin([-L; 2])
+        .index_offset(std::array::from_fn(|a| offset[a] as isize))
         .boundaries(bnd)
         .cfl(CFL)
         .timestepping(ts)
@@ -95,7 +97,7 @@ fn grid_tiles(counts: [usize; 2], ts: Timestepping) -> Vec<(Sim, Kern)> {
     (0..total)
         .map(|flat| {
             let tc = unflatten(flat, counts);
-            let origin = std::array::from_fn(|a| -L + tc[a] as f64 * m[a] as f64 * DX);
+            let offset: [usize; 2] = std::array::from_fn(|a| tc[a] * m[a]);
             let bnd = Boundaries(std::array::from_fn(|a| {
                 let lo = if tc[a] == 0 {
                     BoundaryType::Outflow
@@ -109,7 +111,7 @@ fn grid_tiles(counts: [usize; 2], ts: Timestepping) -> Vec<(Sim, Kern)> {
                 };
                 [lo, hi]
             }));
-            make(m, origin, bnd, ts)
+            make(m, offset, bnd, ts)
         })
         .collect()
 }
@@ -186,7 +188,7 @@ fn assert_decomposed_matches(counts: [usize; 2], ts: Timestepping) {
         );
         let e = max_err(&mv, &dv);
         assert!(
-            e < 1e-12,
+            e == 0.0,
             "{counts:?} {ts:?} {name} decomposed!=mono under shaped wall: err {e:e}"
         );
     }

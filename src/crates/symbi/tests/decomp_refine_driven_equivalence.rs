@@ -5,8 +5,8 @@
 // split into tiles, with a driven inflow on x_lo and the refined patch flush against that face
 // — so the owning tile's fine level inherits `Driven(id)` and evaluates the coordinate DAG at
 // its own fine ghost coordinates while the root halo exchange couples the tiles. must
-// reproduce the monolithic refined run (itself gated by refinement_driven_boundary.rs) to
-// round-off through the production `evolve_hierarchy_decomposed` loop.
+// reproduce the monolithic refined run (itself gated by refinement_driven_boundary.rs) bit
+// for bit through the production `evolve_hierarchy_decomposed` loop.
 //
 // the prescription is position-dependent (rho = 2 + 0.2*y, the cell's global y): with the cut
 // along the driven face, both edge tiles own a piece of it, so a tile evaluating the DAG at a
@@ -72,11 +72,14 @@ fn patch() -> RefinementRegion<2> {
     }
 }
 
-fn build_root(cells: [usize; 2], origin: [f64; 2], bnd: Boundaries<2>) -> Sim {
+// a root tile placed as production places it: the whole grid's origin and the index offset of
+// its first cell
+fn build_root(cells: [usize; 2], offset: [usize; 2], bnd: Boundaries<2>) -> Sim {
     Sim::build(Newtonian, IdealGas { gamma: GAMMA }, Cartesian)
         .cells(cells)
         .spacing([DX; 2])
-        .origin(origin)
+        .origin([0.0; 2])
+        .index_offset(std::array::from_fn(|a| offset[a] as isize))
         .boundaries(bnd)
         .cfl(CFL)
         .timestepping(Timestepping::Euler)
@@ -94,7 +97,7 @@ fn phys_boundaries() -> [[BoundaryType; 2]; 2] {
 }
 
 fn build_mono() -> Hier {
-    let root = build_root([N, N], [0.0, 0.0], Boundaries(phys_boundaries()));
+    let root = build_root([N, N], [0, 0], Boundaries(phys_boundaries()));
     let k = kset(&root);
     let mut h = Hier::with_refinement(root, k, &[patch()], ProlongOrder::Ppm, kset)
         .expect("mono hierarchy");
@@ -110,7 +113,7 @@ fn build_tiles(counts: [usize; 2]) -> Vec<Hier> {
     let mut tiles = Vec::with_capacity(total);
     for flat in 0..total {
         let tc = unflatten(flat, counts);
-        let origin = std::array::from_fn(|a| tc[a] as f64 * m[a] as f64 * DX);
+        let offset: [usize; 2] = std::array::from_fn(|a| tc[a] * m[a]);
         let bnd = Boundaries(std::array::from_fn(|a| {
             let lo = if tc[a] == 0 {
                 phys[a][0]
@@ -124,9 +127,9 @@ fn build_tiles(counts: [usize; 2]) -> Vec<Hier> {
             };
             [lo, hi]
         }));
-        let root = build_root(m, origin, bnd);
+        let root = build_root(m, offset, bnd);
         let owns_patch = (0..2).all(|a| {
-            origin[a] <= patch().x_lo[a] && origin[a] + m[a] as f64 * DX >= patch().x_hi[a]
+            offset[a] as f64 * DX <= patch().x_lo[a] && (offset[a] + m[a]) as f64 * DX >= patch().x_hi[a]
         });
         let mut h = if owns_patch {
             let k = kset(&root);
@@ -223,7 +226,7 @@ fn assert_matches(counts: [usize; 2]) {
         .map(|(a, b)| (a - b).abs())
         .fold(0.0_f64, f64::max);
     assert!(
-        err < 1e-12,
+        err == 0.0,
         "{counts:?}: refined+decomposed driven diverged from mono: {err:e}"
     );
 }

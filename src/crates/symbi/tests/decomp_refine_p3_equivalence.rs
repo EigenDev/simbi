@@ -10,7 +10,7 @@
 // the patch [0.375,0.625]^2 straddles the x-cut at x=0.5: tile 0 refines its left half, tile 1 its
 // right half; the two fine grids share the cut (each inherits a CoarseFine boundary there from its
 // root tile, so fine ghost_fill leaves it for the fine exchange). a smooth bump centered on the cut
-// makes the fine dynamics cross it. decomposed == canonical monolithic (hier.evolve) to round-off.
+// makes the fine dynamics cross it. decomposed == canonical monolithic (hier.evolve) bit for bit.
 // cpu-only + 2d hydro; euler + rk2 root (rk2 also exchanges between the fine stages).
 // =============================================================================
 
@@ -56,11 +56,13 @@ const PX_HI: f64 = 0.625;
 const PY_LO: f64 = 0.375;
 const PY_HI: f64 = 0.625;
 
-fn build_root(cells: [usize; 2], origin: [f64; 2], bnd: Boundaries<2>, ts: Timestepping) -> Sim {
+// a root tile on the whole grid's origin with its first cell at whole-grid index `offset`.
+fn build_root(cells: [usize; 2], offset: [usize; 2], bnd: Boundaries<2>, ts: Timestepping) -> Sim {
     Sim::build(Newtonian, IdealGas { gamma: GAMMA }, Cartesian)
         .cells(cells)
         .spacing([DX; 2])
-        .origin(origin)
+        .origin([0.0; 2])
+        .index_offset(std::array::from_fn(|a| offset[a] as isize))
         .boundaries(bnd)
         .cfl(CFL)
         .timestepping(ts)
@@ -77,7 +79,7 @@ fn build_root(cells: [usize; 2], origin: [f64; 2], bnd: Boundaries<2>, ts: Times
 fn build_mono(ts: Timestepping) -> Hier {
     let root = build_root(
         [N, N],
-        [0.0, 0.0],
+        [0, 0],
         Boundaries::uniform(BoundaryType::Outflow),
         ts,
     );
@@ -104,8 +106,10 @@ fn build_tiles(partition: &Partition<2>, ts: Timestepping) -> Vec<Hier> {
         let tc = unflatten(flat, counts);
         let ext = partition.tile_extents(tc);
         let m: [usize; 2] = [ext[0].1, ext[1].1];
-        let origin: [f64; 2] = std::array::from_fn(|a| ext[a].0 as f64 * DX);
-        let hi: [f64; 2] = std::array::from_fn(|a| origin[a] + m[a] as f64 * DX);
+        let offset: [usize; 2] = [ext[0].0, ext[1].0];
+        // the tile's physical box, which clips the global patch
+        let lo: [f64; 2] = std::array::from_fn(|a| ext[a].0 as f64 * DX);
+        let hi: [f64; 2] = std::array::from_fn(|a| lo[a] + m[a] as f64 * DX);
         let bnd = Boundaries(std::array::from_fn(|a| {
             let lo = if tc[a] == 0 {
                 BoundaryType::Outflow
@@ -119,10 +123,10 @@ fn build_tiles(partition: &Partition<2>, ts: Timestepping) -> Vec<Hier> {
             };
             [lo, hi]
         }));
-        let root = build_root(m, origin, bnd, ts);
+        let root = build_root(m, offset, bnd, ts);
         // clip the global patch to this tile's physical extent.
-        let cx = [PX_LO.max(origin[0]), PX_HI.min(hi[0])];
-        let cy = [PY_LO.max(origin[1]), PY_HI.min(hi[1])];
+        let cx = [PX_LO.max(lo[0]), PX_HI.min(hi[0])];
+        let cy = [PY_LO.max(lo[1]), PY_HI.min(hi[1])];
         let owns_patch = cx[0] < cx[1] && cy[0] < cy[1];
         let h = if owns_patch {
             let k = kset(&root);
@@ -250,7 +254,7 @@ fn assert_p3_matches_partition(partition: &Partition<2>, ts: Timestepping) {
         let dec_c0 = composite_fine(&build_tiles(partition, ts), partition);
         let e0 = max_err(&mono_c0, &dec_c0);
         assert!(
-            e0 < 1e-12,
+            e0 == 0.0,
             "{counts:?} {ts:?}: decomposed and monolithic hierarchies differ at CONSTRUCTION \
              (composite err {e0:e}); the fine seeding read unexchanged data"
         );
@@ -275,7 +279,7 @@ fn assert_p3_matches_partition(partition: &Partition<2>, ts: Timestepping) {
 
     let e = max_err(&mono_c, &dec_c);
     assert!(
-        e < 1e-12,
+        e == 0.0,
         "{counts:?} {ts:?} P3 (patch across cut) composite err {e:e}"
     );
 }
@@ -318,8 +322,8 @@ fn refine_p3_gather_reassembles_hierarchy() {
     };
     let er = level_err(&global.levels[0].state, &mono.levels[0].state);
     let ef = level_err(&global.levels[1].state, &mono.levels[1].state);
-    assert!(er < 1e-12, "gathered root level err {er:e}");
-    assert!(ef < 1e-12, "gathered fine level err {ef:e}");
+    assert!(er == 0.0, "gathered root level err {er:e}");
+    assert!(ef == 0.0, "gathered fine level err {ef:e}");
 }
 
 #[test]

@@ -2,8 +2,8 @@
 // decomp_driven_mhd_equivalence.rs
 //
 // the driven-boundary correctness contract for decomposed MHD: a 2d RMHD grid split into
-// tiles, each registering the same boundary DAG, must reproduce the monolithic run to
-// round-off and keep div(B) at machine zero across the tile cuts. the prescription covers
+// tiles, each registering the same boundary DAG, must reproduce the monolithic run bit
+// for bit and keep div(B) at machine zero across the tile cuts. the prescription covers
 // the hydro prims + the cell B; the staggered face B rides the CT ghost fill and the
 // transverse halo exchange.
 //
@@ -58,12 +58,14 @@ fn boundary_json() -> String {
 }
 
 // quiescent interior with a uniform field (B_x on the faces, B_z out of plane; div-free),
-// distinct from the inflow so the ghost state provably comes from the DAG.
-fn make(cells: [usize; 2], origin: [f64; 2], bnd: Boundaries<2>) -> (Sim, Kern) {
+// distinct from the inflow so the ghost state provably comes from the DAG. the tile sits at the
+// whole grid's origin plus the index offset of its first cell, as production places it.
+fn make(cells: [usize; 2], offset: [usize; 2], bnd: Boundaries<2>) -> (Sim, Kern) {
     let sim = Sim::build(Rmhd, IdealGas { gamma: GAMMA }, Cartesian)
         .cells(cells)
         .spacing([DX; 2])
-        .origin(origin)
+        .origin([0.0; 2])
+        .index_offset(std::array::from_fn(|a| offset[a] as isize))
         .boundaries(bnd)
         .cfl(CFL)
         .timestepping(Timestepping::Rk2)
@@ -94,7 +96,7 @@ fn grid_tiles(counts: [usize; 2]) -> Vec<(Sim, Kern)> {
     (0..total)
         .map(|flat| {
             let tc = unflatten(flat, counts);
-            let origin = std::array::from_fn(|a| tc[a] as f64 * m[a] as f64 * DX);
+            let offset: [usize; 2] = std::array::from_fn(|a| tc[a] * m[a]);
             let phys_lo = [BoundaryType::Driven(0), BoundaryType::Outflow];
             let bnd = Boundaries(std::array::from_fn(|a| {
                 let lo = if tc[a] == 0 {
@@ -109,7 +111,7 @@ fn grid_tiles(counts: [usize; 2]) -> Vec<(Sim, Kern)> {
                 };
                 [lo, hi]
             }));
-            make(m, origin, bnd)
+            make(m, offset, bnd)
         })
         .collect()
 }
@@ -221,18 +223,18 @@ fn assert_driven_mhd_matches(counts: [usize; 2]) {
     assert!(bx_shift > 1e-6, "the in-plane field never evolved ({bx_shift:e}); the CT path is untested");
     let cut_momx: f64 = (0..N).map(|j| mono_momx[flatten([N / 2 - 1, j], [N; 2])].abs() + mono_momx[flatten([N / 2, j], [N; 2])].abs()).sum();
     assert!(cut_momx > 1e-6, "the inflow never reached the cut columns ({cut_momx:e}); the cut carries no signal");
-    assert!(max_err(&mono_bx, &dec_bx) < 1e-12, "{counts:?} bcell_x diverged");
+    assert!(max_err(&mono_bx, &dec_bx) == 0.0, "{counts:?} bcell_x diverged");
 
     assert!(
-        max_err(&mono_den, &dec_den) < 1e-12,
+        max_err(&mono_den, &dec_den) == 0.0,
         "{counts:?} density diverged"
     );
     assert!(
-        max_err(&mono_momx, &dec_momx) < 1e-12,
+        max_err(&mono_momx, &dec_momx) == 0.0,
         "{counts:?} mom_x diverged"
     );
     assert!(
-        max_err(&mono_bz, &dec_bz) < 1e-12,
+        max_err(&mono_bz, &dec_bz) == 0.0,
         "{counts:?} bcell_z diverged"
     );
 
@@ -270,7 +272,7 @@ fn driven_mhd_inflow_four_tiles() {
 fn iso_mhd_driven_inflow_decomposed_matches_monolithic() {
     // the isothermal-mhd instance of the same contract: prescription [rho, v.., B..] (no
     // pressure slot; p = cs^2 rho), the cut along the driven face (both tiles own a piece),
-    // mono == decomposed to round-off. pins the imhd decomposed registration.
+    // mono == decomposed bit for bit. pins the imhd decomposed registration.
     use symbi::regimes::substrate_isothermal_mhd::IsothermalMhdSubstrateKernelSet;
     use symbi_hydro::ISO_MHD_SPEC;
     use symbi_hydro::eos::Isothermal;
@@ -292,11 +294,12 @@ fn iso_mhd_driven_inflow_decomposed_matches_monolithic() {
                    {"op": "CONSTANT", "value": 0.5} ]
     }"#;
 
-    let make_i = |cells: [usize; 2], origin: [f64; 2], bnd: Boundaries<2>| -> (SimI, KernI) {
+    let make_i = |cells: [usize; 2], offset: [usize; 2], bnd: Boundaries<2>| -> (SimI, KernI) {
         let sim = SimI::build(IsothermalMhd, Isothermal { cs: CS }, Cartesian)
             .cells(cells)
             .spacing([DX; 2])
-            .origin(origin)
+            .origin([0.0; 2])
+            .index_offset(std::array::from_fn(|a| offset[a] as isize))
             .boundaries(bnd)
             .cfl(CFL)
             .timestepping(Timestepping::Rk2)
@@ -323,7 +326,7 @@ fn iso_mhd_driven_inflow_decomposed_matches_monolithic() {
         (0..counts.iter().product::<usize>())
             .map(|flat| {
                 let tc = unflatten(flat, counts);
-                let origin = std::array::from_fn(|a| tc[a] as f64 * m[a] as f64 * DX);
+                let offset: [usize; 2] = std::array::from_fn(|a| tc[a] * m[a]);
                 let phys_lo = [BoundaryType::Driven(0), BoundaryType::Outflow];
                 let bnd = Boundaries(std::array::from_fn(|a| {
                     let lo = if tc[a] == 0 {
@@ -338,7 +341,7 @@ fn iso_mhd_driven_inflow_decomposed_matches_monolithic() {
                     };
                     [lo, hi]
                 }));
-                make_i(m, origin, bnd)
+                make_i(m, offset, bnd)
             })
             .collect()
     };
@@ -397,7 +400,7 @@ fn iso_mhd_driven_inflow_decomposed_matches_monolithic() {
         );
         let err = max_err(&a, &b);
         assert!(
-            err < 1e-12,
+            err == 0.0,
             "imhd decomposed diverged from monolithic (comp {comp}): {err:e}"
         );
     }

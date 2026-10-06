@@ -11,7 +11,7 @@
 // complains -- the exterior looks fine while the interior is fiction.
 //
 // gates:
-//   - the decomposed refined excised composite matches the monolithic one to roundoff, for every
+//   - the decomposed refined excised composite matches the monolithic one bit for bit, for every
 //     tile topology (x-cut, y-cut, 2x2 -- the 2x2 cut point is the chart origin, so every tile owns
 //     one quadrant of the excised sphere and the excised rim straddles all four cuts);
 //   - the excise demonstrably fires: the excised core differs from the same run with excision off.
@@ -65,7 +65,9 @@ fn patch() -> RefinementRegion<2> {
     }
 }
 
-fn build_root(cells: [usize; 2], origin: [f64; 2], bnd: Boundaries<2>) -> Sim {
+// a root tile of `cells` placed as production places it: the whole grid's origin and the index
+// offset of its first cell
+fn build_root(cells: [usize; 2], offset: [usize; 2], bnd: Boundaries<2>) -> Sim {
     Sim::build(
         Rhd,
         IdealGas { gamma: GAMMA },
@@ -73,7 +75,8 @@ fn build_root(cells: [usize; 2], origin: [f64; 2], bnd: Boundaries<2>) -> Sim {
     )
     .cells(cells)
     .spacing([DX; 2])
-    .origin(origin)
+    .origin([-L; 2])
+    .index_offset([offset[0] as isize, offset[1] as isize])
     .boundaries(bnd)
     .cfl(CFL)
     .timestepping(Timestepping::Rk2)
@@ -84,7 +87,7 @@ fn build_root(cells: [usize; 2], origin: [f64; 2], bnd: Boundaries<2>) -> Sim {
 }
 
 fn build_mono(mk: fn(&Sim) -> Kern) -> Hier {
-    let root = build_root([N, N], [-L, -L], Boundaries::uniform(BoundaryType::Outflow));
+    let root = build_root([N, N], [0, 0], Boundaries::uniform(BoundaryType::Outflow));
     let k = mk(&root);
     let mut h =
         Hier::with_refinement(root, k, &[patch()], ProlongOrder::Ppm, mk).expect("mono hierarchy");
@@ -99,7 +102,9 @@ fn build_tiles(counts: [usize; 2], mk: fn(&Sim) -> Kern) -> Vec<Hier> {
     let mut tiles = Vec::with_capacity(total);
     for flat in 0..total {
         let tc = unflatten(flat, counts);
-        let origin: [f64; 2] = std::array::from_fn(|a| -L + tc[a] as f64 * m[a] as f64 * DX);
+        let offset: [usize; 2] = std::array::from_fn(|a| tc[a] * m[a]);
+        // the tile's physical lower corner, against which the patch ownership is tested
+        let origin: [f64; 2] = std::array::from_fn(|a| -L + offset[a] as f64 * DX);
         let bnd = Boundaries(std::array::from_fn(|a| {
             let lo = if tc[a] == 0 {
                 BoundaryType::Outflow
@@ -113,7 +118,7 @@ fn build_tiles(counts: [usize; 2], mk: fn(&Sim) -> Kern) -> Vec<Hier> {
             };
             [lo, hi]
         }));
-        let root = build_root(m, origin, bnd);
+        let root = build_root(m, offset, bnd);
         let p = patch();
         let owns_patch =
             (0..2).all(|a| origin[a] <= p.x_lo[a] && origin[a] + m[a] as f64 * DX >= p.x_hi[a]);
@@ -200,7 +205,7 @@ fn assert_matches(counts: [usize; 2]) {
 
     let e = max_err(&want, &got);
     assert!(
-        e < 1e-12,
+        e == 0.0,
         "{counts:?} refined+excised decomposed vs monolithic: err {e:e}"
     );
 

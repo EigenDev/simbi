@@ -76,11 +76,13 @@ macro_rules! message_seam_harness {
                 }
             }
 
-            fn make(cells: [usize; 2], origin: [f64; 2], bnd: Boundaries<2>) -> (Sim, Kern) {
+            // a tile on the whole grid's origin with its first cell at whole-grid index `offset`.
+            fn make(cells: [usize; 2], offset: [usize; 2], bnd: Boundaries<2>) -> (Sim, Kern) {
                 let sim = Sim::build(Newtonian, IdealGas { gamma: GAMMA }, Cartesian)
                     .cells(cells)
                     .spacing([DX; 2])
-                    .origin(origin)
+                    .origin([0.0; 2])
+                    .index_offset(std::array::from_fn(|a| offset[a] as isize))
                     .boundaries(bnd)
                     .timestepping(Timestepping::Rk2)
                     .allocate()
@@ -119,7 +121,7 @@ macro_rules! message_seam_harness {
                         with_device(tile_device(flat), || {
                             make(
                                 [ext[0].1, ext[1].1],
-                                [ext[0].0 as f64 * DX, ext[1].0 as f64 * DX],
+                                [ext[0].0, ext[1].0],
                                 bnd,
                             )
                         })

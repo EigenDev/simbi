@@ -53,11 +53,13 @@ fn bump(x: f64, y: f64) -> f64 {
     0.5 * (-r2).exp()
 }
 
-fn make(cells: [usize; 2], origin: [f64; 2], bnd: Boundaries<2>) -> (Sim, Kern) {
+// a tile on the whole grid's origin with its first cell at whole-grid index `offset`.
+fn make(cells: [usize; 2], offset: [usize; 2], bnd: Boundaries<2>) -> (Sim, Kern) {
     let sim = Sim::build(Newtonian, IdealGas { gamma: GAMMA }, Cartesian)
         .cells(cells)
         .spacing([DX; 2])
-        .origin(origin)
+        .origin([0.0; 2])
+        .index_offset(std::array::from_fn(|a| offset[a] as isize))
         .boundaries(bnd)
         .timestepping(Timestepping::Rk2)
         .allocate()
@@ -103,7 +105,7 @@ fn partition_tiles(partition: &Partition<2>) -> Vec<(Sim, Kern)> {
             }));
             make(
                 [ext[0].1, ext[1].1],
-                [ext[0].0 as f64 * DX, ext[1].0 as f64 * DX],
+                [ext[0].0, ext[1].0],
                 bnd,
             )
         })
@@ -182,7 +184,7 @@ fn assert_matches(cuts: [Vec<usize>; 2]) {
         worst = worst.max((a - b).abs());
     }
     assert!(
-        worst < 1e-12,
+        worst == 0.0,
         "decomposed {:?} vs single-tile periodic density max err {worst:e} (bump moved {moved:e})",
         split.counts()
     );

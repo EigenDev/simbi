@@ -64,11 +64,14 @@ fn kset(sim: &Sim) -> Kern {
     k
 }
 
-fn build_root(cells: [usize; 2], origin: [f64; 2], bnd: Boundaries<2>) -> Sim {
+/// a root tile of `cells` placed as production places it: the whole grid's origin and the index
+/// offset of its first cell
+fn build_root(cells: [usize; 2], offset: [usize; 2], bnd: Boundaries<2>) -> Sim {
     Sim::build(Rhd, IdealGas { gamma: GAMMA }, Cartesian)
         .cells(cells)
         .spacing([DX; 2])
-        .origin(origin)
+        .origin([0.0; 2])
+        .index_offset([offset[0] as isize, offset[1] as isize])
         .boundaries(bnd)
         .cfl(CFL)
         .timestepping(Timestepping::Euler)
@@ -92,8 +95,10 @@ fn build_tiles(partition: &Partition<2>) -> Vec<Hier> {
         let tc = unflatten(flat, counts);
         let ext = partition.tile_extents(tc);
         let m: [usize; 2] = [ext[0].1, ext[1].1];
-        let origin: [f64; 2] = std::array::from_fn(|a| ext[a].0 as f64 * DX);
-        let hi = origin[0] + m[0] as f64 * DX;
+        let offset: [usize; 2] = [ext[0].0, ext[1].0];
+        // the tile's physical x extent, against which the patch is clipped
+        let lo = offset[0] as f64 * DX;
+        let hi = lo + m[0] as f64 * DX;
         let bnd = Boundaries(std::array::from_fn(|a| {
             let edge = if a == 0 { BoundaryType::Outflow } else { BoundaryType::Periodic };
             [
@@ -101,8 +106,8 @@ fn build_tiles(partition: &Partition<2>) -> Vec<Hier> {
                 if tc[a] + 1 == counts[a] { edge } else { BoundaryType::CoarseFine },
             ]
         }));
-        let root = build_root(m, origin, bnd);
-        let cx = [PX_LO.max(origin[0]), PX_HI.min(hi)];
+        let root = build_root(m, offset, bnd);
+        let cx = [PX_LO.max(lo), PX_HI.min(hi)];
         let k = kset(&root);
         let h = if cx[0] < cx[1] {
             let region = RefinementRegion { x_lo: [cx[0], 0.0], x_hi: [cx[1], NY as f64 * DX] };

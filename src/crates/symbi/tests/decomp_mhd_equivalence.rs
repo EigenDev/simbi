@@ -3,7 +3,7 @@
 //
 // the MHD correctness contract for multi-gpu domain decomposition: a 2d
 // RMHD grid split into a 2x2 tile grid, evolved in lockstep with the same-level halo exchange,
-// must reproduce the monolithic run to round-off and keep div(B) at machine zero across the
+// must reproduce the monolithic run bit for bit and keep div(B) at machine zero across the
 // tile cuts. the second check is the MHD-specific one: a wrong staggered `bface` exchange
 // compiles fine and runs, but silently creates a magnetic monopole at the tile boundary.
 //
@@ -58,11 +58,13 @@ fn ic(x: f64, y: f64) -> MhdPrim<f64, 3> {
     )
 }
 
-fn make(cells: [usize; 2], origin: [f64; 2], bnd: Boundaries<2>, ts: Timestepping) -> (Sim, Kern) {
+// a tile on the whole grid's origin with its first cell at whole-grid index `offset`.
+fn make(cells: [usize; 2], offset: [usize; 2], bnd: Boundaries<2>, ts: Timestepping) -> (Sim, Kern) {
     let sim = Sim::build(Rmhd, IdealGas { gamma: GAMMA }, Cartesian)
         .cells(cells)
         .spacing([DX; 2])
-        .origin(origin)
+        .origin([0.0; 2])
+        .index_offset(std::array::from_fn(|a| offset[a] as isize))
         .boundaries(bnd)
         .cfl(CFL)
         .timestepping(ts)
@@ -86,7 +88,7 @@ fn grid_tiles(counts: [usize; 2], ts: Timestepping) -> Vec<(Sim, Kern)> {
     (0..total)
         .map(|flat| {
             let tc = unflatten(flat, counts);
-            let origin = std::array::from_fn(|a| tc[a] as f64 * m[a] as f64 * DX);
+            let offset: [usize; 2] = std::array::from_fn(|a| tc[a] * m[a]);
             let bnd = Boundaries(std::array::from_fn(|a| {
                 let lo = if tc[a] == 0 {
                     BoundaryType::Outflow
@@ -100,7 +102,7 @@ fn grid_tiles(counts: [usize; 2], ts: Timestepping) -> Vec<(Sim, Kern)> {
                 };
                 [lo, hi]
             }));
-            make(m, origin, bnd, ts)
+            make(m, offset, bnd, ts)
         })
         .collect()
 }
@@ -250,7 +252,7 @@ fn assert_matches(counts: [usize; 2], ts: Timestepping) {
         mono_vals.iter().all(|v| v.is_finite()) && dec_vals.iter().all(|v| v.is_finite()),
         "some global cells were never written (gather bug)"
     );
-    // density equivalence: decomposed == monolithic to round-off.
+    // density equivalence: decomposed == monolithic bit for bit.
     // diagnostics first (B-field, the source; then density, downstream), then assert. the curl
     // preserves div(B) for any emf, so div(B)==0 is necessary but not sufficient -- the bcell
     // value equivalence is the real field check.
@@ -284,11 +286,11 @@ fn assert_matches(counts: [usize; 2], ts: Timestepping) {
         let db = global_bcell(&dec, counts, comp);
         let (_, be) = argmax_diff(&mb, &db);
         assert!(
-            be < 1e-11,
+            be == 0.0,
             "{counts:?} {ts:?} bcell[{comp}] err {be:e} (div-free but WRONG)"
         );
     }
-    assert!(de < 1e-11, "{counts:?} {ts:?} density err {de:e}");
+    assert!(de == 0.0, "{counts:?} {ts:?} density err {de:e}");
 }
 
 // a diagnostic bisection: step mono and the 2x2 decomposition in lockstep through one RK2 step,
@@ -483,7 +485,7 @@ fn mhd_euler_quad_tile_2d_grid() {
 // ran before, a domain-boundary ghost at a boundary-meets-cut corner would read a stale
 // unexchanged cut cell -> spurious edge-EMF, exposed by the RK2 corrector averaging the saved
 // stage-1 emf. with ghost_fill after the exchange, div(B) is exact and decomposed == monolithic
-// to round-off here too.
+// bit for bit here too.
 #[test]
 fn mhd_rk2_quad_tile_2d_grid() {
     assert_matches([2, 2], Timestepping::Rk2);
@@ -540,11 +542,11 @@ fn mhd_gather_reassembles_global() {
     }
 
     assert!(
-        max_cell < 1e-11,
+        max_cell == 0.0,
         "gathered cell fields diverge: {max_cell:e}"
     );
     assert!(
-        max_face < 1e-11,
+        max_face == 0.0,
         "gathered staggered faces diverge: {max_face:e}"
     );
 }

@@ -2,8 +2,8 @@
 // decomp_driven_equivalence.rs
 //
 // the driven-boundary correctness contract for multi-gpu domain decomposition: a domain split
-// into tiles, each registering the same boundary DAG, must reproduce the monolithic run to
-// round-off. only edge tiles carry a Driven face (interior cuts are CoarseFine, halo-exchanged);
+// into tiles, each registering the same boundary DAG, must reproduce the monolithic run bit
+// for bit. only edge tiles carry a Driven face (interior cuts are CoarseFine, halo-exchanged);
 // each tile evaluates the coordinate prescription at its own global coordinates.
 //
 // the prescription is a position-dependent inflow on x_lo: rho = 2 + 0.2*y (VARIABLE_X2 -> the
@@ -53,11 +53,13 @@ fn boundary_json() -> String {
 }
 
 // a quiescent interior, distinct from the inflow so the fill provably comes from the DAG.
-fn make(cells: [usize; 2], origin: [f64; 2], bnd: Boundaries<2>) -> (Sim, Kern) {
+// the tile sits on the whole grid's origin with its first cell at whole-grid index `offset`.
+fn make(cells: [usize; 2], offset: [usize; 2], bnd: Boundaries<2>) -> (Sim, Kern) {
     let sim = Sim::build(Newtonian, IdealGas { gamma: GAMMA }, Cartesian)
         .cells(cells)
         .spacing([DX; 2])
-        .origin(origin)
+        .origin([0.0; 2])
+        .index_offset(std::array::from_fn(|a| offset[a] as isize))
         .boundaries(bnd)
         .cfl(CFL)
         .timestepping(Timestepping::Rk2)
@@ -86,7 +88,7 @@ fn grid_tiles(counts: [usize; 2]) -> Vec<(Sim, Kern)> {
     (0..total)
         .map(|flat| {
             let tc = unflatten(flat, counts);
-            let origin = std::array::from_fn(|a| tc[a] as f64 * m[a] as f64 * DX);
+            let offset: [usize; 2] = std::array::from_fn(|a| tc[a] * m[a]);
             let phys_lo = [BoundaryType::Driven(0), BoundaryType::Outflow];
             let bnd = Boundaries(std::array::from_fn(|a| {
                 let lo = if tc[a] == 0 {
@@ -101,7 +103,7 @@ fn grid_tiles(counts: [usize; 2]) -> Vec<(Sim, Kern)> {
                 };
                 [lo, hi]
             }));
-            make(m, origin, bnd)
+            make(m, offset, bnd)
         })
         .collect()
 }
@@ -182,11 +184,11 @@ fn assert_driven_matches(counts: [usize; 2]) {
     let de = max_err(&mono_den, &dec_den);
     let me = max_err(&mono_momx, &dec_momx);
     assert!(
-        de < 1e-12,
+        de == 0.0,
         "{counts:?} density err {de:e} under driven boundary"
     );
     assert!(
-        me < 1e-12,
+        me == 0.0,
         "{counts:?} mom_x err {me:e} under driven boundary"
     );
 }

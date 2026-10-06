@@ -52,11 +52,14 @@ const EARLY: u64 = 7;
 type Sim = SimState<Rhd, 2, Cartesian, IdealGas<f64>, CpuSpace, HostMemory>;
 type Kern = RhdSubstrateKernelSet<HostMemory, f64, 2>;
 
-fn make(cells: [usize; 2], origin: [f64; 2], bnd: Boundaries<2>) -> (Sim, Kern) {
+// a tile of `cells` placed as production places it: the whole grid's origin and the index offset
+// of its first cell
+fn make(cells: [usize; 2], offset: [usize; 2], bnd: Boundaries<2>) -> (Sim, Kern) {
     let sim = Sim::build(Rhd, IdealGas { gamma: GAMMA }, Cartesian)
         .cells(cells)
         .spacing([DX; 2])
-        .origin(origin)
+        .origin([0.0; 2])
+        .index_offset([offset[0] as isize, offset[1] as isize])
         .boundaries(bnd)
         .timestepping(Timestepping::Euler)
         .allocate()
@@ -88,7 +91,7 @@ fn partition_tiles(partition: &Partition<2>) -> Vec<(Sim, Kern)> {
             }));
             make(
                 [ext[0].1, ext[1].1],
-                [ext[0].0 as f64 * DX, ext[1].0 as f64 * DX],
+                [ext[0].0, ext[1].0],
                 bnd,
             )
         })

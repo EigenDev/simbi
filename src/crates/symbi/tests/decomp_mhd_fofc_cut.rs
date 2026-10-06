@@ -62,11 +62,14 @@ struct Fixture {
     collide: usize,
 }
 
+// a tile placed as production places it: the whole grid's origin and the index offset of its
+// first cell
 fn tile(ext: [(usize, usize); 2], bnd: Boundaries<2>, ts: Timestepping, fixture: Fixture) -> Sim {
     Sim::build(Rmhd, IdealGas { gamma: GAMMA }, Cartesian)
         .cells([ext[0].1, ext[1].1])
-        .origin([ext[0].0 as f64 * DX, ext[1].0 as f64 * DY])
+        .origin([0.0; 2])
         .spacing([DX, DY])
+        .index_offset([ext[0].0 as isize, ext[1].0 as isize])
         .boundaries(bnd)
         .cfl(0.1)
         .timestepping(ts)

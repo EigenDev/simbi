@@ -125,6 +125,8 @@ impl Arm {
     }
 }
 
+/// the tile `flat` placed as production places it: the whole grid's origin and the index offset
+/// of its first cell
 fn tile(arm: &Arm, flat: usize) -> (Sim, Kern) {
     let p = arm.partition();
     let counts = p.counts();
@@ -147,7 +149,8 @@ fn tile(arm: &Arm, flat: usize) -> (Sim, Kern) {
     let sim = Sim::build(Rhd, IdealGas { gamma: GAMMA }, Cartesian)
         .cells([ext[0].1, ext[1].1])
         .spacing([DX; 2])
-        .origin([ext[0].0 as f64 * DX, ext[1].0 as f64 * DX])
+        .origin([0.0; 2])
+        .index_offset([ext[0].0 as isize, ext[1].0 as isize])
         .boundaries(bnd)
         .allocate()
         .expect("sim construction failed")

@@ -63,11 +63,14 @@ fn bump(x: f64, y: f64) -> f64 {
     0.3 * (-(((x - 0.5) / 0.08).powi(2) + ((y - 0.5) / 0.08).powi(2))).exp()
 }
 
-fn build_root(cells: [usize; 2], origin: [f64; 2], bnd: Boundaries<2>, ng: usize) -> Sim {
+/// a root tile placed as production places it: the whole grid's origin and the index offset of
+/// its first cell
+fn build_root(cells: [usize; 2], offset: [usize; 2], bnd: Boundaries<2>, ng: usize) -> Sim {
     Sim::build(Newtonian, IdealGas { gamma: GAMMA }, Cartesian)
         .cells(cells)
         .spacing([DX; 2])
-        .origin(origin)
+        .origin([0.0; 2])
+        .index_offset(std::array::from_fn(|a| offset[a] as isize))
         .boundaries(bnd)
         .cfl(CFL)
         .ghosts(ng)
@@ -98,7 +101,7 @@ fn kset_of(scheme: Scheme) -> fn(&Sim) -> Kern {
 
 fn build_mono(scheme: Scheme) -> Hier {
     let make = kset_of(scheme);
-    let root = build_root([N, N], [0.0, 0.0], Boundaries::uniform(BoundaryType::Outflow), scheme.ng);
+    let root = build_root([N, N], [0, 0], Boundaries::uniform(BoundaryType::Outflow), scheme.ng);
     let k = make(&root);
     let region = RefinementRegion { x_lo: [PX_LO, PY_LO], x_hi: [PX_HI, PY_HI] };
     let mut h = Hier::with_refinement(root, k, &[region], scheme.prolong, make).expect("mono hier");
@@ -117,15 +120,16 @@ fn build_tiles(partition: &Partition<2>, scheme: Scheme) -> Vec<Hier> {
         let tc = unflatten(flat, counts);
         let ext = partition.tile_extents(tc);
         let m: [usize; 2] = [ext[0].1, ext[1].1];
-        let origin: [f64; 2] = std::array::from_fn(|a| ext[a].0 as f64 * DX);
-        let hi: [f64; 2] = std::array::from_fn(|a| origin[a] + m[a] as f64 * DX);
+        let offset: [usize; 2] = [ext[0].0, ext[1].0];
+        let lo: [f64; 2] = std::array::from_fn(|a| offset[a] as f64 * DX);
+        let hi: [f64; 2] = std::array::from_fn(|a| (offset[a] + m[a]) as f64 * DX);
         let bnd = Boundaries(std::array::from_fn(|a| {
             let face = |edge: bool| if edge { BoundaryType::Outflow } else { BoundaryType::CoarseFine };
             [face(tc[a] == 0), face(tc[a] == counts[a] - 1)]
         }));
-        let root = build_root(m, origin, bnd, scheme.ng);
-        let cx = [PX_LO.max(origin[0]), PX_HI.min(hi[0])];
-        let cy = [PY_LO.max(origin[1]), PY_HI.min(hi[1])];
+        let root = build_root(m, offset, bnd, scheme.ng);
+        let cx = [PX_LO.max(lo[0]), PX_HI.min(hi[0])];
+        let cy = [PY_LO.max(lo[1]), PY_HI.min(hi[1])];
         let k = make(&root);
         let h = if cx[0] < cx[1] && cy[0] < cy[1] {
             let region = RefinementRegion { x_lo: [cx[0], cy[0]], x_hi: [cx[1], cy[1]] };
@@ -311,7 +315,7 @@ fn assert_one_step_matches(cuts: [usize; 2], scheme: Scheme) {
             let g = global_of(d, origin, *c);
             if let Some(&m_index) = index.get(&g) {
                 let (x, y) = (d.fields[0].1[c_index], mono_fine.fields[0].1[m_index]);
-                assert!((x - y).abs() < 1e-12, "cuts {cuts:?}: fine cell {g:?} rho {x} against {y}");
+                assert!((x - y).abs() == 0.0, "cuts {cuts:?}: fine cell {g:?} rho {x} against {y}");
             }
         }
     }
@@ -342,24 +346,25 @@ fn a_patch_face_on_a_cut_is_refused_by_name() {
     let flat = 0;
     let ext = partition.tile_extents(unflatten(flat, counts));
     let m: [usize; 2] = [ext[0].1, ext[1].1];
-    let origin: [f64; 2] = std::array::from_fn(|a| ext[a].0 as f64 * DX);
+    let offset: [usize; 2] = [ext[0].0, ext[1].0];
     let bnd = Boundaries([
         [BoundaryType::Outflow, BoundaryType::CoarseFine],
         [BoundaryType::Outflow, BoundaryType::CoarseFine],
     ]);
-    let root = build_root(m, origin, bnd, PLM.ng);
+    let root = build_root(m, offset, bnd, PLM.ng);
     // the patch's low x face at 0.375 = root cell 12 is the cut: this tile holds no patch cell,
     // the tile beyond the cut holds the patch's face on its own boundary
     let beyond = partition.tile_extents(unflatten(2, counts));
-    let origin_beyond: [f64; 2] = std::array::from_fn(|a| beyond[a].0 as f64 * DX);
+    let offset_beyond: [usize; 2] = [beyond[0].0, beyond[1].0];
+    let lo_beyond: [f64; 2] = std::array::from_fn(|a| offset_beyond[a] as f64 * DX);
     let m_beyond: [usize; 2] = [beyond[0].1, beyond[1].1];
     let bnd_beyond = Boundaries([
         [BoundaryType::CoarseFine, BoundaryType::Outflow],
         [BoundaryType::Outflow, BoundaryType::CoarseFine],
     ]);
-    let root_beyond = build_root(m_beyond, origin_beyond, bnd_beyond, PLM.ng);
-    let hi: [f64; 2] = std::array::from_fn(|a| origin_beyond[a] + m_beyond[a] as f64 * DX);
-    let clipped = RefinementRegion { x_lo: [PX_LO.max(origin_beyond[0]), PY_LO], x_hi: [PX_HI.min(hi[0]), PY_HI.min(hi[1])] };
+    let root_beyond = build_root(m_beyond, offset_beyond, bnd_beyond, PLM.ng);
+    let hi: [f64; 2] = std::array::from_fn(|a| (offset_beyond[a] + m_beyond[a]) as f64 * DX);
+    let clipped = RefinementRegion { x_lo: [PX_LO.max(lo_beyond[0]), PY_LO], x_hi: [PX_HI.min(hi[0]), PY_HI.min(hi[1])] };
     let whole = RefinementRegion { x_lo: [PX_LO, PY_LO], x_hi: [PX_HI, PY_HI] };
     drop(root);
     let k = kset_plm(&root_beyond);
@@ -380,14 +385,14 @@ fn a_patch_face_one_cell_from_a_cut_is_refused_by_name() {
     let partition = Partition::explicit([N, N], [vec![11], vec![16]]).expect("cuts inside the grid");
     let counts = partition.counts();
     let beyond = partition.tile_extents(unflatten(2, counts));
-    let origin: [f64; 2] = std::array::from_fn(|a| beyond[a].0 as f64 * DX);
+    let offset: [usize; 2] = [beyond[0].0, beyond[1].0];
     let m: [usize; 2] = [beyond[0].1, beyond[1].1];
-    let hi: [f64; 2] = std::array::from_fn(|a| origin[a] + m[a] as f64 * DX);
+    let hi: [f64; 2] = std::array::from_fn(|a| (offset[a] + m[a]) as f64 * DX);
     let bnd = Boundaries([
         [BoundaryType::CoarseFine, BoundaryType::Outflow],
         [BoundaryType::Outflow, BoundaryType::CoarseFine],
     ]);
-    let root = build_root(m, origin, bnd, PLM.ng);
+    let root = build_root(m, offset, bnd, PLM.ng);
     // the patch's low x face at root cell 12, one cell past this tile's cut at 11
     let clipped = RefinementRegion { x_lo: [PX_LO, PY_LO], x_hi: [PX_HI.min(hi[0]), PY_HI.min(hi[1])] };
     let whole = RefinementRegion { x_lo: [PX_LO, PY_LO], x_hi: [PX_HI, PY_HI] };

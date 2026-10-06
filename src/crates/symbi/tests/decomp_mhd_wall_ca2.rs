@@ -13,7 +13,7 @@
 // the sealed shaped wall on the tile cut. a per-tile c_a2 makes the near-wall tile
 // use its small local max while the monolithic run uses the far dip's global max, so
 // the wall penalization diverges at the cut. with a correct global c_a2 the
-// decomposed run reproduces the monolithic one to round-off.
+// decomposed run reproduces the monolithic one bit for bit.
 // =============================================================================
 
 use symbi::regimes::substrate_newtonian_mhd::NewtonianMhdSubstrateKernelSet;
@@ -57,11 +57,14 @@ fn ic(x: f64, y: f64) -> MhdPrim<f64, 3> {
     )
 }
 
-fn make(cells: [usize; 2], origin: [f64; 2], bnd: Boundaries<2>) -> (Sim, Kern) {
+// a tile of `cells` placed as production places it: the whole grid's origin and the index offset
+// of its first cell
+fn make(cells: [usize; 2], offset: [usize; 2], bnd: Boundaries<2>) -> (Sim, Kern) {
     let mut sim = Sim::build(NewtonianMhd, IdealGas { gamma: GAMMA }, Cartesian)
         .cells(cells)
         .spacing([DX; 2])
-        .origin(origin)
+        .origin([0.0; 2])
+        .index_offset([offset[0] as isize, offset[1] as isize])
         .boundaries(bnd)
         .cfl(CFL)
         .timestepping(Timestepping::Rk2)
@@ -105,7 +108,7 @@ fn grid_tiles(counts: [usize; 2]) -> Vec<(Sim, Kern)> {
     (0..total)
         .map(|flat| {
             let tc = unflatten(flat, counts);
-            let origin = std::array::from_fn(|a| tc[a] as f64 * m[a] as f64 * DX);
+            let offset: [usize; 2] = std::array::from_fn(|a| tc[a] * m[a]);
             let bnd = Boundaries(std::array::from_fn(|a| {
                 let lo = if tc[a] == 0 {
                     BoundaryType::Outflow
@@ -119,7 +122,7 @@ fn grid_tiles(counts: [usize; 2]) -> Vec<(Sim, Kern)> {
                 };
                 [lo, hi]
             }));
-            make(m, origin, bnd)
+            make(m, offset, bnd)
         })
         .collect()
 }
@@ -196,7 +199,7 @@ fn assert_decomposed_matches(counts: [usize; 2]) {
         );
         let e = max_err(&mv, &dv);
         assert!(
-            e < 1e-11,
+            e == 0.0,
             "{counts:?} {name} decomposed!=mono under mhd wall (c_a2 divergence): err {e:e}"
         );
     }

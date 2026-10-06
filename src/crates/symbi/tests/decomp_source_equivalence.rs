@@ -3,7 +3,7 @@
 //
 // the source correctness contract for multi-gpu domain decomposition: a domain split into tiles,
 // each carrying the same runtime source collection, evolved with the additive source pass in
-// `evolve_decomposed`, must reproduce the monolithic run to round-off.
+// `evolve_decomposed`, must reproduce the monolithic run bit for bit.
 //
 // two independently parameterized forces sum to `a = [x, 0]`; both use local parameter index zero,
 // so the collection must isolate their values before composing the shared momentum and energy
@@ -103,11 +103,14 @@ fn bump(x: f64) -> f64 {
     0.2 * (-(((x - 0.5) / 0.1).powi(2))).exp()
 }
 
-fn make(cells: [usize; 2], origin: [f64; 2], bnd: Boundaries<2>, ts: Timestepping) -> (Sim, Kern) {
+// a tile of `cells` placed as production places it: the whole grid's origin and the index offset
+// of its first cell
+fn make(cells: [usize; 2], offset: [usize; 2], bnd: Boundaries<2>, ts: Timestepping) -> (Sim, Kern) {
     let sim = Sim::build(Newtonian, IdealGas { gamma: GAMMA }, Cartesian)
         .cells(cells)
         .spacing([DX; 2])
-        .origin(origin)
+        .origin([0.0; 2])
+        .index_offset([offset[0] as isize, offset[1] as isize])
         .boundaries(bnd)
         .cfl(CFL)
         .timestepping(ts)
@@ -151,7 +154,8 @@ fn make(cells: [usize; 2], origin: [f64; 2], bnd: Boundaries<2>, ts: Timesteppin
 }
 
 // build the tile grid: each tile an equal slice, CoarseFine on internal faces, Outflow on the outer
-// domain boundary. each tile gets its own origin, so VARIABLE_X1 binds the correct global x.
+// domain boundary. each tile sits at the whole-grid index offset of its first cell, so VARIABLE_X1
+// binds the global x of the monolithic grid.
 fn grid_tiles(counts: [usize; 2], ts: Timestepping) -> Vec<(Sim, Kern)> {
     let m: [usize; 2] = std::array::from_fn(|a| {
         assert!(N % counts[a] == 0, "N must split evenly into counts[{a}]");
@@ -161,7 +165,7 @@ fn grid_tiles(counts: [usize; 2], ts: Timestepping) -> Vec<(Sim, Kern)> {
     (0..total)
         .map(|flat| {
             let tc = unflatten(flat, counts);
-            let origin = std::array::from_fn(|a| tc[a] as f64 * m[a] as f64 * DX);
+            let offset: [usize; 2] = std::array::from_fn(|a| tc[a] * m[a]);
             let bnd = Boundaries(std::array::from_fn(|a| {
                 let lo = if tc[a] == 0 {
                     BoundaryType::Outflow
@@ -175,7 +179,7 @@ fn grid_tiles(counts: [usize; 2], ts: Timestepping) -> Vec<(Sim, Kern)> {
                 };
                 [lo, hi]
             }));
-            make(m, origin, bnd, ts)
+            make(m, offset, bnd, ts)
         })
         .collect()
 }
@@ -259,22 +263,22 @@ fn assert_source_matches(counts: [usize; 2], ts: Timestepping) {
     let de = max_err(&mono_den, &dec_den);
     let me = max_err(&mono_momx, &dec_momx);
     assert!(
-        de < 1e-12,
+        de == 0.0,
         "{counts:?} {ts:?} density err {de:e} under runtime source"
     );
     assert!(
-        me < 1e-12,
+        me == 0.0,
         "{counts:?} {ts:?} mom_x err {me:e} under runtime source"
     );
 
     // also the production gather path (the python checkpoint output).
     let bnd = Boundaries(std::array::from_fn(|_| [BoundaryType::Outflow; 2]));
-    let global = make([N, N], [0.0, 0.0], bnd, ts);
+    let global = make([N, N], [0, 0], bnd, ts);
     let stores: Vec<_> = dec.iter().map(|(s, _)| &**s).collect();
     gather_interiors(&*global.0, &stores, counts);
     let gathered = global_field(std::slice::from_ref(&global), [1, 1], den);
     let ge = max_err(&gathered, &dec_den);
-    assert!(ge < 1e-12, "{counts:?} {ts:?} gather density err {ge:e}");
+    assert!(ge == 0.0, "{counts:?} {ts:?} gather density err {ge:e}");
 }
 
 #[test]

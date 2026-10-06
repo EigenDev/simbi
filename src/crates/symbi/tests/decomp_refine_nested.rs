@@ -59,11 +59,14 @@ fn bump(x: f64, y: f64) -> f64 {
     0.3 * (-(((x - 0.5) / 0.07).powi(2) + ((y - 0.48) / 0.09).powi(2))).exp()
 }
 
-fn build_root(cells: [usize; 2], origin: [f64; 2], bnd: Boundaries<2>) -> Sim {
+/// a root tile of `cells` placed as production places it: the whole grid's origin and the index
+/// offset of its first cell
+fn build_root(cells: [usize; 2], offset: [usize; 2], bnd: Boundaries<2>) -> Sim {
     Sim::build(Newtonian, IdealGas { gamma: GAMMA }, Cartesian)
         .cells(cells)
         .spacing([DX; 2])
-        .origin(origin)
+        .origin([0.0; 2])
+        .index_offset([offset[0] as isize, offset[1] as isize])
         .boundaries(bnd)
         .cfl(CFL)
         .timestepping(Timestepping::Rk2)
@@ -87,7 +90,7 @@ fn kset_viscous(sim: &Sim) -> Kern {
 }
 
 fn build_single(make: fn(&Sim) -> Kern) -> Hier {
-    let root = build_root([N, N], [0.0, 0.0], Boundaries::uniform(BoundaryType::Outflow));
+    let root = build_root([N, N], [0, 0], Boundaries::uniform(BoundaryType::Outflow));
     let k = make(&root);
     let mut h = Hier::with_refinement(root, k, &regions(), ProlongOrder::Ppm, make).expect("single hierarchy");
     h.seed_fine_from_coarse().expect("seed fine");
@@ -104,17 +107,18 @@ fn build_tiles(partition: &Partition<2>, whole: &[RefinementRegion<2>], make: fn
         let tc = unflatten(flat, counts);
         let ext = partition.tile_extents(tc);
         let m: [usize; 2] = [ext[0].1, ext[1].1];
-        let origin: [f64; 2] = std::array::from_fn(|a| ext[a].0 as f64 * DX);
-        let hi: [f64; 2] = std::array::from_fn(|a| origin[a] + m[a] as f64 * DX);
+        let offset: [usize; 2] = [ext[0].0, ext[1].0];
+        let lo: [f64; 2] = std::array::from_fn(|a| offset[a] as f64 * DX);
+        let hi: [f64; 2] = std::array::from_fn(|a| lo[a] + m[a] as f64 * DX);
         let bnd = Boundaries(std::array::from_fn(|a| {
             let face = |edge: bool| if edge { BoundaryType::Outflow } else { BoundaryType::CoarseFine };
             [face(tc[a] == 0), face(tc[a] == counts[a] - 1)]
         }));
-        let root = build_root(m, origin, bnd);
+        let root = build_root(m, offset, bnd);
         let clipped: Vec<RefinementRegion<2>> = whole
             .iter()
             .map(|r| RefinementRegion {
-                x_lo: std::array::from_fn(|a| r.x_lo[a].max(origin[a])),
+                x_lo: std::array::from_fn(|a| r.x_lo[a].max(lo[a])),
                 x_hi: std::array::from_fn(|a| r.x_hi[a].min(hi[a])),
             })
             .take_while(|r| (0..2).all(|a| r.x_lo[a] < r.x_hi[a]))

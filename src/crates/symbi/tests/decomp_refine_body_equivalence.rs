@@ -5,9 +5,9 @@
 // the same bodies at their global positions (finest-owns-bodies per tile: the fine level
 // holds the full accreting body, the root a gravity-only proxy), driven through the
 // production `evolve_hierarchy_decomposed` loop, reproduce the monolithic refined run
-// to round-off — fields and the accreted-mass bookkeeping alike. the decomposed body phase sums
-// each tile's finest-level feedback partials (the tile fine interiors partition the sink
-// region) and applies the identical global delta everywhere, the same lockstep contract the
+// — the fields bit for bit, the accreted-mass bookkeeping to its summation order. the
+// decomposed body phase sums each tile's finest-level feedback partials (the tile fine
+// interiors partition the sink region) and applies the identical global delta everywhere, the same lockstep contract the
 // flat decomposed loop proves in decomp_body_equivalence.
 //
 // two placements: the sink inside one tile's fine patch, and the sink straddling a root cut
@@ -60,11 +60,14 @@ fn sink_at(pos: [f64; 2]) -> BodyCollection<f64, 2> {
     ))
 }
 
-fn build_root(cells: [usize; 2], origin: [f64; 2], bnd: Boundaries<2>) -> Sim {
+// a root tile placed as production places it: the whole grid's origin and the index offset of
+// its first cell
+fn build_root(cells: [usize; 2], offset: [usize; 2], bnd: Boundaries<2>) -> Sim {
     Sim::build(Newtonian, IdealGas { gamma: GAMMA }, Cartesian)
         .cells(cells)
         .spacing([DX; 2])
-        .origin(origin)
+        .origin([0.0; 2])
+        .index_offset(std::array::from_fn(|a| offset[a] as isize))
         .boundaries(bnd)
         .cfl(CFL)
         .timestepping(Timestepping::Euler)
@@ -74,17 +77,18 @@ fn build_root(cells: [usize; 2], origin: [f64; 2], bnd: Boundaries<2>) -> Sim {
         .build()
 }
 
-// clip a region to a tile's physical slab; None when the overlap is empty or degenerate.
+// clip a region to the physical slab of the tile whose first cell is whole-grid index
+// `offset`; None when the overlap is empty or degenerate.
 fn clip(
     region: &RefinementRegion<2>,
-    origin: [f64; 2],
+    offset: [usize; 2],
     m: [usize; 2],
 ) -> Option<RefinementRegion<2>> {
     let mut lo = [0.0; 2];
     let mut hi = [0.0; 2];
     for a in 0..2 {
-        let tlo = origin[a];
-        let thi = origin[a] + m[a] as f64 * DX;
+        let tlo = offset[a] as f64 * DX;
+        let thi = (offset[a] + m[a]) as f64 * DX;
         lo[a] = region.x_lo[a].max(tlo);
         hi[a] = region.x_hi[a].min(thi);
         if hi[a] - lo[a] < DX {
@@ -97,7 +101,7 @@ fn clip(
 fn build_mono(region: &RefinementRegion<2>, sink_pos: [f64; 2]) -> Hier {
     let root = build_root(
         [N, N],
-        [0.0, 0.0],
+        [0, 0],
         Boundaries::uniform(BoundaryType::Outflow),
     );
     let k = kset(&root);
@@ -121,7 +125,7 @@ fn build_tiles(counts: [usize; 2], region: &RefinementRegion<2>, sink_pos: [f64;
     let mut tiles = Vec::with_capacity(total);
     for flat in 0..total {
         let tc = unflatten(flat, counts);
-        let origin = std::array::from_fn(|a| tc[a] as f64 * m[a] as f64 * DX);
+        let offset: [usize; 2] = std::array::from_fn(|a| tc[a] * m[a]);
         let bnd = Boundaries(std::array::from_fn(|a| {
             let lo = if tc[a] == 0 {
                 BoundaryType::Outflow
@@ -135,8 +139,8 @@ fn build_tiles(counts: [usize; 2], region: &RefinementRegion<2>, sink_pos: [f64;
             };
             [lo, hi]
         }));
-        let root = build_root(m, origin, bnd);
-        let h = match clip(region, origin, m) {
+        let root = build_root(m, offset, bnd);
+        let h = match clip(region, offset, m) {
             Some(r) => {
                 let k = kset(&root);
                 let h = Hier::with_refinement_of(root, k, &[r], &[*region], ProlongOrder::Ppm, kset)
@@ -257,7 +261,7 @@ fn assert_matches(counts: [usize; 2], region: RefinementRegion<2>, sink_pos: [f6
         .map(|(a, b)| (a - b).abs())
         .fold(0.0_f64, f64::max);
     assert!(
-        err < 1e-12,
+        err == 0.0,
         "{counts:?}: refined+decomposed body run diverged from mono: {err:e}"
     );
 }

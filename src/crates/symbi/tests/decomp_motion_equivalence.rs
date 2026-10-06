@@ -2,7 +2,7 @@
 // decomp_motion_equivalence.rs
 //
 // mesh motion x decomposition: tiles evolving a homologously expanding (or uniformly
-// translating) mesh must reproduce the monolithic single-grid run to round-off. every tile
+// translating) mesh must reproduce the monolithic single-grid run bit for bit. every tile
 // carries the identical motion state and the decomposed loop advances all tile clocks and
 // scale factors in lockstep with the shared global dt — identical dt sequence, identical
 // a(t) sequence, bit-for-bit. the cuts sit at fixed comoving indices, so the halo exchange
@@ -39,16 +39,19 @@ fn bump(x: f64, y: f64) -> f64 {
     0.3 * (-(((x - 0.5) / 0.1).powi(2) + ((y - 0.5) / 0.1).powi(2))).exp()
 }
 
+// a tile of `cells` placed as production places it: the whole grid's origin and the index offset
+// of its first cell
 fn make(
     cells: [usize; 2],
-    origin: [f64; 2],
+    offset: [usize; 2],
     bnd: Boundaries<2>,
     motion: MotionState<f64>,
 ) -> (Sim, Kern) {
     let mut sim = Sim::build(Newtonian, IdealGas { gamma: GAMMA }, Cartesian)
         .cells(cells)
         .spacing([DX; 2])
-        .origin(origin)
+        .origin([0.0; 2])
+        .index_offset([offset[0] as isize, offset[1] as isize])
         .boundaries(bnd)
         .cfl(CFL)
         .timestepping(Timestepping::Rk2)
@@ -69,7 +72,7 @@ fn grid_tiles(counts: [usize; 2], motion: MotionState<f64>) -> Vec<(Sim, Kern)> 
     (0..counts.iter().product::<usize>())
         .map(|flat| {
             let tc = unflatten(flat, counts);
-            let origin = std::array::from_fn(|a| tc[a] as f64 * m[a] as f64 * DX);
+            let offset: [usize; 2] = std::array::from_fn(|a| tc[a] * m[a]);
             let bnd = Boundaries(std::array::from_fn(|a| {
                 let lo = if tc[a] == 0 {
                     BoundaryType::Outflow
@@ -83,7 +86,7 @@ fn grid_tiles(counts: [usize; 2], motion: MotionState<f64>) -> Vec<(Sim, Kern)> 
                 };
                 [lo, hi]
             }));
-            make(m, origin, bnd, motion)
+            make(m, offset, bnd, motion)
         })
         .collect()
 }
@@ -141,7 +144,7 @@ fn assert_motion_matches(counts: [usize; 2], motion: MotionState<f64>) {
 
     let (mut mono, mk) = make(
         [N, N],
-        [0.0, 0.0],
+        [0, 0],
         Boundaries::uniform(BoundaryType::Outflow),
         motion,
     );
@@ -175,13 +178,13 @@ fn assert_motion_matches(counts: [usize; 2], motion: MotionState<f64>) {
     // clock (or a never-advanced scale factor) is the failure mode under test.
     for (i, (s, _)) in tiles.iter().enumerate() {
         assert!(
-            (s.time - mono_sim.time).abs() < 1e-12,
+            (s.time - mono_sim.time).abs() == 0.0,
             "{counts:?} tile {i}: clock {:.6e} != mono {:.6e}",
             s.time,
             mono_sim.time
         );
         assert!(
-            (s.motion.a - mono_sim.motion.a).abs() < 1e-14,
+            (s.motion.a - mono_sim.motion.a).abs() == 0.0,
             "{counts:?} tile {i}: scale factor {} != mono {}",
             s.motion.a,
             mono_sim.motion.a
@@ -198,11 +201,11 @@ fn assert_motion_matches(counts: [usize; 2], motion: MotionState<f64>) {
     let de = max_err(&mono_den, &dec_den);
     let me = max_err(&mono_momx, &dec_momx);
     assert!(
-        de < 1e-12,
+        de == 0.0,
         "{counts:?}: density diverged under mesh motion: {de:e}"
     );
     assert!(
-        me < 1e-12,
+        me == 0.0,
         "{counts:?}: mom_x diverged under mesh motion: {me:e}"
     );
 

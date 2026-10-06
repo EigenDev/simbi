@@ -6,7 +6,7 @@
 //
 // the base contract every transport rests on: a domain split into a
 // grid of tiles, with same-level halo exchange each step, must reproduce the
-// monolithic run to round-off. this isolates the decomposition + halo math from all
+// monolithic run bit for bit. this isolates the decomposition + halo math from all
 // hardware and transport concerns; peer-copy (2 gpus) and mpi (multi-node) are then
 // transport substitutions under a proven-correct decomposition.
 //
@@ -36,8 +36,8 @@
 // in their own context while the host-orchestrated exchange runs on device 0 over the
 // managed-global field memory (visible to every context after a per-context drain). this
 // exercises the per-device dispatcher + context-bound modules on a single gpu; the
-// decomposed run still has to reproduce the monolithic run (one tile, device 0) to
-// round-off. on a host build `with_device` is a no-op, so the wrapping is uniform.
+// decomposed run still has to reproduce the monolithic run (one tile, device 0) bit
+// for bit. on a host build `with_device` is a no-op, so the wrapping is uniform.
 // =============================================================================
 
 use symbi::regimes::substrate_gpu::device_sync;
@@ -58,7 +58,9 @@ use symbi_xpu::{DeviceMemory, DeviceSpace};
 
 const GAMMA: f64 = 1.4;
 const CFL: f64 = 0.4;
-const N: usize = 64; // cells per axis (kept modest so the 3d run is quick)
+// cells per axis (kept modest so the 3d run is quick); no power of two divides the spacing 1/48,
+// so a tile placed from its own origin would sit an ulp off the monolithic grid
+const N: usize = 48;
 const DX: f64 = 1.0 / N as f64;
 const T_FINAL: f64 = 0.05; // waves from the central bump stay well inside the domain.
 
@@ -96,16 +98,19 @@ macro_rules! decomp_harness {
 
             // the integrator is set on the sim so the builder allocates the buffers it
             // needs (rk2's u_n snapshot); the harness drives the matching stage table.
+            // a tile of `cells` placed as production places it: the whole grid's origin and the
+            // index offset of its first cell
             fn make(
                 cells: [usize; $d],
-                origin: [f64; $d],
+                offset: [usize; $d],
                 bnd: Boundaries<$d>,
                 ts: Timestepping,
             ) -> (Sim, Kern) {
                 let sim = Sim::build(Newtonian, IdealGas { gamma: GAMMA }, Cartesian)
                     .cells(cells)
                     .spacing([DX; $d])
-                    .origin(origin)
+                    .origin([0.0; $d])
+                    .index_offset(std::array::from_fn(|a| offset[a] as isize))
                     .boundaries(bnd)
                     .timestepping(ts)
                     .allocate()
@@ -131,7 +136,7 @@ macro_rules! decomp_harness {
                 (0..total)
                     .map(|flat| {
                         let tc = unflatten(flat, counts);
-                        let origin = std::array::from_fn(|a| tc[a] as f64 * m[a] as f64 * DX);
+                        let offset: [usize; $d] = std::array::from_fn(|a| tc[a] * m[a]);
                         let bnd = Boundaries(std::array::from_fn(|a| {
                             let lo = if tc[a] == 0 {
                                 BoundaryType::Outflow
@@ -147,7 +152,7 @@ macro_rules! decomp_harness {
                         }));
                         // allocate this tile's fields in its bound device's context, so the
                         // managed memory is hinted resident there (mirrors a real per-gpu tile).
-                        with_device(tile_device(flat), || make(m, origin, bnd, ts))
+                        with_device(tile_device(flat), || make(m, offset, bnd, ts))
                     })
                     .collect()
             }
@@ -221,11 +226,11 @@ macro_rules! decomp_harness {
             // kernels baked unconditionally.
             fn make_chi(
                 cells: [usize; $d],
-                origin: [f64; $d],
+                offset: [usize; $d],
                 bnd: Boundaries<$d>,
                 ts: Timestepping,
             ) -> (Sim, Kern) {
-                let (mut sim, k) = make(cells, origin, bnd, ts);
+                let (mut sim, k) = make(cells, offset, bnd, ts);
                 sim = sim.with_passive_scalar().expect("dye allocation failed");
                 let ilo: [isize; $d] = std::array::from_fn(|a| sim.geom.interior.spaces[a].lo);
                 let cons_chi = sim.fields.cons.chi_field().expect("cons chi");
@@ -239,9 +244,9 @@ macro_rules! decomp_harness {
                         sim.fields.cons.mom[dd].view_mut().set(c, rho * CHI_DRIFT);
                         sim.fields.prim.vel[dd].view_mut().set(c, CHI_DRIFT);
                     }
-                    // global position of this cell center (tile origin + local offset).
+                    // the cell center at its whole-grid index, as the monolithic grid places it
                     let x: [f64; $d] =
-                        std::array::from_fn(|a| origin[a] + ((c[a] - ilo[a]) as f64 + 0.5) * DX);
+                        std::array::from_fn(|a| ((offset[a] as isize + c[a] - ilo[a]) as f64 + 0.5) * DX);
                     let chi = chi_ic(x);
                     cons_chi.view_mut().set(c, rho * chi);
                     prim_chi.view_mut().set(c, chi);
@@ -255,13 +260,13 @@ macro_rules! decomp_harness {
                 (0..total)
                     .map(|flat| {
                         let tc = unflatten(flat, counts);
-                        let origin = std::array::from_fn(|a| tc[a] as f64 * m[a] as f64 * DX);
+                        let offset: [usize; $d] = std::array::from_fn(|a| tc[a] * m[a]);
                         let bnd = Boundaries(std::array::from_fn(|a| {
                             let lo = if tc[a] == 0 { BoundaryType::Outflow } else { BoundaryType::CoarseFine };
                             let hi = if tc[a] == counts[a] - 1 { BoundaryType::Outflow } else { BoundaryType::CoarseFine };
                             [lo, hi]
                         }));
-                        with_device(tile_device(flat), || make_chi(m, origin, bnd, ts))
+                        with_device(tile_device(flat), || make_chi(m, offset, bnd, ts))
                     })
                     .collect()
             }
@@ -285,7 +290,8 @@ macro_rules! decomp_harness {
             }
 
             // run mono (counts = [1; D]) and the requested decomposition with integrator
-            // `ts`, then assert the global density grids agree to round-off.
+            // `ts`, then assert the global density grids agree bit for bit: tiles at whole-grid index
+            // offsets evaluate the same cell centers and the same flux sums as the monolithic grid.
             pub fn assert_matches(counts: [usize; $d], ts: Timestepping) {
                 let mut mono = grid_tiles([1; $d], ts);
                 run(&mut mono, [1; $d], ts);
@@ -305,7 +311,7 @@ macro_rules! decomp_harness {
                     .map(|(a, b)| (a - b).abs())
                     .fold(0.0_f64, f64::max);
                 assert!(
-                    max_err < 1e-12,
+                    max_err == 0.0,
                     "decomposition {counts:?} (D={}, {ts:?}) vs monolithic density max err {max_err:e}",
                     $d
                 );
@@ -316,7 +322,7 @@ macro_rules! decomp_harness {
                 // the gather index arithmetic (mirror of the IC scatter) across every topology
                 // here -- the one piece the python path uses that `evolve_decomposed` does not.
                 let bnd = Boundaries(std::array::from_fn(|_| [BoundaryType::Outflow; 2]));
-                let global = make([N; $d], [0.0; $d], bnd, ts);
+                let global = make([N; $d], [0; $d], bnd, ts);
                 let stores: Vec<_> = dec.iter().map(|(s, _)| &**s).collect();
                 device_sync::<$mem>();
                 symbi::sim::decomp::gather_interiors(&*global.0, &stores, counts);
@@ -327,14 +333,14 @@ macro_rules! decomp_harness {
                     .map(|(a, b)| (a - b).abs())
                     .fold(0.0_f64, f64::max);
                 assert!(
-                    gather_err < 1e-12,
+                    gather_err == 0.0,
                     "gather_interiors {counts:?} (D={}, {ts:?}) vs direct read max err {gather_err:e}",
                     $d
                 );
             }
 
             // the passive-scalar gate: with a dye field allocated, a decomposition must reproduce
-            // the monolithic dye field to round-off -- which it can only do if prim.chi is
+            // the monolithic dye field bit for bit -- which it can only do if prim.chi is
             // exchanged across every cut. the dye is derived into the transport set from the
             // store, so this is what proves the derivation actually carries it.
             pub fn assert_chi_matches(counts: [usize; $d], ts: Timestepping) {
@@ -373,7 +379,7 @@ macro_rules! decomp_harness {
                     .map(|(a, b)| (a - b).abs())
                     .fold(0.0_f64, f64::max);
                 assert!(
-                    max_err < 1e-12,
+                    max_err == 0.0,
                     "decomposition {counts:?} (D={}, {ts:?}) vs monolithic DYE max err {max_err:e} \
                      (advected {max_advect:e})",
                     $d
@@ -461,7 +467,7 @@ fn euler_octo_tile_3d_grid() {
 }
 
 // the gpu validation: the decomposition on device fields (unified memory), every kernel
-// through run_gpu. gpu-mono vs gpu-decomposed must still agree to round-off -- the only
+// through run_gpu. gpu-mono vs gpu-decomposed must still agree bit for bit -- the only
 // difference is the exchange, run identically on both. proves the device-memory path
 // before any multi-device hardware.
 #[cfg(feature = "gpu")]

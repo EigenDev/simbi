@@ -63,11 +63,13 @@ fn blob(x: [f64; 2]) -> f64 {
     2.0 * (-(((x[0] - 0.4).powi(2) + (x[1] - 0.4).powi(2)) / 0.02)).exp()
 }
 
-fn make(cells: [usize; 2], origin: [f64; 2], bnd: Boundaries<2>, ts: Timestepping) -> (Sim, Kern) {
+// a tile on the whole grid's origin with its first cell at whole-grid index `offset`.
+fn make(cells: [usize; 2], offset: [usize; 2], bnd: Boundaries<2>, ts: Timestepping) -> (Sim, Kern) {
     let sim = Sim::build(Newtonian, IdealGas { gamma: GAMMA }, Cartesian)
         .cells(cells)
         .spacing([DX; 2])
-        .origin(origin)
+        .origin([0.0; 2])
+        .index_offset(std::array::from_fn(|a| offset[a] as isize))
         .boundaries(bnd)
         .timestepping(ts)
         .allocate()
@@ -90,10 +92,7 @@ fn grid_tiles(counts: [usize; 2], ts: Timestepping) -> Vec<(Sim, Kern)> {
     (0..total)
         .map(|flat| {
             let tc = unflatten(flat, counts);
-            let origin = [
-                tc[0] as f64 * m[0] as f64 * DX,
-                tc[1] as f64 * m[1] as f64 * DX,
-            ];
+            let offset = [tc[0] * m[0], tc[1] * m[1]];
             let bnd = Boundaries::per_axis(std::array::from_fn(|a| {
                 [
                     if tc[a] == 0 {
@@ -108,7 +107,7 @@ fn grid_tiles(counts: [usize; 2], ts: Timestepping) -> Vec<(Sim, Kern)> {
                     },
                 ]
             }));
-            with_device(tile_device(flat), || make(m, origin, bnd, ts))
+            with_device(tile_device(flat), || make(m, offset, bnd, ts))
         })
         .collect()
 }
@@ -204,7 +203,7 @@ fn assert_matches(counts: [usize; 2], ts: Timestepping) {
     // from the identical tracers.
     let (ref_sim, _) = make(
         [N, N],
-        [0.0, 0.0],
+        [0, 0],
         Boundaries::uniform(BoundaryType::Outflow),
         ts,
     );

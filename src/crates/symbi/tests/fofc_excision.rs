@@ -72,13 +72,16 @@ fn metric() -> SchwarzschildKSCartesian<f64> {
     SchwarzschildKSCartesian { mass: MASS }
 }
 
-fn build(cells: [usize; 3], dx: f64, origin: [f64; 3], bnd: Boundaries<3>, r_exc: f64) -> (Sim, Kern) {
+/// a grid of `cells` placed as production places a tile: the whole box's origin and the index
+/// offset of its first cell
+fn build(cells: [usize; 3], dx: f64, offset: [usize; 3], bnd: Boundaries<3>, r_exc: f64) -> (Sim, Kern) {
     let m = metric();
     let bz = move |x: [f64; 3]| BZ0 / m.sqrt_det_gamma(Tensor::new(x));
     let sim = Sim::build(Rmhd, IdealGas { gamma: GAMMA }, metric())
         .cells(cells)
         .spacing([dx; 3])
-        .origin(origin)
+        .origin([-L; 3])
+        .index_offset(std::array::from_fn(|a| offset[a] as isize))
         .boundaries(bnd)
         .cfl(CFL)
         .timestepping(Timestepping::Rk2)
@@ -101,7 +104,7 @@ fn build(cells: [usize; 3], dx: f64, origin: [f64; 3], bnd: Boundaries<3>, r_exc
 }
 
 fn whole(r_exc: f64) -> (Sim, Kern) {
-    build([N; 3], DX, [-L; 3], Boundaries::uniform(BoundaryType::Outflow), r_exc)
+    build([N; 3], DX, [0; 3], Boundaries::uniform(BoundaryType::Outflow), r_exc)
 }
 
 /// the storage index of global interior cell `g` on a store holding the whole grid
@@ -312,12 +315,12 @@ fn tiles(counts: [usize; 3]) -> Vec<(Sim, Kern)> {
     (0..counts.iter().product())
         .map(|flat| {
             let tc = unflatten(flat, counts);
-            let origin = std::array::from_fn(|a| -L + (tc[a] * m[a]) as f64 * DXT);
+            let offset: [usize; 3] = std::array::from_fn(|a| tc[a] * m[a]);
             let bnd = Boundaries(std::array::from_fn(|a| {
                 let face = |edge: bool| if edge { BoundaryType::Outflow } else { BoundaryType::CoarseFine };
                 [face(tc[a] == 0), face(tc[a] == counts[a] - 1)]
             }));
-            build(m, DXT, origin, bnd, R_EXC)
+            build(m, DXT, offset, bnd, R_EXC)
         })
         .collect()
 }
@@ -367,7 +370,7 @@ fn record(ts: &[(Sim, Kern)], counts: [usize; 3]) -> Vec<(usize, [usize; 3], u64
 /// the whole box through the uni-grid driver, with the number of excised cells whose recovery
 /// was rejected, summed over the steps
 fn run_single(t_final: f64) -> (Vec<(usize, [usize; 3], u64)>, u64) {
-    let (mut sim, k) = build([NT; 3], DXT, [-L; 3], Boundaries::uniform(BoundaryType::Outflow), R_EXC);
+    let (mut sim, k) = build([NT; 3], DXT, [0; 3], Boundaries::uniform(BoundaryType::Outflow), R_EXC);
     let mut rejected = 0u64;
     symbi::sim::evolve::evolve_with_callback(&mut sim, &k, t_final, 1, |s| rejected += rejected_excised(s, [-L; 3]))
         .expect("single-grid run");

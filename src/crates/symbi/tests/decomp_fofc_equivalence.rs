@@ -51,7 +51,9 @@ const V_INFALL: f64 = 0.2;
 type Sim = SimState<Rhd, 2, SchwarzschildKSCartesian<f64>, IdealGas<f64>, CpuSpace, HostMemory>;
 type Kern = RhdSubstrateKernelSet<HostMemory, f64, 2>;
 
-fn make(cells: [usize; 2], origin: [f64; 2], bnd: Boundaries<2>) -> (Sim, Kern) {
+// a tile placed as production places it: the whole grid's origin and the index offset of its
+// first cell
+fn make(cells: [usize; 2], offset: [usize; 2], bnd: Boundaries<2>) -> (Sim, Kern) {
     let sim = Sim::build(
         Rhd,
         IdealGas { gamma: GAMMA },
@@ -59,7 +61,8 @@ fn make(cells: [usize; 2], origin: [f64; 2], bnd: Boundaries<2>) -> (Sim, Kern) 
     )
     .cells(cells)
     .spacing([DX; 2])
-    .origin(origin)
+    .origin([-L; 2])
+    .index_offset(std::array::from_fn(|a| offset[a] as isize))
     .boundaries(bnd)
     .timestepping(Timestepping::Rk2)
     .allocate()
@@ -99,7 +102,7 @@ fn grid_tiles(counts: [usize; 2]) -> Vec<(Sim, Kern)> {
     (0..total)
         .map(|flat| {
             let tc = unflatten(flat, counts);
-            let origin = std::array::from_fn(|a| -L + tc[a] as f64 * m[a] as f64 * DX);
+            let offset: [usize; 2] = std::array::from_fn(|a| tc[a] * m[a]);
             let bnd = Boundaries(std::array::from_fn(|a| {
                 let lo = if tc[a] == 0 {
                     BoundaryType::Outflow
@@ -113,7 +116,7 @@ fn grid_tiles(counts: [usize; 2]) -> Vec<(Sim, Kern)> {
                 };
                 [lo, hi]
             }));
-            make(m, origin, bnd)
+            make(m, offset, bnd)
         })
         .collect()
 }
@@ -194,7 +197,7 @@ fn fofc_fires_and_tiled_matches_monolithic() {
         .map(|(a, b)| (a - b).abs())
         .fold(0.0_f64, f64::max);
     assert!(
-        max_err < 1e-12,
+        max_err == 0.0,
         "decomposed FOFC diverged from monolithic through {mono_fallbacks} correction \
          events: max den err {max_err:e}"
     );

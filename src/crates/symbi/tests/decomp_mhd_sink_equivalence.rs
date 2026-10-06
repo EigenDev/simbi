@@ -61,11 +61,14 @@ impl Setup {
     }
 }
 
-fn make(cells: [usize; 2], origin: [f64; 2], bnd: Boundaries<2>, setup: Setup) -> (Sim, Kern) {
+// a tile of `cells` placed as production places it: the whole grid's origin and the index offset
+// of its first cell
+fn make(cells: [usize; 2], offset: [usize; 2], bnd: Boundaries<2>, setup: Setup) -> (Sim, Kern) {
     let sim = Sim::build(NewtonianMhd, IdealGas { gamma: GAMMA }, Cartesian)
         .cells(cells)
         .spacing([DX; 2])
-        .origin(origin)
+        .origin([0.0; 2])
+        .index_offset([offset[0] as isize, offset[1] as isize])
         .boundaries(bnd)
         .cfl(CFL)
         .timestepping(Timestepping::Rk2)
@@ -110,7 +113,7 @@ fn grid_tiles(counts: [usize; 2], setup: Setup) -> Vec<(Sim, Kern)> {
     (0..total)
         .map(|flat| {
             let tc = unflatten(flat, counts);
-            let origin = std::array::from_fn(|a| tc[a] as f64 * m[a] as f64 * DX);
+            let offset: [usize; 2] = std::array::from_fn(|a| tc[a] * m[a]);
             let bnd = Boundaries(std::array::from_fn(|a| {
                 let lo = if tc[a] == 0 {
                     BoundaryType::Outflow
@@ -124,7 +127,7 @@ fn grid_tiles(counts: [usize; 2], setup: Setup) -> Vec<(Sim, Kern)> {
                 };
                 [lo, hi]
             }));
-            make(m, origin, bnd, setup)
+            make(m, offset, bnd, setup)
         })
         .collect()
 }
@@ -191,7 +194,7 @@ fn assert_decomposed_matches(counts: [usize; 2], setup: Setup) {
     // the recovery, the halo refresh) is measured against the monolithic step.
     let mut mono = vec![make(
         [N, N],
-        [0.0, 0.0],
+        [0, 0],
         Boundaries::uniform(BoundaryType::Outflow),
         setup,
     )];

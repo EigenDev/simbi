@@ -86,11 +86,13 @@ fn bump(x: f64, y: f64) -> f64 {
     0.3 * (-(((x - 0.5) / 0.08).powi(2) + ((y - 0.5) / 0.08).powi(2))).exp()
 }
 
-fn build_root(cells: [usize; 2], origin: [f64; 2], bnd: Boundaries<2>, ng: usize) -> Sim {
+/// a root tile on the whole grid's origin with its first cell at whole-grid index `offset`
+fn build_root(cells: [usize; 2], offset: [usize; 2], bnd: Boundaries<2>, ng: usize) -> Sim {
     Sim::build(NewtonianMhd, IdealGas { gamma: GAMMA }, Cartesian)
         .cells(cells)
         .spacing([DX; 2])
-        .origin(origin)
+        .origin([0.0; 2])
+        .index_offset(std::array::from_fn(|a| offset[a] as isize))
         .boundaries(bnd)
         .cfl(CFL)
         .ghosts(ng)
@@ -124,7 +126,7 @@ fn patch_region(patch: [(usize, usize); 2]) -> RefinementRegion<2> {
 }
 
 fn build_mono(patch: [(usize, usize); 2], ng: usize) -> Hier {
-    let root = build_root([N, N], [0.0, 0.0], Boundaries::uniform(BoundaryType::Outflow), ng);
+    let root = build_root([N, N], [0, 0], Boundaries::uniform(BoundaryType::Outflow), ng);
     let k = kset(&root);
     let mut h = Hier::with_refinement(root, k, &[patch_region(patch)], ProlongOrder::Ppm, kset).expect("mono hier");
     h.seed_fine_from_coarse().expect("seed fine");
@@ -182,16 +184,18 @@ fn tile(partition: &Partition<2>, flat: usize, patch: [(usize, usize); 2], ng: u
     let tc = unflatten(flat, counts);
     let ext = partition.tile_extents(tc);
     let m: [usize; 2] = [ext[0].1, ext[1].1];
-    let origin: [f64; 2] = std::array::from_fn(|a| ext[a].0 as f64 * DX);
-    let hi: [f64; 2] = std::array::from_fn(|a| origin[a] + m[a] as f64 * DX);
+    let offset: [usize; 2] = [ext[0].0, ext[1].0];
+    // the tile's physical box, which clips the patch
+    let lo: [f64; 2] = std::array::from_fn(|a| ext[a].0 as f64 * DX);
+    let hi: [f64; 2] = std::array::from_fn(|a| lo[a] + m[a] as f64 * DX);
     let bnd = Boundaries(std::array::from_fn(|a| {
         let face = |edge: bool| if edge { BoundaryType::Outflow } else { BoundaryType::CoarseFine };
         [face(tc[a] == 0), face(tc[a] == counts[a] - 1)]
     }));
-    let root = build_root(m, origin, bnd, ng);
+    let root = build_root(m, offset, bnd, ng);
     let whole = patch_region(patch);
-    let cx = [whole.x_lo[0].max(origin[0]), whole.x_hi[0].min(hi[0])];
-    let cy = [whole.x_lo[1].max(origin[1]), whole.x_hi[1].min(hi[1])];
+    let cx = [whole.x_lo[0].max(lo[0]), whole.x_hi[0].min(hi[0])];
+    let cy = [whole.x_lo[1].max(lo[1]), whole.x_hi[1].min(hi[1])];
     let k = kset(&root);
     if cx[0] < cx[1] && cy[0] < cy[1] {
         let clipped = RefinementRegion { x_lo: [cx[0], cy[0]], x_hi: [cx[1], cy[1]] };

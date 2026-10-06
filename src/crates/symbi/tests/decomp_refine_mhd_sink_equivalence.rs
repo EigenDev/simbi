@@ -81,12 +81,15 @@ fn sink_at(pos: [f64; 2]) -> BodyCollection<f64, 2> {
     )
 }
 
-fn build_root(cells: [usize; 2], origin: [f64; 2], bnd: Boundaries<2>, setup: Setup) -> Sim {
+// a root tile placed as production places it: the whole grid's origin and the index offset of
+// its first cell
+fn build_root(cells: [usize; 2], offset: [usize; 2], bnd: Boundaries<2>, setup: Setup) -> Sim {
     let shaped = matches!(setup, Setup::Shaped);
     Sim::build(NewtonianMhd, IdealGas { gamma: GAMMA }, Cartesian)
         .cells(cells)
         .spacing([DX; 2])
-        .origin(origin)
+        .origin([0.0; 2])
+        .index_offset(std::array::from_fn(|a| offset[a] as isize))
         .boundaries(bnd)
         .cfl(CFL)
         .timestepping(Timestepping::Rk2)
@@ -108,7 +111,7 @@ fn build_root(cells: [usize; 2], origin: [f64; 2], bnd: Boundaries<2>, setup: Se
         // ghost faces start empty and take their values from the exchanges and boundaries
         .seed_faces(|d, x| {
             let inside = (0..2).all(|a| {
-                let (lo, hi) = (origin[a], origin[a] + cells[a] as f64 * DX);
+                let (lo, hi) = (offset[a] as f64 * DX, (offset[a] + cells[a]) as f64 * DX);
                 let eps = 1e-9 * DX;
                 if a == d { x[a] >= lo - eps && x[a] <= hi + eps } else { x[a] > lo && x[a] < hi }
             });
@@ -122,17 +125,18 @@ fn build_root(cells: [usize; 2], origin: [f64; 2], bnd: Boundaries<2>, setup: Se
         .build()
 }
 
-// clip a region to a tile's physical slab; None when the overlap is empty or degenerate.
+// clip a region to the physical slab of the tile whose first cell is whole-grid index
+// `offset`; None when the overlap is empty or degenerate.
 fn clip(
     region: &RefinementRegion<2>,
-    origin: [f64; 2],
+    offset: [usize; 2],
     m: [usize; 2],
 ) -> Option<RefinementRegion<2>> {
     let mut lo = [0.0; 2];
     let mut hi = [0.0; 2];
     for a in 0..2 {
-        let tlo = origin[a];
-        let thi = origin[a] + m[a] as f64 * DX;
+        let tlo = offset[a] as f64 * DX;
+        let thi = (offset[a] + m[a]) as f64 * DX;
         lo[a] = region.x_lo[a].max(tlo);
         hi[a] = region.x_hi[a].min(thi);
         if hi[a] - lo[a] < DX {
@@ -145,7 +149,7 @@ fn clip(
 fn build_mono(region: &RefinementRegion<2>, sink_pos: Option<[f64; 2]>, setup: Setup) -> Hier {
     let root = build_root(
         [N, N],
-        [0.0, 0.0],
+        [0, 0],
         Boundaries::uniform(BoundaryType::Outflow),
         setup,
     );
@@ -178,7 +182,7 @@ fn build_tiles(
     let mut tiles = Vec::with_capacity(total);
     for flat in 0..total {
         let tc = unflatten(flat, counts);
-        let origin = std::array::from_fn(|a| tc[a] as f64 * m[a] as f64 * DX);
+        let offset: [usize; 2] = std::array::from_fn(|a| tc[a] * m[a]);
         let bnd = Boundaries(std::array::from_fn(|a| {
             let lo = if tc[a] == 0 {
                 BoundaryType::Outflow
@@ -192,8 +196,8 @@ fn build_tiles(
             };
             [lo, hi]
         }));
-        let root = build_root(m, origin, bnd, setup);
-        let h = match clip(region, origin, m) {
+        let root = build_root(m, offset, bnd, setup);
+        let h = match clip(region, offset, m) {
             Some(r) => {
                 let k = kset(&root);
                 Hier::with_refinement_of(root, k, &[r], &[*region], ProlongOrder::Ppm, kset)

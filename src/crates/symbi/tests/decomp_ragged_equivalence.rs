@@ -24,8 +24,8 @@ use symbi_xpu::{CpuSpace, HostMemory};
 
 const GAMMA: f64 = 1.4;
 const CFL: f64 = 0.4;
-// a power-of-two cell count keeps DX and every tile origin binary-exact, so the
-// tiles seed bitwise-identical initial states; the cuts themselves stay ragged.
+// every tile sits on the whole grid's origin at its first cell's whole-grid index offset,
+// so the tiles seed the monolithic grid's initial state bitwise; the cuts stay ragged.
 const N: usize = 64;
 const DX: f64 = 1.0 / N as f64;
 const T_FINAL: f64 = 0.05;
@@ -40,11 +40,12 @@ fn bump(x: f64) -> f64 {
     0.2 * (-((x - 0.5) / 0.1).powi(2)).exp()
 }
 
-fn make(cells: [usize; 2], origin: [f64; 2], bnd: Boundaries<2>) -> (Sim, Kern) {
+fn make(cells: [usize; 2], offset: [usize; 2], bnd: Boundaries<2>) -> (Sim, Kern) {
     let sim = Sim::build(Newtonian, IdealGas { gamma: GAMMA }, Cartesian)
         .cells(cells)
         .spacing([DX; 2])
-        .origin(origin)
+        .origin([0.0; 2])
+        .index_offset(std::array::from_fn(|a| offset[a] as isize))
         .boundaries(bnd)
         .timestepping(Timestepping::Rk2)
         .allocate()
@@ -58,7 +59,7 @@ fn make(cells: [usize; 2], origin: [f64; 2], bnd: Boundaries<2>) -> (Sim, Kern) 
     (sim, k)
 }
 
-// build one tile per partition entry: cells and origin from the partition's own
+// build one tile per partition entry: cells and index offset from the partition's own
 // extents, a CoarseFine face on every interior seam, physical outflow outside.
 fn partition_tiles(partition: &Partition<2>) -> Vec<(Sim, Kern)> {
     let counts = partition.counts();
@@ -67,7 +68,7 @@ fn partition_tiles(partition: &Partition<2>) -> Vec<(Sim, Kern)> {
             let tc = unflatten(flat, counts);
             let ext = partition.tile_extents(tc);
             let cells = [ext[0].1, ext[1].1];
-            let origin = [ext[0].0 as f64 * DX, ext[1].0 as f64 * DX];
+            let offset = [ext[0].0, ext[1].0];
             let bnd = Boundaries(std::array::from_fn(|a| {
                 let lo = if tc[a] == 0 {
                     BoundaryType::Outflow
@@ -81,7 +82,7 @@ fn partition_tiles(partition: &Partition<2>) -> Vec<(Sim, Kern)> {
                 };
                 [lo, hi]
             }));
-            make(cells, origin, bnd)
+            make(cells, offset, bnd)
         })
         .collect()
 }

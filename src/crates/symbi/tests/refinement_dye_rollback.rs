@@ -56,11 +56,14 @@ fn dye(x: f64, y: f64) -> f64 {
     0.5 + 0.4 * (std::f64::consts::TAU * x).sin() * (std::f64::consts::TAU * y).cos()
 }
 
-fn build_root(cells: [usize; 2], origin: [f64; 2], bnd: Boundaries<2>) -> Sim {
+/// a root tile of `cells` placed as production places it: the whole grid's origin and the index
+/// offset of its first cell
+fn build_root(cells: [usize; 2], offset: [usize; 2], bnd: Boundaries<2>) -> Sim {
     Sim::build(Newtonian, IdealGas { gamma: GAMMA }, Cartesian)
         .cells(cells)
         .spacing([DX; 2])
-        .origin(origin)
+        .origin([0.0; 2])
+        .index_offset([offset[0] as isize, offset[1] as isize])
         .boundaries(bnd)
         .cfl(CFL)
         .ghosts(NG)
@@ -102,7 +105,7 @@ fn seed_dye(state: &FieldStore<2, 2, HostMemory, f64>) {
 }
 
 fn build_mono() -> Hier {
-    let root = build_root([N, N], [0.0, 0.0], Boundaries::uniform(BoundaryType::Outflow));
+    let root = build_root([N, N], [0, 0], Boundaries::uniform(BoundaryType::Outflow));
     let k = kset(&root);
     let mut h = Hier::with_refinement(root, k, &[patch_region()], ProlongOrder::Ppm, kset).expect("mono hier");
     h.seed_fine_from_coarse().expect("seed fine");
@@ -121,16 +124,17 @@ fn build_tiles() -> (Vec<Hier>, Partition<2>) {
         let tc = unflatten(flat, counts);
         let ext = partition.tile_extents(tc);
         let m: [usize; 2] = [ext[0].1, ext[1].1];
-        let origin: [f64; 2] = std::array::from_fn(|a| ext[a].0 as f64 * DX);
-        let hi: [f64; 2] = std::array::from_fn(|a| origin[a] + m[a] as f64 * DX);
+        let offset: [usize; 2] = [ext[0].0, ext[1].0];
+        let lo: [f64; 2] = std::array::from_fn(|a| offset[a] as f64 * DX);
+        let hi: [f64; 2] = std::array::from_fn(|a| lo[a] + m[a] as f64 * DX);
         let bnd = Boundaries(std::array::from_fn(|a| {
             let face = |edge: bool| if edge { BoundaryType::Outflow } else { BoundaryType::CoarseFine };
             [face(tc[a] == 0), face(tc[a] == counts[a] - 1)]
         }));
-        let root = build_root(m, origin, bnd);
+        let root = build_root(m, offset, bnd);
         let whole = patch_region();
         let clipped = RefinementRegion {
-            x_lo: [whole.x_lo[0].max(origin[0]), whole.x_lo[1].max(origin[1])],
+            x_lo: [whole.x_lo[0].max(lo[0]), whole.x_lo[1].max(lo[1])],
             x_hi: [whole.x_hi[0].min(hi[0]), whole.x_hi[1].min(hi[1])],
         };
         let k = kset(&root);

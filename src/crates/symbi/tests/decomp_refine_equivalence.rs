@@ -59,11 +59,13 @@ fn patch() -> RefinementRegion<2> {
     }
 }
 
-fn build_root(cells: [usize; 2], origin: [f64; 2], bnd: Boundaries<2>, ts: Timestepping) -> Sim {
+// a root tile on the whole grid's origin with its first cell at whole-grid index `offset`.
+fn build_root(cells: [usize; 2], offset: [usize; 2], bnd: Boundaries<2>, ts: Timestepping) -> Sim {
     Sim::build(Newtonian, IdealGas { gamma: GAMMA }, Cartesian)
         .cells(cells)
         .spacing([DX; 2])
-        .origin(origin)
+        .origin([0.0; 2])
+        .index_offset(std::array::from_fn(|a| offset[a] as isize))
         .boundaries(bnd)
         .cfl(CFL)
         .timestepping(ts)
@@ -82,7 +84,7 @@ fn build_root(cells: [usize; 2], origin: [f64; 2], bnd: Boundaries<2>, ts: Times
 fn build_mono(ts: Timestepping) -> Hier {
     let root = build_root(
         [N, N],
-        [0.0, 0.0],
+        [0, 0],
         Boundaries::uniform(BoundaryType::Outflow),
         ts,
     );
@@ -103,7 +105,9 @@ fn build_tiles(counts: [usize; 2], ts: Timestepping) -> Vec<Hier> {
     let mut tiles = Vec::with_capacity(total);
     for flat in 0..total {
         let tc = unflatten(flat, counts);
-        let origin = std::array::from_fn(|a| tc[a] as f64 * m[a] as f64 * DX);
+        let offset: [usize; 2] = std::array::from_fn(|a| tc[a] * m[a]);
+        // the tile's physical lower edge, which locates the patch
+        let lo: [f64; 2] = std::array::from_fn(|a| offset[a] as f64 * DX);
         let bnd = Boundaries(std::array::from_fn(|a| {
             let lo = if tc[a] == 0 {
                 BoundaryType::Outflow
@@ -117,11 +121,11 @@ fn build_tiles(counts: [usize; 2], ts: Timestepping) -> Vec<Hier> {
             };
             [lo, hi]
         }));
-        let root = build_root(m, origin, bnd, ts);
+        let root = build_root(m, offset, bnd, ts);
         // the patch lives in the single tile whose physical extent contains it (the bottom-left
         // quadrant -> tile 0 for every tested topology). check both axes.
         let owns_patch =
-            (0..2).all(|a| origin[a] <= 0.125 && origin[a] + m[a] as f64 * DX >= 0.375);
+            (0..2).all(|a| lo[a] <= 0.125 && lo[a] + m[a] as f64 * DX >= 0.375);
         let mut h = if owns_patch {
             let k = kset(&root);
             let h = Hier::with_refinement(root, k, &[patch()], ProlongOrder::Ppm, kset)
@@ -187,13 +191,14 @@ fn composite_fine(tiles: &[Hier], counts: [usize; 2]) -> Vec<f64> {
                 }
             }
         }
-        // fine level (if any): absolute fine index == global fine index (tile shares global origin).
+        // fine level (if any): absolute fine index == global fine index (the patch tile sits at
+        // index offset 0).
         if h.levels.len() > 1 {
             let fine = &h.levels[1].state;
             let flo: [isize; 2] = std::array::from_fn(|a| fine.geom.interior.spaces[a].lo);
             for c in fine.geom.interior.iter() {
                 // absolute fine index: interior_lo is coverage.lo*ratio in the tile's index space;
-                // tile shares the global origin so this is the global fine index.
+                // the patch tile sits at index offset 0, so this is the global fine index.
                 let fx = (c[0] - flo[0]) as usize + (flo[0] as usize);
                 let fy = (c[1] - flo[1]) as usize + (flo[1] as usize);
                 out[fy * fn_n + fx] = *fine.fields.cons.den.view().at(c);
@@ -233,7 +238,7 @@ fn assert_refine_matches(counts: [usize; 2], ts: Timestepping) {
 
     let e = max_err(&mono_c, &dec_c);
     assert!(
-        e < 1e-12,
+        e == 0.0,
         "{counts:?} refined decomposed vs monolithic composite err {e:e}"
     );
 }

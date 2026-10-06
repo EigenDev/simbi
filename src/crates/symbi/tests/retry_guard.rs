@@ -113,10 +113,13 @@ impl KernelSet<2, 2, HostMemory, f64> for Rejector {
     }
 }
 
-fn tiny(cells: [usize; 2], origin: [f64; 2], bnd: Boundaries<2>) -> Sim {
+/// a grid of `cells` placed as production places a tile: the whole grid's origin and the index
+/// offset of its first cell
+fn tiny(cells: [usize; 2], offset: [usize; 2], bnd: Boundaries<2>) -> Sim {
     Sim::build(Newtonian, IdealGas { gamma: 1.4 }, Cartesian)
         .cells(cells)
-        .origin(origin)
+        .origin([0.0, 0.0])
+        .index_offset(std::array::from_fn(|a| offset[a] as isize))
         .spacing([0.125; 2])
         .boundaries(bnd)
         .timestepping(Timestepping::Rk2)
@@ -127,7 +130,7 @@ fn tiny(cells: [usize; 2], origin: [f64; 2], bnd: Boundaries<2>) -> Sim {
 }
 
 fn whole() -> Sim {
-    tiny([8, 8], [0.0, 0.0], Boundaries::uniform(BoundaryType::Outflow))
+    tiny([8, 8], [0, 0], Boundaries::uniform(BoundaryType::Outflow))
 }
 
 /// the hierarchy driven to `t_final`: the accepted steps its observer saw before any failure, and
@@ -344,7 +347,7 @@ fn run_worker(me: WorkerId) -> Result<(), WorkerError> {
         let face = |edge: bool| if edge { BoundaryType::Outflow } else { BoundaryType::CoarseFine };
         [face(tc[a] == 0), face(tc[a] + 1 == partition.counts()[a])]
     }));
-    let mut sim = tiny([8, 8], [tc[0] as f64, 0.0], bnd);
+    let mut sim = tiny([8, 8], [tc[0] * 8, 0], bnd);
     // a resumed streak on this worker alone: the session's guard state disagrees
     if let Some(streak) = std::env::var(format!("W_STREAK_{}", me.0)).ok() {
         sim.severe_streak = streak.parse().unwrap();
