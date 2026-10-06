@@ -42,7 +42,7 @@ from pydantic import computed_field
 
 import simbi.expression as expr
 from simbi import ProblemParam
-from simbi.types import BoundaryCondition, Regime
+from simbi.types import BoundaryCondition, Regime, Solver
 from simbi.types.bodies import BondedAssembly
 from simbi_configs.examples.ibm.roche_passage import RochePassage
 from simbi_configs.examples.newtonian.refined_blast import RefinedBlast
@@ -98,6 +98,8 @@ class PerturbedBlast(FlatBlast):
 class IsothermalAlphaPrimary(RochePassage):
     viscosity_alpha: Annotated[float, ProblemParam(0.1, description="alpha")]
     regime: Annotated[Regime, ProblemParam(Regime.ISOTHERMAL, description="isothermal")]
+    # isothermal hydro evaluates the hlle flux
+    solver: Annotated[Solver, ProblemParam(Solver.HLLE, description="hlle")]
     sound_speed: Annotated[float, ProblemParam(0.3, description="sound speed")]
 
     @computed_field

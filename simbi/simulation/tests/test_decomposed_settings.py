@@ -147,7 +147,7 @@ def test_a_patch_face_on_the_device_cut_is_refused_by_name(tmp_path: Path) -> No
     ("script", "flags", "reason"),
     [
         ("simbi_configs/examples/ibm/magnetic_slip_sink.py", ["--resolution", "16,16,16", "--end-time", "1e-6"],
-         "a magnetic slip body with gpus > 1 awaits its tiled slip step"),
+         "a magnetic slip body with several tiles awaits its tiled slip step"),
     ],
 )
 def test_a_setting_the_tiles_do_not_carry_is_refused_by_name(tmp_path: Path, script: str, flags: list[str], reason: str) -> None:

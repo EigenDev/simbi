@@ -609,14 +609,14 @@ def test_a_magnetized_launch_refuses_the_numerics_its_substrate_has_no_door_for(
     layout = _layout(tmp_path / "two.toml", workers=2, shape=(2, 1))
     # a synge equation of state is refused by the problem's own validation before the launch
     # scope sees it, so the reconstruction request is the one that reaches the scope
-    for flags, reason in [(["--reconstruction", "ppm"], "ppm reconstruction with the nmhd regime on the cartesian grid")]:
+    for flags, reason in [(["--reconstruction", "ppm"], "ppm reconstruction is wired for the newtonian (adiabatic ideal-gas) regime only; got 'nmhd'")]:
         out = tmp_path / reason.split()[0]
         cmd = _mhd_launch_command(out, layout, 1) + flags
         done = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
         assert done.returncode != 0, f"the launch succeeded with {flags}:\n{done.stdout}"
         # the error printer wraps long messages at the terminal width
         flat = " ".join(done.stderr.split())
-        assert f"{reason} is outside the distributed first release" in flat, done.stderr
+        assert reason in flat, done.stderr
 
 
 def test_a_rejection_on_one_worker_rolls_every_worker_back(tmp_path: Path) -> None:

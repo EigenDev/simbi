@@ -745,11 +745,12 @@ class SimbiProblem(BaseModel):
         the layout is `rho`, then one velocity per DOF, then pressure. it is exact
         only when BOTH are fixed:
         - DOF is 3 for mhd (v3 couples to B, so it is carried even in 1.5d/2.5d).
-          for pure hydro it is `dimensionality` ONLY on a cartesian chart; a
-          curvilinear chart (spherical/cylindrical) carries transverse velocities
-          for angular momentum with no matching spatial axis, and relativistic
-          hydro (rhd) likewise carries an azimuthal v3 on a curved/rotating chart
-          — so those DOFs are not fixed by dimensionality (width UNDETERMINED).
+          for pure hydro it is `dimensionality`, except on the kerr-schild 2D
+          charts that lift the azimuthal velocity: the (r, theta) plane takes
+          either width, spinning kerr and the (R, z) plane require the lift. this
+          method returns the exact width on a flat cartesian chart and None on the
+          others; the backend checks every row against the width the dispatched
+          arm reads and refuses any other width by name.
         - pressure is mandatory for an energy regime. an ISOTHERMAL run may or may
           not pass an explicit p/cs field (p = cs^2 rho is derivable), so its width
           is UNDETERMINED (None).
@@ -1460,6 +1461,21 @@ class SimbiProblem(BaseModel):
                 f"expected {expected_levels} refinement_ratios, got {len(self.refinement_ratios)}"
             )
 
+        # every level refines its parent by two: the transfers, the subcycle and the backend's level
+        # geometry are built for that ratio alone
+        other_ratios = [int(r) for r in self.refinement_ratios if int(r) != 2]
+        if other_ratios:
+            raise ValueError(
+                f"refinement_ratios {[int(r) for r in self.refinement_ratios]}: every level refines "
+                "its parent by a ratio of 2; other ratios are not implemented"
+            )
+        # level l advances 2^l times per root step; a declared substep count reaches no backend code
+        if any(int(n) != 1 for n in self.refinement_substeps):
+            raise NotImplementedError(
+                f"refinement_substeps {[int(n) for n in self.refinement_substeps]} is not implemented: "
+                "level l advances 2^l times per root step; leave refinement_substeps at its default"
+            )
+
         expected_coords = 2 * self.dimensionality
         for ii, region in enumerate(self.refinement_regions):
             if len(region) != expected_coords:
@@ -1559,6 +1575,9 @@ class SimbiProblem(BaseModel):
         self._validate_isothermal()
         self._validate_plm_theta()
         self.validate_refinement_config()
+        # quirk smoothing reaches no backend code
+        if self.use_quirk_smoothing:
+            raise NotImplementedError("use_quirk_smoothing is not implemented by any solver; unset it")
         return self
 
     # =========================================================================

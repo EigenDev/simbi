@@ -42,7 +42,7 @@ from pydantic import computed_field
 
 import simbi.expression as expr
 from simbi import ProblemParam
-from simbi.types import BoundaryCondition, Regime
+from simbi.types import BoundaryCondition, Regime, Solver
 from simbi_configs.examples.ibm.rubble_wind import RubbleWind
 from simbi_configs.examples.ibm.wind_tunnel import WindTunnel
 from simbi_configs.examples.isothermal.imhd_orszag_tang import IsothermalOrszagTang
@@ -54,6 +54,8 @@ from simbi_configs.examples.newtonian.gradient_box import GradientBox
 def _isothermal(base):
     class Isothermal(base):
         regime: Annotated[Regime, ProblemParam(Regime.ISOTHERMAL, description="isothermal")]
+        # isothermal hydro evaluates the hlle flux
+        solver: Annotated[Solver, ProblemParam(Solver.HLLE, description="hlle")]
         sound_speed: Annotated[float, ProblemParam(3.0, description="sound speed")]
 
         @computed_field

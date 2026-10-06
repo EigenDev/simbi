@@ -5832,9 +5832,6 @@ macro_rules! declared_equilibrium {
         match cfg.equilibrium_json.as_ref() {
             None => None,
             Some(target) => {
-                if !cfg.chi_ic.is_empty() {
-                    return Err("the passive scalar carries no declared target concentration, so its interface flux has nothing to difference against".to_string());
-                }
                 let declared = symbi_source_compile::EquilibriumConfig::from_json(target)
                     .map_err(|e| format!("stationary target parse: {e}"))?;
                 let expected = 1 + $d + usize::from($has_energy);
@@ -5860,9 +5857,6 @@ macro_rules! tiled_equilibrium {
             None => None,
             Some(target) => {
                 use symbi::sim::refinement::equilibrium::{overwrite, restore_gas_state, save_gas_state};
-                if !cfg.chi_ic.is_empty() {
-                    return Err("the passive scalar carries no declared target concentration, so its interface flux has nothing to difference against".to_string());
-                }
                 let declared = symbi_source_compile::EquilibriumConfig::from_json(target)
                     .map_err(|e| format!("stationary target parse: {e}"))?;
                 let has_energy = $tiles[0].0.fields.cons.has_energy();
@@ -7326,6 +7320,12 @@ fn baked_gr_hydro(dims: usize, coords: &str, spacetime: &str) -> bool {
     )
 }
 
+/// the baked GR-hydro combinations the launched gas workers build: the kerr-schild box in three
+/// dimensions and the radial line, the arms of `charted!` in `run_worker_process`
+fn launched_gr_hydro(dims: usize, coords: &str, spacetime: &str) -> bool {
+    baked_gr_hydro(dims, coords, spacetime) && matches!((dims, coords), (3, "cartesian") | (1, "spherical"))
+}
+
 /// expand the (geometry x dims) arms for one hydro regime. cartesian / spherical
 /// / cylindrical are all wired across 1/2/3d (each is a unit-struct `Metric`).
 macro_rules! hydro_dispatch {
@@ -7400,22 +7400,15 @@ macro_rules! hydro_dispatch {
                 SchwarzschildKS { mass: $cfg.schwarzschild_mass }, SchwarzschildKS<f64>
             ),
             // spinning kerr (ingoing kerr-schild coords): the frame-dragging gamma_{r phi}
-            // needs the azimuthal momentum DOF, so the 5-tuple (swirl) generator row is
-            // required — a 4-tuple config is a setup error with no fallback.
+            // needs the azimuthal momentum DOF, which `primitive_row_dof` requires of the rows
             (2, "spherical") if $cfg.spacetime == "kerr_ks" => {
-                if !$prims.first().map_or(false, |row| row.len() == 5) {
-                    return Err(
-                        "the kerr spacetime requires the azimuthal momentum DOF: yield \
-                         5-tuple gas rows (rho, v_r, v_theta, v_phi, pre)".to_string(),
-                    );
-                }
                 build_and_run_hydro!(
                     $cfg, $prims, $regime, $regime_ty, 2, 3,
                     KerrKS { mass: $cfg.schwarzschild_mass, spin: $cfg.kerr_spin }, KerrKS<f64>
                 )
             }
             (2, "spherical") if $cfg.spacetime == "schwarzschild_ks" => {
-                if $prims.first().map_or(false, |row| row.len() == 5) {
+                if primitive_row_dof($cfg, $prims.first().map_or(0, |row| row.len()))? == 3 {
                     build_and_run_hydro!(
                         $cfg, $prims, $regime, $regime_ty, 2, 3,
                         SchwarzschildKS { mass: $cfg.schwarzschild_mass }, SchwarzschildKS<f64>
@@ -7458,13 +7451,6 @@ macro_rules! hydro_dispatch {
                     SchwarzschildKSCylindrical<f64>
                 ),
                 symbi_sim::state::CylPlane::Rz => {
-                    if !$prims.first().map_or(false, |row| row.len() == 5) {
-                        return Err(
-                            "the cylindrical kerr-schild 2.5D (axisymmetric) chart requires the \
-                             azimuthal momentum DOF: yield 5-tuple gas rows (rho, v_R, v_phi, v_z, pre)"
-                                .to_string(),
-                        );
-                    }
                     build_and_run_hydro!(
                         $cfg, $prims, $regime, $regime_ty, 2, 3,
                         SchwarzschildKSCylindricalRz { mass: $cfg.schwarzschild_mass },
@@ -8409,12 +8395,6 @@ macro_rules! mhd_dispatch {
             // gamma_{r phi} rides the tetrad HLLD, the radial shift the moving-interface fan, and
             // the azimuthal (swirl) momentum the frame dragging. requires the 5-tuple swirl gas rows.
             (2, "spherical") if $cfg.spacetime == "kerr_ks" => {
-                if !$prims.first().map_or(false, |row| row.len() == 5) {
-                    return Err(
-                        "the kerr GRMHD spacetime requires the azimuthal momentum DOF: yield \
-                         5-tuple gas rows (rho, v_r, v_theta, v_phi, pre)".to_string(),
-                    );
-                }
                 build_and_run_mhd!(
                     $cfg, $prims, $bufs, $regime, $regime_ty, 2,
                     KerrKS { mass: $cfg.schwarzschild_mass, spin: $cfg.kerr_spin }, KerrKS<f64>
@@ -9458,6 +9438,78 @@ fn dispatch_and_run(
     prims: &[Vec<f64>],
     bfields: &[Vec<f64>],
 ) -> Result<symbi_sim::run_diagnostics::RunDiagnostics, String> {
+    validate_run(cfg)?;
+    validate_primitive_rows(cfg, prims)?;
+    if cfg.n_gpus > 1 {
+        validate_tiled_march(cfg)?;
+        // the decomposed tile builders install the plain reconstruction; the balanced one has no
+        // decomposed equivalence gate, so the combination is refused rather than run unbalanced
+        if cfg.wb_reconstruction {
+            return Err(
+                "wb_reconstruction with gpus > 1 awaits a decomposed equivalence gate for the \
+                 balanced reconstruction; run on one device or unset it"
+                    .to_string(),
+            );
+        }
+    }
+    match cfg.regime.as_str() {
+        "newtonian" => hydro_dispatch!(cfg, prims, Newtonian, Newtonian),
+        "rhd" => hydro_dispatch!(cfg, prims, Rhd, Rhd),
+        "isothermal" => iso_dispatch!(cfg, prims),
+        "rmhd" => mhd_dispatch!(cfg, prims, bfields, Rmhd, Rmhd),
+        "nmhd" => mhd_dispatch!(cfg, prims, bfields, NewtonianMhd, NewtonianMhd),
+        "imhd" => imhd_dispatch!(cfg, prims, bfields),
+        other => Err(format!("regime '{other}' not wired yet")),
+    }
+}
+
+/// the momentum components a configuration's primitive rows carry, read from the row width: rho,
+/// the velocities, then the pressure on an energy regime. an isothermal row may end with one
+/// p/cs entry, required as the closure pressure when the closure is local. the velocity count is
+/// the grid dimension except on MHD (three everywhere) and on the kerr-schild 2D charts that lift
+/// the azimuthal velocity: the (r, theta) plane takes either form, spinning kerr and the (R, z)
+/// plane require the lift. any other width is refused by name
+fn primitive_row_dof(cfg: &Config, width: usize) -> Result<usize, String> {
+    let d = cfg.dims;
+    let accepted: Vec<(usize, usize)> = match cfg.regime.as_str() {
+        "nmhd" | "rmhd" => vec![(5, 3)],
+        "imhd" if cfg.locally_isothermal => vec![(5, 3)],
+        "imhd" => vec![(4, 3), (5, 3)],
+        "isothermal" if cfg.locally_isothermal => vec![(d + 2, d)],
+        "isothermal" => vec![(d + 1, d), (d + 2, d)],
+        _ => match (d, cfg.coord_system.as_str(), cfg.spacetime.as_str()) {
+            (2, "spherical", "schwarzschild_ks") => vec![(4, 2), (5, 3)],
+            (2, "spherical", "kerr_ks") => vec![(5, 3)],
+            (2, "cylindrical", "schwarzschild_ks") if cfg.cyl_plane == symbi_sim::state::CylPlane::Rz => vec![(5, 3)],
+            _ => vec![(d + 2, d)],
+        },
+    };
+    accepted.iter().find(|(w, _)| *w == width).map(|&(_, dof)| dof).ok_or_else(|| {
+        let widths: Vec<String> = accepted.iter().map(|(w, _)| w.to_string()).collect();
+        format!(
+            "a primitive row of {width} entries on the {} regime on the {}: the dispatched kernels \
+             read rows of {} entries (rho, the velocities{})",
+            cfg.regime,
+            grid_name(cfg),
+            widths.join(" or "),
+            if matches!(cfg.regime.as_str(), "isothermal" | "imhd") { ", then an optional p/cs" } else { ", then the pressure" }
+        )
+    })
+}
+
+/// every primitive row has one width the configuration's layout accepts
+fn validate_primitive_rows(cfg: &Config, prims: &[Vec<f64>]) -> Result<usize, String> {
+    let width = prims.first().map_or(0, |row| row.len());
+    if let Some((ii, row)) = prims.iter().enumerate().find(|(_, row)| row.len() != width) {
+        return Err(format!("primitive row {ii} has {} entries where row 0 has {width}", row.len()));
+    }
+    primitive_row_dof(cfg, width)
+}
+
+/// the semantic admission every driver applies before it builds anything: a configured setting
+/// either reaches the kernels the run dispatches or is refused here by name. the single grid, the
+/// host tiles and the launched workers all call it, so a capability decision lives in one place
+fn validate_run(cfg: &Config) -> Result<(), String> {
     validate_porous_body_overlaps(&cfg.bodies)?;
     validate_axis_boundaries(cfg)?;
     validate_magnetic_slip_bodies(
@@ -9488,26 +9540,6 @@ fn dispatch_and_run(
     // on a refined staggered grid is refused.
     if !cfg.bodies.is_empty() && cfg.refinement_enabled && cfg.regime.contains("mhd") {
         validate_refined_mhd_bodies(&cfg.bodies, &cfg.regime, cfg.dims, &cfg.coord_system, cfg.locally_isothermal)?;
-    }
-    // gpus>1 takes the decomposed run loop: single-level hydro (newtonian/rhd/isothermal) and
-    // single-level MHD (rmhd/nmhd/imhd, the equivalence-tested staggered-CT halo exchange + face
-    // gather). reject every other case here so a multi-gpu request never
-    // silently runs on one device.
-    if cfg.n_gpus > 1 {
-        if !matches!(
-            cfg.regime.as_str(),
-            "newtonian" | "rhd" | "isothermal" | "rmhd" | "nmhd" | "imhd"
-        ) {
-            return Err(format!(
-                "gpus>1 is wired for hydro (newtonian, rhd, isothermal) and mhd (rmhd, nmhd, \
-                 imhd); regime '{}' runs single-gpu for now (set gpus=1)",
-                cfg.regime
-            ));
-        }
-        // immersed bodies (incl. moving binaries) and their force/accreted-mass diagnostics are
-        // wired for gpus>1: the decomposed loop applies the body source per tile, sums the backward
-        // feedback across tiles, and advances the prescribed orbit identically, so no refusal is
-        // needed here.
     }
     // a curved spacetime is a relativistic construct: only the relativistic regimes compose
     // with it (the non-relativistic kernel rows are never baked with a spacetime slug).
@@ -9677,29 +9709,11 @@ fn dispatch_and_run(
                     .to_string(),
             );
         }
-        // multi-device hydro uses global container identities and migrates
-        // complete tracer records across decomposition cuts.
-        if cfg.n_gpus > 1
-            && !matches!(
-                cfg.regime.as_str(),
-                "newtonian" | "rhd" | "isothermal" | "nmhd" | "rmhd" | "imhd"
-            )
-        {
-            return Err(format!(
-                "n_tracers with gpus > 1 is wired for hydro/mhd; regime '{}' not yet",
-                cfg.regime
-            ));
-        }
     }
     if !cfg.cohort_ic.is_empty() && cfg.n_tracers == 0 {
         return Err("tracer_cohort requires n_tracers > 0".to_string());
     }
-    // ppm evolution reconstruction: baked for the flat cartesian newtonian ideal-gas
-    // family only. refinement is refused because the coarse-fine transfer has no
-    // prolongation one order above ppm — a refined run would silently lose an order at
-    // every level boundary inside the domain. decomposed (gpus > 1) waits on a ppm
-    // cut-equivalence gate. every unsupported combination refuses here, before any
-    // build, with the reason attached.
+    // ppm evolution reconstruction: baked for the flat cartesian newtonian ideal-gas family
     if cfg.reconstruction_name == "ppm" {
         if cfg.regime != "newtonian" {
             return Err(format!(
@@ -9715,40 +9729,7 @@ fn dispatch_and_run(
             ));
         }
     }
-    // the synge (taub-mathews) eos: baked for the flat rhd family only. every
-    // unsupported combination refuses here, before any build, with the reason
-    // attached.
-    // the decomposed tile builders install the plain reconstruction; the balanced one has no
-    // decomposed equivalence gate, so the combination is refused rather than run unbalanced.
-    // a census reduces over the whole grid; the tiled drivers carry no cross-tile census, so a
-    // configured one is refused rather than left unrecorded
-    // the gas and isothermal tiles, flat and refined, read a stationary target's residual off the
-    // tiled pipeline and lay a declared perturbation over it; the magnetized tiles carry none and
-    // are refused by name
-    if cfg.n_gpus > 1 && cfg.equilibrium_json.is_some() && !matches!(cfg.regime.as_str(), "newtonian" | "rhd" | "isothermal") {
-        return Err(format!(
-            "an equilibrium prescription with gpus > 1 awaits its tiled residual on the {} regime; run it on one device",
-            cfg.regime
-        ));
-    }
-    // the tiled drivers step no magnetic slip body: refused by name rather than run without it
-    if cfg.n_gpus > 1 && cfg.bodies.iter().any(|b| b.magnetic_slip.is_some()) {
-        return Err("a magnetic slip body with gpus > 1 awaits its tiled slip step; run it on one device".to_string());
-    }
-    if !cfg.census_jsons.is_empty() && cfg.n_gpus > 1 {
-        return Err(
-            "a census with gpus > 1 awaits a cross-tile census reduction; run on one device or \
-             drop the census"
-                .to_string(),
-        );
-    }
-    if cfg.wb_reconstruction && cfg.n_gpus > 1 {
-        return Err(
-            "wb_reconstruction with gpus > 1 awaits a decomposed equivalence gate for the \
-             balanced reconstruction; run on one device or unset it"
-                .to_string(),
-        );
-    }
+    // the synge (taub-mathews) eos: baked for the flat rhd family only
     if cfg.eos_name == "synge" {
         if cfg.regime != "rhd" {
             return Err(format!(
@@ -9764,15 +9745,68 @@ fn dispatch_and_run(
             ));
         }
     }
-    match cfg.regime.as_str() {
-        "newtonian" => hydro_dispatch!(cfg, prims, Newtonian, Newtonian),
-        "rhd" => hydro_dispatch!(cfg, prims, Rhd, Rhd),
-        "isothermal" => iso_dispatch!(cfg, prims),
-        "rmhd" => mhd_dispatch!(cfg, prims, bfields, Rmhd, Rmhd),
-        "nmhd" => mhd_dispatch!(cfg, prims, bfields, NewtonianMhd, NewtonianMhd),
-        "imhd" => imhd_dispatch!(cfg, prims, bfields),
-        other => Err(format!("regime '{other}' not wired yet")),
+    // the stationary target declares the gas alone; a passive scalar has no target concentration
+    // for its interface flux to difference against
+    if cfg.equilibrium_json.is_some() && !cfg.chi_ic.is_empty() {
+        return Err(
+            "the passive scalar carries no declared target concentration, so its interface flux \
+             has nothing to difference against; drop the passive scalar or the stationary target"
+                .to_string(),
+        );
     }
+    // a neumann or robin wall maps to a skipped ghost fill on the magnetized substrates, which
+    // register no gradient pass: the prescribed gradient would never be applied
+    if cfg.regime.contains("mhd") && !cfg.gradient_bcs.is_empty() {
+        return Err(format!(
+            "a neumann or robin wall with the {} regime: the magnetized substrates fill no \
+             gradient ghost; use outflow, reflect, periodic or a driven face",
+            cfg.regime
+        ));
+    }
+    // the balanced reconstruction is installed on the newtonian substrate alone
+    if cfg.wb_reconstruction && cfg.regime != "newtonian" {
+        return Err(format!(
+            "wb_reconstruction with the {} regime: the balanced reconstruction is built for the \
+             newtonian regime only; unset it",
+            cfg.regime
+        ));
+    }
+    // the isothermal hydro substrate evaluates the hlle flux
+    if cfg.regime == "isothermal" && cfg.solver != Solver::Hlle {
+        return Err(format!(
+            "solver = '{}' with the isothermal regime: isothermal hydro evaluates the hlle flux; \
+             set solver = hlle",
+            format!("{:?}", cfg.solver).to_lowercase()
+        ));
+    }
+    Ok(())
+}
+
+/// the admission of every tiled march, in-process host tiles and launched workers alike: the
+/// operators the single grid applies that no tiled driver carries yet are refused by name
+fn validate_tiled_march(cfg: &Config) -> Result<(), String> {
+    // the gas and isothermal tiles, flat and refined, read a stationary target's residual off the
+    // tiled pipeline and lay a declared perturbation over it; the magnetized tiles carry none
+    if cfg.equilibrium_json.is_some() && !matches!(cfg.regime.as_str(), "newtonian" | "rhd" | "isothermal") {
+        return Err(format!(
+            "an equilibrium prescription with several tiles awaits its tiled residual on the {} \
+             regime; run it on one device",
+            cfg.regime
+        ));
+    }
+    // the tiled marches step no magnetic slip body
+    if cfg.bodies.iter().any(|b| b.magnetic_slip.is_some()) {
+        return Err("a magnetic slip body with several tiles awaits its tiled slip step; run it on one device".to_string());
+    }
+    // a census reduces over the whole grid; the tiled marches carry no cross-tile census
+    if !cfg.census_jsons.is_empty() {
+        return Err(
+            "a census with several tiles awaits a cross-tile census reduction; run on one device or \
+             drop the census"
+                .to_string(),
+        );
+    }
+    Ok(())
 }
 
 /// author the metadata the frozen v2.0 reader requires beyond what
@@ -10819,6 +10853,12 @@ mod alpha_key_tests {
 
 fn validate_config_preflight(cfg: &Config) -> Result<(), String> {
     validate_gpu_request(cfg.n_gpus)?;
+    validate_config_checks(cfg)
+}
+
+/// the configuration checks every entry point applies before draining the initial state; the
+/// single-process entry adds its device request on top
+fn validate_config_checks(cfg: &Config) -> Result<(), String> {
     // the cartesian constrained-transport curl reads one uniform width per axis; on a mapped axis
     // the staggered field would evolve on the uniform lattice while the gas moves on the mapped one
     let spacings = [&cfg.x1_spacing, &cfg.x2_spacing, &cfg.x3_spacing];
@@ -11249,11 +11289,6 @@ fn validate_launch_scope(cfg: &Config) -> Result<(), String> {
     if !matches!(cfg.regime.as_str(), "newtonian" | "rhd" | "isothermal" | "nmhd" | "imhd" | "rmhd") {
         return refused(&format!("the {} regime", cfg.regime));
     }
-    // ppm is baked for newtonian hydro on the flat cartesian grid alone; the other launched tile
-    // builders install plm (or pcm at a zero slope) and would run a ppm request as plm
-    if cfg.reconstruction_name == "ppm" && (cfg.regime != "newtonian" || cfg.coord_system != "cartesian") {
-        return refused(&format!("ppm reconstruction with the {} regime on the {} grid", cfg.regime, cfg.coord_system));
-    }
     // the magnetized substrate installs the limiter (plm, or pcm at a zero slope), the solver and
     // the edge EMF and has no door for a flattening or an equation of state; a request for one is
     // refused here so a comparison never appears to exercise a setting the run ignores
@@ -11267,9 +11302,6 @@ fn validate_launch_scope(cfg: &Config) -> Result<(), String> {
         if cfg.wb_reconstruction {
             return refused(&format!("well-balanced reconstruction with the {} regime", cfg.regime));
         }
-    }
-    if matches!(cfg.regime.as_str(), "nmhd" | "imhd" | "rmhd") && !cfg.gradient_bcs.is_empty() {
-        return refused(&format!("a gradient wall with the {} regime", cfg.regime));
     }
     // the launched magnetized tiles install no user source; a source the single path would
     // apply is refused rather than dropped
@@ -11285,8 +11317,9 @@ fn validate_launch_scope(cfg: &Config) -> Result<(), String> {
         if cfg.regime != "rhd" {
             return refused(&format!("the {} spacetime with the {} regime", cfg.spacetime, cfg.regime));
         }
-        // the single grid runs the baked GR-hydro combinations alone
-        if !baked_gr_hydro(cfg.dims, &cfg.coord_system, &cfg.spacetime) {
+        // the single grid runs the baked GR-hydro combinations, the launched workers the ones the
+        // worker chart arms build
+        if !launched_gr_hydro(cfg.dims, &cfg.coord_system, &cfg.spacetime) {
             return refused(&format!("the {} spacetime on the {}-dimensional {} chart", cfg.spacetime, cfg.dims, cfg.coord_system));
         }
         if cfg.refinement_enabled {
@@ -11294,9 +11327,6 @@ fn validate_launch_scope(cfg: &Config) -> Result<(), String> {
         }
         if !cfg.bodies.is_empty() || cfg.bonded_assembly.is_some() {
             return refused(&format!("immersed bodies on the {} spacetime", cfg.spacetime));
-        }
-        if cfg.n_tracers > 0 {
-            return refused(&format!("a tracer population on the {} spacetime", cfg.spacetime));
         }
     }
 
@@ -11312,11 +11342,6 @@ fn validate_launch_scope(cfg: &Config) -> Result<(), String> {
             if cfg.refinement_enabled { "mesh refinement".to_string() } else { format!("the {} regime", cfg.regime) }
         ));
     }
-    // the refined workers carry the bodies as the in-process refined tiles do; bonded fragments
-    // take no advance on a refined hierarchy
-    if cfg.bonded_assembly.is_some() && cfg.refinement_enabled {
-        return refused("a bonded fragment assembly with mesh refinement");
-    }
     // the launched gas, isothermal and magnetized tiles carry the discrete and the ito
     // populations on a flat grid
     if cfg.n_tracers > 0 {
@@ -11327,18 +11352,6 @@ fn validate_launch_scope(cfg: &Config) -> Result<(), String> {
     }
     // the dye rides the launched gas and isothermal tiles under the single grid's admission
     validate_passive_scalar(cfg)?;
-    // the gas and isothermal workers, flat and refined, read a stationary target's residual off a
-    // probe stage of the launched pipeline and lay a declared perturbation over it; the magnetized
-    // workers carry none
-    if cfg.equilibrium_json.is_some() {
-        if !matches!(cfg.regime.as_str(), "newtonian" | "rhd" | "isothermal") {
-            return refused(&format!("an equilibrium prescription with the {} regime", cfg.regime));
-        }
-    }
-    // the launched workers carry no cross-tile census reduction
-    if !cfg.census_jsons.is_empty() {
-        return refused("a census");
-    }
     // a combination the launched tiles build as the single path does but that no distributed
     // gate has validated: refused by name, or run as experimental under an explicit opt-in.
     // successful construction is no evidence of validated support
@@ -12514,6 +12527,9 @@ fn run_worker_process(
     use symbi_fabric::WorkerId;
     use symbi_sim::atlas::{Placement, TileId};
 
+    validate_run(cfg)?;
+    validate_primitive_rows(cfg, prims)?;
+    validate_tiled_march(cfg)?;
     validate_launch_scope(cfg)?;
     let fault = LaunchFault::from_env(launch.worker)?;
     if cfg.refinement_enabled {
@@ -13963,7 +13979,6 @@ fn launch_worker(
     cohort_field: Option<&Bound<'_, PyAny>>,
 ) -> PyResult<()> {
     let mut cfg = parse_config(sim_info)?;
-    validate_config_preflight(&cfg).map_err(PyValueError::new_err)?;
     let get = |key: &str| -> PyResult<Bound<'_, PyAny>> {
         launch
             .get_item(key)?
@@ -13984,6 +13999,8 @@ fn launch_worker(
     };
     cfg.n_gpus = params.owner.len();
     cfg.decompose = cuts;
+    // the layout, not the config's device count, sets the tiles; each worker runs on the host
+    validate_config_checks(&cfg).map_err(PyValueError::new_err)?;
     // one write, so the lines of concurrent workers sharing a stream stay whole
     {
         use std::io::Write;

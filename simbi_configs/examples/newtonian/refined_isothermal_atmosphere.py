@@ -93,8 +93,9 @@ class RefinedIsothermalAtmosphere(SimbiProblem):
             [BoundaryCondition.REFLECTING], description="boundary conditions [x]"
         ),
     ]
+    # isothermal hydro evaluates the hlle flux
     solver: Annotated[
-        Solver, ProblemParam(Solver.HLLC, description="numerical solver")
+        Solver, ProblemParam(Solver.HLLE, description="numerical solver")
     ]
     seed_from_equilibrium: Annotated[
         bool,

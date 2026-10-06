@@ -37,7 +37,7 @@ from typing import Annotated, Optional
 from pydantic import computed_field
 
 from simbi import ProblemParam
-from simbi.types import Regime
+from simbi.types import Regime, Solver
 from simbi.types.bodies import BondedAssembly
 from simbi.types.bodies import BodyCapability, GravitationalProperties, ImmersedBodyConfig
 from simbi_configs.examples.ibm.roche_passage import RochePassage
@@ -64,6 +64,8 @@ class RefinedAlphaPrimary(AlphaPrimary):
 
 class IsothermalAlphaPrimary(AlphaRoche):
     regime: Annotated[Regime, ProblemParam(Regime.ISOTHERMAL, description="isothermal")]
+    # isothermal hydro evaluates the hlle flux
+    solver: Annotated[Solver, ProblemParam(Solver.HLLE, description="hlle")]
     sound_speed: Annotated[float, ProblemParam(0.3, description="sound speed")]
 
     @computed_field

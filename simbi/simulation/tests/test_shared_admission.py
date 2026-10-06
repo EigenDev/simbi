@@ -1,0 +1,229 @@
+# =============================================================================
+# test_shared_admission.py
+#
+# one semantic admission for every driver. a setting the dispatched kernels
+# never apply is refused by name, before any output, on the single grid, on host
+# tiles and through `simbi launch` alike:
+# - a magnetic slip body on several tiles (the tiled marches step no slip);
+# - a bonded fragment assembly outside newtonian/isothermal hydro;
+# - resistivity on a hydro regime;
+# - tracer cohorts on a refined hierarchy;
+# - viscosity on the relativistic gas;
+# - a neumann wall on a magnetized regime (no gradient ghost fill);
+# - the balanced reconstruction outside the newtonian regime;
+# - a non-hlle solver on isothermal hydro;
+# - mesh refinement of a one-dimensional magnetized grid.
+# the launch reads the tile count from its layout, so a config declaring
+# several devices launches on a cpu build; a curved-spacetime chart the worker
+# arms do not build is refused by the launch scope before any output.
+#
+# run: pytest -m simulation simbi/simulation/tests/test_shared_admission.py
+# =============================================================================
+
+import os
+import subprocess
+import sys
+from pathlib import Path
+
+import pytest
+
+from simbi.simulation.tests.test_launch import _layout, bounded_processes  # noqa: F401  the autouse process guard
+
+pytestmark = pytest.mark.simulation
+
+PROBE = '''
+import json
+import os
+from functools import partial
+from typing import Annotated, Any
+
+from pydantic import computed_field
+
+from simbi import Neumann, ProblemParam, SimbiProblem
+from simbi.types import BoundaryCondition, CoordSystem, Regime, Solver
+from simbi.types.bodies import BondedAssembly, BondMaterial
+
+OV: dict[str, Any] = json.loads(os.environ["ADMISSION_PROBE"])
+RES = tuple(OV.get("res", [16, 16]))
+
+
+def _bcs():
+    return [Neumann(**b) if isinstance(b, dict) else BoundaryCondition(b) for b in OV.get("bcs", ["outflow"])]
+
+
+class Probe(SimbiProblem):
+    """a small box whose settings come from ADMISSION_PROBE"""
+
+    resolution: Annotated[tuple[int, ...], ProblemParam(RES, cli=True, description="grid")]
+    bounds: Annotated[list[tuple[float, float]], ProblemParam([(0.0, 1.0)] * len(RES), description="box")]
+    coord_system: Annotated[CoordSystem, ProblemParam(CoordSystem.CARTESIAN, description="chart")]
+    regime: Annotated[Regime, ProblemParam(Regime(OV.get("regime", "newtonian")), description="regime")]
+    solver: Annotated[Solver, ProblemParam(Solver(OV.get("solver", "hlle")), description="solver")]
+    sound_speed: Annotated[float | None, ProblemParam(OV.get("cs"), description="cs")]
+    adiabatic_index: Annotated[float | None, ProblemParam(None if OV.get("regime") == "isothermal" else 5.0 / 3.0, description="gamma")]
+    wb_reconstruction: Annotated[bool, ProblemParam(OV.get("wb", False), description="balanced")]
+    boundary_conditions: Annotated[list[Any], ProblemParam(_bcs(), description="walls")]
+    end_time: Annotated[float, ProblemParam(1.0, cli=True, checkpoint_safe=True, description="t")]
+    gpus: Annotated[int, ProblemParam(OV.get("gpus", 1), cli=True, description="devices")]
+    refinement_enabled: Annotated[bool, ProblemParam(bool(OV.get("regions")), description="refined")]
+    refinement_max_levels: Annotated[int, ProblemParam(1 + len(OV.get("regions", [])), description="levels")]
+    refinement_regions: Annotated[list[list[float]], ProblemParam(OV.get("regions", []), description="boxes")]
+    refinement_ratios: Annotated[list[int], ProblemParam([2] * len(OV.get("regions", [])), description="ratios")]
+
+    @computed_field
+    @property
+    def viscosity(self) -> float:
+        return OV.get("viscosity", 0.0)
+
+    @computed_field
+    @property
+    def resistivity(self) -> float:
+        return OV.get("resistivity", 0.0)
+
+    @computed_field
+    @property
+    def n_tracers(self) -> int:
+        return OV.get("n_tracers", 0)
+
+    @computed_field
+    @property
+    def bonded_assembly(self) -> Any:
+        if not OV.get("bonded"):
+            return None
+        return BondedAssembly(positions=[[0.4, 0.5, 0.0], [0.6, 0.5, 0.0]], masses=[1.0, 1.0], radii=[0.08, 0.08],
+                              bonds=[[0, 1]], bond_material=BondMaterial(k_n=200.0))
+
+    def tracer_cohort(self):
+        if not OV.get("cohort"):
+            return None
+        n = 1
+        for r in RES:
+            n *= r
+        return (ii % 3 for ii in range(n))
+
+    def initial_primitive_state(self):
+        n = 1
+        for r in RES:
+            n *= r
+        row = tuple(OV.get("row", [1.0, 0.1, 0.0, 1.0]))
+
+        def gas():
+            for _ in range(n):
+                yield row
+
+        if self.regime in (Regime.NMHD, Regime.RMHD, Regime.IMHD):
+            r3 = list(RES) + [1] * (3 - len(RES))
+            bval = OV.get("b", [0.1, 0.0, 0.0])
+
+            def faces(k):
+                count = 1
+                for ax in range(3):
+                    count *= r3[ax] + (1 if ax == k else 0)
+                return (bval[k] for _ in range(count))
+
+            return gas, partial(faces, 0), partial(faces, 1), partial(faces, 2)
+        return gas
+'''
+MHD = {"regime": "nmhd", "res": [16, 16, 1], "row": [1.0, 0.1, 0.0, 0.0, 1.0]}
+# name: (settings, refusal every driver names)
+REFUSED = {
+    "bonded-mhd": ({**MHD, "bonded": True}, "bonded_assembly (2 fragments) is wired for newtonian/isothermal hydro; got regime 'nmhd'"),
+    "bonded-rhd": ({"regime": "rhd", "bonded": True}, "bonded_assembly (2 fragments) is wired for newtonian/isothermal hydro; got regime 'rhd'"),
+    "resistive-hydro": ({"resistivity": 0.1}, "resistivity is an MHD operator"),
+    "cohort-refined": ({"n_tracers": 100, "cohort": True, "regions": [[0.25, 0.75, 0.25, 0.75]]}, "tracer_cohort seeding on a refined hierarchy"),
+    "viscous-rhd": ({"regime": "rhd", "viscosity": 0.01}, "viscous transport is not built for the rhd regime"),
+    "neumann-mhd": ({**MHD, "bcs": [{"rho": 5.0, "pressure": 5.0}, "outflow", "outflow", "outflow"]}, "a neumann or robin wall with the nmhd regime"),
+    "balanced-isothermal": ({"regime": "isothermal", "cs": 1.0, "row": [1.0, 0.1, 0.0], "wb": True}, "wb_reconstruction with the isothermal regime"),
+    "balanced-mhd": ({**MHD, "wb": True}, "wb_reconstruction with the nmhd regime"),
+    "hllc-isothermal": ({"regime": "isothermal", "cs": 1.0, "row": [1.0, 0.1, 0.0], "solver": "hllc"}, "solver = 'hllc' with the isothermal regime"),
+    "refined-mhd-line": ({"regime": "nmhd", "res": [32], "row": [1.0, 0.1, 0.0, 0.0, 1.0], "regions": [[0.25, 0.75]]}, "mhd refinement requires a 3d or 2.5d cartesian grid"),
+}
+
+
+@pytest.fixture
+def probe(tmp_path: Path) -> Path:
+    path = tmp_path / "admission_probe.py"
+    path.write_text(PROBE)
+    return path
+
+
+def _env(settings: dict, host_tiles: bool = False) -> dict:
+    """the probe settings; host tiles run several devices on the cpu build, a launch takes its tile
+    count from the layout alone"""
+    import json
+
+    env = dict(os.environ, ADMISSION_PROBE=json.dumps(settings))
+    env.pop("SIMBI_LAUNCH_EXPERIMENTAL", None)
+    env.pop("SYMBI_GPU_OVERSUBSCRIBE", None)
+    if host_tiles:
+        env["SYMBI_GPU_OVERSUBSCRIBE"] = "1"
+    return env
+
+
+def _single(probe: Path, settings: dict, out: Path, gpus: int = 1) -> subprocess.CompletedProcess:
+    snippet = (
+        "import sys\n"
+        f"sys.path.insert(0, {str(probe.parent)!r})\n"
+        "from simbi.simulation import runner\n"
+        "from admission_probe import Probe\n"
+        f"runner.run(Probe(gpus={gpus}, data_directory=sys.argv[1], checkpoint_interval=1e9), compute_mode='cpu', max_steps=1)\n"
+    )
+    return subprocess.run([sys.executable, "-c", snippet, str(out)], capture_output=True, text=True, timeout=600, env=_env(settings, host_tiles=gpus > 1))
+
+
+def _launch(probe: Path, settings: dict, out: Path, layout: Path, script: Path | None = None) -> subprocess.CompletedProcess:
+    cmd = [sys.executable, "-m", "simbi.cli", "launch", str(script or probe), "--layout", str(layout), "--max-steps", "1",
+           "--data-directory", str(out), "--checkpoint-interval", "1e9"]
+    return subprocess.run(cmd, capture_output=True, text=True, timeout=600, env=_env(settings))
+
+
+def _assert_refused(done: subprocess.CompletedProcess, out: Path, reason: str, label: str) -> None:
+    assert done.returncode != 0, f"{label}: the run succeeded:\n{done.stdout[-1500:]}"
+    flat = " ".join((done.stdout + done.stderr).split())
+    assert reason in flat, f"{label}: refusal not named:\n{flat[-2000:]}"
+    assert not list(out.glob("*.h5")), f"{label}: a refused run published a checkpoint"
+
+
+def _layout_for(tmp_path: Path, settings: dict) -> Path:
+    dims = len(settings.get("res", [16, 16]))
+    return _layout(tmp_path / "two.toml", workers=2, shape=(2,) + (1,) * (dims - 1))
+
+
+@pytest.mark.parametrize("case", list(REFUSED))
+def test_a_setting_no_kernel_applies_is_refused_by_name_on_every_driver(tmp_path: Path, probe: Path, case: str) -> None:
+    settings, reason = REFUSED[case]
+    _assert_refused(_single(probe, settings, tmp_path / "single"), tmp_path / "single", reason, f"{case} on one device")
+    _assert_refused(_single(probe, settings, tmp_path / "tiles", gpus=2), tmp_path / "tiles", reason, f"{case} on two host tiles")
+    _assert_refused(_launch(probe, settings, tmp_path / "launched", _layout_for(tmp_path, settings)), tmp_path / "launched", reason, f"{case} launched")
+
+
+def test_a_magnetic_slip_body_is_refused_on_launched_workers_as_on_host_tiles(tmp_path: Path, probe: Path) -> None:
+    from simbi_configs.examples.ibm.magnetic_slip_disk_2p5d import MagneticSlipDisk2p5d
+
+    script = Path(MagneticSlipDisk2p5d.__module__.replace(".", "/") + ".py")
+    reason = "a magnetic slip body with several tiles awaits its tiled slip step"
+    for workers, shape in ((1, (1, 1)), (2, (2, 1))):
+        layout = _layout(tmp_path / f"w{workers}.toml", workers=workers, shape=shape)
+        cmd = [sys.executable, "-m", "simbi.cli", "launch", str(script), "--layout", str(layout), "--max-steps", "1",
+               "--resolution", "32,32,1", "--data-directory", str(tmp_path / f"out{workers}"), "--checkpoint-interval", "1e9"]
+        done = subprocess.run(cmd, capture_output=True, text=True, timeout=600, env=_env({}))
+        _assert_refused(done, tmp_path / f"out{workers}", reason, f"slip body on {workers} launched worker(s)")
+
+
+def test_a_launch_reads_its_tile_count_from_the_layout(tmp_path: Path, probe: Path) -> None:
+    # a config declaring two devices launches on the host workers its layout names
+    settings = {"gpus": 2}
+    done = _launch(probe, settings, tmp_path / "launched", _layout_for(tmp_path, settings))
+    assert done.returncode == 0, f"the launch failed:\n{done.stderr[-2000:]}"
+    assert list((tmp_path / "launched").glob("*final*.h5")), "the launch published no final checkpoint"
+
+
+def test_a_gr_chart_no_worker_arm_builds_is_refused_by_the_launch_scope(tmp_path: Path, probe: Path) -> None:
+    from simbi_configs.examples.grhd.gr_cylindrical_ks_bh import GrCylindricalKsBH
+
+    script = Path(GrCylindricalKsBH.__module__.replace(".", "/") + ".py")
+    layout = _layout(tmp_path / "two.toml", workers=2, shape=(2, 1))
+    cmd = [sys.executable, "-m", "simbi.cli", "launch", str(script), "--layout", str(layout), "--max-steps", "1",
+           "--resolution", "16,16", "--data-directory", str(tmp_path / "out"), "--checkpoint-interval", "1e9"]
+    done = subprocess.run(cmd, capture_output=True, text=True, timeout=600, env=_env({}))
+    _assert_refused(done, tmp_path / "out", "the schwarzschild_ks spacetime on the 2-dimensional cylindrical chart is outside the distributed first release", "cylindrical kerr-schild launch")

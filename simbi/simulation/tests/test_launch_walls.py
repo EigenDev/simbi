@@ -110,7 +110,8 @@ def test_a_gradient_wall_with_a_magnetized_regime_is_refused_by_name(tmp_path: P
     done = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
     assert done.returncode != 0, f"the launch succeeded:\n{done.stdout}"
     flat = " ".join(done.stderr.split())
-    assert "a gradient wall with the nmhd regime is outside the distributed first release" in flat, done.stderr
+    assert "a neumann or robin wall with the nmhd regime: the magnetized substrates fill no gradient ghost" in flat, done.stderr
+    assert not list((tmp_path / "out").glob("*.h5")), "a refused launch published a checkpoint"
 
 
 def test_a_user_source_with_a_magnetized_regime_is_refused_by_name(tmp_path: Path) -> None:

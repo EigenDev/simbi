@@ -54,7 +54,7 @@ from pydantic import computed_field
 
 import simbi.expression as expr
 from simbi import ProblemParam
-from simbi.types import Regime
+from simbi.types import Regime, Solver
 from simbi.types.bodies import BondedAssembly
 from simbi_configs.examples.ibm.roche_passage import RochePassage
 from simbi_configs.examples.ibm.rubble_wind import RubbleWind
@@ -69,6 +69,8 @@ from simbi_configs.examples.newtonian.nmhd_orszag_tang import NewtonianOrszagTan
 def _isothermal(base):
     class Isothermal(base):
         regime: Annotated[Regime, ProblemParam(Regime.ISOTHERMAL, description="isothermal")]
+        # isothermal hydro evaluates the hlle flux
+        solver: Annotated[Solver, ProblemParam(Solver.HLLE, description="hlle")]
         sound_speed: Annotated[float, ProblemParam(3.0, description="sound speed")]
 
         @computed_field
@@ -237,8 +239,8 @@ def _body_groups(path: Path) -> dict[str, np.ndarray]:
     with h5py.File(path, "r") as f:
         for group in ("bodies", "body_diagnostics"):
             if group in f:
-                for name in f[group]:
-                    out[f"{group}/{name}"] = np.asarray(f[group][name][()])
+                # every dataset of the group, a bonded assembly's fragment state included
+                f[group].visititems(lambda name, obj, group=group: out.__setitem__(f"{group}/{name}", np.asarray(obj[()])) if isinstance(obj, h5py.Dataset) else None)
     return out
 
 
@@ -323,7 +325,7 @@ def test_a_refined_bonded_assembly_on_launch_is_refused(tmp_path: Path, variants
     env.pop("SIMBI_LAUNCH_EXPERIMENTAL", None)
     done = subprocess.run(cmd, capture_output=True, text=True, timeout=600, env=env)
     assert done.returncode != 0, f"the launch succeeded:\n{done.stdout}"
-    assert "a bonded fragment assembly with mesh refinement is outside the distributed first release" in " ".join(done.stderr.split()), done.stderr[-2000:]
+    assert "does not support refinement yet (no fragment step on the hierarchy)" in " ".join(done.stderr.split()), done.stderr[-2000:]
     assert not list((tmp_path / "out").glob("*.h5")), "a checkpoint was published"
 
 

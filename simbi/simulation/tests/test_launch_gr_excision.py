@@ -123,7 +123,7 @@ def test_a_tracer_population_on_a_curved_spacetime_is_refused(tmp_path: Path) ->
     done = subprocess.run(cmd, capture_output=True, text=True, timeout=600, env=env)
     assert done.returncode != 0, f"the launch ran tracers on a curved spacetime:\n{done.stdout}"
     flat = " ".join((done.stdout + done.stderr).split())
-    assert "a tracer population on the schwarzschild_ks spacetime is outside the distributed first release" in flat, flat[-2000:]
+    assert "requires a flat cartesian chart until curvilinear decomposed transport geometry is wired; got (spherical, schwarzschild_ks)" in flat, flat[-2000:]
     assert not list((tmp_path / "out").glob("*.h5")), "a checkpoint was published"
 
 

@@ -107,7 +107,7 @@ def test_a_passive_scalar_on_two_refined_tiles_matches_the_single_hierarchy(tmp_
 
 
 def test_a_census_on_host_tiles_is_refused_by_name(tmp_path: Path, host_tiles) -> None:
-    with pytest.raises(Exception, match="a census with gpus > 1 awaits a cross-tile census reduction"):
+    with pytest.raises(Exception, match="a census with several tiles awaits a cross-tile census reduction"):
         _run(CensusedRefinedBlast, tmp_path / "tiles", 2, refinement_enabled=False)
     assert not list((tmp_path / "tiles").glob("*final*.h5")), "a refused run published a final checkpoint"
 
@@ -129,7 +129,8 @@ def test_a_census_through_launch_is_refused_by_name(tmp_path: Path) -> None:
     env = dict(os.environ, PYTHONPATH=os.pathsep.join([os.getcwd(), os.environ.get("PYTHONPATH", "")]))
     done = subprocess.run(cmd, capture_output=True, text=True, timeout=600, env=env)
     assert done.returncode != 0, f"the launch succeeded:\n{done.stdout}"
-    assert "a census is outside the distributed first release" in " ".join(done.stderr.split()), done.stderr
+    assert "a census with several tiles awaits a cross-tile census reduction" in " ".join(done.stderr.split()), done.stderr
+    assert not list((tmp_path / "out").glob("*.h5")), "a refused launch published a checkpoint"
 
 
 # the second region spans the cut at x = 0 that two tiles place, with no face on it

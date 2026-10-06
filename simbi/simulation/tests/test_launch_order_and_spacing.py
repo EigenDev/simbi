@@ -162,5 +162,5 @@ def test_ppm_outside_newtonian_cartesian_hydro_is_refused_by_name(tmp_path: Path
     done = subprocess.run(cmd, capture_output=True, text=True, timeout=600, env=env)
     assert done.returncode != 0, f"the launch ran a ppm request:\n{done.stdout}"
     flat = " ".join(done.stderr.split())
-    assert "ppm reconstruction with the isothermal regime on the cartesian grid is outside the distributed first release" in flat, done.stderr
+    assert "ppm reconstruction is wired for the newtonian (adiabatic ideal-gas) regime only; got 'isothermal'" in flat, done.stderr
     assert not list((tmp_path / "out").glob("*.h5")), "a checkpoint was published"

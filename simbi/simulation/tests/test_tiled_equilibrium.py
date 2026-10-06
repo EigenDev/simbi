@@ -77,6 +77,18 @@ class RefinedIsothermalTarget(RefinedIsothermalAtmosphere):
     pass
 
 
+class DyedRefinedTarget(RefinedAtmosphere):
+    """the refined target carrying a dye graded across the grid"""
+
+    def passive_scalar(self):
+        def dye():
+            (n,) = self.resolution
+            for ii in range(n):
+                yield 0.25 + 0.5 * (ii + 0.5) / n
+
+        return dye()
+
+
 class RefinedWithoutTarget(RefinedAtmosphere):
     seed_from_equilibrium: Annotated[bool, ProblemParam(False, description="unseeded")]
 
@@ -291,3 +303,27 @@ def test_launched_refined_workers_hold_the_declared_target_as_the_single_hierarc
     # a resumed launch takes `max_steps` further steps
     resumed, _ = _launch_probed(variants, problem, tmp_path / "resumed", three, STEPS - _iteration(first), checkpoint=first, levels=True)
     _assert_same(resumed, want, f"{problem}: resumed onto three uneven refined workers")
+
+
+def test_a_dyed_target_is_refused_by_name_on_every_driver(tmp_path: Path, variants: Path) -> None:
+    # the stationary target declares the gas alone: a passive scalar beside it has no target
+    # concentration, and every driver refuses the pair by name before any output
+    from simbi.simulation.tests.test_launch import _layout
+
+    reason = "the passive scalar carries no declared target concentration"
+    for label, gpus in (("one device", 1), ("two host tiles", 2)):
+        done = _run_raw("DyedRefinedTarget", tmp_path / label, gpus, STEPS, "", None)
+        assert done.returncode != 0, f"{label}: the run succeeded"
+        assert reason in " ".join(done.stderr.split()), f"{label}: refusal not named:\n{done.stderr[-2000:]}"
+        assert not list((tmp_path / label).glob("*.h5")), f"{label}: a refused run published a checkpoint"
+    two = _layout(tmp_path / "two.toml", workers=2, shape=(2,))
+    script = variants.parent / "launched_dyedrefinedtarget.py"
+    script.write_text("from variants import DyedRefinedTarget as Base\n\n\nclass LaunchedDyedRefinedTarget(Base):\n    pass\n")
+    cmd = [sys.executable, "-m", "simbi.cli", "launch", str(script), "--layout", str(two), "--max-steps", "1",
+           "--data-directory", str(tmp_path / "launched"), "--checkpoint-interval", "1e9"]
+    env = dict(os.environ)
+    env.pop("SIMBI_LAUNCH_EXPERIMENTAL", None)
+    done = subprocess.run(cmd, capture_output=True, text=True, timeout=600, env=env)
+    assert done.returncode != 0, "the launch succeeded"
+    assert reason in " ".join(done.stderr.split()), f"launch: refusal not named:\n{done.stderr[-2000:]}"
+    assert not list((tmp_path / "launched").glob("*.h5")), "a refused launch published a checkpoint"

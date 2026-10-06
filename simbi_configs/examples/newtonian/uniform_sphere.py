@@ -120,6 +120,6 @@ class UniformSphere(SimbiProblem):
         def gas_state() -> GasStateGenerator:
             (nr,) = self.resolution
             for ii in range(nr):
-                yield (self.rho_uniform, 0.0, self.p_uniform, 0.0)
+                yield (self.rho_uniform, 0.0, self.p_uniform)
 
         return gas_state
