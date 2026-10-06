@@ -181,6 +181,11 @@ ARMS = {
 }
 
 
+# the wall and the fragment disk sit at x = 0 on [-2, 6] with 64 cells: the cut at cell 16 runs
+# through each body, so the cross-tile sum of its feedback carries both tiles' partials
+THROUGH_THE_BODY = {"wall": [[16], []], "wall-isothermal": [[16], []], "fragments": [[16], []]}
+
+
 @pytest.fixture
 def variants(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     (tmp_path / "variants.py").write_text(VARIANTS)
@@ -266,10 +271,16 @@ def _assert_same_diagnostics(got: Path, want: Path, label: str) -> None:
 @pytest.mark.parametrize("arm", list(ARMS))
 def test_launched_workers_publish_the_host_tiles_bodies(tmp_path: Path, variants: Path, arm: str) -> None:
     problem, resolution = ARMS[arm]
-    want = _tiles(problem, resolution, tmp_path / "tiles", STEPS)
-    # a planar grid cut once along x; the 3d sinks (resolution from their own setup) likewise
+    cuts = THROUGH_THE_BODY.get(arm)
+    want = _tiles(problem, resolution, tmp_path / "tiles", STEPS, cuts=cuts)
+    if cuts is not None:
+        # premise: the body straddles the cut at x = 0, so both tiles hold a partial of its feedback
+        with h5py.File(want, "r") as f:
+            x = f["bodies/position"][()][:, 0]
+        assert (x.min() < 0.0 < x.max()) or abs(float(x[0])) < 0.4, f"{arm}: the body lies on one side of the cut (x = {x})"
+    # a planar grid cut once along x (through the body where named); the 3d sinks likewise
     planar = resolution is not None and sum(1 for r in resolution if r > 1) == 2
-    two = _layout(tmp_path / "two.toml", workers=2, shape=(2, 1) if planar else (2, 1, 1))
+    two = _layout(tmp_path / "two.toml", workers=2, cuts=cuts) if cuts is not None else _layout(tmp_path / "two.toml", workers=2, shape=(2, 1) if planar else (2, 1, 1))
     got = _launch(variants, problem, resolution, tmp_path / "launched", two, STEPS)
     _assert_same(got, want, f"{arm}: two launched workers")
     if arm == "sink":

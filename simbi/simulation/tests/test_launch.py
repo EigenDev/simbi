@@ -33,6 +33,7 @@ from simbi_configs.examples.newtonian.ordered_sources import OrderedSources
 from simbi_configs.examples.newtonian.refined_mhd_3d import RefinedMhd3D
 from simbi_configs.examples.srhd.ram44 import Ram44
 
+from simbi.simulation.tests.checkpoint_compare import assert_same_checkpoint
 from simbi.simulation.tests.process_guard import ProcessGuard, descendants
 
 pytestmark = pytest.mark.simulation
@@ -173,13 +174,8 @@ def _interior(f: h5py.File) -> dict[str, np.ndarray]:
 
 
 def _assert_same_state(a: Path, b: Path, label: str) -> None:
-    with h5py.File(a, "r") as fa, h5py.File(b, "r") as fb:
-        for key in ("time", "iteration"):
-            assert fa["level_0"].attrs[key] == fb["level_0"].attrs[key], f"{label}: level attr {key}"
-        xs, ys = _interior(fa), _interior(fb)
-        assert xs.keys() == ys.keys(), f"{label}: dataset sets differ"
-        for name, x in xs.items():
-            np.testing.assert_array_equal(x, ys[name], err_msg=f"{label}: {name}")
+    """the whole checkpoint, every group and dataset, halos and faces included, bit for bit"""
+    assert_same_checkpoint(a, b, label)
 
 
 def test_a_fresh_launch_matches_the_single_grid_run(tmp_path: Path) -> None:

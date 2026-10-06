@@ -19,6 +19,8 @@ import h5py
 import numpy as np
 import pytest
 
+from simbi.simulation.tests.checkpoint_compare import assert_same_checkpoint
+
 pytestmark = pytest.mark.simulation
 
 VISCOUS = "simbi_configs/examples/newtonian/viscous_shear.py"
@@ -57,36 +59,31 @@ def _conserved(path: Path) -> tuple[dict[str, np.ndarray], int]:
 
 def test_a_viscous_run_on_two_devices_is_viscous(tmp_path: Path) -> None:
     base = ["--resolution", "32,32,1", "--end-time", "0.05"]
-    viscous_1, steps_1 = _density(_run(VISCOUS, tmp_path / "v1", 1, base + ["--nu", "0.05"]))
+    one = _run(VISCOUS, tmp_path / "v1", 1, base + ["--nu", "0.05"])
+    viscous_1, _ = _density(one)
     inviscid_1, _ = _density(_run(VISCOUS, tmp_path / "i1", 1, base + ["--nu", "0.0"]))
     assert np.abs(viscous_1 - inviscid_1).max() > 0.0, "viscosity does not act on this setup; the gate is vacuous"
-    viscous_2, steps_2 = _density(_run(VISCOUS, tmp_path / "v2", 2, base + ["--nu", "0.05"]))
-    assert steps_2 == steps_1, "the viscous timestep limit reaches the decomposed run"
-    np.testing.assert_array_equal(viscous_2, viscous_1)
+    assert_same_checkpoint(_run(VISCOUS, tmp_path / "v2", 2, base + ["--nu", "0.05"]), one, "a viscous run on two devices")
 
 
 def test_an_excised_run_on_two_devices_is_excised(tmp_path: Path) -> None:
     base = ["--resolution", "24,24,24", "--end-time", "0.6", "--domain-radius", "0.12"]
-    one, steps_1 = _conserved(_run(BONDI, tmp_path / "e1", 1, base + ["--excision-radius", "1.6"]))
+    excised = _run(BONDI, tmp_path / "e1", 1, base + ["--excision-radius", "1.6"])
+    one, _ = _conserved(excised)
     bare, _ = _conserved(_run(BONDI, tmp_path / "n1", 1, base + ["--excision-radius", "0.0"]))
     assert not np.array_equal(one["den"], bare["den"]), "excision does not act on this setup; the gate is vacuous"
-    two, steps_2 = _conserved(_run(BONDI, tmp_path / "e2", 2, base + ["--excision-radius", "1.6"]))
-    assert steps_1 == steps_2
     # every tile evaluates the metric at whole-grid cell centers (the global origin plus its index
     # offset), so the excised relativistic march is the single grid's, bit for bit
-    assert one.keys() == two.keys()
-    for name, field in one.items():
-        np.testing.assert_array_equal(two[name], field, err_msg=f"excised {name}")
+    assert_same_checkpoint(_run(BONDI, tmp_path / "e2", 2, base + ["--excision-radius", "1.6"]), excised, "an excised run on two devices")
 
 
 def test_the_synge_gas_on_two_devices_is_the_synge_gas(tmp_path: Path) -> None:
     base = ["--resolution", "32,32", "--end-time", "0.02"]
-    synge_1, steps_1 = _density(_run(SYNGE, tmp_path / "s1", 1, base))
+    one = _run(SYNGE, tmp_path / "s1", 1, base)
+    synge_1, _ = _density(one)
     ideal_1, _ = _density(_run(SYNGE, tmp_path / "i1", 1, base + ["--eos", "ideal", "--adiabatic-index", "1.4"]))
     assert np.abs(synge_1 - ideal_1).max() > 0.0, "the closure does not act on this setup; the gate is vacuous"
-    synge_2, steps_2 = _density(_run(SYNGE, tmp_path / "s2", 2, base))
-    assert steps_2 == steps_1
-    np.testing.assert_array_equal(synge_2, synge_1)
+    assert_same_checkpoint(_run(SYNGE, tmp_path / "s2", 2, base), one, "the synge gas on two devices")
 
 
 def test_the_balanced_reconstruction_on_several_devices_is_refused(tmp_path: Path) -> None:

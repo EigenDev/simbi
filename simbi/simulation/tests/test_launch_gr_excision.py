@@ -70,7 +70,8 @@ def _assert_same(got: Path, want: Path, label: str) -> None:
     ("case", "resolution", "fields", "uneven"),
     [
         (BOX, BOX_RESOLUTION, BOX_FIELDS, [[11], [13], []]),
-        (LINE, LINE_RESOLUTION, LINE_FIELDS, [[40, 90]]),
+        # the cut at cell 4 lies inside the excised radius (faces at r = 100^(k/128), r_exc = 1.4)
+        (LINE, LINE_RESOLUTION, LINE_FIELDS, [[4, 64]]),
     ],
     ids=["box", "line"],
 )
@@ -83,6 +84,13 @@ def test_an_excised_relativistic_launch_matches_the_single_grid(tmp_path: Path, 
     assert not np.array_equal(_all_levels(want)["level_0/conserved/den"], _all_levels(bare)["level_0/conserved/den"]), (
         "the excision left the run unchanged; the gate is vacuous"
     )
+    if case == LINE:
+        # premise: an uneven cut passes through the excised region of the radial line
+        with h5py.File(want, "r") as f:
+            dim = f["level_0/mesh/geometry/dim_0"].attrs
+            start, end = float(dim["start"]), float(dim["end"])
+        cut_radius = start * (end / start) ** (uneven[0][0] / resolution[0])
+        assert cut_radius < float(fields["excision_radius"]), f"the cut at r = {cut_radius:.3f} misses the excised region"
     shape = (2,) + (1,) * (len(resolution) - 1)
     two = _layout(tmp_path / "two.toml", workers=2, shape=shape)
     _assert_same(_script_launch(_script(module), resolution, tmp_path / "two", two, STEPS, workers=2, flags=_flags(fields)), want, "two workers")

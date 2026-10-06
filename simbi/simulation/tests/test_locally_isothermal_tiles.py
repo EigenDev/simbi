@@ -20,6 +20,7 @@ import subprocess
 import sys
 from pathlib import Path
 
+import h5py
 import numpy as np
 import pytest
 
@@ -90,7 +91,8 @@ class LocalIso(GlobalIso):
 
 
 class LocalImhd(IsothermalOrszagTang):
-    """the isothermal orszag-tang vortex with the closure cs^2 = 1 + 0.1 sin(v_x)"""
+    """the isothermal orszag-tang vortex with the closure cs^2 = 1 + 0.1 sin(v_x) + 0.05 sin(v_y):
+    v_x varies along y and v_y along x, so the closure varies across a cut of either axis"""
 
     @computed_field
     @property
@@ -102,7 +104,7 @@ class LocalImhd(IsothermalOrszagTang):
 
         def rows():
             for row in gas():
-                yield (*row, row[0] * (1.0 + 0.1 * math.sin(row[1])))
+                yield (*row, row[0] * (1.0 + 0.1 * math.sin(row[1]) + 0.05 * math.sin(row[2])))
 
         return (rows, *faces)
 
@@ -195,6 +197,12 @@ def test_a_troubled_cell_against_a_cut_corrects_alike_under_the_local_closure(tm
 @pytest.mark.parametrize("problem", ["LocalImhd", "OutflowLocalImhd"])
 def test_isothermal_mhd_workers_carry_the_local_closure_as_the_single_grid(tmp_path: Path, variants: Path, problem: str) -> None:
     want = _single(problem, tmp_path / "single")
+    # premise: the closure varies along x, the axis every layout here cuts
+    with h5py.File(want, "r") as f:
+        level = f["level_0"]
+        ng = int(level["mesh"].attrs["halo_width"])
+        cs2 = level["iso_cs2"][()][ng:-ng, ng:-ng]
+    assert not np.all(cs2 == cs2[:, :1]), f"{problem}: the closure is uniform along the cut axis; the gate is vacuous"
     two = _layout(tmp_path / "two.toml", workers=2, shape=(2, 1))
     _assert_same(_launch(variants, problem, tmp_path / "two", two, STEPS), want, f"{problem}: two workers")
     first = _launch(variants, problem, tmp_path / "first", two, STEPS // 2)

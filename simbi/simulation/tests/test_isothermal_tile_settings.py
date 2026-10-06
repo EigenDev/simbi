@@ -30,6 +30,8 @@ import h5py
 import numpy as np
 import pytest
 
+from simbi.simulation.tests.checkpoint_compare import assert_same_checkpoint
+
 pytestmark = pytest.mark.simulation
 
 VARIANTS = '''
@@ -160,10 +162,7 @@ def _cells(path: Path) -> dict[str, np.ndarray]:
 
 
 def _assert_bitwise(got: Path, want: Path, label: str) -> None:
-    xs, ys = _cells(got), _cells(want)
-    assert xs.keys() == ys.keys(), f"{label}: datasets {sorted(xs)} against {sorted(ys)}"
-    for name, x in xs.items():
-        np.testing.assert_array_equal(x, ys[name], err_msg=f"{label}: {name}")
+    assert_same_checkpoint(got, want, label)
 
 
 def test_an_isothermal_dye_is_transported_on_one_device_and_on_tiles(tmp_path: Path, variants: Path) -> None:
@@ -180,7 +179,20 @@ def test_an_isothermal_dye_is_transported_on_one_device_and_on_tiles(tmp_path: P
 
 def test_isothermal_tiles_carry_a_shaped_wall(tmp_path: Path, variants: Path) -> None:
     single = _final("IsoWindTunnel", (64, 32), tmp_path / "single", 1)
-    _assert_bitwise(_final("IsoWindTunnel", (64, 32), tmp_path / "tiles", 2), single, "two isothermal tiles around a shaped wall")
+    tiles = _final("IsoWindTunnel", (64, 32), tmp_path / "tiles", 2)
+    # the wall's force history sums each tile's partial; every other dataset is bit for bit
+    assert_same_checkpoint(tiles, single, "two isothermal tiles around a shaped wall", exclude=("body_diagnostics",), expect=("bodies",))
+    # the summed columns move by the reassociation of a sum over n cells split in two: n u of
+    # the force scale (n = 2048, u = 2^-53); the torque cancels to round-off, so it takes the force
+    # bound times the domain's longest lever arm (8)
+    n, u, arm = 64 * 32, 2.0**-53, 8.0
+    with h5py.File(single, "r") as fa, h5py.File(tiles, "r") as fb:
+        force = fa["body_diagnostics/force"][()]
+        assert np.abs(force).max() > 0.0, "the wall felt no force; the history comparison is vacuous"
+        bound = n * u * np.abs(force).max()
+        for name, scale in (("force", 1.0), ("force_normal", 1.0), ("torque", arm)):
+            worst = np.abs(fa[f"body_diagnostics/{name}"][()] - fb[f"body_diagnostics/{name}"][()]).max()
+            assert worst <= bound * scale, f"{name}: two tiles differ by {worst:.3e} against {bound * scale:.3e}"
 
 
 def test_isothermal_tiles_carry_a_bonded_cluster(tmp_path: Path, variants: Path) -> None:
