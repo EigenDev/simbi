@@ -288,6 +288,52 @@ def boundaries_on_restart(recorded: Sequence[str], declared: Any) -> list[Any]:
     return resolved
 
 
+def recorded_physics_identity(checkpoint_path: Path) -> dict[str, Any]:
+    """the physics a checkpoint records as metadata attributes and its run cannot change: the
+    background spacetime with its mass and spin, and the isothermal sound speed. only the
+    attributes the file carries are returned, so a file written before one existed keeps the
+    configuration's value."""
+    import h5py
+
+    from simbi.types import Spacetime
+
+    recorded: dict[str, Any] = {}
+    with h5py.File(checkpoint_path, "r") as f:
+        if "metadata" not in f:
+            return recorded
+        attrs = f["metadata"].attrs
+        if "spacetime" in attrs:
+            value = attrs["spacetime"]
+            recorded["spacetime"] = Spacetime(value.decode() if isinstance(value, bytes) else str(value))
+        for name in ("schwarzschild_mass", "kerr_spin", "sound_speed"):
+            if name in attrs:
+                recorded[name] = float(attrs[name])
+    return recorded
+
+
+def verify_tracer_population(problem: SimbiProblem, checkpoint_path: Path) -> None:
+    """a resumed run carries the tracer population its checkpoint records, of the same kind: a
+    discrete population, a continuous (ito) one, or none. a run that adds, drops or changes the
+    kind of a population is refused, since no driver can continue a population the file lacks."""
+    import h5py
+
+    from .problem import ConfigError
+    from simbi.types import TracerScheme
+
+    with h5py.File(checkpoint_path, "r") as f:
+        recorded = "discrete" if "tracers" in f else "continuous" if "continuous_tracers" in f else "none"
+    if problem.n_tracers == 0:
+        configured = "none"
+    else:
+        configured = "discrete" if problem.tracer_scheme == TracerScheme.DISCRETE else "continuous"
+    if recorded != configured:
+        raise ConfigError(
+            f"the checkpoint {checkpoint_path} records {'no' if recorded == 'none' else 'a ' + recorded} "
+            f"tracer population; this run configures {'none' if configured == 'none' else 'a ' + configured + ' one'}. "
+            "a resumed run continues the population its checkpoint carries"
+        )
+
+
 def merge_with_checkpoint(
     problem: SimbiProblem,
     checkpoint_path: Path,
@@ -311,6 +357,8 @@ def merge_with_checkpoint(
     """
     metadata, mesh_shape = load_checkpoint_metadata(checkpoint_path)
     checkpoint_config = metadata_to_config_dict(metadata, mesh_shape)
+    checkpoint_config.update(recorded_physics_identity(checkpoint_path))
+    verify_tracer_population(problem, checkpoint_path)
     checkpoint_config["coord_system"] = chart_on_restart(
         checkpoint_config["coord_system"], checkpoint_config.pop("cyl_plane"), problem.coord_system
     )

@@ -1859,6 +1859,25 @@ fn sample_scale_factor(cfg: &mut Config, a: Option<&Bound<'_, PyAny>>, adot: Opt
         let (Some(a), Some(adot)) = (a.filter(|f| !f.is_none()), adot.filter(|f| !f.is_none())) else {
             return Err(PyValueError::new_err("mesh motion declared without the scale factor callables a(t), a_dot(t)"));
         };
+        // the callable motion integrates a at the constant rate sampled at the start, so a resumed
+        // run continues the integrated a and its rate the checkpoint records; the callables would
+        // place the mesh on their own curve instead. a traced law evaluates a(t) exactly and keeps
+        // the start sample
+        if let (Some(path), None) = (cfg.restart_path.as_deref(), cfg.motion_json.as_ref()) {
+            let meta = symbi_io::read_attrs(std::path::Path::new(path), "metadata")
+                .map_err(|e| PyValueError::new_err(format!("restart from '{path}': {e}")))?;
+            let recorded = |name: &str| -> PyResult<f64> {
+                match meta.iter().find(|(key, _)| key == name).map(|(_, attr)| attr) {
+                    Some(symbi_io::Attr::F64(v)) => Ok(*v),
+                    _ => Err(PyValueError::new_err(format!(
+                        "restart from '{path}': the checkpoint records no metadata/{name} for the mesh motion"
+                    ))),
+                }
+            };
+            cfg.scale_a0 = recorded("scale_factor")?;
+            cfg.scale_adot = recorded("scale_factor_dot")?;
+            return Ok(());
+        }
         let t0 = cfg.start_time;
         cfg.scale_a0 = a.call1((t0,))?.extract::<f64>()?;
         cfg.scale_adot = adot.call1((t0,))?.extract::<f64>()?;
@@ -6367,15 +6386,17 @@ where
     // a restart reads every level of every tile from the checkpoint's global grids.
     if let Some(path) = cfg.restart_path.as_deref() {
         let stored = symbi_sim::checkpoint::checkpoint_level_count(path).map_err(|e| format!("{e}"))?;
-        for (i, tile) in tiles.iter_mut().enumerate() {
-            load_partitioned_level(&mut tile.levels[0].state, path, 0, root_offsets[i], &root_grid)
-                .map_err(|e| format!("restart of tile {i} root from '{path}': {e}"))?;
-        }
-        if stored < depth {
+        // a deeper checkpoint would lose the levels it carries beyond this run's, a shallower one
+        // would leave levels unseeded: both are refused before any level is read
+        if stored != depth {
             return Err(format!(
                 "restart from '{path}': the checkpoint holds {stored} level(s), this run refines to \
                  {depth}; a refined decomposed run resumes from a checkpoint of its own depth"
             ));
+        }
+        for (i, tile) in tiles.iter_mut().enumerate() {
+            load_partitioned_level(&mut tile.levels[0].state, path, 0, root_offsets[i], &root_grid)
+                .map_err(|e| format!("restart of tile {i} root from '{path}': {e}"))?;
         }
         for (level, (fg, offsets, grid)) in fine.iter().enumerate().map(|(k, f)| (k + 1, f)) {
             for (k, &i) in fg.order.iter().enumerate() {

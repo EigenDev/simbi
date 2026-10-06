@@ -306,6 +306,43 @@ struct BodyStateSnap {
     omega: Vec<f64>,           // [nb, 3] angular-velocity vector
     shape_json: Vec<String>,   // per-body CSG wire (empty = the analytic sphere), for viz
     nb: usize,
+    fragments: Option<FragmentSnap>,
+}
+
+/// the evolving state of a bonded assembly: each bond's pair, rest length, tangential slip and
+/// intact flag in bond-list order, and each touching pair's contact slip in pair order. the bond
+/// list is rebuilt from the configuration at every start; these restore what it has lived through
+struct FragmentSnap {
+    bond_pairs: Vec<u64>,    // [nbond, 2]
+    bond_rest: Vec<f64>,     // [nbond]
+    bond_slip: Vec<f64>,     // [nbond, 3]
+    bond_intact: Vec<u64>,   // [nbond] 1 intact, 0 broken
+    contact_pairs: Vec<u64>, // [ncontact, 2]
+    contact_slip: Vec<f64>,  // [ncontact, 3]
+}
+
+fn fragment_snap(physics: &symbi_ib::FragmentPhysics) -> FragmentSnap {
+    let mut snap = FragmentSnap {
+        bond_pairs: Vec::new(),
+        bond_rest: Vec::new(),
+        bond_slip: Vec::new(),
+        bond_intact: Vec::new(),
+        contact_pairs: Vec::new(),
+        contact_slip: Vec::new(),
+    };
+    for bond in &physics.bonds {
+        snap.bond_pairs.extend([bond.i as u64, bond.j as u64]);
+        snap.bond_rest.push(bond.rest_length);
+        snap.bond_slip.extend((0..3).map(|k| bond.slip[k]));
+        snap.bond_intact.push(bond.intact as u64);
+    }
+    if let Some(contacts) = &physics.contacts {
+        for ((i, j), slip) in contacts.slip_pairs() {
+            snap.contact_pairs.extend([i as u64, j as u64]);
+            snap.contact_slip.extend((0..3).map(|k| slip[k]));
+        }
+    }
+    snap
 }
 
 fn body_state_snap<const D: usize>(im: &ImmersedBodies<D>) -> BodyStateSnap {
@@ -327,6 +364,7 @@ fn body_state_snap<const D: usize>(im: &ImmersedBodies<D>) -> BodyStateSnap {
         omega: Vec::with_capacity(nb * 3),
         shape_json: Vec::with_capacity(nb),
         nb,
+        fragments: im.fragment_physics.as_ref().map(fragment_snap),
     };
     for b in 0..nb {
         // the CSG shape wire (empty for the analytic sphere) — a self-describing silhouette for viz.
@@ -707,7 +745,72 @@ fn body_state_group<'a, const D: usize>(snap: &'a BodyStateSnap, heat_name: &str
     for (b, wire) in snap.shape_json.iter().enumerate() {
         t.push_attr(format!("shape_{b}"), wire.clone());
     }
+    if let Some(f) = &snap.fragments {
+        let nbond = f.bond_rest.len();
+        let ncontact = f.contact_pairs.len() / 2;
+        t.push_group(
+            Tree::new("fragments")
+                .with_dataset(Dataset::new("bond_pairs", vec![nbond, 2], DataRef::U64(&f.bond_pairs)))
+                .with_dataset(Dataset::new("bond_rest_length", vec![nbond], DataRef::F64(&f.bond_rest)))
+                .with_dataset(Dataset::new("bond_slip", vec![nbond, 3], DataRef::F64(&f.bond_slip)))
+                .with_dataset(Dataset::new("bond_intact", vec![nbond], DataRef::U64(&f.bond_intact)))
+                .with_dataset(Dataset::new("contact_pairs", vec![ncontact, 2], DataRef::U64(&f.contact_pairs)))
+                .with_dataset(Dataset::new("contact_slip", vec![ncontact, 3], DataRef::F64(&f.contact_slip))),
+        );
+    }
     t
+}
+
+/// restore a bonded assembly's evolving state onto the bond list the configuration rebuilt: the
+/// file's bonds must join the same pairs in the same order, or the restart is refused
+fn restore_fragments(fragments_g: &TreeBuf, physics: &mut symbi_ib::FragmentPhysics) -> Result<()> {
+    let f64s = |name: &str| -> Result<Vec<f64>> {
+        fragments_g
+            .find_dataset(name)
+            .and_then(|d| d.data.as_f64().map(|v| v.to_vec()))
+            .ok_or_else(|| IoError::MissingPath(format!("bodies/fragments/{name}")))
+    };
+    let u64s = |name: &str| -> Result<Vec<u64>> {
+        fragments_g
+            .find_dataset(name)
+            .and_then(|d| d.data.as_u64().map(|v| v.to_vec()))
+            .ok_or_else(|| IoError::MissingPath(format!("bodies/fragments/{name}")))
+    };
+    let pairs = u64s("bond_pairs")?;
+    let configured: Vec<u64> = physics.bonds.iter().flat_map(|b| [b.i as u64, b.j as u64]).collect();
+    if pairs != configured {
+        return Err(IoError::Backend(format!(
+            "the checkpoint records {} bond(s) joining {pairs:?}; this run configures {} joining \
+             {configured:?}. a bonded assembly resumes onto the bond list it was written with",
+            pairs.len() / 2,
+            configured.len() / 2
+        )));
+    }
+    let (rest, slip, intact) = (f64s("bond_rest_length")?, f64s("bond_slip")?, u64s("bond_intact")?);
+    for (k, bond) in physics.bonds.iter_mut().enumerate() {
+        bond.rest_length = rest[k];
+        for a in 0..3 {
+            bond.slip[a] = slip[3 * k + a];
+        }
+        bond.intact = intact[k] != 0;
+    }
+    let contact_pairs = u64s("contact_pairs")?;
+    let contact_slip = f64s("contact_slip")?;
+    match physics.contacts.as_mut() {
+        Some(contacts) => contacts.set_slip_pairs((0..contact_pairs.len() / 2).map(|c| {
+            (
+                (contact_pairs[2 * c] as usize, contact_pairs[2 * c + 1] as usize),
+                symbi_algebra::Tensor::new([contact_slip[3 * c], contact_slip[3 * c + 1], contact_slip[3 * c + 2]]),
+            )
+        })),
+        None if !contact_pairs.is_empty() => {
+            return Err(IoError::Backend(
+                "the checkpoint records contact state; this run configures no contact model".into(),
+            ));
+        }
+        None => {}
+    }
+    Ok(())
 }
 
 /// root attribute naming the measure the stored conserved state carries. absent means the
@@ -927,38 +1030,6 @@ where
         .find_group(&name)
         .and_then(|level| level.find_group("mesh"))
         .ok_or_else(|| IoError::MissingPath(format!("{name}/mesh")))?;
-
-    let cells = match mesh.find_dataset("global_cells").map(|d| &d.data) {
-        Some(symbi_io::DataBuf::U64(v)) => v.clone(),
-        _ => return Err(IoError::MissingPath(format!("{name}/mesh/global_cells"))),
-    };
-    for ax in 0..D {
-        let want = sim.geom.interior.spaces[ax].size();
-        // `mesh/global_cells` is written in reversed (storage) axis order, matching the reversed
-        // dataset shapes so a reader's plot axes are not transposed — see `mesh_cells`. reading it
-        // forward compares axis 0 against the last axis's count, which agrees only on a cubic grid
-        // and rejects every anisotropic one.
-        let got = *cells.get(D - 1 - ax).unwrap_or(&0) as usize;
-        if got != want {
-            return Err(IoError::Backend(format!(
-                "{path}: level {level_index} was written with {got} cell(s) on axis {ax} but this \
-                 run builds {want}. a deeper restart requires level {level_index} to occupy the \
-                 same grid it did in the checkpoint; a refinement schedule whose regions depend on \
-                 the level count does not satisfy that, and loading across the mismatch would \
-                 place the data on the wrong region."
-            )));
-        }
-    }
-
-    let geometry = mesh
-        .find_group("geometry")
-        .ok_or_else(|| IoError::MissingPath(format!("{name}/mesh/geometry")))?;
-    // the writer stores physical bounds — the comoving faces scaled by the mesh-motion
-    // factor a(t) at write time on the expanding axes — while this sim is freshly built
-    // on the comoving grid (a = 1; the motion re-derives a(t) from the resume time, it
-    // is never integrated state). unscale the stored bounds by the checkpoint's own
-    // scale factor so the comparison is comoving against comoving; a checkpoint from a
-    // static-mesh run carries a = 1 and is unchanged.
     let a_checkpoint = tree
         .find_group("metadata")
         .and_then(|meta| meta.find_attr("scale_factor"))
@@ -967,10 +1038,59 @@ where
             _ => None,
         })
         .unwrap_or(1.0);
+    verify_level_region(mesh, path, level_index, &GlobalGrid::of_state(&sim.store), sim.physics.metric.geometry(), a_checkpoint)
+}
+
+/// a level's comoving face range on one axis, by the writer's face arithmetic: the coordinate maps
+/// when present, the uniform formula otherwise, scaled by `scale` on the expanding axes
+fn grid_face_range<const D: usize>(grid: &GlobalGrid<D>, ax: usize, scale: f64) -> (f64, f64) {
+    let lo_index = grid.interior_lo[ax];
+    let hi_index = lo_index + grid.cells[ax] as isize;
+    match &grid.maps {
+        Some(maps) => (maps[ax].face(lo_index) * scale, maps[ax].face(hi_index) * scale),
+        None => {
+            let start = facts_x_lo(&grid.x_lo, grid.dx[ax], lo_index, ax, scale);
+            (start, start + grid.dx[ax] * scale * grid.cells[ax] as f64)
+        }
+    }
+}
+
+/// the level a checkpoint stores occupies the grid this run builds for it: the same cells on every
+/// axis and the same comoving region (the stored physical faces divided by the checkpoint's own
+/// scale factor). every loader applies it, the single grid's and the partitioned one alike
+fn verify_level_region<const D: usize>(
+    mesh: &TreeBuf,
+    path: &str,
+    level_index: usize,
+    grid: &GlobalGrid<D>,
+    geometry_kind: symbi_geometry::Geometry,
+    a_checkpoint: f64,
+) -> Result<()> {
+    let name = format!("level_{level_index}");
+    let cells = match mesh.find_dataset("global_cells").map(|d| &d.data) {
+        Some(symbi_io::DataBuf::U64(v)) => v.clone(),
+        _ => return Err(IoError::MissingPath(format!("{name}/mesh/global_cells"))),
+    };
+    for ax in 0..D {
+        let want = grid.cells[ax];
+        // `mesh/global_cells` is written in reversed (storage) axis order, matching the reversed
+        // dataset shapes so a reader's plot axes are not transposed — see `mesh_cells`
+        let got = *cells.get(D - 1 - ax).unwrap_or(&0) as usize;
+        if got != want {
+            return Err(IoError::Backend(format!(
+                "{path}: level {level_index} was written with {got} cell(s) on axis {ax} but this \
+                 run builds {want}. a restart requires level {level_index} to occupy the same grid \
+                 it did in the checkpoint; loading across the mismatch would place the data on the \
+                 wrong region."
+            )));
+        }
+    }
+    let geometry = mesh
+        .find_group("geometry")
+        .ok_or_else(|| IoError::MissingPath(format!("{name}/mesh/geometry")))?;
     for ax in 0..D {
         // the geometry groups are named by storage slot, `(0..D).rev().enumerate()` in the writer,
-        // so slot `D - 1 - ax` holds axis `ax`. the same reversal as `global_cells`, and equally
-        // invisible on a cubic grid or in one dimension.
+        // so slot `D - 1 - ax` holds axis `ax`
         let slot = D - 1 - ax;
         let dim = geometry
             .find_group(&format!("dim_{slot}"))
@@ -980,37 +1100,20 @@ where
             _ => None,
         };
         let (Some(start), Some(end)) = (bound("start"), bound("end")) else {
-            return Err(IoError::MissingPath(format!(
-                "{name}/mesh/geometry/dim_{slot}/start|end"
-            )));
+            return Err(IoError::MissingPath(format!("{name}/mesh/geometry/dim_{slot}/start|end")));
         };
-        let unscale = motion_axis_scale(sim.physics.metric.geometry(), ax, D, a_checkpoint);
-        let start = start / unscale;
-        let end = end / unscale;
-        // the run's comoving bounds, by the writer's own face arithmetic (the coordinate
-        // maps when present, the uniform formula otherwise) so the two sides can only
-        // differ by a genuine region mismatch, never by formula drift.
-        let lo_index = sim.geom.interior.spaces[ax].lo;
-        let hi_index = sim.geom.interior.spaces[ax].hi;
-        let (lo, hi) = match &sim.geom.maps {
-            Some(maps) => (maps[ax].face(lo_index), maps[ax].face(hi_index)),
-            None => {
-                let lo = sim.geom.x_lo[ax] + lo_index as f64 * sim.geom.dx[ax];
-                (
-                    lo,
-                    lo + sim.geom.dx[ax] * sim.geom.interior.spaces[ax].size() as f64,
-                )
-            }
-        };
+        let unscale = motion_axis_scale(geometry_kind, ax, D, a_checkpoint);
+        let (start, end) = (start / unscale, end / unscale);
+        let (lo, hi) = grid_face_range(grid, ax, 1.0);
         // relative to the level's own extent: an absolute tolerance would be meaningless across a
-        // ladder whose finest level is orders of magnitude smaller than its root.
+        // ladder whose finest level is orders of magnitude smaller than its root
         let scale = (hi - lo).abs().max(1.0e-300);
         if (start - lo).abs() / scale > 1.0e-9 || (end - hi).abs() / scale > 1.0e-9 {
             return Err(IoError::Backend(format!(
                 "{path}: level {level_index} axis {ax} spans [{start:e}, {end:e}] in the checkpoint \
                  (comoving, unscaled by its a = {a_checkpoint}) but [{lo:e}, {hi:e}] in this run. \
                  level {level_index} must occupy the same comoving region at every depth for a \
-                 deeper restart to be meaningful."
+                 restart to be meaningful."
             )));
         }
     }
@@ -1112,13 +1215,17 @@ where
             }
         }
     }
-    // the passive scalar rides outside the spec iteration (run-level opt-in):
-    // restored iff this run allocated it and the file carries it — a dyed
-    // restart of an undyed file starts from chi = 0 rather than failing.
+    // the passive scalar rides outside the spec iteration (run-level opt-in): a dyed run restores
+    // the dye its checkpoint carries, and a file without one is refused, as the partitioned loader
+    // refuses it
     if let Some(chi) = sim.fields.cons.chi_field() {
-        if cons.find_dataset("chi").is_some() {
-            restore_field(cons, "chi", chi, chi.domain())?;
+        if cons.find_dataset("chi").is_none() {
+            return Err(IoError::Backend(format!(
+                "checkpoint '{path}' records no passive scalar (conserved/chi); this run carries one, \
+                 which would restart from its initial concentration over the restored gas"
+            )));
         }
+        restore_field(cons, "chi", chi, chi.domain())?;
     }
 
     // primitives (optional). the canonical v2 tree nests visualization fields
@@ -1497,6 +1604,23 @@ fn restore_bodies<const D: usize>(bodies_g: &TreeBuf, im: &mut ImmersedBodies<D>
             .as_f64()
             .map(|d| d.to_vec())
     };
+    // a bonded assembly's bonds and contacts: the file and the run carry an assembly together
+    match (bodies_g.find_group("fragments"), im.fragment_physics.as_mut()) {
+        (Some(g), Some(physics)) => restore_fragments(g, physics)?,
+        (None, Some(_)) => {
+            return Err(IoError::Backend(
+                "the checkpoint records no bonded-assembly state; this run configures a bonded \
+                 assembly, whose bonds and contacts would restart from their formation"
+                    .into(),
+            ));
+        }
+        (Some(_), None) => {
+            return Err(IoError::Backend(
+                "the checkpoint records a bonded assembly; this run configures none".into(),
+            ));
+        }
+        (None, None) => {}
+    }
     if let (Some(orient), Some(omega)) = (get_opt("orientation"), get_opt("omega")) {
         for b in 0..nb {
             let body = im.bodies.get_mut(b);
@@ -2889,16 +3013,8 @@ impl CheckpointStream {
         let geometry_kind = identity.geometry;
         let mut geometry = Tree::new("geometry").with_attr("metric", coord_name(geometry_kind));
         for (slot, ax) in (0..D).rev().enumerate() {
-            let lo_index = grid.interior_lo[ax];
-            let hi_index = lo_index + grid.cells[ax] as isize;
             let scale = motion_axis_scale(geometry_kind, ax, D, sim.motion.a);
-            let (start, end) = match &grid.maps {
-                Some(maps) => (maps[ax].face(lo_index) * scale, maps[ax].face(hi_index) * scale),
-                None => {
-                    let start = facts_x_lo(&grid.x_lo, grid.dx[ax], lo_index, ax, scale);
-                    (start, start + grid.dx[ax] * scale * grid.cells[ax] as f64)
-                }
-            };
+            let (start, end) = grid_face_range(grid, ax, scale);
             let (spacing_label, spacing_ratio) = match &grid.maps {
                 Some(maps) => match maps[ax] {
                     symbi_geometry::AxisMap::Uniform { .. } => ("linear", 1.0),
@@ -3492,17 +3608,16 @@ where
         sim.iteration = a.as_u64(&format!("{level_path}/iteration"))?;
     }
     let mesh = read_group(file, &format!("{level_path}/mesh"))?;
-    let stored_cells: Vec<u64> = mesh
-        .find_dataset("global_cells")
-        .and_then(|d| d.data.as_u64().map(|v| v.to_vec()))
-        .ok_or_else(|| IoError::MissingPath(format!("{level_path}/mesh/global_cells")))?;
-    let expected_cells: Vec<u64> = (0..D).rev().map(|ax| grid.cells[ax] as u64).collect();
-    if stored_cells != expected_cells {
-        return Err(IoError::ShapeMismatch {
-            path: format!("{level_path}/mesh/global_cells"),
-            expected: expected_cells.iter().map(|&c| c as usize).collect(),
-            actual: stored_cells.iter().map(|&c| c as usize).collect(),
-        });
+    let a_checkpoint = match attr_of(&meta, "scale_factor") {
+        Some(Attr::F64(v)) => *v,
+        _ => 1.0,
+    };
+    verify_level_region(&mesh, path, level_index, grid, sim.physics.metric.geometry(), a_checkpoint)?;
+    if sim.fields.cons.chi_field().is_some() && dataset_shape(file, &format!("{level_path}/conserved/chi")).is_err() {
+        return Err(IoError::Backend(format!(
+            "checkpoint '{path}' records no passive scalar (conserved/chi); this run carries one, \
+             which would restart from its initial concentration over the restored gas"
+        )));
     }
     let halo = mesh
         .find_attr("halo_width")

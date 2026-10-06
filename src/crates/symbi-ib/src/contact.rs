@@ -134,6 +134,18 @@ impl Contacts {
         self.slip.len()
     }
 
+    /// the tangential slip accumulator of every pair in contact, in pair order: the evolving
+    /// contact state a checkpoint records.
+    pub fn slip_pairs(&self) -> impl Iterator<Item = ((usize, usize), Tensor<f64, 3>)> + '_ {
+        self.slip.iter().map(|(&key, &slip)| (key, slip))
+    }
+
+    /// replace every slip accumulator with the given pairs: a restart restores the recorded
+    /// contact state.
+    pub fn set_slip_pairs(&mut self, pairs: impl IntoIterator<Item = ((usize, usize), Tensor<f64, 3>)>) {
+        self.slip = pairs.into_iter().collect();
+    }
+
     // the contact force on body i of the pair, at the contact point. reads the
     // stored slip; saturation against the coulomb cone happens here on the
     // force (the accumulator itself is clipped in `update_slip`).

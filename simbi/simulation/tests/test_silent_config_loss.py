@@ -16,6 +16,16 @@ from simbi.types.input import Limiter
 from simbi_configs.examples.grhd.gr_bondi_ks import GrBondiKS
 
 
+@pytest.fixture(autouse=True)
+def _metadata_alone(monkeypatch: pytest.MonkeyPatch) -> None:
+    """these restarts merge a fabricated metadata record on a path that holds no file: the
+    recorded physics identity and tracer population read from the file are taken as absent"""
+    from simbi.simulation import checkpoint as cp
+
+    monkeypatch.setattr(cp, "recorded_physics_identity", lambda _p: {})
+    monkeypatch.setattr(cp, "verify_tracer_population", lambda _problem, _p: None)
+
+
 def test_typoed_constructor_kwarg_is_rejected():
     # extra="forbid": cfl_numbr must not vanish while cfl_number keeps its default.
     with pytest.raises(ValidationError, match="cfl_numbr"):
