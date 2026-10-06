@@ -1071,19 +1071,12 @@ fn verify_level_region<const D: usize>(
         Some(symbi_io::DataBuf::U64(v)) => v.clone(),
         _ => return Err(IoError::MissingPath(format!("{name}/mesh/global_cells"))),
     };
-    for ax in 0..D {
-        let want = grid.cells[ax];
-        // `mesh/global_cells` is written in reversed (storage) axis order, matching the reversed
-        // dataset shapes so a reader's plot axes are not transposed — see `mesh_cells`
-        let got = *cells.get(D - 1 - ax).unwrap_or(&0) as usize;
-        if got != want {
-            return Err(IoError::Backend(format!(
-                "{path}: level {level_index} was written with {got} cell(s) on axis {ax} but this \
-                 run builds {want}. a restart requires level {level_index} to occupy the same grid \
-                 it did in the checkpoint; loading across the mismatch would place the data on the \
-                 wrong region."
-            )));
-        }
+    // `mesh/global_cells` is written in reversed (storage) axis order, matching the reversed
+    // dataset shapes so a reader's plot axes are not transposed — see `mesh_cells`
+    let expected: Vec<usize> = (0..D).rev().map(|ax| grid.cells[ax]).collect();
+    let actual: Vec<usize> = cells.iter().map(|&c| c as usize).collect();
+    if actual != expected {
+        return Err(IoError::ShapeMismatch { path: format!("{name}/mesh/global_cells"), expected, actual });
     }
     let geometry = mesh
         .find_group("geometry")
