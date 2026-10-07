@@ -304,3 +304,47 @@ fn a_refined_run_sums_every_level() {
         diag.guards.troubled_cells.total
     );
 }
+
+/// a guard that refuses the first step accepted at half its candidate: one rejection halves it
+fn refusing(mut sim: Sim) -> Sim {
+    sim.retry_guard = symbi_sim::retry_guard::RetryGuard { max_rejections: 20, severe_ratio: 0.5, sustained_steps: 1 };
+    sim
+}
+
+/// a step the sustained-reduction guard refuses never reaches its accepted boundary: its guard
+/// acts stay out of the accepted totals and the crash stands at the step's entry clock, on the
+/// single grid and on two tiles alike. the first fofc call rejects, the retry accepts at half the
+/// candidate, and the guard refuses that step.
+#[test]
+fn a_step_the_retry_guard_refuses_is_absent_from_the_accepted_guards() {
+    let calls = Arc::new(AtomicUsize::new(0));
+    let sim = refusing(uniform_sim(16, 0.0, 1.0 / 16.0, Boundaries::uniform(BoundaryType::Periodic)));
+    let mut hier = Hierarchy::single(sim, GuardMock::new(&calls, Some(1), None));
+    let diag = hier
+        .evolve_with_callback(0.05, 1, |_| std::ops::ControlFlow::Continue(()))
+        .expect("the driver catches the refusal and ends the march");
+    let crash = hier.crash.as_ref().expect("premise: the guard refused the first step");
+    assert!(crash.halt.as_ref().is_some_and(|h| h.detail().contains("severely reduced")), "{crash:?}");
+    let (attempted, _) = guard_ledger::report();
+    assert!(attempted.troubled_cells.total >= ACCEPT_TROUBLED, "premise: the refused attempt booked its acts");
+    assert_eq!(diag.guards.troubled_cells.total, 0, "single grid: the refused step's guard acts were accepted");
+    assert_eq!((crash.iter, crash.time), (0, 0.0), "single grid: the crash left the step's entry clock");
+
+    let calls = Arc::new(AtomicUsize::new(0));
+    let mut tiles: Vec<_> = (0..2)
+        .map(|tile| {
+            let outer = BoundaryType::Outflow;
+            let cut = BoundaryType::CoarseFine;
+            let boundaries = Boundaries::per_axis([[if tile == 0 { outer } else { cut }, if tile == 1 { outer } else { cut }]]);
+            let root = refusing(uniform_sim(16, tile as f64 * 0.5, 1.0 / 32.0, boundaries));
+            Hierarchy::single(root, GuardMock::new(&calls, Some(1), None))
+        })
+        .collect();
+    let diag = evolve_hierarchy_decomposed(&mut tiles, [2], &[0, 0], &LocalCopy, Timestepping::Euler, 0.0, 0.05, 1, |_, _, _| {
+        std::ops::ControlFlow::Continue(())
+    });
+    let crash = tiles[0].crash.as_ref().expect("premise: the guard refused the first step on two tiles");
+    assert!(crash.halt.as_ref().is_some_and(|h| h.detail().contains("severely reduced")), "{crash:?}");
+    assert_eq!(diag.guards.troubled_cells.total, 0, "two tiles: the refused step's guard acts were accepted");
+    assert_eq!((crash.iter, crash.time), (0, 0.0), "two tiles: the crash left the step's entry clock");
+}

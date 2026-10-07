@@ -33,7 +33,8 @@ use symbi_grid::Field;
 use symbi_hydro::regime::Regime;
 use symbi_sim::atlas::{AuditAt, ExchangePoint, FinePoint, TileId};
 use symbi_sim::decomp::{HaloTransport, plan_cons_fields, plan_fields};
-use symbi_sim::driver::{TimestepFailure, advance_clock, agree_timestep, retry_timestep};
+use symbi_sim::driver::{TimestepFailure, advance_clock, agree_timestep};
+use symbi_sim::step_transaction::{AttemptOp, AttemptReply, RootStep, ScopedAttempt, StepHalt, take_root_step};
 use symbi_sim::hydro_ops::scan_c2p_errors;
 use symbi_sim::plan_exchange::{AuditError, PlanExchange, PlanRole, StagingFault, audit_plans};
 use symbi_sim::state::FieldStore;
@@ -818,400 +819,424 @@ where
                 dt = dt.min(f64::from_bits(bits));
             }
         }
-        // the root step's candidate: the agreed timestep after its final-time clamp and caps
+        // the root step from its candidate, the agreed timestep after its final-time clamp and
+        // caps, through the shared step transaction; the attempt's mechanics answer it from this
+        // scope, beside the plans and exchange points they drive
         let guard = tiles[0].levels[0].state.retry_guard;
-        let mut ledger = symbi_sim::retry_guard::RetryLedger::new(dt);
         let mut attempt: u16 = 0;
-        'attempt: loop {
-            // the root-attempt snapshot of every level and its sidecars
-            let sidecars: Vec<_> = tiles.iter().map(|h| h.snapshot_retry_sidecars()).collect();
-            for (k, h) in tiles.iter_mut().enumerate() {
-                for level in &h.levels {
-                    if level.kernels.fofc_active() {
-                        with_device(root_dev(k), || level.kernels.snapshot_retry(&level.state));
-                    }
+        let mut sidecars: Vec<crate::refinement::hierarchy::HierarchyRetrySidecars<D>> = Vec::new();
+        let mut restorable = false;
+        let mut scoped = ScopedAttempt(|op: AttemptOp| -> Result<AttemptReply, WorkerError> {
+            match op {
+                AttemptOp::Rejectable => {
+                    Ok(AttemptReply::Flag(tiles.iter().any(Hierarchy::root_step_rejectable) || !base.injection.reject_at.is_empty()))
                 }
-                with_device(root_dev(k), || {
-                    h.snapshot_attempt_entry();
-                    h.snapshot_face_entry();
-                    h.level_step_begin(0, dt);
-                });
-            }
-            let mut rejected = false;
-            // the root stages
-            for ii in 0..nstages {
-                let marks: Vec<StageMark> = (0..n)
-                    .map(|k| with_device(root_dev(k), || tiles[k].level_stage_through_mark(0, ii, dt, 0.0)))
-                    .collect();
-                let mut troubled: u64 = marks.iter().map(|m| m.troubled).sum();
-                if attempt == 0 {
-                    if let Some((at_step, at_stage, cell)) = base.injection.trouble_at {
-                        if (at_step, at_stage) == (iter, ii) {
-                            let cell: [isize; D] = std::array::from_fn(|ax| cell[ax]);
-                            for k in 0..n {
-                                if let Some(local) = plans.root.local_cell(held.root_ids[k], cell) {
-                                    *tiles[k].levels[0].state.workspace.fofc_flag.view_mut().at_mut(local) = 1.0;
-                                    troubled += 1;
-                                }
+                AttemptOp::Capture { restorable: complete, .. } => {
+                    // the root-attempt snapshot of every level and its sidecars
+                    restorable = complete;
+                    sidecars = tiles.iter().map(|h| h.snapshot_retry_sidecars()).collect();
+                    for (k, h) in tiles.iter_mut().enumerate() {
+                        if complete {
+                            for level in &h.levels {
+                                with_device(root_dev(k), || level.kernels.snapshot_retry(&level.state));
                             }
                         }
-                    }
-                }
-                let cut_trouble = level_trouble(
-                    tiles, &plans.root, held.root_ids, held.root_devices, 0, troubled,
-                    ExchangePoint::Troubled(ii as u8), iter, attempt, transport, fabric, deadline, &mut timing,
-                    &mut report.troubled_exchanges,
-                )?;
-                // every held root tile holds the root's agreed freeze count between passes
-                let prior_streak = tiles[0].levels[0].kernels.freeze_streak();
-                let mut retry = false;
-                for k in 0..n {
-                    report.neighbor_corrections += u64::from(cut_trouble[k] && marks[k].troubled == 0);
-                    retry |= with_device(root_dev(k), || {
-                        tiles[k].level_stage_from_correction(0, ii, dt, 0.0, cut_trouble[k], marks[k].receipt_start)
-                    });
-                }
-                let froze = (0..n).any(|k| tiles[k].levels[0].kernels.freeze_streak() > 0);
-                let streak = vote_freeze_streak(fabric, prior_streak, froze, deadline, &mut timing)?;
-                for k in 0..n {
-                    tiles[k].levels[0].kernels.set_freeze_streak(streak);
-                }
-                if attempt == 0 && base.injection.reject_at.contains(&(iter, ii)) {
-                    retry = true;
-                }
-                if vote_retry(fabric, retry, deadline, &mut timing)? {
-                    rejected = true;
-                    break;
-                }
-                if let Some(atlas) = discrete_atlas {
-                    exchange_level_tracers(tiles, held, atlas, 0, ii, fabric, deadline).map_err(|e| fail(fabric, e.into()))?;
-                }
-                if ii + 1 == nstages && plans.stencil.is_some() {
-                    // the last root stage point also gathers every refined tile's parent face
-                    // stencil at both time levels, the faces final for the fine subcycle
-                    let (old, new) = plans.stencil.as_ref().unwrap();
-                    let prims = root_fields!();
-                    let entry = entry_fields!();
-                    let faces = face_fields!();
-                    let (stencil_old, stencil_new) = stencil_fields!();
-                    let parts = [
-                        PlanPart { plan: &plans.root, fields: &prims, devices: held.root_devices, fault: None, dst_fields: None },
-                        PlanPart { plan: old, fields: &entry, devices: held.root_devices, fault: None, dst_fields: Some(&stencil_old) },
-                        PlanPart { plan: new, fields: &faces, devices: held.root_devices, fault: None, dst_fields: Some(&stencil_new) },
-                    ];
-                    exchange_point_plans(&parts, transport, fabric, ExchangePoint::Stage(ii as u8), iter, attempt, deadline, &mut timing.exchange)
-                        .map_err(|e| fail(fabric, e.into()))?;
-                    for (k, h) in tiles.iter().enumerate() {
                         with_device(root_dev(k), || {
-                            h.levels[0].kernels.ghost_fill(&h.levels[0].state);
-                            h.mark_face_stencil_filled();
+                            h.snapshot_attempt_entry();
+                            h.snapshot_face_entry();
                         });
                     }
-                } else {
-                    root_point!(ExchangePoint::Stage(ii as u8), iter, attempt);
+                    Ok(AttemptReply::Done)
                 }
-                if base.audit_every_point {
-                    audit!(plans.root, root_fields!(), ExchangePoint::Audit(AuditAt::Stage(ii as u8)), iter, attempt);
-                }
-            }
-            if !rejected {
-                if let Some(atlas) = discrete_atlas {
-                    spawn_level_injection(tiles, held, atlas, 0, fabric, deadline).map_err(|e| fail(fabric, e.into()))?;
-                }
-                for (k, h) in tiles.iter().enumerate() {
-                    with_device(root_dev(k), || {
-                        h.level_tail_emf(0, dt);
-                        h.level_tail_excise(0);
-                        // rigid walls also act on the uncovered root cells; the restriction
-                        // replaces the covered ones after the fine subcycle, and the sinks stay
-                        // off the root's gravity-only proxies
-                        let level = &h.levels[0];
-                        if level.state.immersed.as_ref().is_some_and(|im| im.bodies.rigid_count() > 0) {
-                            level.kernels.penalize(&level.state, dt);
-                        }
-                    });
-                }
-                // the root's continuous tracers: the injection held until they advance, the root's
-                // accepted ito coefficients across the cuts before the fine level prolongs them
-                if continuous {
+                AttemptOp::Run { dt } => {
                     for (k, h) in tiles.iter_mut().enumerate() {
-                        h.hold_continuous_injection(0);
-                        with_device(root_dev(k), || h.prepare_level_ito_coefficients(0));
+                        with_device(root_dev(k), || h.level_step_begin(0, dt));
                     }
-                    exchange_level_coefficients(
-                        tiles, held, &plans.coefficients[0], 0, ExchangePoint::RootCoefficients, iter, attempt, transport, fabric, deadline,
-                        &mut timing.exchange,
-                    )
-                    .map_err(|e| fail(fabric, e.into()))?;
-                }
-                // the fine subcycle: every worker walks its phases, a worker without fine
-                // tiles with no local work
-                let fine_dt = dt / RATIO as f64;
-                'subcycle: for sub in 0..RATIO {
-                    let alpha = sub as f64 / RATIO as f64;
-                    for &k in &refined {
-                        with_device(fine_dev(k), || {
-                            tiles[k].prolong_cf(1, alpha);
-                            tiles[k].levels[1].kernels.ghost_fill(&tiles[k].levels[1].state);
-                        });
-                    }
-                    fine_point!(ExchangePoint::Fine { substep: sub as u8, point: FinePoint::Prolong }, iter, attempt);
-                    for &k in &refined {
-                        with_device(fine_dev(k), || {
-                            tiles[k].level_step_begin(1, fine_dt);
-                            // the fine faces at the substep's start, the old time level of the
-                            // nested level's stencil
-                            tiles[k].snapshot_level_faces(1);
-                        });
-                    }
-                    for jj in 0..nstages {
-                        let marks: Vec<StageMark> = refined
-                            .iter()
-                            .map(|&k| with_device(fine_dev(k), || tiles[k].level_stage_through_mark(1, jj, fine_dt, alpha)))
+                    let mut rejected = false;
+                    // the root stages
+                    for ii in 0..nstages {
+                        let marks: Vec<StageMark> = (0..n)
+                            .map(|k| with_device(root_dev(k), || tiles[k].level_stage_through_mark(0, ii, dt, 0.0)))
                             .collect();
                         let mut troubled: u64 = marks.iter().map(|m| m.troubled).sum();
-                        let fine_ids: Vec<TileId> = refined.iter().map(|&k| held.fine_ids[k].unwrap()).collect();
                         if attempt == 0 {
-                            if let Some((at_step, at_sub, at_stage, cell)) = cfg.fine_trouble_at {
-                                if (at_step, at_sub, at_stage) == (iter, sub as u8, jj) {
+                            if let Some((at_step, at_stage, cell)) = base.injection.trouble_at {
+                                if (at_step, at_stage) == (iter, ii) {
                                     let cell: [isize; D] = std::array::from_fn(|ax| cell[ax]);
-                                    for (r, &k) in refined.iter().enumerate() {
-                                        if let Some(local) = plans.fine.local_cell(fine_ids[r], cell) {
-                                            *tiles[k].levels[1].state.workspace.fofc_flag.view_mut().at_mut(local) = 1.0;
+                                    for k in 0..n {
+                                        if let Some(local) = plans.root.local_cell(held.root_ids[k], cell) {
+                                            *tiles[k].levels[0].state.workspace.fofc_flag.view_mut().at_mut(local) = 1.0;
                                             troubled += 1;
                                         }
                                     }
                                 }
                             }
                         }
-                        let cut_trouble = fine_level_trouble(
-                            tiles, 1, &refined, &plans.fine, &fine_ids, held.fine_devices, troubled,
-                            ExchangePoint::Fine { substep: sub as u8, point: FinePoint::Troubled(jj as u8) },
-                            iter, attempt, transport, fabric, deadline, &mut timing, &mut report.fine_troubled_exchanges,
+                        let cut_trouble = level_trouble(
+                            tiles, &plans.root, held.root_ids, held.root_devices, 0, troubled,
+                            ExchangePoint::Troubled(ii as u8), iter, attempt, transport, fabric, deadline, &mut timing,
+                            &mut report.troubled_exchanges,
                         )?;
-                        let prior_streak = refined.first().map_or(0, |&k| tiles[k].levels[1].kernels.freeze_streak());
+                        // every held root tile holds the root's agreed freeze count between passes
+                        let prior_streak = tiles[0].levels[0].kernels.freeze_streak();
                         let mut retry = false;
-                        for (r, &k) in refined.iter().enumerate() {
-                            report.fine_neighbor_corrections += u64::from(cut_trouble[r] && marks[r].troubled == 0);
-                            retry |= with_device(fine_dev(k), || {
-                                tiles[k].level_stage_from_correction(1, jj, fine_dt, alpha, cut_trouble[r], marks[r].receipt_start)
+                        for k in 0..n {
+                            report.neighbor_corrections += u64::from(cut_trouble[k] && marks[k].troubled == 0);
+                            retry |= with_device(root_dev(k), || {
+                                tiles[k].level_stage_from_correction(0, ii, dt, 0.0, cut_trouble[k], marks[k].receipt_start)
                             });
                         }
-                        let froze = refined.iter().any(|&k| tiles[k].levels[1].kernels.freeze_streak() > 0);
+                        let froze = (0..n).any(|k| tiles[k].levels[0].kernels.freeze_streak() > 0);
                         let streak = vote_freeze_streak(fabric, prior_streak, froze, deadline, &mut timing)?;
-                        for &k in &refined {
-                            tiles[k].levels[1].kernels.set_freeze_streak(streak);
+                        for k in 0..n {
+                            tiles[k].levels[0].kernels.set_freeze_streak(streak);
+                        }
+                        if attempt == 0 && base.injection.reject_at.contains(&(iter, ii)) {
+                            retry = true;
                         }
                         if vote_retry(fabric, retry, deadline, &mut timing)? {
                             rejected = true;
-                            break 'subcycle;
+                            break;
                         }
                         if let Some(atlas) = discrete_atlas {
-                            exchange_level_tracers(tiles, held, atlas, 1, jj, fabric, deadline).map_err(|e| fail(fabric, e.into()))?;
+                            exchange_level_tracers(tiles, held, atlas, 0, ii, fabric, deadline).map_err(|e| fail(fabric, e.into()))?;
                         }
-                        fine_stage_point!(sub, jj, iter, attempt);
+                        if ii + 1 == nstages && plans.stencil.is_some() {
+                            // the last root stage point also gathers every refined tile's parent face
+                            // stencil at both time levels, the faces final for the fine subcycle
+                            let (old, new) = plans.stencil.as_ref().unwrap();
+                            let prims = root_fields!();
+                            let entry = entry_fields!();
+                            let faces = face_fields!();
+                            let (stencil_old, stencil_new) = stencil_fields!();
+                            let parts = [
+                                PlanPart { plan: &plans.root, fields: &prims, devices: held.root_devices, fault: None, dst_fields: None },
+                                PlanPart { plan: old, fields: &entry, devices: held.root_devices, fault: None, dst_fields: Some(&stencil_old) },
+                                PlanPart { plan: new, fields: &faces, devices: held.root_devices, fault: None, dst_fields: Some(&stencil_new) },
+                            ];
+                            exchange_point_plans(&parts, transport, fabric, ExchangePoint::Stage(ii as u8), iter, attempt, deadline, &mut timing.exchange)
+                                .map_err(|e| fail(fabric, e.into()))?;
+                            for (k, h) in tiles.iter().enumerate() {
+                                with_device(root_dev(k), || {
+                                    h.levels[0].kernels.ghost_fill(&h.levels[0].state);
+                                    h.mark_face_stencil_filled();
+                                });
+                            }
+                        } else {
+                            root_point!(ExchangePoint::Stage(ii as u8), iter, attempt);
+                        }
                         if base.audit_every_point {
-                            audit!(plans.fine, fine_fields!(), ExchangePoint::Fine { substep: sub as u8, point: FinePoint::Audit(jj as u8) }, iter, attempt);
+                            audit!(plans.root, root_fields!(), ExchangePoint::Audit(AuditAt::Stage(ii as u8)), iter, attempt);
                         }
                     }
-                    if let Some(atlas) = discrete_atlas {
-                        spawn_level_injection(tiles, held, atlas, 1, fabric, deadline).map_err(|e| fail(fabric, e.into()))?;
-                    }
-                    // the fine tail on the globally finest level, then its recovery and halo
-                    // refresh at the post-tail point before any later reader
-                    let mut retry = false;
-                    if depth > 2 {
-                        // the fine tail around the nested subcycle: the nested levels advance across
-                        // their own tiles, restrict into the fine level, and its halos carry the
-                        // restriction before the tail completes
-                        for &k in &refined {
-                            with_device(fine_dev(k), || tiles[k].level_tail_pre(1, fine_dt));
+                    if !rejected {
+                        if let Some(atlas) = discrete_atlas {
+                            spawn_level_injection(tiles, held, atlas, 0, fabric, deadline).map_err(|e| fail(fabric, e.into()))?;
                         }
+                        for (k, h) in tiles.iter().enumerate() {
+                            with_device(root_dev(k), || {
+                                h.level_tail_emf(0, dt);
+                                h.level_tail_excise(0);
+                                // rigid walls also act on the uncovered root cells; the restriction
+                                // replaces the covered ones after the fine subcycle, and the sinks stay
+                                // off the root's gravity-only proxies
+                                let level = &h.levels[0];
+                                if level.state.immersed.as_ref().is_some_and(|im| im.bodies.rigid_count() > 0) {
+                                    level.kernels.penalize(&level.state, dt);
+                                }
+                            });
+                        }
+                        // the root's continuous tracers: the injection held until they advance, the root's
+                        // accepted ito coefficients across the cuts before the fine level prolongs them
                         if continuous {
+                            for (k, h) in tiles.iter_mut().enumerate() {
+                                h.hold_continuous_injection(0);
+                                with_device(root_dev(k), || h.prepare_level_ito_coefficients(0));
+                            }
                             exchange_level_coefficients(
-                                tiles, held, &plans.coefficients[1], 1, ExchangePoint::Fine { substep: sub as u8, point: FinePoint::Coefficients },
-                                iter, attempt, transport, fabric, deadline, &mut timing.exchange,
+                                tiles, held, &plans.coefficients[0], 0, ExchangePoint::RootCoefficients, iter, attempt, transport, fabric, deadline,
+                                &mut timing.exchange,
                             )
                             .map_err(|e| fail(fabric, e.into()))?;
                         }
-                        let nested = NestedStep { held, plans, transport, deadline, nstages, depth, audit_every: base.audit_every_point, step: iter, attempt, atlas: atlas.as_ref(), discrete: discrete_atlas.is_some() };
-                        if nested_subcycle(tiles, &nested, fabric, &mut timing, &mut report, 2, sub as u8, fine_dt)? {
-                            rejected = true;
-                            break 'subcycle;
-                        }
-                        for (k, h) in tiles.iter_mut().enumerate() {
-                            if h.levels.len() > 2 {
-                                with_device(fine_dev(k), || h.level_restrict_reflux(1, alpha));
+                        // the fine subcycle: every worker walks its phases, a worker without fine
+                        // tiles with no local work
+                        let fine_dt = dt / RATIO as f64;
+                        'subcycle: for sub in 0..RATIO {
+                            let alpha = sub as f64 / RATIO as f64;
+                            for &k in &refined {
+                                with_device(fine_dev(k), || {
+                                    tiles[k].prolong_cf(1, alpha);
+                                    tiles[k].levels[1].kernels.ghost_fill(&tiles[k].levels[1].state);
+                                });
+                            }
+                            fine_point!(ExchangePoint::Fine { substep: sub as u8, point: FinePoint::Prolong }, iter, attempt);
+                            for &k in &refined {
+                                with_device(fine_dev(k), || {
+                                    tiles[k].level_step_begin(1, fine_dt);
+                                    // the fine faces at the substep's start, the old time level of the
+                                    // nested level's stencil
+                                    tiles[k].snapshot_level_faces(1);
+                                });
+                            }
+                            for jj in 0..nstages {
+                                let marks: Vec<StageMark> = refined
+                                    .iter()
+                                    .map(|&k| with_device(fine_dev(k), || tiles[k].level_stage_through_mark(1, jj, fine_dt, alpha)))
+                                    .collect();
+                                let mut troubled: u64 = marks.iter().map(|m| m.troubled).sum();
+                                let fine_ids: Vec<TileId> = refined.iter().map(|&k| held.fine_ids[k].unwrap()).collect();
+                                if attempt == 0 {
+                                    if let Some((at_step, at_sub, at_stage, cell)) = cfg.fine_trouble_at {
+                                        if (at_step, at_sub, at_stage) == (iter, sub as u8, jj) {
+                                            let cell: [isize; D] = std::array::from_fn(|ax| cell[ax]);
+                                            for (r, &k) in refined.iter().enumerate() {
+                                                if let Some(local) = plans.fine.local_cell(fine_ids[r], cell) {
+                                                    *tiles[k].levels[1].state.workspace.fofc_flag.view_mut().at_mut(local) = 1.0;
+                                                    troubled += 1;
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                                let cut_trouble = fine_level_trouble(
+                                    tiles, 1, &refined, &plans.fine, &fine_ids, held.fine_devices, troubled,
+                                    ExchangePoint::Fine { substep: sub as u8, point: FinePoint::Troubled(jj as u8) },
+                                    iter, attempt, transport, fabric, deadline, &mut timing, &mut report.fine_troubled_exchanges,
+                                )?;
+                                let prior_streak = refined.first().map_or(0, |&k| tiles[k].levels[1].kernels.freeze_streak());
+                                let mut retry = false;
+                                for (r, &k) in refined.iter().enumerate() {
+                                    report.fine_neighbor_corrections += u64::from(cut_trouble[r] && marks[r].troubled == 0);
+                                    retry |= with_device(fine_dev(k), || {
+                                        tiles[k].level_stage_from_correction(1, jj, fine_dt, alpha, cut_trouble[r], marks[r].receipt_start)
+                                    });
+                                }
+                                let froze = refined.iter().any(|&k| tiles[k].levels[1].kernels.freeze_streak() > 0);
+                                let streak = vote_freeze_streak(fabric, prior_streak, froze, deadline, &mut timing)?;
+                                for &k in &refined {
+                                    tiles[k].levels[1].kernels.set_freeze_streak(streak);
+                                }
+                                if vote_retry(fabric, retry, deadline, &mut timing)? {
+                                    rejected = true;
+                                    break 'subcycle;
+                                }
+                                if let Some(atlas) = discrete_atlas {
+                                    exchange_level_tracers(tiles, held, atlas, 1, jj, fabric, deadline).map_err(|e| fail(fabric, e.into()))?;
+                                }
+                                fine_stage_point!(sub, jj, iter, attempt);
+                                if base.audit_every_point {
+                                    audit!(plans.fine, fine_fields!(), ExchangePoint::Fine { substep: sub as u8, point: FinePoint::Audit(jj as u8) }, iter, attempt);
+                                }
+                            }
+                            if let Some(atlas) = discrete_atlas {
+                                spawn_level_injection(tiles, held, atlas, 1, fabric, deadline).map_err(|e| fail(fabric, e.into()))?;
+                            }
+                            // the fine tail on the globally finest level, then its recovery and halo
+                            // refresh at the post-tail point before any later reader
+                            let mut retry = false;
+                            if depth > 2 {
+                                // the fine tail around the nested subcycle: the nested levels advance across
+                                // their own tiles, restrict into the fine level, and its halos carry the
+                                // restriction before the tail completes
+                                for &k in &refined {
+                                    with_device(fine_dev(k), || tiles[k].level_tail_pre(1, fine_dt));
+                                }
+                                if continuous {
+                                    exchange_level_coefficients(
+                                        tiles, held, &plans.coefficients[1], 1, ExchangePoint::Fine { substep: sub as u8, point: FinePoint::Coefficients },
+                                        iter, attempt, transport, fabric, deadline, &mut timing.exchange,
+                                    )
+                                    .map_err(|e| fail(fabric, e.into()))?;
+                                }
+                                let nested = NestedStep { held, plans, transport, deadline, nstages, depth, audit_every: base.audit_every_point, step: iter, attempt, atlas: atlas.as_ref(), discrete: discrete_atlas.is_some() };
+                                if nested_subcycle(tiles, &nested, fabric, &mut timing, &mut report, 2, sub as u8, fine_dt)? {
+                                    rejected = true;
+                                    break 'subcycle;
+                                }
+                                for (k, h) in tiles.iter_mut().enumerate() {
+                                    if h.levels.len() > 2 {
+                                        with_device(fine_dev(k), || h.level_restrict_reflux(1, alpha));
+                                    }
+                                }
+                                {
+                                    let fine = fine_fields!();
+                                    let part = PlanPart { plan: &plans.fine, fields: &fine, devices: held.fine_devices, fault: None, dst_fields: None };
+                                    exchange_point_plans(&[part], transport, fabric, ExchangePoint::NestedRestrict { level: 1, path: sub as u8 }, iter, attempt, deadline, &mut timing.exchange)
+                                        .map_err(|e| fail(fabric, e.into()))?;
+                                }
+                                for &k in &refined {
+                                    with_device(fine_dev(k), || tiles[k].levels[1].kernels.ghost_fill(&tiles[k].levels[1].state));
+                                }
+                                if continuous {
+                                    continuous_tail(tiles, held, atlas.as_ref().unwrap(), 1, fine_dt, fabric, deadline)?;
+                                } else {
+                                    for &k in &refined {
+                                        with_device(fine_dev(k), || tiles[k].level_tail_post(1, fine_dt));
+                                    }
+                                }
+                            } else if continuous {
+                                // the finest fine level's tail split around its coefficients and its tracers'
+                                // crossing, as the single hierarchy runs it
+                                for &k in &refined {
+                                    with_device(fine_dev(k), || tiles[k].level_tail_pre(1, fine_dt));
+                                }
+                                exchange_level_coefficients(
+                                    tiles, held, &plans.coefficients[1], 1, ExchangePoint::Fine { substep: sub as u8, point: FinePoint::Coefficients },
+                                    iter, attempt, transport, fabric, deadline, &mut timing.exchange,
+                                )
+                                .map_err(|e| fail(fabric, e.into()))?;
+                                continuous_tail(tiles, held, atlas.as_ref().unwrap(), 1, fine_dt, fabric, deadline)?;
+                            } else {
+                                for &k in &refined {
+                                    retry |= with_device(fine_dev(k), || tiles[k].level_step_tail(1, fine_dt, alpha));
+                                }
+                            }
+                            if vote_retry(fabric, retry, deadline, &mut timing)? {
+                                rejected = true;
+                                break 'subcycle;
+                            }
+                            // the last substep: the refined tiles restrict and reflux before the
+                            // post-tail exchange, so the staggered faces it carries to the neighbors
+                            // across the cuts are the corrected ones
+                            if sub + 1 == RATIO {
+                                for &k in &refined {
+                                    with_device(root_dev(k), || tiles[k].level_restrict_reflux(0, 0.0));
+                                }
+                            }
+                            fine_tail_point!(sub, iter, attempt);
+                            if base.audit_every_point {
+                                audit!(plans.fine, fine_fields!(), ExchangePoint::Fine { substep: sub as u8, point: FinePoint::AuditTail }, iter, attempt);
                             }
                         }
-                        {
-                            let fine = fine_fields!();
-                            let part = PlanPart { plan: &plans.fine, fields: &fine, devices: held.fine_devices, fault: None, dst_fields: None };
-                            exchange_point_plans(&[part], transport, fabric, ExchangePoint::NestedRestrict { level: 1, path: sub as u8 }, iter, attempt, deadline, &mut timing.exchange)
+                    }
+                    if !rejected {
+                        // the tiles beside a neighbor's patch apply their received units, the faces
+                        // that application wrote on their own cuts reach the tiles across them, and
+                        // every such tile then recovers its cells beside the patch
+                        let beside: Vec<usize> = (0..n).filter(|&k| tiles[k].levels.len() == 1 && tiles[k].has_flux_register(0)).collect();
+                        for &k in &beside {
+                            with_device(root_dev(k), || tiles[k].reflux_received());
+                        }
+                        if let Some(corrected) = plans.corrected.as_ref() {
+                            let fields = face_fields!();
+                            let part = PlanPart { plan: corrected, fields: &fields, devices: held.root_devices, fault: None, dst_fields: None };
+                            exchange_point_plans(&[part], transport, fabric, ExchangePoint::CorrectedFaces, iter, attempt, deadline, &mut timing.exchange)
                                 .map_err(|e| fail(fabric, e.into()))?;
                         }
-                        for &k in &refined {
-                            with_device(fine_dev(k), || tiles[k].levels[1].kernels.ghost_fill(&tiles[k].levels[1].state));
+                        for &k in &beside {
+                            with_device(root_dev(k), || tiles[k].recover_beside_patch());
                         }
+                        root_point!(ExchangePoint::Restrict, iter, attempt);
+                        if base.audit_every_point {
+                            audit!(plans.root, root_fields!(), ExchangePoint::Audit(AuditAt::Restrict), iter, attempt);
+                        }
+                        // the root's continuous tracers advance over the root step after the fine subcycle
+                        // and its restriction, cross to the tiles holding their cells, and the held
+                        // injection spawns once
                         if continuous {
-                            continuous_tail(tiles, held, atlas.as_ref().unwrap(), 1, fine_dt, fabric, deadline)?;
-                        } else {
-                            for &k in &refined {
-                                with_device(fine_dev(k), || tiles[k].level_tail_post(1, fine_dt));
+                            let atlas = atlas.as_ref().unwrap();
+                            for (k, h) in tiles.iter_mut().enumerate() {
+                                with_device(root_dev(k), || h.advance_level_continuous_tracers(0, dt));
                             }
+                            migrate_level_continuous(tiles, held, atlas, 0, fabric, deadline).map_err(|e| fail(fabric, e.into()))?;
+                            spawn_level_continuous(tiles, held, atlas, 0, fabric, deadline).map_err(|e| fail(fabric, e.into()))?;
                         }
-                    } else if continuous {
-                        // the finest fine level's tail split around its coefficients and its tracers'
-                        // crossing, as the single hierarchy runs it
-                        for &k in &refined {
-                            with_device(fine_dev(k), || tiles[k].level_tail_pre(1, fine_dt));
-                        }
-                        exchange_level_coefficients(
-                            tiles, held, &plans.coefficients[1], 1, ExchangePoint::Fine { substep: sub as u8, point: FinePoint::Coefficients },
-                            iter, attempt, transport, fabric, deadline, &mut timing.exchange,
-                        )
-                        .map_err(|e| fail(fabric, e.into()))?;
-                        continuous_tail(tiles, held, atlas.as_ref().unwrap(), 1, fine_dt, fabric, deadline)?;
-                    } else {
-                        for &k in &refined {
-                            retry |= with_device(fine_dev(k), || tiles[k].level_step_tail(1, fine_dt, alpha));
+                        for (k, h) in tiles.iter_mut().enumerate() {
+                            with_device(root_dev(k), || {
+                                let s = &mut h.levels[0].state;
+                                (s.time, s.iteration) = advance_clock(s.time, s.iteration, dt);
+                            });
                         }
                     }
-                    if vote_retry(fabric, retry, deadline, &mut timing)? {
-                        rejected = true;
-                        break 'subcycle;
+                    if rejected {
+                        report.rejections += 1;
                     }
-                    // the last substep: the refined tiles restrict and reflux before the
-                    // post-tail exchange, so the staggered faces it carries to the neighbors
-                    // across the cuts are the corrected ones
-                    if sub + 1 == RATIO {
-                        for &k in &refined {
-                            with_device(root_dev(k), || tiles[k].level_restrict_reflux(0, 0.0));
+                    Ok(AttemptReply::Flag(!rejected))
+                }
+                AttemptOp::Evidence { rejections } => {
+                    // every worker books the agreed rejection with the evidence its own tiles
+                    // hold, a fine substep's included, so every worker reaches the guard's
+                    // decision at the same attempt
+                    let mut evidence = Vec::new();
+                    for (k, h) in tiles.iter().enumerate() {
+                        for (ll, level) in h.levels.iter().enumerate() {
+                            let tile = if ll == 0 { held.root_ids[k].0 } else { held.fine_ids[k].map_or(u32::MAX, |t| t.0) };
+                            let site = format!("worker {}, tile {tile}, level {ll}", fabric.me().0);
+                            evidence.extend(symbi_sim::retry_guard::take_evidence(&level.state, &site, rejections));
                         }
                     }
-                    fine_tail_point!(sub, iter, attempt);
-                    if base.audit_every_point {
-                        audit!(plans.fine, fine_fields!(), ExchangePoint::Fine { substep: sub as u8, point: FinePoint::AuditTail }, iter, attempt);
-                    }
+                    Ok(AttemptReply::Evidence(evidence))
                 }
-            }
-            if !rejected {
-                // the tiles beside a neighbor's patch apply their received units, the faces
-                // that application wrote on their own cuts reach the tiles across them, and
-                // every such tile then recovers its cells beside the patch
-                let beside: Vec<usize> = (0..n).filter(|&k| tiles[k].levels.len() == 1 && tiles[k].has_flux_register(0)).collect();
-                for &k in &beside {
-                    with_device(root_dev(k), || tiles[k].reflux_received());
-                }
-                if let Some(corrected) = plans.corrected.as_ref() {
-                    let fields = face_fields!();
-                    let part = PlanPart { plan: corrected, fields: &fields, devices: held.root_devices, fault: None, dst_fields: None };
-                    exchange_point_plans(&[part], transport, fabric, ExchangePoint::CorrectedFaces, iter, attempt, deadline, &mut timing.exchange)
-                        .map_err(|e| fail(fabric, e.into()))?;
-                }
-                for &k in &beside {
-                    with_device(root_dev(k), || tiles[k].recover_beside_patch());
-                }
-                root_point!(ExchangePoint::Restrict, iter, attempt);
-                if base.audit_every_point {
-                    audit!(plans.root, root_fields!(), ExchangePoint::Audit(AuditAt::Restrict), iter, attempt);
-                }
-                // the root's continuous tracers advance over the root step after the fine subcycle
-                // and its restriction, cross to the tiles holding their cells, and the held
-                // injection spawns once
-                if continuous {
-                    let atlas = atlas.as_ref().unwrap();
+                AttemptOp::Restore => {
+                    assert!(restorable, "a root step restored from an incomplete capture");
+                    // the collective rollback: every level of every tile returns to the
+                    // root-attempt snapshot, and every level's halos are refreshed at the
+                    // rollback point
                     for (k, h) in tiles.iter_mut().enumerate() {
-                        with_device(root_dev(k), || h.advance_level_continuous_tracers(0, dt));
+                        for level in &h.levels {
+                            if !level.kernels.field_rollback_is_complete(&level.state) {
+                                return Err(fail(
+                                    fabric,
+                                    WorkerError::Numerics(
+                                        "a step was rejected on a kernel set without a complete rollback snapshot; the \
+                                         replay cannot start from the step entry"
+                                            .into(),
+                                    ),
+                                ));
+                            }
+                            with_device(root_dev(k), || level.kernels.restore_step(&level.state));
+                        }
+                        with_device(root_dev(k), || {
+                            h.restore_attempt_entry();
+                            h.clear_pending_contributions();
+                        });
+                        h.restore_retry_sidecars(&sidecars[k]);
                     }
-                    migrate_level_continuous(tiles, held, atlas, 0, fabric, deadline).map_err(|e| fail(fabric, e.into()))?;
-                    spawn_level_continuous(tiles, held, atlas, 0, fabric, deadline).map_err(|e| fail(fabric, e.into()))?;
-                }
-                for (k, h) in tiles.iter_mut().enumerate() {
-                    with_device(root_dev(k), || {
-                        let s = &mut h.levels[0].state;
-                        (s.time, s.iteration) = advance_clock(s.time, s.iteration, dt);
-                    });
-                }
-                symbi_sim::guard_ledger::step_commit();
-                break 'attempt;
-            }
-            // the collective rollback: every level of every tile returns to the root-attempt
-            // snapshot, both levels' halos are refreshed at the rollback point, the step
-            // replays at a halved timestep
-            symbi_sim::guard_ledger::step_discard();
-            report.rejections += 1;
-            // every worker books the agreed rejection with the evidence its own tiles hold, a fine
-            // substep's included, so every worker reaches the guard's decision at the same attempt
-            {
-                let mut evidence = Vec::new();
-                for (k, h) in tiles.iter().enumerate() {
-                    for (ll, level) in h.levels.iter().enumerate() {
-                        let tile = if ll == 0 { held.root_ids[k].0 } else { held.fine_ids[k].map_or(u32::MAX, |t| t.0) };
-                        let site = format!("worker {}, tile {tile}, level {ll}", fabric.me().0);
-                        evidence.extend(symbi_sim::retry_guard::take_evidence(&level.state, &site, ledger.rejections()));
+                    {
+                        let prims = root_fields!();
+                        let fine = fine_fields!();
+                        let nested: Vec<_> = (2..depth).map(|level| level_fields!(level, plan_fields)).collect();
+                        let mut parts = vec![
+                            PlanPart { plan: &plans.root, fields: &prims, devices: held.root_devices, fault: None, dst_fields: None },
+                            PlanPart { plan: &plans.fine, fields: &fine, devices: held.fine_devices, fault: None, dst_fields: None },
+                        ];
+                        for (i, level) in plans.nested.iter().enumerate() {
+                            parts.push(PlanPart { plan: &level.state, fields: &nested[i], devices: held.level_devices(i + 2), fault: None, dst_fields: None });
+                        }
+                        exchange_point_plans(&parts, transport, fabric, ExchangePoint::Rollback, iter, attempt, deadline, &mut timing.exchange)
+                            .map_err(|e| fail(fabric, e.into()))?;
                     }
-                }
-                if let Err(failure) = ledger.reject(&guard, dt, evidence) {
-                    return Err(symbi_sim::worker::guard_failure(fabric, failure, &base.injection, deadline));
-                }
-            }
-            for (k, h) in tiles.iter_mut().enumerate() {
-                for level in &h.levels {
-                    if !level.kernels.field_rollback_is_complete(&level.state) {
-                        return Err(fail(
-                            fabric,
-                            WorkerError::Numerics(
-                                "a step was rejected on a kernel set without a complete rollback snapshot; the \
-                                 replay cannot start from the step entry"
-                                    .into(),
-                            ),
-                        ));
+                    for (k, h) in tiles.iter().enumerate() {
+                        for level in &h.levels {
+                            with_device(root_dev(k), || level.kernels.ghost_fill(&level.state));
+                        }
                     }
-                    with_device(root_dev(k), || level.kernels.restore_step(&level.state));
+                    if base.audit_every_point {
+                        audit!(plans.root, root_fields!(), ExchangePoint::Audit(AuditAt::Rollback), iter, attempt);
+                    }
+                    attempt += 1;
+                    Ok(AttemptReply::Done)
                 }
-                with_device(root_dev(k), || {
-                    h.restore_attempt_entry();
-                    h.clear_pending_contributions();
-                });
-                h.restore_retry_sidecars(&sidecars[k]);
-            }
-            {
-                let prims = root_fields!();
-                let fine = fine_fields!();
-                let nested: Vec<_> = (2..depth).map(|level| level_fields!(level, plan_fields)).collect();
-                let mut parts = vec![
-                    PlanPart { plan: &plans.root, fields: &prims, devices: held.root_devices, fault: None, dst_fields: None },
-                    PlanPart { plan: &plans.fine, fields: &fine, devices: held.fine_devices, fault: None, dst_fields: None },
-                ];
-                for (i, level) in plans.nested.iter().enumerate() {
-                    parts.push(PlanPart { plan: &level.state, fields: &nested[i], devices: held.level_devices(i + 2), fault: None, dst_fields: None });
-                }
-                exchange_point_plans(&parts, transport, fabric, ExchangePoint::Rollback, iter, attempt, deadline, &mut timing.exchange)
-                    .map_err(|e| fail(fabric, e.into()))?;
-            }
-            for (k, h) in tiles.iter().enumerate() {
-                for level in &h.levels {
-                    with_device(root_dev(k), || level.kernels.ghost_fill(&level.state));
+                AttemptOp::SevereStreak => Ok(AttemptReply::Streak(tiles[0].levels[0].state.severe_streak)),
+                // every tile's root carries the streak its checkpoint records
+                AttemptOp::SetSevereStreak(streak) => {
+                    for h in tiles.iter_mut() {
+                        h.levels[0].state.severe_streak = streak;
+                    }
+                    Ok(AttemptReply::Done)
                 }
             }
-            if base.audit_every_point {
-                audit!(plans.root, root_fields!(), ExchangePoint::Audit(AuditAt::Rollback), iter, attempt);
-            }
-            dt = retry_timestep(dt, t).map_err(|e| fail(fabric, WorkerError::Numerics(e.detail)))?;
-            attempt += 1;
-        }
-        // the sustained-reduction guard, once per accepted root step, before any checkpoint
-        // publishes it; the agreed timesteps give every worker the same decision
-        {
-            let mut streak = tiles[0].levels[0].state.severe_streak;
-            if let Err(failure) = symbi_sim::retry_guard::accept(&guard, &mut streak, &ledger, dt) {
+        });
+        let step = take_root_step(&mut scoped, &guard, dt, t)?;
+        drop(scoped);
+        let dt = match step {
+            RootStep::Accepted { dt } => dt,
+            RootStep::Halted(StepHalt::Guard(failure)) => {
                 return Err(symbi_sim::worker::guard_failure(fabric, failure, &base.injection, deadline));
             }
-            for h in tiles.iter_mut() {
-                h.levels[0].state.severe_streak = streak;
-            }
-        }
+            RootStep::Halted(StepHalt::Timestep { detail, .. }) => return Err(fail(fabric, WorkerError::Numerics(detail))),
+        };
         // the continuous tracers onto the finest level holding them, once per accepted root step
         if continuous {
             relocate_continuous_to_finest(tiles, held, atlas.as_ref().unwrap(), depth, fabric, deadline).map_err(|e| fail(fabric, e.into()))?;

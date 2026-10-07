@@ -255,3 +255,92 @@ fn decomposed_rejection_rolls_every_tile_back_collectively() {
         assert!((total_accreted_energy - 2.0 * want).abs() < 8.0 * f64::EPSILON);
     }
 }
+
+/// a kernel set without FOFC whose every stage adds its timestep to the interior density, with a
+/// retry snapshot of that density. a no-op additive source makes the stage capture its input,
+/// which the covered-core hold of a refined level reads
+struct Accumulate {
+    entry: std::sync::Mutex<Vec<f64>>,
+}
+
+impl Accumulate {
+    fn new() -> Self {
+        Self { entry: std::sync::Mutex::new(Vec::new()) }
+    }
+}
+
+impl KernelSet<1, 1, HostMemory, f64> for Accumulate {
+    fn reconstruction_reach(&self) -> u8 {
+        1
+    }
+    fn flux(&self, _store: &FieldStore<1, 1, HostMemory>, _dir: usize) {}
+    fn c2p(&self, store: &FieldStore<1, 1, HostMemory>) {
+        for cell in store.geom.interior.iter() {
+            let rho = *store.fields.cons.den.view().at(cell);
+            store.fields.prim.rho.view_mut().set(cell, rho);
+            store.fields.prim.vel[0].view_mut().set(cell, 0.0);
+            store.fields.prim.pre_field().unwrap().view_mut().set(cell, 1.0);
+        }
+        store.mark_primitives_recovered();
+    }
+    fn godunov_stage(&self, store: &FieldStore<1, 1, HostMemory>, dt: f64, _a0: f64, _ac: f64) {
+        for cell in store.geom.interior.iter() {
+            let rho = *store.fields.cons.den.view().at(cell);
+            store.fields.cons.den.view_mut().set(cell, rho + dt);
+        }
+    }
+    fn cfl(&self, _store: &FieldStore<1, 1, HostMemory>) -> f64 {
+        0.1
+    }
+    fn ghost_fill(&self, _store: &FieldStore<1, 1, HostMemory>) {}
+    fn snapshot(&self, _store: &FieldStore<1, 1, HostMemory>) {}
+    fn has_additive_source(&self) -> bool {
+        true
+    }
+    fn snapshot_stage(&self, store: &FieldStore<1, 1, HostMemory>) {
+        for cell in store.geom.allocated.iter() {
+            store.stage_input().den.view_mut().set(cell, *store.fields.cons.den.view().at(cell));
+        }
+    }
+    fn snapshot_retry(&self, store: &FieldStore<1, 1, HostMemory>) {
+        *self.entry.lock().unwrap() = store.geom.interior.iter().map(|cell| *store.fields.cons.den.view().at(cell)).collect();
+    }
+    fn restore_step(&self, store: &FieldStore<1, 1, HostMemory>) {
+        let entry = self.entry.lock().unwrap();
+        for (cell, &rho) in store.geom.interior.iter().zip(entry.iter()) {
+            store.fields.cons.den.view_mut().set(cell, rho);
+        }
+        self.c2p(store);
+    }
+    fn horizon_accretion(&self, _store: &FieldStore<1, 1, HostMemory>, _diagnostic_radius: f64) -> (f64, f64) {
+        (0.0, 0.0)
+    }
+}
+
+/// a forced fine rejection on a kernel set without FOFC replays the root step from its entry: the
+/// rejection is a source of its own, so the step captures the root's retry snapshot and the replay
+/// at half the candidate leaves an uncovered root cell at 1 + 0.05, the rejected attempt's 0.1
+/// gone
+#[test]
+fn a_forced_rejection_without_fofc_replays_from_the_step_entry() {
+    let coarse = Sim::build(Newtonian, IdealGas { gamma: GAMMA }, Cartesian)
+        .cells([16])
+        .spacing([1.0 / 16.0])
+        .boundaries(Boundaries::uniform(BoundaryType::Periodic))
+        .timestepping(Timestepping::Euler)
+        .cfl(0.4)
+        .allocate()
+        .unwrap()
+        .set_initial(|_| Prim::adiabatic(Density(1.0), Tensor::zeros(), Pressure(1.0)))
+        .build();
+    let region = RefinementRegion { x_lo: [0.25], x_hi: [0.75] };
+    let mut hierarchy = Hierarchy::with_refinement(coarse, Accumulate::new(), &[region], ProlongOrder::Plm, |_| Accumulate::new()).unwrap();
+    // the only stage of the second fine substep of the first root step
+    hierarchy.reject_fine_once_at(0, 1, 0);
+    hierarchy.evolve_steps(1).unwrap();
+    assert!(!hierarchy.forced_fine_rejection_pending(), "premise: the forced rejection never fired");
+    let root = &hierarchy.levels[0].state;
+    assert_eq!(root.time, 0.05, "premise: the step was accepted at half its candidate");
+    let uncovered = root.geom.interior.iter().next().unwrap();
+    assert_eq!(*root.fields.cons.den.view().at(uncovered), 1.0 + 0.05, "the replay started from the rejected attempt's root");
+}

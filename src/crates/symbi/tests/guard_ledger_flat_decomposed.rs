@@ -19,7 +19,10 @@
 // - two sequential runs report their own accepted totals;
 // - two concurrent runs on separate threads report their own;
 // - an observer break returns the accepted-so-far totals (an early-exit path the
-//   driver actually supports).
+//   driver actually supports);
+// - a step the sustained-reduction guard refuses returns the guard's halt with
+//   the tiles at the step entry, no observer call for it, and none of its acts
+//   accepted.
 // =============================================================================
 
 use std::sync::Arc;
@@ -277,4 +280,42 @@ fn an_observer_break_returns_the_accepted_totals() {
         diag.guards.troubled_cells.total > 0,
         "the break exit returned no accepted acts; the early-exit path is untested"
     );
+}
+
+/// a step the sustained-reduction guard refuses ends the march with the guard's halt: every tile
+/// stands at the step entry, the observer never sees the step, and none of its acts are accepted.
+/// the first fofc call rejects, the retry accepts at half the candidate, and a guard that refuses
+/// one step at or below half its candidate ends the run there.
+#[test]
+fn a_step_the_retry_guard_refuses_returns_the_halt_at_the_step_entry() {
+    let calls = Arc::new(AtomicUsize::new(0));
+    let refusing = symbi_sim::retry_guard::RetryGuard { max_rejections: 20, severe_ratio: 0.5, sustained_steps: 1 };
+    let mut tiles = vec![
+        (tile(0.0, BoundaryType::Outflow, BoundaryType::CoarseFine), GuardMock::new(&calls, Some(1))),
+        (tile(0.5, BoundaryType::CoarseFine, BoundaryType::Outflow), GuardMock::new(&calls, Some(1))),
+    ];
+    let mut stores = Vec::new();
+    let mut kernels = Vec::new();
+    for (s, k) in tiles.iter_mut() {
+        s.retry_guard = refusing;
+        stores.push(&mut **s);
+        kernels.push(&*k);
+    }
+    let mut observed = Vec::new();
+    let diag = evolve_decomposed(&mut stores, &kernels, [2], &[0, 0], Timestepping::Euler, 0.0, 0.05, 1, &LocalCopy, |iter, _, _| {
+        observed.push(iter);
+        std::ops::ControlFlow::Continue(())
+    });
+    let halt = diag.halt.as_ref().expect("the refused step returned no halt");
+    let step = halt.step.as_ref().expect("the halt names no root step");
+    assert!(
+        matches!(step, symbi_sim::step_transaction::StepHalt::Guard(f) if f.detail.contains("accepted at or below 0.5")),
+        "{step:?}"
+    );
+    assert_eq!((halt.iter, halt.time), (0, 0.0), "the halt left the step entry");
+    assert!(observed.is_empty(), "the observer saw the refused step: {observed:?}");
+    for s in &stores {
+        assert_eq!((s.iteration, s.time), (0, 0.0), "a tile left the step entry");
+    }
+    assert_eq!(diag.guards.troubled_cells.total, 0, "the refused step's acts were accepted");
 }

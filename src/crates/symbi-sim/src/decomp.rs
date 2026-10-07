@@ -2648,6 +2648,321 @@ where
 
 /// a tile's stage hook: called with the tile's flat index, its store, the hook point and the
 /// stage's arguments at every hook point of every stage fold, the admissibility redo's included
+/// the attempts of one root step of the flat decomposed march: every tile captures its retry
+/// snapshot, the stages advance in lockstep with the troubled marks and the halos crossing the
+/// cuts, and a rejection restores every tile's fields, tracer ancestry, motion and clock with the
+/// halos exchanged again
+struct FlatRootAttempt<'a, 's, 'h, const D: usize, const DOF: usize, M, K, T>
+where
+    M: MemorySpace,
+    K: KernelSet<D, DOF, M, f64>,
+    T: HaloTransport,
+{
+    stores: &'a mut [&'s mut FieldStore<D, DOF, M, f64>],
+    kernels: &'a [&'a K],
+    schedule: &'a Schedule<D>,
+    devices: &'a [i32],
+    transport: &'a T,
+    stage_hook: &'a mut TileStageHook<'h, D, DOF, M>,
+    stages: &'a [(f64, f64)],
+    multistage: bool,
+    has_axis_rings: bool,
+    has_discrete_tracers: bool,
+    has_continuous_tracers: bool,
+    motion_n: Vec<symbi_geometry::MotionState<f64>>,
+    a_n: Vec<f64>,
+    restorable: bool,
+    /// each tile's tracer injections of the last attempt, spawned once the step is accepted
+    injection_ledgers: Vec<std::collections::BTreeMap<crate::mass_transport::ContainerId, f64>>,
+}
+
+impl<const D: usize, const DOF: usize, M, K, T> crate::step_transaction::RootAttempt for FlatRootAttempt<'_, '_, '_, D, DOF, M, K, T>
+where
+    M: MemorySpace,
+    K: KernelSet<D, DOF, M, f64>,
+    T: HaloTransport,
+    symbi_geometry::Cartesian: symbi_geometry::Metric<f64, D>,
+{
+    type Error = std::convert::Infallible;
+
+    fn rejectable(&mut self) -> bool {
+        self.kernels.iter().any(|k| k.fofc_active())
+    }
+
+    fn capture(&mut self, dt: f64, restorable: bool) -> Result<(), Self::Error> {
+        self.restorable = restorable;
+        for ii in 0..self.stores.len() {
+            let (store, kernel) = (&*self.stores[ii], self.kernels[ii]);
+            if restorable {
+                symbi_xpu::with_device(self.devices[ii], || kernel.snapshot_retry(store));
+            }
+            if self.multistage {
+                symbi_xpu::with_device(self.devices[ii], || kernel.snapshot(store));
+            }
+        }
+        for s in self.stores.iter_mut() {
+            s.dt = dt;
+            if self.has_discrete_tracers {
+                crate::tracers::snapshot_transport_state(&mut **s);
+            }
+            if self.has_continuous_tracers {
+                let geometry = s.geom.block_geometry(symbi_geometry::Cartesian);
+                crate::tracers::begin_ito_transport_store(&mut **s, &geometry)
+                    .unwrap_or_else(|err| panic!("ito transport initialization failed: {err}"));
+            }
+        }
+        Ok(())
+    }
+
+    fn run(&mut self, dt: f64) -> Result<bool, Self::Error> {
+        let (stores, kernels, devices, transport, stages) = (&mut *self.stores, self.kernels, self.devices, self.transport, self.stages);
+        let (schedule, stage_hook) = (self.schedule, &mut *self.stage_hook);
+        let (has_axis_rings, has_discrete_tracers, has_continuous_tracers) =
+            (self.has_axis_rings, self.has_discrete_tracers, self.has_continuous_tracers);
+        let a_n = &self.a_n;
+        let n = stores.len();
+        let counts = schedule.counts();
+        macro_rules! shared {
+            () => {{
+                let sh: Vec<&FieldStore<D, DOF, M, f64>> = stores.iter().map(|s| &**s).collect();
+                sh
+            }};
+        }
+        let mut injection_ledgers = vec![std::collections::BTreeMap::new(); n];
+        let mut retry = false;
+        for stage in crate::driver::stage_schedule(stages) {
+            for (i, s) in stores.iter_mut().enumerate() {
+                let t_entry = s.time + stage.entry * dt;
+                let law_value = s
+                    .motion_law
+                    .as_ref()
+                    .map(|law| (law.a_at(t_entry), law.adot_at(t_entry)));
+                crate::driver::set_stage_motion(
+                    &mut s.motion,
+                    law_value,
+                    dt,
+                    a_n[i],
+                    stage.entry,
+                );
+            }
+            let sh = shared!();
+            // the stage tag is minted canonically inside the fold
+            // (stage_tag: euler = 0, rk2 = 1 then 2). a per-driver `sidx + 1`
+            // instead labels forward-euler as tag 1, which is the rk2-predictor
+            // identity — the shared fold makes that divergence unrepresentable.
+            // the full per-stage pipeline (stage.rs STAGE_PIPELINE), folded in two spans.
+            // wave_speeds / efield / post_godunov are the MHD constrained-transport hooks,
+            // no-op defaults for hydro + iso; snapshot_stage / source_apply are the additive
+            // source pass; body_source is the forward immersed-body pass, pointwise from
+            // the body's global position so each tile applies it to its own cells. this
+            // loop never elides the stage-input copy (no cross-tile alias tracking).
+            //
+            // the first span ends with every tile's troubled cells marked. a face on a cut
+            // takes the first-order flux when either cell sharing it is troubled, and those
+            // cells sit on different tiles, so the flags cross the cuts before any tile
+            // corrects, and a tile whose neighbor's trouble reached its cut ghosts corrects
+            // with a clean interior. a stage with no troubled cell anywhere moves nothing.
+            let args = crate::stage::StageArgs {
+                dt,
+                a0: stage.a0,
+                ac: stage.ac,
+                stage: stage.index,
+                n_stages: stages.len(),
+                injection_weight: crate::driver::downstream_injection_weight(
+                    stages,
+                    stage.index,
+                ),
+                allow_elision: false,
+                exit_fraction: crate::driver::stage_exit_fraction(stages, stage.index),
+            };
+            let mut troubled = 0u64;
+            if has_axis_rings {
+                // the edges on a coordinate axis are reconciled over the whole ring between
+                // the stage's complete EMF and its curl, across every tile holding a copy
+                for i in 0..n {
+                    symbi_xpu::with_device(devices[i], || {
+                        crate::stage::fold_stage_through_emf(sh[i], kernels[i], args, &mut |hp| stage_hook(i, sh[i], hp, args))
+                    });
+                }
+                drain_devices::<M>(devices);
+                crate::axis_ring::reconcile_across(&sh);
+                for i in 0..n {
+                    troubled += symbi_xpu::with_device(devices[i], || {
+                        crate::stage::fold_stage_curl_through_mark(sh[i], kernels[i], args, &mut |hp| stage_hook(i, sh[i], hp, args))
+                    });
+                }
+            } else {
+                for i in 0..n {
+                    troubled += symbi_xpu::with_device(devices[i], || {
+                        crate::stage::fold_stage_through_mark(sh[i], kernels[i], args, &mut |hp| stage_hook(i, sh[i], hp, args))
+                    });
+                }
+            }
+            let mut cut_trouble = vec![false; n];
+            if troubled > 0 {
+                drain_devices::<M>(devices);
+                let received = exchange_trouble(&sh, &schedule, devices, transport);
+                drain_devices::<M>(devices);
+                for i in 0..n {
+                    cut_trouble[i] = symbi_xpu::with_device(devices[i], || {
+                        received[i]
+                            .iter()
+                            .any(|region| kernels[i].fofc_flags_in(sh[i], region) > 0)
+                    });
+                }
+            }
+            // every tile holds the level's agreed freeze count between passes
+            let prior_streak = kernels[0].freeze_streak();
+            for i in 0..n {
+                let outcome = symbi_xpu::with_device(devices[i], || {
+                    crate::stage::fold_stage_from_correction(
+                        sh[i],
+                        kernels[i],
+                        args,
+                        cut_trouble[i],
+                        &mut |hp| stage_hook(i, sh[i], hp, args),
+                    )
+                });
+                retry |= outcome == crate::stage::StageOutcome::RetryStep;
+            }
+            let streak = crate::stage::agreed_freeze_streak(prior_streak, (0..n).any(|i| kernels[i].freeze_streak() > 0));
+            for i in 0..n {
+                kernels[i].set_freeze_streak(streak);
+            }
+            if retry {
+                break;
+            }
+            // the stage-end excision, every sweep and the rebuild followed by the exchange
+            // that publishes the excised state into the neighbors' halos
+            drain_devices::<M>(devices);
+            {
+                let mut step = ScheduledStep { schedule: &schedule, devices, transport, kernels };
+                crate::stage::fold_stage_excision(&sh, kernels, &mut step).unwrap_or_else(|e| panic!("{e}"));
+            }
+            // refresh the cut halos from each neighbor's stage-updated interior.
+            drain_devices::<M>(devices);
+            exchange_grid(&sh, &schedule, devices, transport);
+            flip_polar_bands(&sh, kernels, &schedule, devices);
+            // re-fill physical boundary ghosts post-exchange (cut-corner consistency, see prime).
+            for i in 0..n {
+                symbi_xpu::with_device(devices[i], || kernels[i].ghost_fill(sh[i]));
+            }
+            drop(sh);
+            if has_continuous_tracers {
+                for store in stores.iter_mut() {
+                    let geometry = store.geom.block_geometry(symbi_geometry::Cartesian);
+                    crate::tracers::accumulate_ito_transport_stage_store(
+                        &mut **store,
+                        &geometry,
+                        stage.ac,
+                    )
+                    .unwrap_or_else(|err| panic!("ito transport accumulation failed: {err}"));
+                }
+            }
+            if has_discrete_tracers || has_continuous_tracers {
+                let partition = {
+                    let sh: Vec<&FieldStore<D, DOF, M, f64>> =
+                        stores.iter().map(|s| &**s).collect();
+                    tile_partition_of(&sh, counts)
+                };
+                for (flat, store) in stores.iter_mut().enumerate() {
+                    if store.geom.coords != symbi_geometry::Geometry::Cartesian {
+                        panic!(
+                            "decomposed mass-transport tracers require explicit curvilinear geometry"
+                        );
+                    }
+                    let geometry = store.geom.block_geometry(symbi_geometry::Cartesian);
+                    let tile = unflatten(flat, counts);
+                    let ext = partition.tile_extents(tile);
+                    let layout = crate::tracers::TransportLayout {
+                        global_cells: partition.n_cells(),
+                        tile_offset: std::array::from_fn(|dd| ext[dd].0),
+                        wraps: std::array::from_fn(|dd| schedule.wraps(dd)),
+                        level: 0,
+                    };
+                    let mut injections = crate::tracers::boundary_injection_transfers_store(
+                        &**store, &geometry, layout,
+                    );
+                    injections.extend(crate::tracers::source_injection_transfers_store(
+                        &**store, &geometry, layout, stage.a0, stage.ac,
+                    ));
+                    crate::tracers::fold_injection_ledger(
+                        &mut injection_ledgers[flat],
+                        injections,
+                        stage.ac,
+                    );
+                    if has_discrete_tracers {
+                        crate::tracers::advance_stage_mass_transport_tile(
+                            &mut **store,
+                            &geometry,
+                            layout,
+                            stage.a0,
+                            stage.ac,
+                            stage.index,
+                        )
+                        .unwrap_or_else(|err| panic!("tracer mass transport failed: {err}"));
+                    }
+                }
+                if has_discrete_tracers {
+                    migrate_mass_transport_tracers(stores, &schedule);
+                    blend_mass_transport_ancestry(stores, stage.ac, stage.index);
+                    migrate_mass_transport_tracers(stores, &schedule);
+                }
+            }
+        }
+        self.injection_ledgers = injection_ledgers;
+        Ok(!retry)
+    }
+
+    fn evidence(&mut self, rejections: u32) -> Vec<String> {
+        // the rejection counts once against this step, whichever tile raised it
+        let mut evidence = Vec::new();
+        for (ii, store) in self.stores.iter().enumerate() {
+            evidence.extend(crate::retry_guard::take_evidence(&**store, &format!("tile {ii}"), rejections));
+        }
+        evidence
+    }
+
+    fn restore(&mut self) -> Result<(), Self::Error> {
+        assert!(self.restorable, "a root step restored from an incomplete capture");
+        // per-tile rollback restores the fields and each tracer's step-entry ancestry, but the
+        // stage loop migrates tracer records between tiles as they cross a cut. a migrated
+        // record lives in a different tile's storage once it crosses, and a per-tile restore
+        // leaves it there.
+        assert!(
+            !self.has_discrete_tracers && !self.has_continuous_tracers,
+            "a decomposed step was rejected with tracers attached: cross-tile tracer \
+             migration has no per-tile inverse"
+        );
+        for (ii, store) in self.stores.iter_mut().enumerate() {
+            symbi_xpu::with_device(self.devices[ii], || self.kernels[ii].restore_step(&**store));
+            crate::tracers::restore_transport_state(&mut **store);
+            store.motion = self.motion_n[ii];
+            // the tile stands at its step entry again, the clock its ghost refills read
+            store.reset_state_clock();
+        }
+        drain_devices::<M>(self.devices);
+        let sh: Vec<&FieldStore<D, DOF, M, f64>> = self.stores.iter().map(|s| &**s).collect();
+        exchange_grid(&sh, self.schedule, self.devices, self.transport);
+        flip_polar_bands(&sh, self.kernels, self.schedule, self.devices);
+        for ii in 0..sh.len() {
+            symbi_xpu::with_device(self.devices[ii], || self.kernels[ii].ghost_fill(sh[ii]));
+        }
+        Ok(())
+    }
+
+    fn severe_streak(&mut self) -> u32 {
+        self.stores[0].severe_streak
+    }
+
+    // every tile carries the streak its checkpoint records
+    fn set_severe_streak(&mut self, streak: u32) {
+        for store in self.stores.iter_mut() {
+            store.severe_streak = streak;
+        }
+    }
+}
+
 pub type TileStageHook<'h, const D: usize, const DOF: usize, M> =
     dyn FnMut(usize, &FieldStore<D, DOF, M, f64>, crate::stage::HookPoint, crate::stage::StageArgs) + 'h;
 
@@ -2789,7 +3104,7 @@ where
         halt: None,
     };
     // a timestep the march cannot take halts it on its last state, reported to the caller
-    let mut halt: Option<crate::run_diagnostics::TimestepHalt> = None;
+    let mut halt: Option<crate::run_diagnostics::MarchHalt> = None;
     let mut dt_prev = 0.0_f64;
 
     let mut t = start_time;
@@ -2797,7 +3112,7 @@ where
     let mut last_cb: u64 = 0;
     'march: while t < t_final {
         // global dt = min over tiles' cfl, clamped so the last step lands exactly on t_final.
-        let mut dt = {
+        let dt = {
             let sh = shared!();
             let candidates = (0..n).map(|i| symbi_xpu::with_device(devices[i], || kernels[i].cfl(sh[i])));
             match crate::driver::agree_timestep(candidates, sh[0].max_dt, t_final - t, Ok::<f64, std::convert::Infallible>) {
@@ -2806,7 +3121,7 @@ where
                     agreed.dt
                 }
                 Err(crate::driver::TimestepFailure::Invalid(bad)) => {
-                    halt = Some(crate::run_diagnostics::TimestepHalt { iter: sh[0].iteration, time: t, dt_cfl: bad.value, dt_prev });
+                    halt = Some(crate::run_diagnostics::MarchHalt { iter: sh[0].iteration, time: t, dt_cfl: bad.value, dt_prev, step: None });
                     break 'march;
                 }
                 Err(crate::driver::TimestepFailure::Collective(never)) => match never {},
@@ -2820,271 +3135,36 @@ where
         // lives at the step tail. static meshes assign a_n back to itself — no change.
         let motion_n: Vec<_> = stores.iter().map(|s| s.motion).collect();
         let a_n: Vec<f64> = motion_n.iter().map(|motion| motion.a).collect();
-        let guard = stores[0].retry_guard;
-        let mut ledger = crate::retry_guard::RetryLedger::new(dt);
-        let injection_ledgers = 'attempt: loop {
-            let mut injection_ledgers = vec![std::collections::BTreeMap::new(); n];
-            {
-                let sh = shared!();
-                for ii in 0..n {
-                    if kernels[ii].fofc_active() {
-                        symbi_xpu::with_device(devices[ii], || kernels[ii].snapshot_retry(sh[ii]));
-                    }
-                    if multistage {
-                        symbi_xpu::with_device(devices[ii], || kernels[ii].snapshot(sh[ii]));
-                    }
-                }
-            }
-            for s in stores.iter_mut() {
-                s.dt = dt;
-                if has_discrete_tracers {
-                    crate::tracers::snapshot_transport_state(&mut **s);
-                }
-                if has_continuous_tracers {
-                    let geometry = s.geom.block_geometry(symbi_geometry::Cartesian);
-                    crate::tracers::begin_ito_transport_store(&mut **s, &geometry)
-                        .unwrap_or_else(|err| panic!("ito transport initialization failed: {err}"));
-                }
-            }
-            let mut retry = false;
-            for stage in crate::driver::stage_schedule(stages) {
-                for (i, s) in stores.iter_mut().enumerate() {
-                    let t_entry = s.time + stage.entry * dt;
-                    let law_value = s
-                        .motion_law
-                        .as_ref()
-                        .map(|law| (law.a_at(t_entry), law.adot_at(t_entry)));
-                    crate::driver::set_stage_motion(
-                        &mut s.motion,
-                        law_value,
-                        dt,
-                        a_n[i],
-                        stage.entry,
-                    );
-                }
-                let sh = shared!();
-                // the stage tag is minted canonically inside the fold
-                // (stage_tag: euler = 0, rk2 = 1 then 2). a per-driver `sidx + 1`
-                // instead labels forward-euler as tag 1, which is the rk2-predictor
-                // identity — the shared fold makes that divergence unrepresentable.
-                // the full per-stage pipeline (stage.rs STAGE_PIPELINE), folded in two spans.
-                // wave_speeds / efield / post_godunov are the MHD constrained-transport hooks,
-                // no-op defaults for hydro + iso; snapshot_stage / source_apply are the additive
-                // source pass; body_source is the forward immersed-body pass, pointwise from
-                // the body's global position so each tile applies it to its own cells. this
-                // loop never elides the stage-input copy (no cross-tile alias tracking).
-                //
-                // the first span ends with every tile's troubled cells marked. a face on a cut
-                // takes the first-order flux when either cell sharing it is troubled, and those
-                // cells sit on different tiles, so the flags cross the cuts before any tile
-                // corrects, and a tile whose neighbor's trouble reached its cut ghosts corrects
-                // with a clean interior. a stage with no troubled cell anywhere moves nothing.
-                let args = crate::stage::StageArgs {
-                    dt,
-                    a0: stage.a0,
-                    ac: stage.ac,
-                    stage: stage.index,
-                    n_stages: stages.len(),
-                    injection_weight: crate::driver::downstream_injection_weight(
-                        stages,
-                        stage.index,
-                    ),
-                    allow_elision: false,
-                    exit_fraction: crate::driver::stage_exit_fraction(stages, stage.index),
-                };
-                let mut troubled = 0u64;
-                if has_axis_rings {
-                    // the edges on a coordinate axis are reconciled over the whole ring between
-                    // the stage's complete EMF and its curl, across every tile holding a copy
-                    for i in 0..n {
-                        symbi_xpu::with_device(devices[i], || {
-                            crate::stage::fold_stage_through_emf(sh[i], kernels[i], args, &mut |hp| stage_hook(i, sh[i], hp, args))
-                        });
-                    }
-                    drain_devices::<M>(devices);
-                    crate::axis_ring::reconcile_across(&sh);
-                    for i in 0..n {
-                        troubled += symbi_xpu::with_device(devices[i], || {
-                            crate::stage::fold_stage_curl_through_mark(sh[i], kernels[i], args, &mut |hp| stage_hook(i, sh[i], hp, args))
-                        });
-                    }
-                } else {
-                    for i in 0..n {
-                        troubled += symbi_xpu::with_device(devices[i], || {
-                            crate::stage::fold_stage_through_mark(sh[i], kernels[i], args, &mut |hp| stage_hook(i, sh[i], hp, args))
-                        });
-                    }
-                }
-                let mut cut_trouble = vec![false; n];
-                if troubled > 0 {
-                    drain_devices::<M>(devices);
-                    let received = exchange_trouble(&sh, &schedule, devices, transport);
-                    drain_devices::<M>(devices);
-                    for i in 0..n {
-                        cut_trouble[i] = symbi_xpu::with_device(devices[i], || {
-                            received[i]
-                                .iter()
-                                .any(|region| kernels[i].fofc_flags_in(sh[i], region) > 0)
-                        });
-                    }
-                }
-                // every tile holds the level's agreed freeze count between passes
-                let prior_streak = kernels[0].freeze_streak();
-                for i in 0..n {
-                    let outcome = symbi_xpu::with_device(devices[i], || {
-                        crate::stage::fold_stage_from_correction(
-                            sh[i],
-                            kernels[i],
-                            args,
-                            cut_trouble[i],
-                            &mut |hp| stage_hook(i, sh[i], hp, args),
-                        )
-                    });
-                    retry |= outcome == crate::stage::StageOutcome::RetryStep;
-                }
-                let streak = crate::stage::agreed_freeze_streak(prior_streak, (0..n).any(|i| kernels[i].freeze_streak() > 0));
-                for i in 0..n {
-                    kernels[i].set_freeze_streak(streak);
-                }
-                if retry {
-                    break;
-                }
-                // the stage-end excision, every sweep and the rebuild followed by the exchange
-                // that publishes the excised state into the neighbors' halos
-                drain_devices::<M>(devices);
-                {
-                    let mut step = ScheduledStep { schedule: &schedule, devices, transport, kernels };
-                    crate::stage::fold_stage_excision(&sh, kernels, &mut step).unwrap_or_else(|e| panic!("{e}"));
-                }
-                // refresh the cut halos from each neighbor's stage-updated interior.
-                drain_devices::<M>(devices);
-                exchange_grid(&sh, &schedule, devices, transport);
-                flip_polar_bands(&sh, kernels, &schedule, devices);
-                // re-fill physical boundary ghosts post-exchange (cut-corner consistency, see prime).
-                for i in 0..n {
-                    symbi_xpu::with_device(devices[i], || kernels[i].ghost_fill(sh[i]));
-                }
-                drop(sh);
-                if has_continuous_tracers {
-                    for store in stores.iter_mut() {
-                        let geometry = store.geom.block_geometry(symbi_geometry::Cartesian);
-                        crate::tracers::accumulate_ito_transport_stage_store(
-                            &mut **store,
-                            &geometry,
-                            stage.ac,
-                        )
-                        .unwrap_or_else(|err| panic!("ito transport accumulation failed: {err}"));
-                    }
-                }
-                if has_discrete_tracers || has_continuous_tracers {
-                    let partition = {
-                        let sh: Vec<&FieldStore<D, DOF, M, f64>> =
-                            stores.iter().map(|s| &**s).collect();
-                        tile_partition_of(&sh, counts)
-                    };
-                    for (flat, store) in stores.iter_mut().enumerate() {
-                        if store.geom.coords != symbi_geometry::Geometry::Cartesian {
-                            panic!(
-                                "decomposed mass-transport tracers require explicit curvilinear geometry"
-                            );
-                        }
-                        let geometry = store.geom.block_geometry(symbi_geometry::Cartesian);
-                        let tile = unflatten(flat, counts);
-                        let ext = partition.tile_extents(tile);
-                        let layout = crate::tracers::TransportLayout {
-                            global_cells: partition.n_cells(),
-                            tile_offset: std::array::from_fn(|dd| ext[dd].0),
-                            wraps: std::array::from_fn(|dd| schedule.wraps(dd)),
-                            level: 0,
-                        };
-                        let mut injections = crate::tracers::boundary_injection_transfers_store(
-                            &**store, &geometry, layout,
-                        );
-                        injections.extend(crate::tracers::source_injection_transfers_store(
-                            &**store, &geometry, layout, stage.a0, stage.ac,
-                        ));
-                        crate::tracers::fold_injection_ledger(
-                            &mut injection_ledgers[flat],
-                            injections,
-                            stage.ac,
-                        );
-                        if has_discrete_tracers {
-                            crate::tracers::advance_stage_mass_transport_tile(
-                                &mut **store,
-                                &geometry,
-                                layout,
-                                stage.a0,
-                                stage.ac,
-                                stage.index,
-                            )
-                            .unwrap_or_else(|err| panic!("tracer mass transport failed: {err}"));
-                        }
-                    }
-                    if has_discrete_tracers {
-                        migrate_mass_transport_tracers(stores, &schedule);
-                        blend_mass_transport_ancestry(stores, stage.ac, stage.index);
-                        migrate_mass_transport_tracers(stores, &schedule);
-                    }
-                }
-            }
-            if !retry {
-                // the guard ledger's accepted-step boundary: every tile's pending
-                // acts survive into the solution here.
-                crate::guard_ledger::step_commit();
-                break 'attempt injection_ledgers;
-            }
-            // the rejection counts once against this step, whichever tile raised it
-            let mut evidence = Vec::new();
-            for (ii, store) in stores.iter().enumerate() {
-                evidence.extend(crate::retry_guard::take_evidence(&**store, &format!("tile {ii}"), ledger.rejections()));
-            }
-            ledger.reject(&guard, dt, evidence).unwrap_or_else(|failure| panic!("{failure}"));
-            // the guard ledger's rejection boundary: the pending acts describe
-            // states this per-tile rollback discards.
-            crate::guard_ledger::step_discard();
-            // per-tile rollback restores the fields and each tracer's step-entry ancestry, but the
-            // stage loop migrates tracer records between tiles as they cross a cut. a migrated
-            // record now lives in a different tile's storage and no per-tile restore puts it back.
-            assert!(
-                !has_discrete_tracers && !has_continuous_tracers,
-                "a decomposed step was rejected with tracers attached: cross-tile tracer \
-                 migration has no per-tile inverse"
-            );
-            for (ii, store) in stores.iter_mut().enumerate() {
-                if kernels[ii].fofc_active() {
-                    symbi_xpu::with_device(devices[ii], || kernels[ii].restore_step(&**store));
-                }
-                crate::tracers::restore_transport_state(&mut **store);
-                store.motion = motion_n[ii];
-                // the tile stands at its step entry again, the clock its ghost refills read
-                store.reset_state_clock();
-            }
-            drain_devices::<M>(devices);
-            {
-                let sh = shared!();
-                exchange_grid(&sh, &schedule, devices, transport);
-                flip_polar_bands(&sh, kernels, &schedule, devices);
-                for ii in 0..n {
-                    symbi_xpu::with_device(devices[ii], || kernels[ii].ghost_fill(sh[ii]));
-                }
-            }
-            // a rejected step whose halved timestep can no longer advance time halts the march on
-            // the state the rejection restored
-            dt = match crate::driver::retry_timestep(dt, t) {
-                Ok(retry) => retry,
-                Err(_) => {
-                    halt = Some(crate::run_diagnostics::TimestepHalt { iter: stores[0].iteration, time: t, dt_cfl: 0.5 * dt, dt_prev });
-                    break 'march;
-                }
-            };
+        let mut attempt = FlatRootAttempt {
+            stores: &mut *stores,
+            kernels,
+            schedule: &schedule,
+            devices,
+            transport,
+            stage_hook: &mut *stage_hook,
+            stages,
+            multistage,
+            has_axis_rings,
+            has_discrete_tracers,
+            has_continuous_tracers,
+            motion_n,
+            a_n: a_n.clone(),
+            restorable: false,
+            injection_ledgers: Vec::new(),
         };
-        // the sustained-reduction guard, once per accepted step, before anything publishes it;
-        // every tile carries the streak its checkpoint records
-        let mut streak = stores[0].severe_streak;
-        crate::retry_guard::accept(&guard, &mut streak, &ledger, dt).unwrap_or_else(|failure| panic!("{failure}"));
-        for store in stores.iter_mut() {
-            store.severe_streak = streak;
-        }
+        let guard = attempt.stores[0].retry_guard;
+        let dt = match crate::step_transaction::take_root_step(&mut attempt, &guard, dt, t) {
+            Ok::<_, std::convert::Infallible>(crate::step_transaction::RootStep::Accepted { dt }) => dt,
+            Ok(crate::step_transaction::RootStep::Halted(step)) => {
+                let dt_cfl = match &step {
+                    crate::step_transaction::StepHalt::Timestep { dt, .. } => 0.5 * dt,
+                    crate::step_transaction::StepHalt::Guard(_) => f64::NAN,
+                };
+                halt = Some(crate::run_diagnostics::MarchHalt { iter: stores[0].iteration, time: t, dt_cfl, dt_prev, step: Some(step) });
+                break 'march;
+            }
+        };
+        let injection_ledgers = attempt.injection_ledgers;
         if has_discrete_tracers {
             spawn_decomposed_injection(stores, &schedule, injection_ledgers.clone());
         }

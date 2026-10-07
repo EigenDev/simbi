@@ -125,6 +125,7 @@ use symbi_hydro::state::PrimFromSlots;
 use symbi_sim::decomp::{
     HaloTransport, Topology, drain_devices, exchange_grid, flatten, schedule_of_tiles, unflatten,
 };
+use symbi_sim::step_transaction::{RootAttempt, RootStep, StepHalt, take_root_step};
 use symbi_sim::driver::{
     TimestepFailure, advance_clock, advance_state_clock, agree_timestep, book_horizon_receipt, evolve_bodies,
     horizon_request, needs_step_snapshot, prof, stage_time_fractions,
@@ -265,20 +266,22 @@ where
 // =============================================================================
 
 /// static-refinement hierarchy: levels[0] = coarsest, levels[n-1] = finest.
-/// a fatal crash: either the CFL watchdog (the wave speed went NaN or made the timestep
-/// non-positive) or a panic
-/// caught inside the step (the FOFC freeze-streak halt, a poisoned-cell assertion). the evolve loop
-/// halts on the last computed state and the driver snapshots a `.crashed` checkpoint + reports it,
-/// so every crash of either class reaches the user with its state on disk.
+/// a fatal crash: an invalid cfl estimate (the wave speed went NaN or made the timestep
+/// non-positive), a root step the retry guard or the timestep floor ended, or a panic caught
+/// inside the step (the FOFC freeze-streak halt, a poisoned-cell assertion). the evolve loop
+/// halts on the state the crash left and the driver snapshots a `.crashed` checkpoint + reports
+/// it, so every crash reaches the user with its state on disk. a halted root step leaves the
+/// step entry, the last accepted state; a panic leaves the mid-step state it fired on.
 #[derive(Clone, Debug)]
 pub struct CrashReport {
     pub iter: u64,
     pub time: f64,
     pub dt_cfl: f64,
     pub dt_prev: f64,
-    /// the payload of a panic caught inside `step_root`; the dt fields carry NaN in
-    /// that case, and the watchdog's own reports leave this empty.
+    /// the payload of a panic caught inside the step; the dt fields carry NaN in that case
     pub panic: Option<String>,
+    /// the root step the retry guard or the timestep floor ended, with its evidence
+    pub halt: Option<symbi_sim::step_transaction::StepHalt>,
 }
 
 /// A positive CFL estimate may increase by an arbitrary factor after a transient fast cell
@@ -2683,69 +2686,46 @@ where
             dt_cfl,
             dt_prev: self.prev_dt_cfl,
             panic: None,
+            halt: None,
         });
     }
 
-    /// one root step at an already-selected dt: the retry-snapshot transaction, the stage
-    /// recursion with its rejection replay, and the accepted-step tail (tracer migration,
-    /// census, clock and motion, body feedback). callable with any admissible dt, which is
-    /// what lets a multi-tile driver select a global minimum and drive each tile with it
-    /// while the uni-grid path arrives through `step_root`'s watchdog.
-    pub fn step_root_with_dt(&mut self, mut dt: f64) {
+    /// record a root step the shared transaction halted: the entry it restored is the state the
+    /// crash publishes
+    fn record_step_halt(&mut self, halt: &StepHalt) {
+        let root = &self.levels[0].state;
+        self.crash = Some(CrashReport {
+            iter: root.iteration,
+            time: root.time,
+            dt_cfl: f64::NAN,
+            dt_prev: self.prev_dt_cfl,
+            panic: None,
+            halt: Some(halt.clone()),
+        });
+    }
+
+    /// whether a root attempt can be rejected: a level's FOFC can request a retry, a forced
+    /// rejection is armed, or the magnetic-slip composite can fail its solve
+    pub fn root_step_rejectable(&self) -> bool {
+        self.levels.iter().any(|level| level.kernels.fofc_active()) || self.forced_fine_rejection_pending() || self.finest_has_magnetic_slip()
+    }
+
+    /// one root step at an already-selected dt: the shared step transaction over this
+    /// hierarchy's attempt, then the accepted-step tail (tracer migration, census, clock and
+    /// motion, body feedback). a step the retry guard or the timestep floor ends restores the
+    /// step entry and records the halt in `crash`. callable with any admissible dt, which is
+    /// what lets a multi-tile driver select a global minimum and drive each tile with it.
+    pub fn step_root_with_dt(&mut self, candidate: f64) {
         let time = self.levels[0].state.time;
         let guard = self.levels[0].state.retry_guard;
-        let mut ledger = symbi_sim::retry_guard::RetryLedger::new(dt);
-        // A rejection can originate in the second (or deeper) fine substep after an earlier
-        // substep has spawned/migrated tracers or booked a horizon receipt.  Field snapshots alone
-        // cannot invert those host-side commits, so the root attempt owns a complete transaction
-        // snapshot of every mutable side-car.
-        let retry_sidecars = self.snapshot_retry_sidecars();
-        loop {
-            for level in &self.levels {
-                if level.kernels.fofc_active() {
-                    level.kernels.snapshot_retry(&level.state);
-                }
+        let mut attempt = SingleRootAttempt { hier: self, restorable: false, sidecars: None };
+        let dt = match take_root_step(&mut attempt, &guard, candidate, time) {
+            Ok::<_, std::convert::Infallible>(RootStep::Accepted { dt }) => dt,
+            Ok(RootStep::Halted(halt)) => {
+                self.record_step_halt(&halt);
+                return;
             }
-            self.snapshot_attempt_entry();
-            // a slip-enabled draining body runs the palindromic D-M-H-M-D coupled step in place of the
-            // plain RK march; the snapshot above (taken before the first D) is the boundary its retry
-            // restores to. a body with no magnetic slip keeps the ordinary advance bit-for-bit.
-            let root_is_slip = self.finest_has_magnetic_slip();
-            let failed = if root_is_slip {
-                self.advance_slip_coupled_step(0, dt, 0.0)
-            } else {
-                self.advance_level(0, dt, 0.0)
-            };
-            if !failed {
-                break;
-            }
-            // the rejection counts against this root attempt, a fine substep's included
-            let mut evidence = Vec::new();
-            for (ll, level) in self.levels.iter().enumerate() {
-                evidence.extend(symbi_sim::retry_guard::take_evidence(&level.state, &format!("level {ll}"), ledger.rejections()));
-            }
-            ledger.reject(&guard, dt, evidence).unwrap_or_else(|failure| panic!("{failure}"));
-            // the projection and guard ledgers' rejection boundary: the
-            // pending-step evidence describes states this rollback discards.
-            if symbi_sim::projection_ledger::scope_is_open() {
-                symbi_sim::projection_ledger::step_discard();
-            }
-            if symbi_sim::guard_ledger::scope_is_open() {
-                symbi_sim::guard_ledger::step_discard();
-            }
-            for level in &mut self.levels {
-                if level.kernels.fofc_active() {
-                    level.kernels.restore_step(&level.state);
-                }
-            }
-            self.restore_attempt_entry();
-            self.restore_retry_sidecars(&retry_sidecars);
-            dt = symbi_sim::driver::retry_timestep(dt, time)
-                .unwrap_or_else(|err| panic!("{}", err.detail));
-        }
-        // the sustained-reduction guard, once per accepted root step, before anything publishes it
-        symbi_sim::retry_guard::accept(&guard, &mut self.levels[0].state.severe_streak, &ledger, dt)
-            .unwrap_or_else(|failure| panic!("{failure}"));
+        };
         if self
             .levels
             .iter()
@@ -2766,15 +2746,6 @@ where
         let root = &mut self.levels[0];
         // homologous linear advance, taken when the run leaves the motion law untraced.
         advance_state_clock(&mut root.state, dt);
-        // the projection and guard ledgers' accepted-step boundary: the
-        // pending-step evidence survives into the solution here.
-        if symbi_sim::projection_ledger::scope_is_open() {
-            symbi_sim::projection_ledger::step_commit();
-        }
-        if symbi_sim::guard_ledger::scope_is_open() {
-            symbi_sim::guard_ledger::step_commit();
-        }
-
         self.root_body_step(dt);
     }
 
@@ -6467,26 +6438,12 @@ where
             let step = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                 match decomp {
                     Some((devices, counts, transport)) => {
-                        let retry_sidecars: Vec<_> = tiles
-                            .iter()
-                            .map(Hierarchy::snapshot_retry_sidecars)
-                            .collect();
                         let t = tiles[0].levels[0].state.time;
-                        let adt = decomposed_root_attempt(
-                            tiles,
-                            counts,
-                            devices,
-                            transport,
-                            &fine,
-                            &root_order,
-                            nstages,
-                            &retry_sidecars,
-                            gdt,
-                            t,
-                        );
-                        decomposed_root_post(
-                            tiles, counts, devices, transport, &root_order, adt, t,
-                        );
+                        if let Some(adt) =
+                            decomposed_root_attempt(tiles, counts, devices, transport, &fine, &root_order, nstages, gdt, t)
+                        {
+                            decomposed_root_post(tiles, counts, devices, transport, &root_order, adt, t);
+                        }
                     }
                     None => tiles[0].step_root_with_dt(gdt),
                 }
@@ -6507,6 +6464,7 @@ where
                     dt_cfl: f64::NAN,
                     dt_prev: tiles[0].prev_dt_cfl,
                     panic: Some(msg),
+                    halt: None,
                 });
             }
         }
@@ -6652,24 +6610,99 @@ where
     false
 }
 
-/// one collective root step of the decomposed march at an agreed timestep: every tile
-/// snapshots its retry state, the root stages advance in lockstep with a halo exchange
-/// between each, the fine subcycle runs with its own exchanges, and a rejection anywhere
-/// rolls every tile back to the same entry state and replays the attempt at a reduced dt.
-/// returns the accepted timestep the tiles advanced by.
-#[allow(clippy::too_many_arguments)]
-fn decomposed_root_attempt<R, const NDIM: usize, const DOF: usize, M, E, S, Mem, K, T>(
-    tiles: &mut [Hierarchy<R, NDIM, DOF, M, E, S, Mem, K>],
-    counts: [usize; NDIM],
-    devices: &[i32],
-    transport: &T,
-    fine: &[FineSubgrid<NDIM>],
-    root_order: &[usize],
-    nstages: usize,
-    retry_sidecars: &[HierarchyRetrySidecars<NDIM>],
-    mut gdt: f64,
-    t: f64,
-) -> f64
+/// the attempts of one hierarchy's root step: every level's retry snapshot when the step can be
+/// rejected, the finer levels' attempt entry, and the host side-cars (tracers, bodies, motion,
+/// clocks, censuses) captured at the first attempt
+struct SingleRootAttempt<'h, R, const NDIM: usize, const DOF: usize, M, E, S, Mem, K>
+where
+    R: Regime<f64, NDIM> + Copy,
+    M: Metric<f64, NDIM> + Copy + Send + Sync,
+    E: symbi_hydro::eos::EosFor<f64, <R as Regime<f64, NDIM>>::Energy> + Copy + Send + Sync,
+    S: ExecutionSpace,
+    Mem: MemorySpace + Sync,
+    K: KernelSet<NDIM, DOF, Mem, f64>,
+{
+    hier: &'h mut Hierarchy<R, NDIM, DOF, M, E, S, Mem, K>,
+    restorable: bool,
+    sidecars: Option<HierarchyRetrySidecars<NDIM>>,
+}
+
+impl<R, const NDIM: usize, const DOF: usize, M, E, S, Mem, K> RootAttempt for SingleRootAttempt<'_, R, NDIM, DOF, M, E, S, Mem, K>
+where
+    R: Regime<f64, NDIM> + Copy,
+    M: Metric<f64, NDIM> + Copy + Send + Sync,
+    E: symbi_hydro::eos::EosFor<f64, <R as Regime<f64, NDIM>>::Energy> + Copy + Send + Sync,
+    S: ExecutionSpace,
+    Mem: MemorySpace + Sync,
+    K: KernelSet<NDIM, DOF, Mem, f64>,
+{
+    type Error = std::convert::Infallible;
+
+    fn rejectable(&mut self) -> bool {
+        self.hier.root_step_rejectable()
+    }
+
+    fn capture(&mut self, _dt: f64, restorable: bool) -> Result<(), Self::Error> {
+        let hier = &mut *self.hier;
+        if self.sidecars.is_none() {
+            self.sidecars = Some(hier.snapshot_retry_sidecars());
+        }
+        self.restorable = restorable;
+        if restorable {
+            for level in &hier.levels {
+                level.kernels.snapshot_retry(&level.state);
+            }
+        }
+        hier.snapshot_attempt_entry();
+        Ok(())
+    }
+
+    fn run(&mut self, dt: f64) -> Result<bool, Self::Error> {
+        // a slip-enabled draining body runs the palindromic D-M-H-M-D coupled step in place of the
+        // plain RK march; the capture above (taken before the first D) is the boundary its retry
+        // restores to. a body with no magnetic slip keeps the ordinary advance bit-for-bit.
+        let failed = if self.hier.finest_has_magnetic_slip() {
+            self.hier.advance_slip_coupled_step(0, dt, 0.0)
+        } else {
+            self.hier.advance_level(0, dt, 0.0)
+        };
+        Ok(!failed)
+    }
+
+    fn evidence(&mut self, rejections: u32) -> Vec<String> {
+        // the rejection counts against this root attempt, a fine substep's included
+        let mut evidence = Vec::new();
+        for (ll, level) in self.hier.levels.iter().enumerate() {
+            evidence.extend(symbi_sim::retry_guard::take_evidence(&level.state, &format!("level {ll}"), rejections));
+        }
+        evidence
+    }
+
+    fn restore(&mut self) -> Result<(), Self::Error> {
+        assert!(self.restorable, "a root step restored from an incomplete capture");
+        let hier = &mut *self.hier;
+        for level in &hier.levels {
+            level.kernels.restore_step(&level.state);
+        }
+        hier.restore_attempt_entry();
+        hier.restore_retry_sidecars(self.sidecars.as_ref().expect("the first attempt captured the side-cars"));
+        Ok(())
+    }
+
+    fn severe_streak(&mut self) -> u32 {
+        self.hier.levels[0].state.severe_streak
+    }
+
+    fn set_severe_streak(&mut self, streak: u32) {
+        self.hier.levels[0].state.severe_streak = streak;
+    }
+}
+
+/// the attempts of one collective root step of the decomposed march: every tile snapshots its
+/// retry state, the root stages advance in lockstep with a halo exchange between each, the fine
+/// subcycle runs with its own exchanges, and a rejection anywhere rolls every tile back to the
+/// same entry state, its halos exchanged again, before the transaction replays it
+struct TiledRootAttempt<'a, R, const NDIM: usize, const DOF: usize, M, E, S, Mem, K, T>
 where
     R: Regime<f64, NDIM> + Copy,
     M: Metric<f64, NDIM> + Copy + Send + Sync,
@@ -6679,183 +6712,245 @@ where
     K: KernelSet<NDIM, DOF, Mem, f64>,
     T: HaloTransport,
 {
-    let n = tiles.len();
-    let guard = tiles[0].levels[0].state.retry_guard;
-    let mut ledger = symbi_sim::retry_guard::RetryLedger::new(gdt);
-        'attempt: loop {
-            for i in 0..n {
-                for level in &tiles[i].levels {
-                    if level.kernels.fofc_active() {
-                        symbi_xpu::with_device(devices[i], || {
-                            level.kernels.snapshot_retry(&level.state)
-                        });
+    tiles: &'a mut [Hierarchy<R, NDIM, DOF, M, E, S, Mem, K>],
+    counts: [usize; NDIM],
+    devices: &'a [i32],
+    transport: &'a T,
+    fine: &'a [FineSubgrid<NDIM>],
+    root_order: &'a [usize],
+    nstages: usize,
+    restorable: bool,
+    sidecars: Option<Vec<HierarchyRetrySidecars<NDIM>>>,
+}
+
+impl<R, const NDIM: usize, const DOF: usize, M, E, S, Mem, K, T> RootAttempt for TiledRootAttempt<'_, R, NDIM, DOF, M, E, S, Mem, K, T>
+where
+    R: Regime<f64, NDIM> + Copy,
+    M: Metric<f64, NDIM> + Copy + Send + Sync,
+    E: symbi_hydro::eos::EosFor<f64, <R as Regime<f64, NDIM>>::Energy> + Copy + Send + Sync,
+    S: ExecutionSpace,
+    Mem: MemorySpace + Sync,
+    K: KernelSet<NDIM, DOF, Mem, f64>,
+    T: HaloTransport,
+{
+    type Error = std::convert::Infallible;
+
+    fn rejectable(&mut self) -> bool {
+        self.tiles.iter().any(Hierarchy::root_step_rejectable)
+    }
+
+    fn capture(&mut self, _dt: f64, restorable: bool) -> Result<(), Self::Error> {
+        if self.sidecars.is_none() {
+            self.sidecars = Some(self.tiles.iter().map(Hierarchy::snapshot_retry_sidecars).collect());
+        }
+        self.restorable = restorable;
+        for (i, tile) in self.tiles.iter().enumerate() {
+            symbi_xpu::with_device(self.devices[i], || {
+                if restorable {
+                    for level in &tile.levels {
+                        level.kernels.snapshot_retry(&level.state);
                     }
                 }
-                symbi_xpu::with_device(devices[i], || {
-                    tiles[i].snapshot_attempt_entry();
-                    tiles[i].level_step_begin(0, gdt)
-                });
-                phase_probe::set_tile(i);
-                phase_probe::sample("begin", 0, &tiles[i].levels[0].state);
-            }
-            let mut retry = false;
-            // the root SSP stages, each with the troubled marks crossing the cuts before the
-            // correction and a root halo exchange after.
-            for ii in 0..nstages {
-                retry |= decomposed_level_stage(tiles, 0, root_order, counts, devices, transport, ii, gdt, 0.0);
-                if retry {
-                    break;
-                }
-                exchange_level_tracers(tiles, 0, ii);
-                exchange_level_halos(tiles, 0, &root_order, counts, devices, transport);
-                for &i in root_order {
-                    phase_probe::set_tile(i);
-                    phase_probe::sample(phase_probe::STAGE[ii], 0, &tiles[i].levels[0].state);
-                }
-            }
+                tile.snapshot_attempt_entry();
+            });
+        }
+        Ok(())
+    }
+
+    fn run(&mut self, dt: f64) -> Result<bool, Self::Error> {
+        let (tiles, counts, devices, transport, fine, root_order, nstages) =
+            (&mut *self.tiles, self.counts, self.devices, self.transport, self.fine, self.root_order, self.nstages);
+        let n = tiles.len();
+        for i in 0..n {
+            symbi_xpu::with_device(devices[i], || tiles[i].level_step_begin(0, dt));
+            phase_probe::set_tile(i);
+            phase_probe::sample("begin", 0, &tiles[i].levels[0].state);
+        }
+        let mut retry = false;
+        // the root SSP stages, each with the troubled marks crossing the cuts before the
+        // correction and a root halo exchange after.
+        for ii in 0..nstages {
+            retry |= decomposed_level_stage(tiles, 0, root_order, counts, devices, transport, ii, dt, 0.0);
             if retry {
-                // handled by the common collective rollback at the end of the attempt.
-            } else {
-                spawn_decomposed_injections(tiles, &root_order, 0);
-                // root emf bookkeeping (mhd; no-op for hydro + unrefined tiles).
+                break;
+            }
+            exchange_level_tracers(tiles, 0, ii);
+            exchange_level_halos(tiles, 0, root_order, counts, devices, transport);
+            for &i in root_order {
+                phase_probe::set_tile(i);
+                phase_probe::sample(phase_probe::STAGE[ii], 0, &tiles[i].levels[0].state);
+            }
+        }
+        // a rejected stage skips the root tail; the transaction restores the entry
+        if !retry {
+            spawn_decomposed_injections(tiles, root_order, 0);
+            // root emf bookkeeping (mhd; no-op for hydro + unrefined tiles).
+            for i in 0..n {
+                symbi_xpu::with_device(devices[i], || tiles[i].level_tail_emf(0, dt));
+            }
+            // the root excise, in the same position the uni-grid tail puts it (after the emf
+            // bookkeeping). the rest of the tail — viscous, horizon ledger, penalize — belongs to the
+            // finest level and is driven with the fine subcycle; the excise runs per level, because
+            // the excised region is owned by whichever level contains it and a refined root still
+            // owns its core.
+            for i in 0..n {
+                symbi_xpu::with_device(devices[i], || tiles[i].level_tail_excise(0));
+            }
+            // rigid walls also act on uncovered root cells when their shape crosses the refined
+            // patch boundary. covered root writes are replaced by restriction after the fine
+            // subcycle; accretion remains absent from root proxies.
+            for i in 0..n {
+                symbi_xpu::with_device(devices[i], || {
+                    let level = &tiles[i].levels[0];
+                    let has_rigid = level
+                        .state
+                        .immersed
+                        .as_ref()
+                        .is_some_and(|immersed| immersed.bodies.rigid_count() > 0);
+                    if has_rigid {
+                        prof("penalize", || level.kernels.penalize(&level.state, dt));
+                    }
+                });
+            }
+            // the root's continuous tracers, as the root's tail holds them on the single
+            // hierarchy: the injection held until they advance, and the root's accepted ito
+            // coefficients across the cuts before the fine level prolongs them
+            let continuous = tiles.iter().any(|t| t.levels[0].state.continuous_tracers.is_some());
+            if continuous {
                 for i in 0..n {
-                    symbi_xpu::with_device(devices[i], || tiles[i].level_tail_emf(0, gdt));
+                    tiles[i].hold_continuous_injection(0);
+                    symbi_xpu::with_device(devices[i], || tiles[i].prepare_level_ito_coefficients(0));
                 }
-                // the root excise, in the same position the uni-grid tail puts it (after the emf
-                // bookkeeping). the rest of the tail — viscous, horizon ledger, penalize — belongs to the
-                // finest level and is driven with the fine subcycle; the excise runs per level, because
-                // the excised region is owned by whichever level contains it and a refined root still
-                // owns its core.
+                exchange_level_ito(tiles, 0, root_order, counts, devices, transport);
+            }
+            // the refined levels, subcycled across their tiles, then each refined tile's root
+            // takes the restriction and reflux of level 1, and the root halos carry the
+            // restricted covered cells: the next step's prolongation snapshot and the
+            // cut-adjacent stencils read them.
+            if let Some(fg) = fine.first() {
+                retry |= decomposed_subcycle(tiles, 0, fine, transport, nstages, dt);
+                if !retry {
+                    for (k, &i) in fg.order.iter().enumerate() {
+                        phase_probe::set_tile(i);
+                        symbi_xpu::with_device(fg.devices[k], || {
+                            tiles[i].level_restrict_reflux(0, 0.0)
+                        });
+                    }
+                    exchange_level_halos(tiles, 0, root_order, counts, devices, transport);
+                    for &i in root_order {
+                        phase_probe::set_tile(i);
+                        phase_probe::sample("restrict", 0, &tiles[i].levels[0].state);
+                    }
+                }
+            }
+            // the root's continuous tracers advance over the root step after the fine subcycle and
+            // its restriction, cross to the tiles holding their cells, and the held injection
+            // spawns once
+            if !retry && continuous {
                 for i in 0..n {
-                    symbi_xpu::with_device(devices[i], || tiles[i].level_tail_excise(0));
+                    symbi_xpu::with_device(devices[i], || tiles[i].advance_level_continuous_tracers(0, dt));
                 }
-                // rigid walls also act on uncovered root cells when their shape crosses the refined
-                // patch boundary. covered root writes are replaced by restriction after the fine
-                // subcycle; accretion remains absent from root proxies.
+                migrate_level_continuous(tiles, 0);
+                spawn_decomposed_continuous(tiles, root_order, 0);
+            }
+            // the root clock; the root post-step carries no mesh motion.
+            if !retry {
                 for i in 0..n {
                     symbi_xpu::with_device(devices[i], || {
-                        let level = &tiles[i].levels[0];
-                        let has_rigid = level
-                            .state
-                            .immersed
-                            .as_ref()
-                            .is_some_and(|immersed| immersed.bodies.rigid_count() > 0);
-                        if has_rigid {
-                            prof("penalize", || level.kernels.penalize(&level.state, gdt));
-                        }
+                        let s = &mut tiles[i].levels[0].state;
+                        (s.time, s.iteration) = advance_clock(s.time, s.iteration, dt);
                     });
                 }
-                // the root's continuous tracers, as the root's tail holds them on the single
-                // hierarchy: the injection held until they advance, and the root's accepted ito
-                // coefficients across the cuts before the fine level prolongs them
-                let continuous = tiles.iter().any(|t| t.levels[0].state.continuous_tracers.is_some());
-                if continuous {
-                    for i in 0..n {
-                        tiles[i].hold_continuous_injection(0);
-                        symbi_xpu::with_device(devices[i], || tiles[i].prepare_level_ito_coefficients(0));
-                    }
-                    exchange_level_ito(tiles, 0, &root_order, counts, devices, transport);
-                }
-                // the refined levels, subcycled across their tiles, then each refined tile's root
-                // takes the restriction and reflux of level 1, and the root halos carry the
-                // restricted covered cells: the next step's prolongation snapshot and the
-                // cut-adjacent stencils read them.
-                if let Some(fg) = fine.first() {
-                    retry |= decomposed_subcycle(tiles, 0, fine, transport, nstages, gdt);
-                    if !retry {
-                        for (k, &i) in fg.order.iter().enumerate() {
-                            phase_probe::set_tile(i);
-                            symbi_xpu::with_device(fg.devices[k], || {
-                                tiles[i].level_restrict_reflux(0, 0.0)
-                            });
-                        }
-                        exchange_level_halos(tiles, 0, &root_order, counts, devices, transport);
-                        for &i in root_order {
-                            phase_probe::set_tile(i);
-                            phase_probe::sample("restrict", 0, &tiles[i].levels[0].state);
-                        }
-                    }
-                }
-                // the root's continuous tracers advance over the root step after the fine subcycle and
-                // its restriction, cross to the tiles holding their cells, and the held injection
-                // spawns once
-                if !retry && continuous {
-                    for i in 0..n {
-                        symbi_xpu::with_device(devices[i], || tiles[i].advance_level_continuous_tracers(0, gdt));
-                    }
-                    migrate_level_continuous(tiles, 0);
-                    spawn_decomposed_continuous(tiles, &root_order, 0);
-                }
-                // the root clock; the root post-step carries no mesh motion.
-                if !retry {
-                    for i in 0..n {
-                        symbi_xpu::with_device(devices[i], || {
-                            let s = &mut tiles[i].levels[0].state;
-                            (s.time, s.iteration) = advance_clock(s.time, s.iteration, gdt);
-                        });
-                    }
-                }
             }
-            if !retry {
-                // the guard ledger's accepted-step boundary: every tile's and
-                // level's pending acts survive into the solution here.
-                if symbi_sim::guard_ledger::scope_is_open() {
-                    symbi_sim::guard_ledger::step_commit();
-                }
-                break 'attempt;
-            }
-            // the rejection counts once against this root attempt, whichever tile, level or
-            // substep raised it
-            let mut evidence = Vec::new();
-            for (i, tile) in tiles.iter().enumerate() {
-                for (ll, level) in tile.levels.iter().enumerate() {
-                    evidence.extend(symbi_sim::retry_guard::take_evidence(
-                        &level.state,
-                        &format!("tile {i}, level {ll}"),
-                        ledger.rejections(),
-                    ));
-                }
-            }
-            ledger.reject(&guard, gdt, evidence).unwrap_or_else(|failure| panic!("{failure}"));
-            // the guard ledger's rejection boundary: the pending acts describe
-            // states this collective rollback discards.
-            if symbi_sim::guard_ledger::scope_is_open() {
-                symbi_sim::guard_ledger::step_discard();
-            }
-            // Collective rollback: every tile returns to the same root-step entry before any halo is
-            // exchanged or the reduced timestep is replayed.  This includes host-side tracer/body
-            // state as well as each kernel set's conserved and magnetic retry snapshot.
-            for i in 0..n {
-                for level in &tiles[i].levels {
-                    if level.kernels.fofc_active() {
-                        symbi_xpu::with_device(devices[i], || {
-                            level.kernels.restore_step(&level.state)
-                        });
-                    }
-                }
-                symbi_xpu::with_device(devices[i], || tiles[i].restore_attempt_entry());
-                tiles[i].restore_retry_sidecars(&retry_sidecars[i]);
-            }
-            drain_devices::<Mem>(devices);
-            exchange_level_halos(tiles, 0, &root_order, counts, devices, transport);
-            for (k, fg) in fine.iter().enumerate() {
-                exchange_level_halos(tiles, k + 1, &fg.order, fg.counts, &fg.devices, transport);
-            }
-            gdt = symbi_sim::driver::retry_timestep(gdt, t)
-                .unwrap_or_else(|err| panic!("{}", err.detail));
         }
-    // the sustained-reduction guard, once per accepted root step, before anything publishes it;
-    // every tile's root carries the streak its checkpoint records
-    let mut streak = tiles[0].levels[0].state.severe_streak;
-    symbi_sim::retry_guard::accept(&guard, &mut streak, &ledger, gdt).unwrap_or_else(|failure| panic!("{failure}"));
-    for tile in tiles.iter_mut() {
-        tile.levels[0].state.severe_streak = streak;
+        Ok(!retry)
     }
+
+    fn evidence(&mut self, rejections: u32) -> Vec<String> {
+        // the rejection counts once against this root attempt, whichever tile, level or substep
+        // raised it
+        let mut evidence = Vec::new();
+        for (i, tile) in self.tiles.iter().enumerate() {
+            for (ll, level) in tile.levels.iter().enumerate() {
+                evidence.extend(symbi_sim::retry_guard::take_evidence(&level.state, &format!("tile {i}, level {ll}"), rejections));
+            }
+        }
+        evidence
+    }
+
+    fn restore(&mut self) -> Result<(), Self::Error> {
+        assert!(self.restorable, "a root step restored from an incomplete capture");
+        // every tile returns to the same root-step entry, host-side tracer and body state
+        // included, before any halo is exchanged
+        let sidecars = self.sidecars.as_ref().expect("the first attempt captured the side-cars");
+        for (i, tile) in self.tiles.iter_mut().enumerate() {
+            symbi_xpu::with_device(self.devices[i], || {
+                for level in &tile.levels {
+                    level.kernels.restore_step(&level.state);
+                }
+                tile.restore_attempt_entry();
+            });
+            tile.restore_retry_sidecars(&sidecars[i]);
+        }
+        drain_devices::<Mem>(self.devices);
+        exchange_level_halos(self.tiles, 0, self.root_order, self.counts, self.devices, self.transport);
+        for (k, fg) in self.fine.iter().enumerate() {
+            exchange_level_halos(self.tiles, k + 1, &fg.order, fg.counts, &fg.devices, self.transport);
+        }
+        Ok(())
+    }
+
+    fn severe_streak(&mut self) -> u32 {
+        self.tiles[0].levels[0].state.severe_streak
+    }
+
+    // every tile's root carries the streak its checkpoint records
+    fn set_severe_streak(&mut self, streak: u32) {
+        for tile in self.tiles.iter_mut() {
+            tile.levels[0].state.severe_streak = streak;
+        }
+    }
+}
+
+/// one collective root step of the decomposed march from its agreed candidate timestep, through
+/// the shared step transaction: the accepted timestep the tiles advanced by, or none when the
+/// step halted on its entry state, the halt recorded on the first tile
+#[allow(clippy::too_many_arguments)]
+fn decomposed_root_attempt<R, const NDIM: usize, const DOF: usize, M, E, S, Mem, K, T>(
+    tiles: &mut [Hierarchy<R, NDIM, DOF, M, E, S, Mem, K>],
+    counts: [usize; NDIM],
+    devices: &[i32],
+    transport: &T,
+    fine: &[FineSubgrid<NDIM>],
+    root_order: &[usize],
+    nstages: usize,
+    candidate: f64,
+    t: f64,
+) -> Option<f64>
+where
+    R: Regime<f64, NDIM> + Copy,
+    M: Metric<f64, NDIM> + Copy + Send + Sync,
+    E: symbi_hydro::eos::EosFor<f64, <R as Regime<f64, NDIM>>::Energy> + Copy + Send + Sync,
+    S: ExecutionSpace,
+    Mem: MemorySpace + Sync,
+    K: KernelSet<NDIM, DOF, Mem, f64>,
+    T: HaloTransport,
+{
+    let guard = tiles[0].levels[0].state.retry_guard;
+    let mut attempt =
+        TiledRootAttempt { tiles: &mut *tiles, counts, devices, transport, fine, root_order, nstages, restorable: false, sidecars: None };
+    let dt = match take_root_step(&mut attempt, &guard, candidate, t) {
+        Ok::<_, std::convert::Infallible>(RootStep::Accepted { dt }) => dt,
+        Ok(RootStep::Halted(halt)) => {
+            tiles[0].record_step_halt(&halt);
+            return None;
+        }
+    };
     // the continuous tracers onto the finest level holding them, once per accepted root step
     if tiles.iter().any(|t| t.levels.iter().any(|l| l.state.continuous_tracers.is_some())) {
         migrate_continuous_to_finest_decomposed(tiles);
     }
-    gdt
+    Some(dt)
 }
 
 /// the accepted-step tail of the decomposed march: the per-step immersed-body bookkeeping

@@ -3293,17 +3293,16 @@ where
         // non-positive one a degenerate state. a positive increase is allowed: it means the
         // maximum signal speed fell and is not itself unsafe. asserting one diagnosis for all
         // sends every investigation down the same wrong path.
-        let cause = crash_cause(c.dt_cfl, c.panic.as_deref());
+        let cause = crash_cause(c.dt_cfl, c.panic.as_deref(), c.halt.as_ref());
         let summary = format!(
             "crashed — {} steps, t = {:.4} — {cause} · state {crashed}",
             c.iter, c.time,
         );
         table.post_error(&summary);
         table.exit_frame(ExitKind::Crash, &summary);
-        // a panic-origin crash keeps the non-zero process exit the uncaught panic produced,
-        // so schedulers and chains read the same failure signal as before; the watchdog exit
-        // stays a reported halt.
-        if c.panic.is_some() {
+        // a panic-origin crash and a halted root step end with a failing exit, so schedulers
+        // and chains read a failure signal; the invalid-cfl exit stays a reported halt.
+        if c.panic.is_some() || c.halt.is_some() {
             return Err(summary.into());
         }
         return Ok(diagnostics);
@@ -5254,12 +5253,15 @@ fn prolong_order_for(reconstruction: &str) -> ProlongOrder {
 }
 
 /// which halt condition stopped a march, with its numbers: a caught step panic carries its own
-/// message (the FOFC freeze-streak halt names the offending cell and state), a non-finite rate is a
-/// poisoned cell, a non-positive one a degenerate state, and a positive one a reduced retry that
-/// could no longer advance time.
-fn crash_cause(dt_cfl: f64, panic: Option<&str>) -> String {
+/// message (the FOFC freeze-streak halt names the offending cell and state), a halted root step
+/// the retry guard's or the timestep floor's evidence, a non-finite rate is a poisoned cell, a
+/// non-positive one a degenerate state, and a positive one a reduced retry that could no longer
+/// advance time.
+fn crash_cause(dt_cfl: f64, panic: Option<&str>, step: Option<&symbi_sim::step_transaction::StepHalt>) -> String {
     if let Some(msg) = panic {
         format!("step panic: {msg}")
+    } else if let Some(step) = step {
+        step.detail().to_string()
     } else if dt_cfl.is_nan() {
         "cfl dt is NaN — a non-finite wave speed (poisoned cell or boundary)".to_string()
     } else if dt_cfl <= 0.0 {
@@ -6118,7 +6120,7 @@ where
     let sh: Vec<_> = tiles.iter().map(|(s, _)| &**s).collect();
     // a march halted on a timestep it could not take publishes its last state as crashed and no
     // final snapshot, as the single grid does
-    if let Some(h) = diagnostics.halt {
+    if let Some(h) = diagnostics.halt.clone() {
         let crashed = checkpoint_name(cfg, checkpoint_status_tag(CheckpointOutcome::Crashed));
         if let Err(msg) = write_tiles(&sh, &crashed, cadence.index) {
             reporter.fail(&msg);
@@ -6128,10 +6130,11 @@ where
             "crashed — {} steps, t = {:.4} — {} · state {crashed}",
             h.iter,
             h.time,
-            crash_cause(h.dt_cfl, None)
+            crash_cause(h.dt_cfl, None, h.step.as_ref())
         );
         reporter.fail(&summary);
-        return Ok(diagnostics);
+        // a halted root step ends with a failing exit; the invalid-cfl exit stays a reported halt
+        return if h.step.is_some() { Err(summary) } else { Ok(diagnostics) };
     }
     // canonical final snapshot, mirroring the single-grid run; the march drained every device
     // before returning, and the drain here pins that boundary in front of the staging reads.
@@ -6468,24 +6471,24 @@ where
         return Err(msg);
     }
     symbi::sim::decomp::drain_devices::<Mem>(&devices);
-    // a tile that halted on a timestep it could not take, or on a caught step panic, records the
-    // crash: the run publishes its last state as crashed and no final snapshot, as the single
-    // grid does, and a panic-origin crash keeps its failing exit
+    // a tile that halted on a timestep it could not take, a halted root step or a caught step
+    // panic records the crash: the run publishes its state as crashed and no final snapshot, as
+    // the single grid does, and a halted step or a panic ends with a failing exit
     if let Some(c) = tiles.iter().find_map(|h| h.crash.as_ref()) {
         let crashed = checkpoint_name(cfg, checkpoint_status_tag(CheckpointOutcome::Crashed));
         let summary = format!(
             "crashed — {} steps, t = {:.4} — {} · state {crashed}",
             c.iter,
             c.time,
-            crash_cause(c.dt_cfl, c.panic.as_deref())
+            crash_cause(c.dt_cfl, c.panic.as_deref(), c.halt.as_ref())
         );
-        let from_panic = c.panic.is_some();
+        let failing = c.panic.is_some() || c.halt.is_some();
         if let Err(msg) = write_cp(&tiles, &crashed, cadence.index) {
             reporter.fail(&msg);
             return Err(msg);
         }
         reporter.fail(&summary);
-        return if from_panic { Err(summary) } else { Ok(diagnostics) };
+        return if failing { Err(summary) } else { Ok(diagnostics) };
     }
     // canonical final snapshot, after every device drained.
     let final_path = checkpoint_name(cfg, checkpoint_status_tag(CheckpointOutcome::Completed));

@@ -9,6 +9,12 @@
 # end with a failing exit and no final checkpoint, and the in-process drivers
 # write the `.crashed` snapshot of the last state.
 #
+# a retry guard that counts every step as severely reduced and ends the run at
+# the first one refuses the first step of a clean box, refined or flat, on
+# every driver: a failing exit naming the guard, no final checkpoint, and an
+# in-process `.crashed` snapshot of the step entry, the last accepted state at
+# t = 0.
+#
 # run: pytest -m simulation simbi/simulation/tests/test_crash_publication.py
 # =============================================================================
 
@@ -17,6 +23,7 @@ import subprocess
 import sys
 from pathlib import Path
 
+import h5py
 import pytest
 
 from simbi.simulation.tests.test_launch import _layout, bounded_processes  # noqa: F401  the autouse process guard
@@ -45,7 +52,15 @@ class Poisoned(SimbiProblem):
     boundary_conditions: Annotated[list[Any], ProblemParam([BoundaryCondition("outflow")], description="walls")]
     end_time: Annotated[float, ProblemParam(1.0, cli=True, checkpoint_safe=True, description="t")]
     gpus: Annotated[int, ProblemParam(int(os.environ.get("POISON_GPUS", "1")), cli=True, description="devices")]
-    refinement_enabled: Annotated[bool, ProblemParam(True, description="refined")]
+    refinement_enabled: Annotated[bool, ProblemParam(os.environ.get("POISON_REFINED", "1") == "1", description="refined")]
+    retry_severe_ratio: Annotated[
+        float,
+        ProblemParam(float(os.environ.get("POISON_SEVERE_RATIO", "0.0625")), gt=0.0, le=1.0, cli=True, checkpoint_safe=True, description="severe"),
+    ]
+    retry_sustained_steps: Annotated[
+        int,
+        ProblemParam(int(os.environ.get("POISON_SUSTAINED", "8")), ge=1, cli=True, checkpoint_safe=True, description="sustained"),
+    ]
     refinement_max_levels: Annotated[int, ProblemParam(2, description="levels")]
     refinement_regions: Annotated[list[list[float]], ProblemParam(REGIONS, description="boxes")]
     refinement_ratios: Annotated[list[int], ProblemParam([2], description="ratios")]
@@ -58,6 +73,8 @@ class Poisoned(SimbiProblem):
 
     @property
     def source_expressions(self):
+        if os.environ.get("POISON_CLEAN") == "1":
+            return []
         return [{"kind": "force", "dim": 2, "outputs": [1, 2], "params": [],
                  "vocabulary": {"reads": [], "params": []},
                  "nodes": [{"op": "CONSTANT", "value": -1.0}, {"op": "SQRT", "left": 0},
@@ -72,13 +89,13 @@ def probe(tmp_path: Path) -> Path:
     return path
 
 
-def _env(gpus: int) -> dict:
-    env = dict(os.environ, POISON_GPUS=str(gpus), SYMBI_GPU_OVERSUBSCRIBE="1")
+def _env(gpus: int, refined: bool = True) -> dict:
+    env = dict(os.environ, POISON_GPUS=str(gpus), POISON_REFINED="1" if refined else "0", SYMBI_GPU_OVERSUBSCRIBE="1")
     env.pop("SIMBI_LAUNCH_EXPERIMENTAL", None)
     return env
 
 
-def _in_process(probe: Path, out: Path, gpus: int) -> subprocess.CompletedProcess:
+def _in_process(probe: Path, out: Path, gpus: int, env: dict | None = None) -> subprocess.CompletedProcess:
     snippet = (
         "import sys\n"
         f"sys.path.insert(0, {str(probe.parent)!r})\n"
@@ -86,7 +103,14 @@ def _in_process(probe: Path, out: Path, gpus: int) -> subprocess.CompletedProces
         "from poisoned import Poisoned\n"
         "runner.run(Poisoned(data_directory=sys.argv[1], checkpoint_interval=1e9), compute_mode='cpu', validate=False, max_steps=5)\n"
     )
-    return subprocess.run([sys.executable, "-c", snippet, str(out)], capture_output=True, text=True, timeout=600, env=_env(gpus))
+    return subprocess.run([sys.executable, "-c", snippet, str(out)], capture_output=True, text=True, timeout=600, env=env or _env(gpus))
+
+
+def _launch(probe: Path, out: Path, tmp_path: Path, env: dict) -> subprocess.CompletedProcess:
+    layout = _layout(tmp_path / "two.toml", workers=2, shape=(2, 1))
+    cmd = [sys.executable, "-m", "simbi.cli", "launch", str(probe), "--layout", str(layout), "--max-steps", "5",
+           "--data-directory", str(out), "--checkpoint-interval", "1e9"]
+    return subprocess.run(cmd, capture_output=True, text=True, timeout=600, env=env)
 
 
 def _assert_crashed(done: subprocess.CompletedProcess, out: Path, label: str, snapshot: bool) -> None:
@@ -106,8 +130,37 @@ def test_a_crashed_refined_run_publishes_its_state_as_crashed(tmp_path: Path, pr
 
 def test_a_crashed_refined_launch_publishes_no_final_checkpoint(tmp_path: Path, probe: Path) -> None:
     out = tmp_path / "launched"
-    layout = _layout(tmp_path / "two.toml", workers=2, shape=(2, 1))
-    cmd = [sys.executable, "-m", "simbi.cli", "launch", str(probe), "--layout", str(layout), "--max-steps", "5",
-           "--data-directory", str(out), "--checkpoint-interval", "1e9"]
-    done = subprocess.run(cmd, capture_output=True, text=True, timeout=600, env=_env(1))
-    _assert_crashed(done, out, "refined launch", snapshot=False)
+    _assert_crashed(_launch(probe, out, tmp_path, _env(1)), out, "refined launch", snapshot=False)
+
+
+GUARD = "1 consecutive root steps accepted at or below 1 of their candidate timestep"
+
+
+def _refusing(gpus: int, refined: bool) -> dict:
+    """a clean box under a guard that refuses its first step"""
+    return dict(_env(gpus, refined), POISON_CLEAN="1", POISON_SEVERE_RATIO="1.0", POISON_SUSTAINED="1")
+
+
+def _assert_guard_halt(done: subprocess.CompletedProcess, out: Path, label: str, snapshot: bool) -> None:
+    flat = " ".join((done.stdout + done.stderr).split())
+    assert GUARD in flat, f"{label}: the retry guard did not end the run:\n{flat[-1500:]}"
+    assert done.returncode != 0, f"{label}: a run the retry guard ended exited cleanly"
+    assert not list(out.glob("*final*.h5")), f"{label}: a run the retry guard ended published a final checkpoint"
+    if snapshot:
+        crashed = list(out.glob("*crashed*.h5"))
+        assert crashed, f"{label}: no crashed snapshot of the step entry"
+        with h5py.File(crashed[0], "r") as f:
+            clock = (int(f["level_0"].attrs["iteration"]), float(f["level_0"].attrs["time"]))
+        assert clock == (0, 0.0), f"{label}: the crashed snapshot holds {clock}, past the refused step's entry"
+
+
+@pytest.mark.parametrize("refined", [True, False], ids=["refined", "flat"])
+@pytest.mark.parametrize("driver", ["single", "host-tiles", "launch"])
+def test_a_run_the_retry_guard_ends_publishes_the_step_entry_as_crashed(tmp_path: Path, probe: Path, driver: str, refined: bool) -> None:
+    out = tmp_path / "out"
+    label = f"{driver}, {'refined' if refined else 'flat'}"
+    if driver == "launch":
+        _assert_guard_halt(_launch(probe, out, tmp_path, _refusing(1, refined)), out, label, snapshot=False)
+    else:
+        gpus = 1 if driver == "single" else 2
+        _assert_guard_halt(_in_process(probe, out, gpus, _refusing(gpus, refined)), out, label, snapshot=True)

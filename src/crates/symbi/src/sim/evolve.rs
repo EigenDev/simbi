@@ -26,8 +26,9 @@ pub use crate::sim::substrate_seam::KernelSet;
 // re-exported at the `sim::evolve::` path for the bench examples.
 use crate::sim::driver::{
     advance_state_clock, book_horizon_receipt, evolve_bodies, horizon_request, needs_step_snapshot,
-    TimestepFailure, agree_timestep, prof, retry_timestep, set_stage_motion, stage_schedule,
+    TimestepFailure, agree_timestep, prof, set_stage_motion, stage_schedule,
 };
+use symbi_sim::step_transaction::{RootAttempt, RootStep, take_root_step};
 pub use crate::sim::driver::{check_dt, report_profile, reset_profile};
 
 // =============================================================================
@@ -67,19 +68,77 @@ pub fn step_once<R, const D: usize, const DOF: usize, M, E, S, Mem>(
 {
     // the per-step driver opens no projection-ledger scope; its callers advance
     // the clock and own the step boundary, so a projection here books nothing.
-    sim.dt = dt;
-    let guard = sim.retry_guard;
-    let mut ledger = symbi_sim::retry_guard::RetryLedger::new(dt);
-    while step(sim, kernels) {
-        let evidence = symbi_sim::retry_guard::take_evidence(sim, "grid", ledger.rejections());
-        ledger.reject(&guard, sim.dt, evidence).unwrap_or_else(|failure| panic!("{failure}"));
-        kernels.restore_step(sim);
-        sim.reset_state_clock();
-        symbi_sim::tracers::restore_transport_state(&mut sim.store);
-        sim.dt = retry_timestep(sim.dt, sim.time).unwrap_or_else(|err| panic!("{}", err.detail));
+    let (guard, time) = (sim.retry_guard, sim.time);
+    let mut attempt = GridAttempt { sim, kernels, restorable: false };
+    match take_root_step(&mut attempt, &guard, dt, time) {
+        Ok::<_, std::convert::Infallible>(RootStep::Accepted { .. }) => {}
+        Ok(RootStep::Halted(halt)) => panic!("{}", halt.detail()),
     }
-    let accepted = sim.dt;
-    symbi_sim::retry_guard::accept(&guard, &mut sim.severe_streak, &ledger, accepted).unwrap_or_else(|failure| panic!("{failure}"));
+}
+
+/// the attempts of one standalone single-grid step: the retry snapshot when the step can end in
+/// a restore, the stage sequence, and the restore of the fields, clock and tracer transport
+struct GridAttempt<'s, 'k, R, const D: usize, const DOF: usize, M, E, S, Mem, K>
+where
+    R: Regime<f64, D>,
+    M: Metric<f64, D> + Copy,
+    E: Eos<f64>,
+    S: ExecutionSpace,
+    Mem: MemorySpace,
+    K: KernelSet<D, DOF, Mem, f64>,
+{
+    sim: &'s mut SimStateGeneric<R, D, DOF, M, E, S, Mem>,
+    kernels: &'k K,
+    restorable: bool,
+}
+
+impl<R, const D: usize, const DOF: usize, M, E, S, Mem, K> RootAttempt for GridAttempt<'_, '_, R, D, DOF, M, E, S, Mem, K>
+where
+    R: Regime<f64, D>,
+    M: Metric<f64, D> + Copy,
+    E: Eos<f64>,
+    S: ExecutionSpace,
+    Mem: MemorySpace,
+    K: KernelSet<D, DOF, Mem, f64>,
+{
+    type Error = std::convert::Infallible;
+
+    fn rejectable(&mut self) -> bool {
+        self.kernels.fofc_active()
+    }
+
+    fn capture(&mut self, dt: f64, restorable: bool) -> Result<(), Self::Error> {
+        self.sim.dt = dt;
+        self.restorable = restorable;
+        if restorable {
+            prof("snapshot_retry", || self.kernels.snapshot_retry(self.sim));
+        }
+        Ok(())
+    }
+
+    fn run(&mut self, _dt: f64) -> Result<bool, Self::Error> {
+        Ok(!step(self.sim, self.kernels))
+    }
+
+    fn evidence(&mut self, rejections: u32) -> Vec<String> {
+        symbi_sim::retry_guard::take_evidence(self.sim, "grid", rejections)
+    }
+
+    fn restore(&mut self) -> Result<(), Self::Error> {
+        assert!(self.restorable, "a step restored from an incomplete capture");
+        self.kernels.restore_step(self.sim);
+        self.sim.reset_state_clock();
+        symbi_sim::tracers::restore_transport_state(&mut self.sim.store);
+        Ok(())
+    }
+
+    fn severe_streak(&mut self) -> u32 {
+        self.sim.severe_streak
+    }
+
+    fn set_severe_streak(&mut self, streak: u32) {
+        self.sim.severe_streak = streak;
+    }
 }
 
 pub fn evolve_with_callback<R, const D: usize, const DOF: usize, M, E, S, Mem>(
@@ -220,29 +279,16 @@ where
                 return Err(err);
             }
         };
-        sim.dt = dt;
-        let guard = sim.retry_guard;
-        let mut ledger = symbi_sim::retry_guard::RetryLedger::new(dt);
-        let guard_failure = |failure: symbi_sim::retry_guard::RetryGuardFailure| symbi_xpu::XpuError {
-            operation: "evolve",
-            code: -1,
-            detail: failure.detail,
-        };
-        loop {
-            if step(sim, kernels) {
-                let evidence = symbi_sim::retry_guard::take_evidence(sim, "grid", ledger.rejections());
-                ledger.reject(&guard, sim.dt, evidence).map_err(guard_failure)?;
-                kernels.restore_step(sim);
-                sim.reset_state_clock();
-                symbi_sim::tracers::restore_transport_state(&mut sim.store);
-                sim.dt = retry_timestep(sim.dt, sim.time)?;
-                continue;
+        // the step transaction, its sustained-reduction guard decided before the step is published
+        // to the callback
+        let (guard, time) = (sim.retry_guard, sim.time);
+        let mut attempt = GridAttempt { sim: &mut *sim, kernels, restorable: false };
+        match take_root_step(&mut attempt, &guard, dt, time) {
+            Ok::<_, std::convert::Infallible>(RootStep::Accepted { .. }) => {}
+            Ok(RootStep::Halted(halt)) => {
+                return Err(symbi_xpu::XpuError { operation: "evolve", code: -1, detail: halt.detail().to_string() });
             }
-            break;
         }
-        // the sustained-reduction guard before the step is published to the callback
-        let accepted = sim.dt;
-        symbi_sim::retry_guard::accept(&guard, &mut sim.severe_streak, &ledger, accepted).map_err(guard_failure)?;
         // no per-step host-side scans: the `if !dt.is_finite()` check
         // above catches NaN/Inf cascades on the very next iteration
         // (NaN cons -> NaN wave speeds -> NaN dt -> panic). a per-cell host
@@ -474,9 +520,6 @@ where
 {
     let stages = sim.timestepping.stages();
     let n = stages.len();
-    if k.fofc_active() {
-        prof("snapshot_retry", || k.snapshot_retry(sim));
-    }
     // snapshot u^n once for multi-stage schemes (RK2/RK3 corrector reads it with a0>0).
     // forward-Euler (n=1, a0=0) reads u_n only at zero weight, so the snapshot
     // write is pure bandwidth waste. RMHD additionally saves bcell -> bcell_n for the

@@ -29,7 +29,7 @@ use crate::atlas::{AuditAt, ExchangePoint, TileId};
 use crate::decomp::{HaloTransport, plan_fields};
 use crate::driver::{
     advance_clock, advance_state_clock, downstream_injection_weight, needs_step_snapshot,
-    TimestepFailure, agree_timestep, retry_timestep, stage_schedule,
+    TimestepFailure, agree_timestep, stage_schedule,
 };
 use crate::plan_exchange::{AuditCost, AuditError, PlanExchange, StagingFault};
 use crate::stage::{
@@ -722,6 +722,434 @@ pub fn fail<L: Link>(fabric: &mut Fabric<L>, err: WorkerError) -> WorkerError {
     err
 }
 
+/// the attempts of one root step on a worker: every held tile captures its retry snapshot, the
+/// stages advance with the troubled marks, the freeze streak and the rejection agreed across the
+/// workers, and a rejection restores every held tile and refreshes the halos at the rollback
+/// exchange point
+struct WorkerRootAttempt<'a, 's, 'p, 'h, const D: usize, const DOF: usize, M, K, T, L>
+where
+    M: MemorySpace,
+    K: KernelSet<D, DOF, M, f64>,
+    T: HaloTransport,
+    L: Link,
+{
+    tiles: &'a [TileId],
+    stores: &'a mut [&'s mut FieldStore<D, DOF, M, f64>],
+    kernels: &'a [&'a K],
+    devices: &'a [i32],
+    exchange: &'a PlanExchange<'p, D>,
+    transport: &'a T,
+    fabric: &'a mut Fabric<L>,
+    cfg: &'a WorkerConfig,
+    stage_hook: &'a mut crate::decomp::TileStageHook<'h, D, DOF, M>,
+    timing: &'a mut WorkerTiming,
+    report: &'a mut WorkerReport,
+    schedule: &'a [crate::driver::StageSpec],
+    stages: &'a [(f64, f64)],
+    multistage: bool,
+    has_axis_rings: bool,
+    has_tracers: bool,
+    has_continuous: bool,
+    n_cells: [usize; D],
+    ring_len: u64,
+    excise_passes: usize,
+    tracer_layouts: &'a [crate::tracers::TransportLayout<D>],
+    motion_n: Vec<symbi_geometry::MotionState<f64>>,
+    a_n: Vec<f64>,
+    iter: u64,
+    /// the attempt's ordinal within the root step, the exchange points' and injections' label
+    attempt: u16,
+    restorable: bool,
+    /// each tile's tracer injections of the last attempt, spawned once the step is accepted
+    injection_ledgers: Vec<std::collections::BTreeMap<crate::mass_transport::ContainerId, f64>>,
+}
+
+impl<const D: usize, const DOF: usize, M, K, T, L> crate::step_transaction::RootAttempt
+    for WorkerRootAttempt<'_, '_, '_, '_, D, DOF, M, K, T, L>
+where
+    M: MemorySpace,
+    K: KernelSet<D, DOF, M, f64>,
+    T: HaloTransport,
+    L: Link,
+    symbi_geometry::Cartesian: symbi_geometry::Metric<f64, D>,
+{
+    type Error = WorkerError;
+
+    fn rejectable(&mut self) -> bool {
+        self.kernels.iter().any(|k| k.fofc_active()) || !self.cfg.injection.reject_at.is_empty()
+    }
+
+    fn capture(&mut self, dt: f64, restorable: bool) -> Result<(), WorkerError> {
+        self.restorable = restorable;
+        let (tiles, devices) = (self.tiles, self.devices);
+        let dev = |k: usize| devices[tiles[k].0 as usize];
+        for k in 0..self.stores.len() {
+            let (store, kernel) = (&*self.stores[k], self.kernels[k]);
+            if restorable {
+                with_device(dev(k), || kernel.snapshot_retry(store));
+            }
+            if self.multistage {
+                with_device(dev(k), || kernel.snapshot(store));
+            }
+        }
+        for s in self.stores.iter_mut() {
+            s.dt = dt;
+            if self.has_tracers {
+                crate::tracers::snapshot_transport_state(&mut **s);
+            }
+            if self.has_continuous {
+                let geometry = s.geom.block_geometry(symbi_geometry::Cartesian);
+                crate::tracers::begin_ito_transport_store(&mut **s, &geometry)
+                    .map_err(|e| fail(self.fabric, WorkerError::Numerics(format!("ito transport initialization: {e}"))))?;
+            }
+        }
+        Ok(())
+    }
+
+    fn run(&mut self, dt: f64) -> Result<bool, WorkerError> {
+        let (tiles, kernels, devices, exchange, transport, cfg) =
+            (self.tiles, self.kernels, self.devices, self.exchange, self.transport, self.cfg);
+        let (schedule, stages, tracer_layouts) = (self.schedule, self.stages, self.tracer_layouts);
+        let (has_axis_rings, has_tracers, has_continuous) = (self.has_axis_rings, self.has_tracers, self.has_continuous);
+        let (n_cells, ring_len, excise_passes, iter, attempt) = (self.n_cells, self.ring_len, self.excise_passes, self.iter, self.attempt);
+        let a_n = &self.a_n;
+        let stores = &mut *self.stores;
+        let fabric = &mut *self.fabric;
+        let stage_hook = &mut *self.stage_hook;
+        let timing = &mut *self.timing;
+        let report = &mut *self.report;
+        let deadline = cfg.deadline;
+        let n = stores.len();
+        let n_tiles = devices.len();
+        let dev = |k: usize| devices[tiles[k].0 as usize];
+        macro_rules! shared {
+            () => {{
+                let sh: Vec<&FieldStore<D, DOF, M, f64>> = stores.iter().map(|s| &**s).collect();
+                sh
+            }};
+        }
+        self.injection_ledgers = vec![std::collections::BTreeMap::new(); n];
+        let injection_ledgers = &mut self.injection_ledgers;
+        let mut rejected = false;
+        for stage in schedule {
+            for (k, s) in stores.iter_mut().enumerate() {
+                let t_entry = s.time + stage.entry * dt;
+                let law_value = s.motion_law.as_ref().map(|law| (law.a_at(t_entry), law.adot_at(t_entry)));
+                crate::driver::set_stage_motion(&mut s.motion, law_value, dt, a_n[k], stage.entry);
+            }
+            let sh = shared!();
+            let mut retry = false;
+            let args = StageArgs {
+                dt,
+                a0: stage.a0,
+                ac: stage.ac,
+                stage: stage.index,
+                n_stages: stages.len(),
+                injection_weight: downstream_injection_weight(stages, stage.index),
+                allow_elision: false,
+                exit_fraction: crate::driver::stage_exit_fraction(stages, stage.index),
+            };
+            // the stage runs in two spans. the first ends with every owned tile's troubled
+            // cells marked; the worker then makes one vote for all of them, so workers
+            // holding different numbers of tiles issue the same collective sequence.
+            let mut troubled = 0u64;
+            if has_axis_rings {
+                // the edges on a coordinate axis are reconciled over the whole ring between
+                // the stage's complete EMF and its curl: every worker supplies the copies its
+                // tiles own to one assembled vector and reconciles the rings it holds from it
+                for k in 0..n {
+                    with_device(dev(k), || fold_stage_through_emf(sh[k], kernels[k], args, &mut |hp| stage_hook(k, sh[k], hp, args)));
+                }
+                let entries: Vec<(u64, u64)> =
+                    (0..n).flat_map(|k| crate::axis_ring::ring_entries(sh[k], n_cells)).collect();
+                let clock = Instant::now();
+                let assembled = fabric
+                    .assemble_windowed(ring_len, &entries, deadline)
+                    .map_err(|e| fail(fabric, e.into()))?;
+                timing.collectives += clock.elapsed();
+                for k in 0..n {
+                    crate::axis_ring::apply_assembled(sh[k], n_cells, &assembled, symbi_fabric::ABSENT);
+                    troubled += with_device(dev(k), || fold_stage_curl_through_mark(sh[k], kernels[k], args, &mut |hp| stage_hook(k, sh[k], hp, args)));
+                }
+            } else {
+                for k in 0..n {
+                    troubled += with_device(dev(k), || {
+                        fold_stage_through_mark(sh[k], kernels[k], args, &mut |hp| stage_hook(k, sh[k], hp, args))
+                    });
+                }
+            }
+            if attempt == 0 {
+                if let Some((at_step, at_stage, cell)) = cfg.injection.trouble_at {
+                    if (at_step, at_stage) == (iter, stage.index) {
+                        let cell: [isize; D] = std::array::from_fn(|ax| cell[ax]);
+                        for k in 0..n {
+                            if let Some(local) = exchange.local_cell(tiles[k], cell) {
+                                troubled += raise_troubled_cell(sh[k], local);
+                            }
+                        }
+                    }
+                }
+            }
+            let clock = Instant::now();
+            let any_troubled = fabric
+                .collective(OpKind::Any, u64::from(troubled > 0), deadline)
+                .map_err(|e| fail(fabric, e.into()))?;
+            timing.collectives += clock.elapsed();
+            // a face on a cut takes the first-order flux when either cell sharing it is
+            // troubled, and those cells sit on different tiles: the flags cross the cuts
+            // before any tile corrects, and a tile whose cut ghosts received a set flag
+            // corrects with a clean interior. every flag ghost on a cut is rewritten here,
+            // so none survives from an earlier stage or attempt.
+            let mut cut_trouble = vec![false; n];
+            let mut clean = vec![false; n];
+            if any_troubled != 0 {
+                report.troubled_exchanges += 1;
+                for k in 0..n {
+                    clean[k] = with_device(dev(k), || {
+                        kernels[k].fofc_flags_in(sh[k], &sh[k].geom.interior) == 0
+                    });
+                }
+                exchange_point(
+                    exchange,
+                    tiles,
+                    &sh,
+                    n_tiles,
+                    devices,
+                    transport,
+                    fabric,
+                    ExchangePoint::Troubled(stage.index as u8),
+                    iter,
+                    attempt,
+                    deadline,
+                    &mut timing.exchange,
+                )
+                .map_err(|e| fail(fabric, e.into()))?;
+                for k in 0..n {
+                    cut_trouble[k] = with_device(dev(k), || {
+                        exchange
+                            .trouble_regions(tiles[k])
+                            .iter()
+                            .any(|region| kernels[k].fofc_flags_in(sh[k], region) > 0)
+                    });
+                }
+            }
+            // every tile, on every worker, holds the level's agreed freeze count between passes
+            let prior_streak = kernels[0].freeze_streak();
+            for k in 0..n {
+                let outcome = with_device(dev(k), || {
+                    fold_stage_from_correction(
+                        sh[k],
+                        kernels[k],
+                        args,
+                        cut_trouble[k],
+                        &mut |hp| stage_hook(k, sh[k], hp, args),
+                    )
+                });
+                retry |= outcome == StageOutcome::RetryStep;
+                report.neighbor_corrections += u64::from(cut_trouble[k] && clean[k]);
+            }
+            let clock = Instant::now();
+            let froze = fabric
+                .collective(OpKind::Any, u64::from((0..n).any(|k| kernels[k].freeze_streak() > 0)), deadline)
+                .map_err(|e| fail(fabric, e.into()))?;
+            timing.collectives += clock.elapsed();
+            let streak = crate::stage::agreed_freeze_streak(prior_streak, froze != 0);
+            for k in 0..n {
+                kernels[k].set_freeze_streak(streak);
+            }
+            if attempt == 0 && cfg.injection.reject_at.contains(&(iter, stage.index)) {
+                retry = true;
+            }
+            // the rejection is decided before this stage's halos move, so no halo is
+            // computed from a rejected state.
+            let clock = Instant::now();
+            let reject = fabric
+                .collective(OpKind::Any, u64::from(retry), deadline)
+                .map_err(|e| fail(fabric, e.into()))?;
+            timing.collectives += clock.elapsed();
+            if reject != 0 {
+                rejected = true;
+                break;
+            }
+            // the excision of the accepted stage, its sweep and rebuild refreshed at their own
+            // points, before the stage's halos move
+            if excise_passes > 0 {
+                let mut step = WorkerStep {
+                    exchange,
+                    tiles,
+                    n_tiles,
+                    devices,
+                    transport,
+                    fabric: &mut *fabric,
+                    kernels,
+                    step: iter,
+                    attempt,
+                    deadline,
+                    spent: &mut timing.exchange,
+                    failure: None,
+                    excise_at: stage.index as u8,
+                    excise_passes,
+                };
+                let folded = crate::stage::fold_stage_excision(&sh, kernels, &mut step);
+                if let Some(e) = step.failure.take() {
+                    return Err(fail(fabric, e.into()));
+                }
+                if let Err(e) = folded {
+                    return Err(fail(fabric, WorkerError::Numerics(e.to_string())));
+                }
+            }
+            exchange_point(
+                exchange,
+                tiles,
+                &sh,
+                n_tiles,
+                devices,
+                transport,
+                fabric,
+                ExchangePoint::Stage(stage.index as u8),
+                iter,
+                attempt,
+                deadline,
+        &mut timing.exchange,
+    )
+            .map_err(|e| fail(fabric, e.into()))?;
+            flip_polar_bands(exchange, tiles, &sh, kernels, devices);
+            for k in 0..n {
+                with_device(dev(k), || kernels[k].ghost_fill(sh[k]));
+            }
+            if cfg.audit_every_point {
+                let at = AuditAt::Stage(stage.index as u8);
+                audit_point(
+                    exchange, tiles, &sh, n_tiles, fabric, at, iter, attempt, deadline,
+                    &mut *report,
+                )
+                .map_err(|e| fail(fabric, e))?;
+            }
+            drop(sh);
+            // the stage's tracer transport on the exchanged state: each tile books its
+            // boundary and source injection and moves its tracers' owners, the leavers cross
+            // to their owners' tiles, the ancestry blend runs, and the reverted cross again
+            if has_tracers || has_continuous {
+                for k in 0..n {
+                    let store = &mut *stores[k];
+                    let geometry = store.geom.block_geometry(symbi_geometry::Cartesian);
+                    let layout = tracer_layouts[k];
+                    if has_continuous {
+                        crate::tracers::accumulate_ito_transport_stage_store(store, &geometry, stage.ac)
+                            .map_err(|e| fail(fabric, WorkerError::Numerics(format!("ito transport accumulation: {e}"))))?;
+                    }
+                    let mut injections = crate::tracers::boundary_injection_transfers_store(&*store, &geometry, layout);
+                    injections.extend(crate::tracers::source_injection_transfers_store(
+                        &*store, &geometry, layout, stage.a0, stage.ac,
+                    ));
+                    crate::tracers::fold_injection_ledger(&mut injection_ledgers[k], injections, stage.ac);
+                    if has_tracers {
+                        crate::tracers::advance_stage_mass_transport_tile(store, &geometry, layout, stage.a0, stage.ac, stage.index)
+                            .map_err(|e| fail(fabric, WorkerError::Numerics(format!("tracer mass transport: {e}"))))?;
+                    }
+                }
+            }
+            if has_tracers {
+                let moves = crate::worker_tracers::migrate_discrete(stores, tiles, exchange.plan(), fabric, deadline)
+                    .map_err(|e| fail(fabric, e.into()))?;
+                report.tracer_migrations.add(moves);
+                crate::worker_tracers::blend_discrete(stores, stage.ac, stage.index);
+                let moves = crate::worker_tracers::migrate_discrete(stores, tiles, exchange.plan(), fabric, deadline)
+                    .map_err(|e| fail(fabric, e.into()))?;
+                report.tracer_migrations.add(moves);
+            }
+        }
+        if rejected {
+            report.rejections += 1;
+        }
+        Ok(!rejected)
+    }
+
+    fn evidence(&mut self, rejections: u32) -> Vec<String> {
+        // every worker books the agreed rejection with the evidence its own tiles hold, so every
+        // worker reaches the guard's decision at the same attempt
+        let mut evidence = Vec::new();
+        for (k, store) in self.stores.iter().enumerate() {
+            let site = format!("worker {}, tile {}, level 0", self.fabric.me().0, self.tiles[k].0);
+            evidence.extend(crate::retry_guard::take_evidence(&**store, &site, rejections));
+        }
+        evidence
+    }
+
+    fn restore(&mut self) -> Result<(), WorkerError> {
+        assert!(self.restorable, "a root step restored from an incomplete capture");
+        // a migrated tracer lives in another tile's storage, and a per-tile restore leaves it
+        // there, so a traced run ends in place of a replay
+        if self.has_tracers || self.has_continuous {
+            return Err(fail(
+                self.fabric,
+                WorkerError::Numerics(
+                    "a step was rejected with tracers attached: cross-tile tracer migration has no per-tile inverse".into(),
+                ),
+            ));
+        }
+        for (k, s) in self.stores.iter_mut().enumerate() {
+            s.motion = self.motion_n[k];
+        }
+        let (tiles, devices, kernels) = (self.tiles, self.devices, self.kernels);
+        let dev = |k: usize| devices[tiles[k].0 as usize];
+        let sh: Vec<&FieldStore<D, DOF, M, f64>> = self.stores.iter().map(|s| &**s).collect();
+        for k in 0..sh.len() {
+            // a replay from anything but the step entry is a different computation dressed as a
+            // retry: every worker ends the session instead
+            if !kernels[k].rollback_snapshot_is_complete(sh[k]) {
+                return Err(fail(
+                    self.fabric,
+                    WorkerError::Numerics(
+                        "a step was rejected on a kernel set without a complete rollback \
+                         snapshot; the replay cannot start from the step entry"
+                            .into(),
+                    ),
+                ));
+            }
+            with_device(dev(k), || kernels[k].restore_step(sh[k]));
+            // the tile stands at its step entry again, the clock its ghost refills read
+            sh[k].reset_state_clock();
+        }
+        let deadline = self.cfg.deadline;
+        exchange_point(
+            self.exchange,
+            tiles,
+            &sh,
+            devices.len(),
+            devices,
+            self.transport,
+            self.fabric,
+            ExchangePoint::Rollback,
+            self.iter,
+            self.attempt,
+            deadline,
+            &mut self.timing.exchange,
+        )
+        .map_err(|e| fail(self.fabric, e.into()))?;
+        flip_polar_bands(self.exchange, tiles, &sh, kernels, devices);
+        for k in 0..sh.len() {
+            with_device(dev(k), || kernels[k].ghost_fill(sh[k]));
+        }
+        if self.cfg.audit_every_point {
+            audit_point(self.exchange, tiles, &sh, devices.len(), self.fabric, AuditAt::Rollback, self.iter, self.attempt, deadline, self.report)
+                .map_err(|e| fail(self.fabric, e))?;
+        }
+        self.attempt += 1;
+        Ok(())
+    }
+
+    fn severe_streak(&mut self) -> u32 {
+        self.stores[0].severe_streak
+    }
+
+    fn set_severe_streak(&mut self, streak: u32) {
+        for store in self.stores.iter_mut() {
+            store.severe_streak = streak;
+        }
+    }
+}
+
 /// end the run on a retry-guard failure: the guard's decision follows from the agreed timestep and
 /// the agreed rejections, so every worker reaches it at the same point, and a collective there lets
 /// each worker report its own evidence before any peer's abort ends its session
@@ -1112,10 +1540,6 @@ where
                 dt = dt.min(f64::from_bits(bits));
             }
         }
-        // the root step's candidate: the agreed timestep after its final-time clamp and caps
-        let guard = stores[0].retry_guard;
-        let mut ledger = crate::retry_guard::RetryLedger::new(dt);
-        let mut attempt: u16 = 0;
         // homologous mesh motion: each stage's dispatches bind the geometry and grid-velocity
         // scalars from the tile's motion state, which holds a(t) at the stage's entry; the step
         // entry is kept for a rollback and for the step-tail advance
@@ -1134,356 +1558,55 @@ where
                 ));
             }
         }
-        loop {
-            {
-                let sh = shared!();
-                for k in 0..n {
-                    if kernels[k].fofc_active() {
-                        with_device(dev(k), || kernels[k].snapshot_retry(sh[k]));
-                    }
-                    if multistage {
-                        with_device(dev(k), || kernels[k].snapshot(sh[k]));
-                    }
-                }
+        // the root step from its candidate, the agreed timestep after its final-time clamp and caps
+        let guard = stores[0].retry_guard;
+        let mut root = WorkerRootAttempt {
+            tiles,
+            stores: &mut *stores,
+            kernels,
+            devices,
+            exchange,
+            transport,
+            fabric: &mut *fabric,
+            cfg,
+            stage_hook: &mut *stage_hook,
+            timing: &mut timing,
+            report: &mut report,
+            schedule: &schedule,
+            stages,
+            multistage,
+            has_axis_rings,
+            has_tracers,
+            has_continuous,
+            n_cells,
+            ring_len,
+            excise_passes,
+            tracer_layouts: &tracer_layouts,
+            motion_n,
+            a_n: a_n.clone(),
+            iter,
+            attempt: 0,
+            restorable: false,
+            injection_ledgers: Vec::new(),
+        };
+        let step = crate::step_transaction::take_root_step(&mut root, &guard, dt, t)?;
+        injection_ledgers = std::mem::take(&mut root.injection_ledgers);
+        // the accepted attempt's ordinal labels the step tail's exchange points
+        let attempt = root.attempt;
+        drop(root);
+        let dt = match step {
+            crate::step_transaction::RootStep::Accepted { dt } => dt,
+            crate::step_transaction::RootStep::Halted(crate::step_transaction::StepHalt::Guard(failure)) => {
+                return Err(guard_failure(fabric, failure, &cfg.injection, deadline));
             }
-            for s in stores.iter_mut() {
-                s.dt = dt;
-                if has_tracers {
-                    crate::tracers::snapshot_transport_state(&mut **s);
-                }
-                if has_continuous {
-                    let geometry = s.geom.block_geometry(symbi_geometry::Cartesian);
-                    crate::tracers::begin_ito_transport_store(&mut **s, &geometry)
-                        .map_err(|e| fail(fabric, WorkerError::Numerics(format!("ito transport initialization: {e}"))))?;
-                }
+            crate::step_transaction::RootStep::Halted(crate::step_transaction::StepHalt::Timestep { detail, .. }) => {
+                return Err(fail(fabric, WorkerError::Numerics(detail)));
             }
-            injection_ledgers = vec![std::collections::BTreeMap::new(); n];
-            let mut rejected = false;
-            for stage in &schedule {
-                for (k, s) in stores.iter_mut().enumerate() {
-                    let t_entry = s.time + stage.entry * dt;
-                    let law_value = s.motion_law.as_ref().map(|law| (law.a_at(t_entry), law.adot_at(t_entry)));
-                    crate::driver::set_stage_motion(&mut s.motion, law_value, dt, a_n[k], stage.entry);
-                }
-                let sh = shared!();
-                let mut retry = false;
-                let args = StageArgs {
-                    dt,
-                    a0: stage.a0,
-                    ac: stage.ac,
-                    stage: stage.index,
-                    n_stages: stages.len(),
-                    injection_weight: downstream_injection_weight(stages, stage.index),
-                    allow_elision: false,
-                    exit_fraction: crate::driver::stage_exit_fraction(stages, stage.index),
-                };
-                // the stage runs in two spans. the first ends with every owned tile's troubled
-                // cells marked; the worker then makes one vote for all of them, so workers
-                // holding different numbers of tiles issue the same collective sequence.
-                let mut troubled = 0u64;
-                if has_axis_rings {
-                    // the edges on a coordinate axis are reconciled over the whole ring between
-                    // the stage's complete EMF and its curl: every worker supplies the copies its
-                    // tiles own to one assembled vector and reconciles the rings it holds from it
-                    for k in 0..n {
-                        with_device(dev(k), || fold_stage_through_emf(sh[k], kernels[k], args, &mut |hp| stage_hook(k, sh[k], hp, args)));
-                    }
-                    let entries: Vec<(u64, u64)> =
-                        (0..n).flat_map(|k| crate::axis_ring::ring_entries(sh[k], n_cells)).collect();
-                    let clock = Instant::now();
-                    let assembled = fabric
-                        .assemble_windowed(ring_len, &entries, deadline)
-                        .map_err(|e| fail(fabric, e.into()))?;
-                    timing.collectives += clock.elapsed();
-                    for k in 0..n {
-                        crate::axis_ring::apply_assembled(sh[k], n_cells, &assembled, symbi_fabric::ABSENT);
-                        troubled += with_device(dev(k), || fold_stage_curl_through_mark(sh[k], kernels[k], args, &mut |hp| stage_hook(k, sh[k], hp, args)));
-                    }
-                } else {
-                    for k in 0..n {
-                        troubled += with_device(dev(k), || {
-                            fold_stage_through_mark(sh[k], kernels[k], args, &mut |hp| stage_hook(k, sh[k], hp, args))
-                        });
-                    }
-                }
-                if attempt == 0 {
-                    if let Some((at_step, at_stage, cell)) = cfg.injection.trouble_at {
-                        if (at_step, at_stage) == (iter, stage.index) {
-                            let cell: [isize; D] = std::array::from_fn(|ax| cell[ax]);
-                            for k in 0..n {
-                                if let Some(local) = exchange.local_cell(tiles[k], cell) {
-                                    troubled += raise_troubled_cell(sh[k], local);
-                                }
-                            }
-                        }
-                    }
-                }
-                let clock = Instant::now();
-                let any_troubled = fabric
-                    .collective(OpKind::Any, u64::from(troubled > 0), deadline)
-                    .map_err(|e| fail(fabric, e.into()))?;
-                timing.collectives += clock.elapsed();
-                // a face on a cut takes the first-order flux when either cell sharing it is
-                // troubled, and those cells sit on different tiles: the flags cross the cuts
-                // before any tile corrects, and a tile whose cut ghosts received a set flag
-                // corrects with a clean interior. every flag ghost on a cut is rewritten here,
-                // so none survives from an earlier stage or attempt.
-                let mut cut_trouble = vec![false; n];
-                let mut clean = vec![false; n];
-                if any_troubled != 0 {
-                    report.troubled_exchanges += 1;
-                    for k in 0..n {
-                        clean[k] = with_device(dev(k), || {
-                            kernels[k].fofc_flags_in(sh[k], &sh[k].geom.interior) == 0
-                        });
-                    }
-                    exchange_point(
-                        exchange,
-                        tiles,
-                        &sh,
-                        n_tiles,
-                        devices,
-                        transport,
-                        fabric,
-                        ExchangePoint::Troubled(stage.index as u8),
-                        iter,
-                        attempt,
-                        deadline,
-                        &mut timing.exchange,
-                    )
-                    .map_err(|e| fail(fabric, e.into()))?;
-                    for k in 0..n {
-                        cut_trouble[k] = with_device(dev(k), || {
-                            exchange
-                                .trouble_regions(tiles[k])
-                                .iter()
-                                .any(|region| kernels[k].fofc_flags_in(sh[k], region) > 0)
-                        });
-                    }
-                }
-                // every tile, on every worker, holds the level's agreed freeze count between passes
-                let prior_streak = kernels[0].freeze_streak();
-                for k in 0..n {
-                    let outcome = with_device(dev(k), || {
-                        fold_stage_from_correction(
-                            sh[k],
-                            kernels[k],
-                            args,
-                            cut_trouble[k],
-                            &mut |hp| stage_hook(k, sh[k], hp, args),
-                        )
-                    });
-                    retry |= outcome == StageOutcome::RetryStep;
-                    report.neighbor_corrections += u64::from(cut_trouble[k] && clean[k]);
-                }
-                let clock = Instant::now();
-                let froze = fabric
-                    .collective(OpKind::Any, u64::from((0..n).any(|k| kernels[k].freeze_streak() > 0)), deadline)
-                    .map_err(|e| fail(fabric, e.into()))?;
-                timing.collectives += clock.elapsed();
-                let streak = crate::stage::agreed_freeze_streak(prior_streak, froze != 0);
-                for k in 0..n {
-                    kernels[k].set_freeze_streak(streak);
-                }
-                if attempt == 0 && cfg.injection.reject_at.contains(&(iter, stage.index)) {
-                    retry = true;
-                }
-                // the rejection is decided before this stage's halos move, so no halo is
-                // computed from a rejected state.
-                let clock = Instant::now();
-                let reject = fabric
-                    .collective(OpKind::Any, u64::from(retry), deadline)
-                    .map_err(|e| fail(fabric, e.into()))?;
-                timing.collectives += clock.elapsed();
-                if reject != 0 {
-                    rejected = true;
-                    break;
-                }
-                // the excision of the accepted stage, its sweep and rebuild refreshed at their own
-                // points, before the stage's halos move
-                if excise_passes > 0 {
-                    let mut step = WorkerStep {
-                        exchange,
-                        tiles,
-                        n_tiles,
-                        devices,
-                        transport,
-                        fabric: &mut *fabric,
-                        kernels,
-                        step: iter,
-                        attempt,
-                        deadline,
-                        spent: &mut timing.exchange,
-                        failure: None,
-                        excise_at: stage.index as u8,
-                        excise_passes,
-                    };
-                    let folded = crate::stage::fold_stage_excision(&sh, kernels, &mut step);
-                    if let Some(e) = step.failure.take() {
-                        return Err(fail(fabric, e.into()));
-                    }
-                    if let Err(e) = folded {
-                        return Err(fail(fabric, WorkerError::Numerics(e.to_string())));
-                    }
-                }
-                exchange_point(
-                    exchange,
-                    tiles,
-                    &sh,
-                    n_tiles,
-                    devices,
-                    transport,
-                    fabric,
-                    ExchangePoint::Stage(stage.index as u8),
-                    iter,
-                    attempt,
-                    deadline,
-            &mut timing.exchange,
-        )
-                .map_err(|e| fail(fabric, e.into()))?;
-                flip_polar_bands(exchange, tiles, &sh, kernels, devices);
-                for k in 0..n {
-                    with_device(dev(k), || kernels[k].ghost_fill(sh[k]));
-                }
-                if cfg.audit_every_point {
-                    let at = AuditAt::Stage(stage.index as u8);
-                    audit_point(
-                        exchange, tiles, &sh, n_tiles, fabric, at, iter, attempt, deadline,
-                        &mut report,
-                    )
-                    .map_err(|e| fail(fabric, e))?;
-                }
-                drop(sh);
-                // the stage's tracer transport on the exchanged state: each tile books its
-                // boundary and source injection and moves its tracers' owners, the leavers cross
-                // to their owners' tiles, the ancestry blend runs, and the reverted cross again
-                if has_tracers || has_continuous {
-                    for k in 0..n {
-                        let store = &mut *stores[k];
-                        let geometry = store.geom.block_geometry(symbi_geometry::Cartesian);
-                        let layout = tracer_layouts[k];
-                        if has_continuous {
-                            crate::tracers::accumulate_ito_transport_stage_store(store, &geometry, stage.ac)
-                                .map_err(|e| fail(fabric, WorkerError::Numerics(format!("ito transport accumulation: {e}"))))?;
-                        }
-                        let mut injections = crate::tracers::boundary_injection_transfers_store(&*store, &geometry, layout);
-                        injections.extend(crate::tracers::source_injection_transfers_store(
-                            &*store, &geometry, layout, stage.a0, stage.ac,
-                        ));
-                        crate::tracers::fold_injection_ledger(&mut injection_ledgers[k], injections, stage.ac);
-                        if has_tracers {
-                            crate::tracers::advance_stage_mass_transport_tile(store, &geometry, layout, stage.a0, stage.ac, stage.index)
-                                .map_err(|e| fail(fabric, WorkerError::Numerics(format!("tracer mass transport: {e}"))))?;
-                        }
-                    }
-                }
-                if has_tracers {
-                    let moves = crate::worker_tracers::migrate_discrete(stores, tiles, exchange.plan(), fabric, deadline)
-                        .map_err(|e| fail(fabric, e.into()))?;
-                    report.tracer_migrations.add(moves);
-                    crate::worker_tracers::blend_discrete(stores, stage.ac, stage.index);
-                    let moves = crate::worker_tracers::migrate_discrete(stores, tiles, exchange.plan(), fabric, deadline)
-                        .map_err(|e| fail(fabric, e.into()))?;
-                    report.tracer_migrations.add(moves);
-                }
-            }
-            if !rejected {
-                crate::guard_ledger::step_commit();
-                break;
-            }
-            crate::guard_ledger::step_discard();
-            // a migrated tracer lives in another tile's storage, and no per-tile restore puts it
-            // back, so a traced run ends instead of replaying
-            if has_tracers || has_continuous {
-                return Err(fail(
-                    fabric,
-                    WorkerError::Numerics(
-                        "a step was rejected with tracers attached: cross-tile tracer migration has no per-tile inverse".into(),
-                    ),
-                ));
-            }
-            report.rejections += 1;
-            // every worker books the agreed rejection with the evidence its own tiles hold, so
-            // every worker reaches the guard's decision at the same attempt
-            {
-                let mut evidence = Vec::new();
-                for (k, store) in stores.iter().enumerate() {
-                    let site = format!("worker {}, tile {}, level 0", fabric.me().0, tiles[k].0);
-                    evidence.extend(crate::retry_guard::take_evidence(&**store, &site, ledger.rejections()));
-                }
-                if let Err(failure) = ledger.reject(&guard, dt, evidence) {
-                    return Err(guard_failure(fabric, failure, &cfg.injection, deadline));
-                }
-            }
-            for (k, s) in stores.iter_mut().enumerate() {
-                s.motion = motion_n[k];
-            }
-            {
-                let sh = shared!();
-                for k in 0..n {
-                    // a replay from anything but the step entry is a different computation
-                    // dressed as a retry: every worker ends the session instead
-                    if !kernels[k].rollback_snapshot_is_complete(sh[k]) {
-                        return Err(fail(
-                            fabric,
-                            WorkerError::Numerics(
-                                "a step was rejected on a kernel set without a complete rollback \
-                                 snapshot; the replay cannot start from the step entry"
-                                    .into(),
-                            ),
-                        ));
-                    }
-                    with_device(dev(k), || kernels[k].restore_step(sh[k]));
-                    // the tile stands at its step entry again, the clock its ghost refills read
-                    sh[k].reset_state_clock();
-                }
-                exchange_point(
-                    exchange,
-                    tiles,
-                    &sh,
-                    n_tiles,
-                    devices,
-                    transport,
-                    fabric,
-                    ExchangePoint::Rollback,
-                    iter,
-                    attempt,
-                    deadline,
-            &mut timing.exchange,
-        )
-                .map_err(|e| fail(fabric, e.into()))?;
-                flip_polar_bands(exchange, tiles, &sh, kernels, devices);
-                for k in 0..n {
-                    with_device(dev(k), || kernels[k].ghost_fill(sh[k]));
-                }
-                if cfg.audit_every_point {
-                    audit_point(
-                        exchange, tiles, &sh, n_tiles, fabric, AuditAt::Rollback, iter, attempt,
-                        deadline, &mut report,
-                    )
-                    .map_err(|e| fail(fabric, e))?;
-                }
-            }
-            dt =
-                retry_timestep(dt, t).map_err(|e| fail(fabric, WorkerError::Numerics(e.detail)))?;
-            attempt += 1;
-        }
+        };
         // the stage refresh moved a; the step-tail advance starts from the step-entry value, as
         // on the single grid
         for (k, s) in stores.iter_mut().enumerate() {
             s.motion.a = a_n[k];
-        }
-        // the sustained-reduction guard, once per accepted root step, before the post-step
-        // recipe and any checkpoint publish it; the agreed timesteps give every worker the same
-        // decision
-        {
-            let mut streak = stores[0].severe_streak;
-            if let Err(failure) = crate::retry_guard::accept(&guard, &mut streak, &ledger, dt) {
-                return Err(guard_failure(fabric, failure, &cfg.injection, deadline));
-            }
-            for store in stores.iter_mut() {
-                store.severe_streak = streak;
-            }
         }
         if has_tracers {
             crate::worker_tracers::spawn_discrete_injection(stores, tiles, exchange.plan(), &injection_ledgers, fabric, deadline)

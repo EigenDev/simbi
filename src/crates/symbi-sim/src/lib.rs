@@ -36,6 +36,7 @@ pub mod placement;
 pub mod plan_exchange;
 pub mod retry_guard;
 pub mod stage;
+pub mod step_transaction;
 pub mod state;
 pub mod substrate_seam;
 #[cfg(feature = "gpu")]

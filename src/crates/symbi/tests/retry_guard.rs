@@ -147,7 +147,7 @@ fn run_hierarchy(sim: Sim, schedule: Vec<u32>, t_final: f64) -> (Vec<f64>, Optio
         ControlFlow::Continue(())
     })
     .expect("evolve");
-    let failure = h.crash.as_ref().and_then(|c| c.panic.clone());
+    let failure = h.crash.as_ref().and_then(|c| c.halt.as_ref()).map(|halt| halt.detail().to_string());
     (seen.into_iter().map(|(_, dt)| dt).collect(), failure)
 }
 
@@ -250,9 +250,9 @@ fn a_late_fine_substep_rejection_counts_once_against_the_root_step() {
     let mut failure = None;
     for _ in 0..5 {
         let dt = h.root_cfl_dt();
-        let step = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| h.step_root_with_dt(dt)));
-        if let Err(payload) = step {
-            failure = payload.downcast_ref::<String>().cloned();
+        h.step_root_with_dt(dt);
+        if let Some(crash) = h.crash.as_ref() {
+            failure = crash.halt.as_ref().map(|halt| halt.detail().to_string());
             break;
         }
     }

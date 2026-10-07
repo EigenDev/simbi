@@ -16,10 +16,13 @@
 // - each rejection records its evidence: the cells whose freeze acts counted
 //   toward it, with the tile, level, stage and attempt that produced them.
 //
+// the step transaction (`step_transaction::take_root_step`) is the one caller
+// on every march.
+//
 // usage:
 //  let mut ledger = RetryLedger::new(candidate);
-//  loop { if accepted { break } ledger.reject(&guard, dt, evidence)?; dt = retry_timestep(dt, t)?; }
-//  accept(&guard, &mut store.severe_streak, &ledger, dt)?;
+//  ledger.reject(&guard, dt, evidence)?;
+//  accept(&guard, &mut streak, &ledger, accepted)?;
 // =============================================================================
 
 /// the retry safeguards of a run; `Default` is the built-in configuration, a run may override
@@ -41,6 +44,12 @@ impl Default for RetryGuard {
 }
 
 impl RetryGuard {
+    /// whether a root step accepted at its full candidate counts as severely reduced, so the
+    /// guard can refuse a step no rejection reduced
+    pub fn refuses_unreduced_steps(&self) -> bool {
+        1.0 <= self.severe_ratio
+    }
+
     /// the thresholds in words, for the run's opening report and every failure
     pub fn describe(&self) -> String {
         format!(
