@@ -32,6 +32,15 @@ pub enum IoError {
         expected: Vec<usize>,
         actual: Vec<usize>,
     },
+    /// a checkpointed refinement level was written on a different grid than this run builds for
+    /// it: `stored` cells on `axis` in the file against `built` in the run.
+    LevelGridMismatch {
+        path: String,
+        level: usize,
+        axis: usize,
+        stored: usize,
+        built: usize,
+    },
     /// a path tried to overwrite an existing node.
     AlreadyExists(String),
     /// raw I/O (filesystem-level).
@@ -61,6 +70,21 @@ impl fmt::Display for IoError {
                 write!(
                     f,
                     "shape mismatch at '{path}': expected {expected:?}, got {actual:?}"
+                )
+            }
+            Self::LevelGridMismatch {
+                path,
+                level,
+                axis,
+                stored,
+                built,
+            } => {
+                write!(
+                    f,
+                    "{path}: level {level} was written with {stored} cell(s) on axis {axis} but this \
+                     run builds {built}. a restart requires level {level} to occupy the same grid it \
+                     did in the checkpoint; loading across the mismatch would place the data on the \
+                     wrong region."
                 )
             }
             Self::AlreadyExists(p) => write!(f, "node already exists at '{p}'"),

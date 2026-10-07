@@ -1071,12 +1071,14 @@ fn verify_level_region<const D: usize>(
         Some(symbi_io::DataBuf::U64(v)) => v.clone(),
         _ => return Err(IoError::MissingPath(format!("{name}/mesh/global_cells"))),
     };
-    // `mesh/global_cells` is written in reversed (storage) axis order, matching the reversed
-    // dataset shapes so a reader's plot axes are not transposed — see `mesh_cells`
-    let expected: Vec<usize> = (0..D).rev().map(|ax| grid.cells[ax]).collect();
-    let actual: Vec<usize> = cells.iter().map(|&c| c as usize).collect();
-    if actual != expected {
-        return Err(IoError::ShapeMismatch { path: format!("{name}/mesh/global_cells"), expected, actual });
+    for ax in 0..D {
+        let built = grid.cells[ax];
+        // `mesh/global_cells` is written in reversed (storage) axis order, matching the reversed
+        // dataset shapes so a reader's plot axes are not transposed — see `mesh_cells`
+        let stored = *cells.get(D - 1 - ax).unwrap_or(&0) as usize;
+        if stored != built || cells.len() != D {
+            return Err(IoError::LevelGridMismatch { path: path.to_string(), level: level_index, axis: ax, stored, built });
+        }
     }
     let geometry = mesh
         .find_group("geometry")
@@ -3778,6 +3780,9 @@ mod partitioned_restart_tests {
         let mut other = blank([0, 0], [8, 4]);
         let wrong = GlobalGrid::of_state(&other.store);
         let err = load_partitioned_level(&mut other, path.to_str().unwrap(), 0, [0, 0], &wrong).unwrap_err();
-        assert!(matches!(err, IoError::ShapeMismatch { .. }), "{err:?}");
+        assert!(
+            matches!(err, IoError::LevelGridMismatch { level: 0, axis: 1, stored: 6, built: 4, .. }),
+            "{err:?}"
+        );
     }
 }
