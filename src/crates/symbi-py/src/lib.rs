@@ -5303,24 +5303,26 @@ fn motion_state(cfg: &Config) -> MotionState<f64> {
 /// given, the balanced longest-axis heuristic otherwise. an explicit partition must
 /// yield exactly `n_gpus` tiles, since each tile binds one device.
 fn tile_partition<const D: usize>(n: [usize; D], cfg: &Config) -> Result<Partition<D>, String> {
-    if cfg.decompose.is_empty() {
-        return Partition::auto(n, cfg.n_gpus);
-    }
-    if cfg.decompose.len() != D {
-        return Err(format!(
-            "decompose carries {} axis cut lists for a {D}-dimensional run",
-            cfg.decompose.len()
-        ));
-    }
-    let cuts: [Vec<usize>; D] = std::array::from_fn(|ax| cfg.decompose[ax].clone());
-    let partition = Partition::explicit(n, cuts)?;
-    if partition.n_tiles() != cfg.n_gpus {
-        return Err(format!(
-            "decompose yields {} tiles for {} gpus; each tile binds one device",
-            partition.n_tiles(),
-            cfg.n_gpus
-        ));
-    }
+    let partition = if cfg.decompose.is_empty() {
+        Partition::auto(n, cfg.n_gpus)?
+    } else {
+        if cfg.decompose.len() != D {
+            return Err(format!(
+                "decompose carries {} axis cut lists for a {D}-dimensional run",
+                cfg.decompose.len()
+            ));
+        }
+        let cuts: [Vec<usize>; D] = std::array::from_fn(|ax| cfg.decompose[ax].clone());
+        let partition = Partition::explicit(n, cuts)?;
+        if partition.n_tiles() != cfg.n_gpus {
+            return Err(format!(
+                "decompose yields {} tiles for {} gpus; each tile binds one device",
+                partition.n_tiles(),
+                cfg.n_gpus
+            ));
+        }
+        partition
+    };
     Ok(partition)
 }
 
@@ -10319,9 +10321,14 @@ fn validate_config_checks(cfg: &Config) -> Result<(), String> {
         preflight_spec,
         Some(&state_law_of(cfg, preflight_spec)),
     )?;
+    // each driven face lowers against the run's regime here, so a prescription that cannot is
+    // refused by name before any driver builds a level; every level of every tile and worker
+    // then registers a prescription known to lower
     for (ii, json) in cfg.driven_exprs.iter().enumerate() {
-        symbi_source_compile::SourceConfig::from_json(json)
+        let bcfg = symbi_source_compile::SourceConfig::from_json(json)
             .map_err(|err| format!("driven boundary {ii} parse: {err}"))?;
+        symbi_source_compile::expr_bridge::build_boundary_dag(&bcfg, preflight_spec)
+            .map_err(|err| format!("driven boundary {ii} lower: {err}"))?;
     }
     if let Some(json) = &cfg.motion_json {
         symbi_source_compile::motion_law::MotionLaw::from_json(json, cfg.start_time, cfg.t_final)

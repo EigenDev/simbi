@@ -13,6 +13,9 @@
 # - the balanced reconstruction outside the newtonian regime;
 # - a non-hlle solver on isothermal hydro;
 # - mesh refinement of a one-dimensional magnetized grid.
+# a driven face whose prescription does not lower against the regime is refused at
+# admission, naming the face, on every driver including the refined tiles, which
+# otherwise build each level's kernels after the run is admitted.
 # the launch reads the tile count from its layout, so a config declaring
 # several devices launches on a cpu build; a curved-spacetime chart the worker
 # arms do not build is refused by the launch scope before any output.
@@ -79,6 +82,11 @@ class Probe(SimbiProblem):
     @property
     def resistivity(self) -> float:
         return OV.get("resistivity", 0.0)
+
+    @computed_field
+    @property
+    def bx1_inner_expressions(self) -> Any:
+        return OV.get("driven", {})
 
     @computed_field
     @property
@@ -227,3 +235,28 @@ def test_a_gr_chart_no_worker_arm_builds_is_refused_by_the_launch_scope(tmp_path
            "--resolution", "16,16", "--data-directory", str(tmp_path / "out"), "--checkpoint-interval", "1e9"]
     done = subprocess.run(cmd, capture_output=True, text=True, timeout=600, env=_env({}))
     _assert_refused(done, tmp_path / "out", "the schwarzschild_ks spacetime on the 2-dimensional cylindrical chart is outside the distributed first release", "cylindrical kerr-schild launch")
+
+
+# a dirichlet prescription of the right arity whose first node names no operation: python
+# validation and the json parse accept it, the lowering against the regime does not
+UNLOWERABLE = {
+    "kind": "dirichlet", "dim": 2, "outputs": [0, 1, 2, 3], "params": [],
+    "nodes": [{"op": "NO_SUCH_OP"}, {"op": "CONSTANT", "value": 0.0},
+              {"op": "CONSTANT", "value": 0.0}, {"op": "CONSTANT", "value": 1.0}],
+}
+
+
+def _assert_admission_refusal(done: subprocess.CompletedProcess, out: Path, reason: str, label: str) -> None:
+    _assert_refused(done, out, reason, label)
+    flat = " ".join((done.stdout + done.stderr).split())
+    assert "panicked" not in flat, f"{label}: refused by a panic rather than at admission:\n{flat[-2000:]}"
+
+
+def test_an_unlowerable_driven_face_is_refused_at_admission_on_every_driver(tmp_path: Path, probe: Path) -> None:
+    settings = {"bcs": ["dynamic", "outflow", "outflow", "outflow"], "driven": UNLOWERABLE,
+                "regions": [[0.0, 0.5, 0.25, 0.75]]}
+    reason = "driven boundary 0 lower"
+    _assert_admission_refusal(_single(probe, settings, tmp_path / "single"), tmp_path / "single", reason, "refined single grid")
+    _assert_admission_refusal(_single(probe, settings, tmp_path / "tiles", gpus=2), tmp_path / "tiles", reason, "refined host tiles")
+    _assert_admission_refusal(_launch(probe, settings, tmp_path / "launched", _layout_for(tmp_path, settings)), tmp_path / "launched", reason, "refined launch")
+
