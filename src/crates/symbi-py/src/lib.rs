@@ -5256,38 +5256,41 @@ fn prolong_order_for(reconstruction: &str) -> ProlongOrder {
     }
 }
 
-/// the mesh-motion state from the config: static, homologous expansion (linear,
-/// `a += a_dot*dt`, a_ddot = 0), or uniform cartesian translation. `scale_a0` /
-/// `scale_adot` are the python scale-factor callables already evaluated at
-/// start_time (the rust model integrates a from a constant rate).
-/// seed a sim's clock + mesh-motion state from the config: physical time starts at
-/// start_time (a moving-mesh a(t) samples the physical clock), the motion state from the
-/// scale-factor scalars, and the traced a(t) law when the config carries one — the same
-/// seeding the shared uni-grid prep performs; decomposed tiles call it per tile so every
-/// tile advances the identical law in lockstep.
-fn attach_motion<R, const D: usize, const DOF: usize, M, E, S, Mem>(
-    sim: &mut SimStateGeneric<R, D, DOF, M, E, S, Mem>,
+/// pin a state's clock to the run's start time and give it the user timestep clamp. the march
+/// advances from start_time, the checkpoint's time on a restart, and every level, tile and worker
+/// clamps its step alike.
+fn pin_run_clock<const D: usize, const DOF: usize, Mem: MemorySpace>(
+    store: &mut symbi_sim::state::FieldStore<D, DOF, Mem, f64>,
     cfg: &Config,
-) -> Result<(), String>
-where
-    R: Regime<f64, D>,
-    M: Metric<f64, D> + Copy + Send + Sync,
-    E: Eos<f64> + Send + Sync,
-    S: ExecutionSpace,
-    Mem: MemorySpace + Sync,
-{
-    sim.time = cfg.start_time;
-    sim.motion = motion_state(cfg);
+) {
+    store.time = cfg.start_time;
+    store.max_dt = cfg.max_dt;
+}
+
+/// seed a freshly built state for the run: its clock and clamp, and the mesh-motion state from
+/// the scale-factor scalars or the traced a(t) law, sampled at the physical start time. every
+/// single grid, level, tile and worker seeds through it, so all advance the identical law in
+/// lockstep. a resumed state keeps the motion its checkpoint restored and only re-pins its clock.
+fn seed_run_state<const D: usize, const DOF: usize, Mem: MemorySpace>(
+    store: &mut symbi_sim::state::FieldStore<D, DOF, Mem, f64>,
+    cfg: &Config,
+) -> Result<(), String> {
+    pin_run_clock(store, cfg);
+    store.motion = motion_state(cfg);
     if let Some(ref mj) = cfg.motion_json {
-        let t0 = sim.time;
+        let t0 = store.time;
         let law = symbi_source_compile::motion_law::MotionLaw::from_json(mj, t0, cfg.t_final)
             .map_err(|e| format!("mesh motion: {e}"))?;
-        sim.motion = symbi_geometry::MotionState::homologous(law.a_at(t0), law.adot_at(t0));
-        sim.motion_law = Some(law);
+        store.motion = symbi_geometry::MotionState::homologous(law.a_at(t0), law.adot_at(t0));
+        store.motion_law = Some(law);
     }
     Ok(())
 }
 
+/// the mesh-motion state from the config: static, homologous expansion (linear,
+/// `a += a_dot*dt`, a_ddot = 0), or uniform cartesian translation. `scale_a0` /
+/// `scale_adot` are the python scale-factor callables already evaluated at
+/// start_time (the rust model integrates a from a constant rate).
 fn motion_state(cfg: &Config) -> MotionState<f64> {
     if !cfg.mesh_motion {
         MotionState::static_mesh()
@@ -5399,26 +5402,9 @@ fn axis_maps<const D: usize>(cfg: &Config) -> Option<[symbi_geometry::AxisMap; D
 macro_rules! into_hierarchy {
     ($sim:expr, $kernels:expr, $cfg:expr, $d:literal, $make:expr) => {{
         let mut sim = $sim;
-        // the user dt clamp (0 = disabled): pins the dt sequence across runs whose CFL
-        // estimators differ (kernel cross-validation, temporal convergence studies).
-        sim.max_dt = $cfg.max_dt;
-        // the physical clock starts at start_time (t0): the IC is the state at t0, and a moving-mesh
-        // a(t) must be sampled at the physical time; an elapsed-from-0 clock would mis-phase it. (default 0 -> no
-        // change for the common case.)
-        sim.time = $cfg.start_time;
-        // mesh motion lives on the (coarse) state — set before wrapping. static
-        // for the common case; the gates above keep motion to single-grid hydro.
-        sim.motion = motion_state($cfg);
-        // expression-driven mesh motion: build the traced a(t)/a_dot(t) law (autodiff'd a_dot, fd
-        // cross-checked) and seed the homologous motion from it at t0 = sim.time. the time loop then
-        // evaluates a(t) exactly each (sub)stage.
-        if let Some(ref mj) = $cfg.motion_json {
-            let t0 = sim.time;
-            let law = symbi_source_compile::motion_law::MotionLaw::from_json(mj, t0, $cfg.t_final)
-                .map_err(|e| format!("mesh motion: {e}"))?;
-            sim.motion = symbi_geometry::MotionState::homologous(law.a_at(t0), law.adot_at(t0));
-            sim.motion_law = Some(law);
-        }
+        // the clock, the user dt clamp and the mesh motion, seeded on the coarse state before it
+        // is wrapped; the motion is sampled at the physical start time
+        seed_run_state(&mut sim, $cfg)?;
         if $cfg.refinement_enabled {
             let regions = refinement_regions_nd::<$d>(&$cfg.refinement_regions)?;
             let prolong = prolong_order_for(&$cfg.reconstruction_name);
@@ -5962,12 +5948,10 @@ where
     // loop advances these per step, and the checkpoint writer records the gather target's
     // clock — synced from tile 0 before every write below. every tile carries the user
     // timestep clamp the march applies.
-    for (s, _) in tiles.iter_mut() {
-        s.time = cfg.start_time;
-        s.max_dt = cfg.max_dt;
-        // the whole grid's interior in the tile's `index + offset` frame, where the grid's first
-        // cell is index 0 at the origin x_lo
-        s.geom.whole_span = Some(std::array::from_fn(|ax| (grid.interior_lo[ax], grid.interior_lo[ax] + grid.cells[ax] as isize)));
+    for ((s, _), offset) in tiles.iter_mut().zip(&offsets) {
+        pin_run_clock(s, cfg);
+        // the whole grid's interior in the tile's `index + offset` frame
+        s.geom.whole_span = Some(grid.interior_span(&s.geom, *offset));
     }
     if cfg.n_tracers > 0 {
         reporter.milestone(&format!(
@@ -6287,19 +6271,13 @@ where
     // every level of every tile records its whole level's interior in the tile's own index frame:
     // a bound that reads the level's extent (the alpha viscosity's slowest orbit) takes the whole
     // level's, as the single hierarchy does, whichever tile holds a part of it
-    let whole_span = |state: &symbi_sim::state::FieldStore<D, DOF, Mem, f64>, offset: [isize; D], grid: &symbi_sim::checkpoint::GlobalGrid<D>| -> [(isize, isize); D] {
-        std::array::from_fn(|ax| {
-            let shift = state.geom.interior.spaces[ax].lo + state.geom.index_offset[ax] - offset[ax];
-            (grid.interior_lo[ax] + shift, grid.interior_lo[ax] + grid.cells[ax] as isize + shift)
-        })
-    };
     for (i, tile) in tiles.iter_mut().enumerate() {
-        let span = whole_span(&tile.levels[0].state.store, root_offsets[i], &root_grid);
+        let span = root_grid.interior_span(&tile.levels[0].state.geom, root_offsets[i]);
         tile.levels[0].state.geom.whole_span = Some(span);
     }
     for (level, (fg, offsets, grid)) in fine.iter().enumerate().map(|(k, f)| (k + 1, f)) {
         for (k, &i) in fg.order.iter().enumerate() {
-            let span = whole_span(&tiles[i].levels[level].state.store, offsets[k], grid);
+            let span = grid.interior_span(&tiles[i].levels[level].state.geom, offsets[k]);
             tiles[i].levels[level].state.geom.whole_span = Some(span);
         }
     }
@@ -6542,8 +6520,7 @@ macro_rules! build_and_run_hydro_decomposed_refined {
                 // from it starts every fine level there, as on the single hierarchy; the root
                 // carries the user timestep clamp the hierarchy applies
                 let mut sim = sim;
-                sim.time = cfg.start_time;
-                sim.max_dt = cfg.max_dt;
+                seed_run_state(&mut sim, cfg)?;
                 // the dye rides on the root; the hierarchy carries it onto the fine levels
                 let sim = if cfg.chi_ic.is_empty() {
                     sim
@@ -6771,8 +6748,7 @@ macro_rules! build_and_run_magnetized_decomposed_refined {
                     .build();
                 // the physical clock and the user timestep clamp ride on the root, as on the single
                 // hierarchy
-                sim.time = cfg.start_time;
-                sim.max_dt = cfg.max_dt;
+                seed_run_state(&mut sim, cfg)?;
                 let sub = mhd_kernels(sim.substrate(), &settings, LevelRole::Root).map_err(|e| format!("tile {flat}: {e}"))?;
                 let mut h = if tile_regions.is_empty() {
                     Hierarchy::single(sim, sub)
@@ -6963,7 +6939,7 @@ macro_rules! build_and_run_hydro_decomposed {
                 };
                 // clock + mesh motion per tile: every tile carries the identical a(t) law and
                 // the decomposed loop advances them in lockstep with the shared dt.
-                attach_motion(&mut sim, cfg)?;
+                seed_run_state(&mut sim, cfg)?;
                 // the declared perturbation at the tile's own cell centers, the single grid's; with a
                 // declared stationary target it is laid over the target, after the probe
                 let has_energy = sim.fields.cons.has_energy();
@@ -8163,7 +8139,7 @@ macro_rules! build_and_run_iso_decomposed {
                 // clock + mesh motion per tile: every tile carries the identical a(t) law and
                 // the decomposed loop advances them in lockstep with the shared dt.
                 let mut sim = sim;
-                attach_motion(&mut sim, cfg)?;
+                seed_run_state(&mut sim, cfg)?;
                 // the declared perturbation at the tile's own cell centers, the single grid's; with a
                 // declared stationary target it is laid over the target, after the probe
                 if cfg.equilibrium_json.is_none() {
@@ -10935,8 +10911,7 @@ where
     // starts every fine level there, as on the single hierarchy; the root carries the user
     // timestep clamp the hierarchy applies
     let mut sim = sim;
-    sim.time = cfg.start_time;
-    sim.max_dt = cfg.max_dt;
+    seed_run_state(&mut sim, cfg)?;
     let sub = kernels_of(&sim);
     let clipped = clip_regions_to_tile::<D>(&regions, grid, tile);
     let mut h = if clipped.is_empty() {
@@ -11892,12 +11867,10 @@ fn run_worker_process(
         ($regime_ty:ty, $dof:literal, $tiles:ident, $seed:expr, $perturb:expr) => {{
             let ng = $tiles[0].0.geom.ng;
             let grid = decomposed_grid::<$d>(cfg, ng);
-            for (sim, _) in $tiles.iter_mut() {
-                sim.time = cfg.start_time;
-                sim.max_dt = cfg.max_dt;
-                // the whole grid's interior in the tile's `index + offset` frame, where the
-                // grid's first cell is index 0 at the origin x_lo
-                sim.geom.whole_span = Some(std::array::from_fn(|ax| (grid.interior_lo[ax], grid.interior_lo[ax] + grid.cells[ax] as isize)));
+            for ((sim, _), &flat) in $tiles.iter_mut().zip(&mine) {
+                pin_run_clock(sim, cfg);
+                // the whole grid's interior in the tile's `index + offset` frame
+                sim.geom.whole_span = Some(grid.interior_span(&sim.geom, offsets[flat]));
             }
             let built = build_clock.elapsed();
             worker_session::<$regime_ty, _, _, _, $d, $dof>(
@@ -11940,7 +11913,7 @@ fn run_worker_process(
                 };
                 // the clock and the mesh motion, every tile carrying the same a(t)
                 let mut sim = sim;
-                attach_motion(&mut sim, cfg)?;
+                seed_run_state(&mut sim, cfg)?;
                 // the declared perturbation at the tile's own cell centers, the single grid's; with a
                 // declared stationary target the session lays it over the target, after the probe
                 let has_energy = sim.fields.cons.has_energy();
@@ -12213,7 +12186,7 @@ fn run_worker_process(
                 };
                 // the clock and the mesh motion, every tile carrying the same a(t)
                 let mut sim = sim;
-                attach_motion(&mut sim, cfg)?;
+                seed_run_state(&mut sim, cfg)?;
                 // the declared perturbation at the tile's own cell centers, the single grid's; with a
                 // declared stationary target the session lays it over the target, after the probe
                 if cfg.equilibrium_json.is_none() {

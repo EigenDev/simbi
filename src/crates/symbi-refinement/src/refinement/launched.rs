@@ -1980,16 +1980,10 @@ pub fn record_level_spans<R, const D: usize, const DOF: usize, M, E, S, Mem, K>(
     Mem: MemorySpace + Sync,
     K: KernelSet<D, DOF, Mem, f64>,
 {
-    fn span<const D: usize>(geom: &symbi_sim::state::PartitionGeometry<D>, offset: [isize; D], grid: &GlobalGrid<D>) -> [(isize, isize); D] {
-        std::array::from_fn(|a| {
-            let shift = geom.interior.spaces[a].lo + geom.index_offset[a] - offset[a];
-            (grid.interior_lo[a] + shift, grid.interior_lo[a] + grid.cells[a] as isize + shift)
-        })
-    }
     let depth = 2 + plans.nested.len();
     for (k, h) in tiles.iter_mut().enumerate() {
         let offset = plans.root.plan().tiles[held.root_ids[k].0 as usize].offset;
-        let whole = span(&h.levels[0].state.geom, offset, &grids.root);
+        let whole = grids.root.interior_span(&h.levels[0].state.geom, offset);
         h.levels[0].state.geom.whole_span = Some(whole);
         for level in 1..depth.min(h.levels.len()) {
             let Some(id) = held.level_ids(level)[k] else {
@@ -1999,7 +1993,7 @@ pub fn record_level_spans<R, const D: usize, const DOF: usize, M, E, S, Mem, K>(
             let grid = grids.level(level);
             let layout = &plan.plan().tiles[id.0 as usize];
             let offset: [isize; D] = std::array::from_fn(|a| grid.interior_lo[a] + layout.offset[a]);
-            let whole = span(&h.levels[level].state.geom, offset, grid);
+            let whole = grid.interior_span(&h.levels[level].state.geom, offset);
             h.levels[level].state.geom.whole_span = Some(whole);
         }
     }

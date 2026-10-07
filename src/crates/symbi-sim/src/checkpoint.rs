@@ -2504,6 +2504,16 @@ pub struct GlobalGrid<const D: usize> {
 }
 
 impl<const D: usize> GlobalGrid<D> {
+    /// this grid's interior in the `local index + index_offset` frame of a store `geom` describes,
+    /// whose first interior cell sits at `offset` in this grid's index frame. a tile reads the whole
+    /// level's extent from it where a bound depends on the level's extreme position.
+    pub fn interior_span(&self, geom: &crate::state::PartitionGeometry<D>, offset: [isize; D]) -> [(isize, isize); D] {
+        std::array::from_fn(|ax| {
+            let shift = geom.interior.spaces[ax].lo + geom.index_offset[ax] - offset[ax];
+            (self.interior_lo[ax] + shift, self.interior_lo[ax] + self.cells[ax] as isize + shift)
+        })
+    }
+
     /// the grid of a store that is its whole level.
     pub fn of_state<const DOF: usize, Mem: MemorySpace>(sim: &FieldStore<D, DOF, Mem, f64>) -> Self {
         let interior = &sim.geom.interior;
@@ -3738,6 +3748,23 @@ mod partitioned_restart_tests {
     use super::*;
     use symbi_hydro::newtonian_mhd::NewtonianMhd;
     use symbi_xpu::HostMemory;
+
+    // a tile placed at whole-grid index 13 of a 48-cell axis reads the grid's interior as (0, 48)
+    // in its own `local index + index_offset` frame; on a grid whose interior starts at index 24,
+    // a store with index offset 13 whose first interior cell sits at grid index 24 sees the grid
+    // start at 13 = 24 + (13 - 24)
+    #[test]
+    fn a_tile_reads_its_grid_interior_in_its_own_frame() {
+        let mut sim = blank([0, 0], [8, 6]);
+        let lo: [isize; 2] = std::array::from_fn(|ax| sim.geom.interior.spaces[ax].lo);
+        assert_eq!(lo, [0, 0], "premise: interior indices start at zero, ghosts below");
+        sim.geom.index_offset = [13, 5];
+        let grid = GlobalGrid { cells: [48, 30], interior_lo: [0, 0], ng: NG, x_lo: [0.0; 2], dx: [0.1; 2], maps: None };
+        assert_eq!(grid.interior_span(&sim.geom, [13, 5]), [(0, 48), (0, 30)]);
+        let fine = GlobalGrid { interior_lo: [24, 8], ..grid };
+        assert_eq!(fine.interior_span(&sim.geom, [24 + 13, 8 + 5]), [(0, 48), (0, 30)]);
+        assert_eq!(fine.interior_span(&sim.geom, [24, 8]), [(13, 61), (5, 35)]);
+    }
 
     #[test]
     fn a_restart_reconstructs_tiles_of_a_different_cut_and_the_whole_grid() {
