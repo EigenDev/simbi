@@ -15,7 +15,9 @@
 # - mesh refinement of a one-dimensional magnetized grid.
 # a driven face whose prescription does not lower against the regime is refused at
 # admission, naming the face, on every driver including the refined tiles, which
-# otherwise build each level's kernels after the run is admitted.
+# otherwise build each level's kernels after the run is admitted. a periodic
+# declaration on one face of an axis cut into tiles is refused at admission: the one
+# tile wraps onto itself and its neighbor's seam is never filled.
 # the launch reads the tile count from its layout, so a config declaring
 # several devices launches on a cpu build; a curved-spacetime chart the worker
 # arms do not build is refused by the launch scope before any output.
@@ -260,3 +262,12 @@ def test_an_unlowerable_driven_face_is_refused_at_admission_on_every_driver(tmp_
     _assert_admission_refusal(_single(probe, settings, tmp_path / "tiles", gpus=2), tmp_path / "tiles", reason, "refined host tiles")
     _assert_admission_refusal(_launch(probe, settings, tmp_path / "launched", _layout_for(tmp_path, settings)), tmp_path / "launched", reason, "refined launch")
 
+
+def test_a_one_sided_periodic_axis_cut_into_tiles_is_refused_at_admission(tmp_path: Path, probe: Path) -> None:
+    settings = {"bcs": ["periodic", "outflow", "outflow", "outflow"]}
+    reason = "periodic on one face of axis 0"
+    # one tile wraps onto itself across the whole domain: the single grid runs
+    done = _single(probe, settings, tmp_path / "single")
+    assert done.returncode == 0, f"the single grid refused a one-sided periodic axis:\n{done.stderr[-2000:]}"
+    _assert_admission_refusal(_single(probe, settings, tmp_path / "tiles", gpus=2), tmp_path / "tiles", reason, "host tiles cut across x")
+    _assert_admission_refusal(_launch(probe, settings, tmp_path / "launched", _layout_for(tmp_path, settings)), tmp_path / "launched", reason, "launch cut across x")

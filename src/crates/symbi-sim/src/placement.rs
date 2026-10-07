@@ -79,6 +79,24 @@ impl<const D: usize> WholeGrid<D> {
         Topology::wrapping(std::array::from_fn(|ax| self.wraps(ax, counts)))
     }
 
+    /// whether a partition with `counts` tiles per axis can carry this grid's declared boundaries.
+    /// an axis periodic on one face only and cut into several tiles cannot: the end tile's periodic
+    /// face refills from its own interior, the far side of the domain only when the axis is uncut.
+    pub fn admits_cuts(&self, counts: [usize; D]) -> Result<(), String> {
+        for ax in (0..D).filter(|&ax| counts[ax] > 1) {
+            let periodic = [self.boundaries.lo(ax), self.boundaries.hi(ax)].map(|b| b == BoundaryType::Periodic);
+            if periodic[0] != periodic[1] {
+                return Err(format!(
+                    "the domain is periodic on one face of axis {ax} and that axis is cut into {} tiles; \
+                     a tile's periodic face refills from its own interior rather than the far side of \
+                     the domain. declare both faces of the axis periodic, or neither",
+                    counts[ax]
+                ));
+            }
+        }
+        Ok(())
+    }
+
     /// the grid as its own single tile: offset zero, every cell, the declared boundaries.
     pub fn single(&self) -> PlacedTile<D> {
         PlacedTile { offset: [0; D], cells: self.cells, boundaries: self.boundaries.clone() }
@@ -262,6 +280,17 @@ mod tests {
         assert_eq!(upper.to_bits(), (1.5 + 2.0 * (1.0 / 48.0_f64)).to_bits());
         let per_tile = (1.5 + 1.0 * (1.0 / 48.0_f64)) + 1.0 * (1.0 / 48.0_f64);
         assert_ne!(per_tile.to_bits(), upper.to_bits(), "premise: the per-tile corner must differ here");
+    }
+
+    // a one-sided periodic axis is carried uncut and refused cut; a two-sided one is carried cut
+    #[test]
+    fn a_one_sided_periodic_axis_admits_no_cut() {
+        let one_sided = grid2([48, 30], [[Periodic, Outflow], [Outflow, Outflow]], None);
+        assert!(one_sided.admits_cuts([1, 2]).is_ok(), "the cut misses the periodic axis");
+        let refusal = one_sided.admits_cuts([2, 1]).unwrap_err();
+        assert!(refusal.contains("periodic on one face of axis 0"), "{refusal}");
+        let both = grid2([48, 30], [[Periodic, Periodic], [Outflow, Outflow]], None);
+        assert!(both.admits_cuts([3, 2]).is_ok());
     }
 
     #[test]

@@ -5301,7 +5301,8 @@ fn motion_state(cfg: &Config) -> MotionState<f64> {
 
 /// the tile partition for a decomposed run: the config's explicit per-axis cuts when
 /// given, the balanced longest-axis heuristic otherwise. an explicit partition must
-/// yield exactly `n_gpus` tiles, since each tile binds one device.
+/// yield exactly `n_gpus` tiles, since each tile binds one device, and every partition
+/// must carry the declared boundaries: an axis periodic on one face only stays uncut.
 fn tile_partition<const D: usize>(n: [usize; D], cfg: &Config) -> Result<Partition<D>, String> {
     let partition = if cfg.decompose.is_empty() {
         Partition::auto(n, cfg.n_gpus)?
@@ -5323,6 +5324,8 @@ fn tile_partition<const D: usize>(n: [usize; D], cfg: &Config) -> Result<Partiti
         }
         partition
     };
+    // the declared boundaries the cuts must carry
+    whole_grid::<D>(cfg).admits_cuts(partition.counts())?;
     Ok(partition)
 }
 
