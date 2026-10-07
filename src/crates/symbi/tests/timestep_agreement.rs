@@ -12,7 +12,8 @@
 //   notwithstanding: the decomposed march returns the halt without a panic and
 //   without a further observer call that could publish the halted state;
 // - a march whose last step reaches its final time takes it shortened to the
-//   time left and ends complete, with no halt.
+//   time left and ends complete, with no halt;
+// - the standalone single-grid driver steps at the user cap.
 //
 // run: cargo test -p symbi --test timestep_agreement
 // =============================================================================
@@ -288,4 +289,13 @@ fn the_last_step_is_shortened_to_the_final_time_and_the_run_completes() {
             s.time
         );
     }
+}
+
+// the standalone single-grid driver honors the user cap: steps of 0.01 under a cap of 0.004 reach
+// 0.02 in five steps
+#[test]
+fn the_standalone_driver_steps_at_the_user_cap() {
+    let mut sim = store(16, 0, BoundaryType::Outflow, BoundaryType::Outflow, 0.004);
+    symbi::sim::evolve::evolve(&mut sim, &FixedCfl::uniform(None), 0.02).expect("the capped run completes");
+    assert_eq!(sim.iteration, 5, "the run stepped at {} per step", sim.time / sim.iteration as f64);
 }

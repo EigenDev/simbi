@@ -198,8 +198,7 @@ where
     let mut last_cb = sim.iteration;
     while sim.time < t_final {
         let cfl = prof("cfl", || kernels.cfl(sim));
-        // the standalone driver steps at the cfl and final-time limits alone (max_dt = 0)
-        let dt = match agree_timestep([cfl], 0.0, t_final - sim.time, Ok::<f64, std::convert::Infallible>) {
+        let dt = match agree_timestep([cfl], sim.max_dt, t_final - sim.time, Ok::<f64, std::convert::Infallible>) {
             Ok(agreed) => agreed.dt,
             Err(failure) => {
                 let (iter, time) = (sim.iteration, sim.time);
