@@ -2786,20 +2786,37 @@ where
     let run_diagnostics = || crate::run_diagnostics::RunDiagnostics {
         projection: crate::projection_ledger::ProjectionLedger::default(),
         guards: guard_scope.accepted(),
+        halt: None,
     };
+    // a timestep the march cannot take halts it on its last state, reported to the caller
+    let mut halt: Option<crate::run_diagnostics::TimestepHalt> = None;
+    let mut dt_prev = 0.0_f64;
 
     let mut t = start_time;
     let mut iter: u64 = 0;
     let mut last_cb: u64 = 0;
-    while t < t_final {
+    'march: while t < t_final {
         // global dt = min over tiles' cfl, clamped so the last step lands exactly on t_final.
         let mut dt = {
             let sh = shared!();
-            let candidates =
-                (0..n).map(|i| symbi_xpu::with_device(devices[i], || kernels[i].cfl(sh[i])));
-            let dt = crate::driver::select_timestep(candidates, t_final - t, iter, t)
-                .unwrap_or_else(|err| panic!("{}", err.detail));
-            clamp_user_dt(dt, sh[0].max_dt)
+            let candidates: Vec<f64> =
+                (0..n).map(|i| symbi_xpu::with_device(devices[i], || kernels[i].cfl(sh[i]))).collect();
+            // the estimate that decides the halt: the first unusable one, else the minimum
+            let dt_cfl = candidates
+                .iter()
+                .copied()
+                .find(|c| !c.is_finite() || *c <= 0.0)
+                .unwrap_or_else(|| candidates.iter().copied().fold(f64::INFINITY, f64::min));
+            match crate::driver::select_timestep(candidates, t_final - t, iter, t) {
+                Ok(dt) => {
+                    dt_prev = dt_cfl;
+                    clamp_user_dt(dt, sh[0].max_dt)
+                }
+                Err(_) => {
+                    halt = Some(crate::run_diagnostics::TimestepHalt { iter: sh[0].iteration, time: t, dt_cfl, dt_prev });
+                    break 'march;
+                }
+            }
         };
         // homologous mesh motion: each stage's dispatches bind geometry / grid-velocity
         // scalars from the tile's motion state, which must hold a(t) at the stage's
@@ -3057,8 +3074,15 @@ where
                     symbi_xpu::with_device(devices[ii], || kernels[ii].ghost_fill(sh[ii]));
                 }
             }
-            dt =
-                crate::driver::retry_timestep(dt, t).unwrap_or_else(|err| panic!("{}", err.detail));
+            // a rejected step whose halved timestep can no longer advance time halts the march on
+            // the state the rejection restored
+            dt = match crate::driver::retry_timestep(dt, t) {
+                Ok(retry) => retry,
+                Err(_) => {
+                    halt = Some(crate::run_diagnostics::TimestepHalt { iter: stores[0].iteration, time: t, dt_cfl: 0.5 * dt, dt_prev });
+                    break 'march;
+                }
+            };
         };
         // the sustained-reduction guard, once per accepted step, before anything publishes it;
         // every tile carries the streak its checkpoint records
@@ -3310,6 +3334,11 @@ where
         }
     }
     drain_devices::<M>(devices);
+    // a halted march publishes nothing further: the caller reports the halt and writes the state
+    // as crashed
+    if halt.is_some() {
+        return crate::run_diagnostics::RunDiagnostics { halt, ..run_diagnostics() };
+    }
     let sh = shared!();
     let _ = on_checkpoint(iter, t, &sh);
     run_diagnostics()

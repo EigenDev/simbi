@@ -6408,6 +6408,8 @@ where
             .map(symbi_sim::projection_ledger::LedgerScope::accepted)
             .unwrap_or_default(),
         guards: guard_scope.accepted(),
+        // a hierarchy records its halt on the tile itself (`crash`), caught step panics included
+        halt: None,
     };
     let drain = |decomp: Option<(&[i32], [usize; NDIM], &T)>| match decomp {
         Some((devices, _, _)) => drain_devices::<Mem>(devices),
