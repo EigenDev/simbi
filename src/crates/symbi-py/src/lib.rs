@@ -781,6 +781,174 @@ where
     substrate.attach_runtime_source(built, params)
 }
 
+/// the numerics a kernel set carries, read once from the run's configuration for one regime: the
+/// slope limiter and reconstruction, the eos and solver, the non-ideal coefficients, the excision,
+/// the CT method, and the user sources, driven boundaries and gradient walls in their id order
+struct KernelSettings<'c> {
+    spec: &'static symbi_hydro::regime_spec::RegimeSpec,
+    theta: f64,
+    recon: symbi::Recon,
+    flatten: (f64, f64),
+    well_balanced: bool,
+    eos: symbi::EosArm,
+    solver: Solver,
+    ct_method: CtMethod,
+    viscosity: f64,
+    alpha: f64,
+    resistivity: f64,
+    excision: [f64; 3],
+    sources: &'c [SourcePayload],
+    law: symbi_hydro::state_law::StateLaw,
+    driven: &'c [String],
+    gradient_walls: &'c [GradientBc],
+}
+
+impl<'c> KernelSettings<'c> {
+    fn of(cfg: &'c Config, spec: &'static symbi_hydro::regime_spec::RegimeSpec) -> Self {
+        Self {
+            spec,
+            theta: build_theta(cfg),
+            recon: build_recon(cfg),
+            flatten: (cfg.ppm_flatten_onset, cfg.ppm_flatten_full),
+            well_balanced: cfg.wb_reconstruction,
+            eos: build_eos(cfg),
+            solver: cfg.solver,
+            ct_method: cfg.ct_method,
+            viscosity: cfg.viscosity,
+            alpha: cfg.alpha,
+            resistivity: cfg.resistivity,
+            excision: [cfg.excision_radius, cfg.excision_rho_scale, cfg.excision_pre_scale],
+            sources: &cfg.source_jsons,
+            law: state_law_of(cfg, spec),
+            driven: &cfg.driven_exprs,
+            gradient_walls: &cfg.gradient_bcs,
+        }
+    }
+}
+
+/// the level a kernel set serves in its hierarchy. the root carries the horizon excision; a fine
+/// level inside it carries none, since the excised core lives on the root.
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum LevelRole {
+    Root,
+    Fine,
+}
+
+/// the construction doors both gas kernel sets (newtonian and relativistic hydro) carry as inherent
+/// methods, so one gas construction path serves either. each method forwards to the set's own door;
+/// the relativistic set accepts the newtonian-only settings at their defaults, which admission
+/// guarantees.
+trait GasDoors: Sized + WithViscosity + WithResistivity + WithExcision + AttachRuntimeSource + EnableSourceFusion {
+    fn slope_theta(self, theta: f64) -> Self;
+    fn reconstruct(self, recon: symbi::Recon) -> Self;
+    fn flatten(self, onset: f64, full: f64) -> Self;
+    fn well_balance(self, on: bool) -> Self;
+    fn eos(self, eos: symbi::EosArm) -> Self;
+    fn solve_with(self, solver: Solver) -> Result<Self, symbi_sim::state::ConfigError>;
+    fn driven(self, built: symbi_source_compile::expr_bridge::BoundaryPrescription, params: Vec<f64>) -> Self;
+    fn gradient_wall(self, wall: GradientBc) -> Self;
+}
+
+macro_rules! gas_doors {
+    ($set:ident) => {
+        impl<Mem: MemorySpace, Sc: symbi_hydro::Scalar + symbi_algebra::OrderedNumeric, const D: usize> GasDoors
+            for $set<Mem, Sc, D>
+        {
+            fn slope_theta(self, theta: f64) -> Self {
+                $set::theta(self, theta)
+            }
+            fn reconstruct(self, recon: symbi::Recon) -> Self {
+                $set::reconstruction(self, recon)
+            }
+            fn flatten(self, onset: f64, full: f64) -> Self {
+                $set::ppm_flatten(self, onset, full)
+            }
+            fn well_balance(self, on: bool) -> Self {
+                $set::well_balanced_reconstruction(self, on)
+            }
+            fn eos(self, eos: symbi::EosArm) -> Self {
+                $set::with_eos(self, eos)
+            }
+            fn solve_with(self, solver: Solver) -> Result<Self, symbi_sim::state::ConfigError> {
+                $set::with_solver(self, solver)
+            }
+            fn driven(self, built: symbi_source_compile::expr_bridge::BoundaryPrescription, params: Vec<f64>) -> Self {
+                $set::with_driven_boundary(self, built, params).0
+            }
+            fn gradient_wall(self, wall: GradientBc) -> Self {
+                $set::with_gradient_boundary(self, wall).0
+            }
+        }
+    };
+}
+gas_doors!(AdiabaticSubstrateKernelSet);
+gas_doors!(RhdSubstrateKernelSet);
+
+/// the kernel set of one level of a gas run: the limiter, reconstruction and flattening, the
+/// balance-aware reconstruction, the eos and solver, viscosity and alpha, the excision on the root,
+/// then the user sources, the driven boundaries and the gradient walls in their id order.
+fn gas_kernels<K: GasDoors>(sub: K, settings: &KernelSettings, role: LevelRole) -> Result<K, String> {
+    let ks = sub
+        .slope_theta(settings.theta)
+        .reconstruct(settings.recon)
+        .flatten(settings.flatten.0, settings.flatten.1)
+        .well_balance(settings.well_balanced)
+        .eos(settings.eos)
+        .solve_with(settings.solver)
+        .map_err(|e| format!("substrate/solver: {e:?}"))?
+        .with_viscosity(settings.viscosity)
+        .with_alpha(settings.alpha)
+        .with_resistivity(settings.resistivity);
+    let ks = excised(ks, settings, role);
+    let ks = attach_configured_sources(ks, settings.sources, settings.spec, &settings.law)?;
+    let ks = attach_driven_boundaries(ks, settings.driven, settings.spec, |ks, built, params| ks.driven(built, params))?;
+    Ok(attach_gradient_walls(ks, settings.gradient_walls, |ks, wall| ks.gradient_wall(wall)))
+}
+
+/// the kernel set of one level of an isothermal hydro run: the limiter, viscosity and alpha, then
+/// the user sources, the driven boundaries and the gradient walls in their id order. the local
+/// sound-speed closure is seeded from the tile's own cells, outside the construction.
+fn iso_kernels<const D: usize>(
+    sub: IsoSubstrateKernelSet<DefaultMemory, f64, D>,
+    settings: &KernelSettings,
+) -> Result<IsoSubstrateKernelSet<DefaultMemory, f64, D>, String> {
+    let ks = sub.theta(settings.theta).with_viscosity(settings.viscosity).with_alpha(settings.alpha);
+    let ks = attach_configured_sources(ks, settings.sources, settings.spec, &settings.law)?;
+    let ks = attach_driven_boundaries(ks, settings.driven, settings.spec, |ks, built, params| {
+        ks.with_driven_boundary(built, params).0
+    })?;
+    Ok(attach_gradient_walls(ks, settings.gradient_walls, |ks, wall| ks.with_gradient_boundary(wall).0))
+}
+
+/// the kernel set of one level of a magnetized run (newtonian, relativistic or isothermal MHD): the
+/// limiter, the solver and the CT method, viscosity and alpha, resistivity, the excision on the
+/// root, then the user sources and the driven boundaries in their id order.
+fn mhd_kernels<R: Regime<f64, D>, const D: usize>(
+    sub: symbi::regimes::substrate_mhd::MhdSubstrateKernelSet<R, DefaultMemory, f64, D>,
+    settings: &KernelSettings,
+    role: LevelRole,
+) -> Result<symbi::regimes::substrate_mhd::MhdSubstrateKernelSet<R, DefaultMemory, f64, D>, String> {
+    let ks = sub
+        .theta(settings.theta)
+        .with_solver(settings.solver)
+        .map_err(|e| format!("substrate/solver: {e:?}"))?
+        .ct_method(settings.ct_method)
+        .with_viscosity(settings.viscosity)
+        .with_alpha(settings.alpha)
+        .with_resistivity(settings.resistivity);
+    let ks = excised(ks, settings, role);
+    let ks = attach_configured_sources(ks, settings.sources, settings.spec, &settings.law)?;
+    attach_driven_boundaries(ks, settings.driven, settings.spec, |ks, built, params| ks.with_driven_boundary(built, params).0)
+}
+
+/// the horizon excision on a root kernel set; a fine level keeps the set as it is
+fn excised<K: WithExcision>(ks: K, settings: &KernelSettings, role: LevelRole) -> K {
+    match role {
+        LevelRole::Root => ks.with_excision(settings.excision[0], settings.excision[1], settings.excision[2]),
+        LevelRole::Fine => ks,
+    }
+}
+
 /// the static regime spec a config's `regime` string names. the spec drives every
 /// source-term validation (which conservation laws are well posed, whether an energy
 /// equation exists), so resolving it here is what lets a source be lowered at preflight,
@@ -1979,11 +2147,11 @@ fn boundaries_nd<const D: usize>(bcs: &[BoundaryType]) -> Boundaries<D> {
 /// each lowered against the run's regime and handed to `register` with its parameters
 fn attach_driven_boundaries<K>(
     mut ks: K,
-    cfg: &Config,
+    driven: &[String],
     spec: &symbi_hydro::regime_spec::RegimeSpec,
     register: impl Fn(K, symbi_source_compile::expr_bridge::BoundaryPrescription, Vec<f64>) -> K,
 ) -> Result<K, String> {
-    for json in &cfg.driven_exprs {
+    for json in driven {
         let bcfg = symbi_source_compile::SourceConfig::from_json(json)
             .map_err(|e| format!("boundary expression parse: {e}"))?;
         let built = symbi_source_compile::expr_bridge::build_boundary_dag(&bcfg, spec)
@@ -1998,10 +2166,10 @@ fn attach_driven_boundaries<K>(
 /// level or tile away from every wall carries no such face and the table stays unread.
 fn attach_gradient_walls<K>(
     mut sub: K,
-    cfg: &Config,
-    register: impl Fn(K, symbi::regimes::substrate_kernels::GradientBc) -> K,
+    walls: &[GradientBc],
+    register: impl Fn(K, GradientBc) -> K,
 ) -> K {
-    for wall in &cfg.gradient_bcs {
+    for wall in walls {
         sub = register(sub, wall.clone());
     }
     sub
@@ -5441,100 +5609,12 @@ macro_rules! build_and_run_hydro {
             attach_configured_censuses(&mut sim, cfg)?;
             sim
         };
-        let theta = build_theta(cfg);
-        let sub = sim
-            .substrate()
-            .theta(theta)
-            .reconstruction(build_recon(cfg))
-            .ppm_flatten(cfg.ppm_flatten_onset, cfg.ppm_flatten_full)
-                .well_balanced_reconstruction(cfg.wb_reconstruction)
-            .with_eos(build_eos(cfg))
-            .with_solver(cfg.solver)
-            .map_err(|e| format!("substrate/solver: {e:?}"))?
-            .with_viscosity(cfg.viscosity).with_alpha(cfg.alpha)
-            .with_resistivity(cfg.resistivity)
-            .with_excision(
-                cfg.excision_radius,
-                cfg.excision_rho_scale,
-                cfg.excision_pre_scale,
-            );
-        // attach a user source expression (force/cooling/relax/raw) when present.
-        // lowered against this regime's spec via the source front door — the bridge rejects
-        // force/cooling/relax on relativistic regimes (use raw). the base level attaches it here;
-        // refined runs re-attach the same source to each fine level in the `into_hierarchy` `$make`
-        // closure below, so it acts on every level it overlaps.
-        let sub = attach_configured_sources(
-            sub,
-            &cfg.source_jsons,
-            <$regime_ty as Regime<f64, $dof>>::SPEC,
-            &state_law_of(cfg, <$regime_ty as Regime<f64, $dof>>::SPEC),
-        )?;
-        // register driven (dynamic) boundaries in Driven-id order so `Driven(id)` on a face
-        // matches `driven_exprs[id]` — the complete prim prescription [rho, vel_0..DOF-1, pre]
-        // as coordinate DAGs. a theta-stratified rotating equilibrium requires
-        // this: no local ghost rule can represent the state beyond a wedge wall.
-        let mut sub = sub;
-        for json in &cfg.driven_exprs {
-            let bcfg = symbi_source_compile::SourceConfig::from_json(json)
-                .map_err(|e| format!("boundary expression parse: {e}"))?;
-            let built = symbi_source_compile::expr_bridge::build_boundary_dag(
-                &bcfg,
-                <$regime_ty as Regime<f64, $dof>>::SPEC,
-            )
-            .map_err(|e| format!("boundary expression lower: {e}"))?;
-            sub = sub.with_driven_boundary(built, bcfg.params.clone()).0;
-        }
-        // register the Neumann/Robin gradient boundaries (the convenience prescribed-gradient walls);
-        // the flattened coeffs are re-grouped into the registry entry (Robin: (a,b,c) triples).
-        sub = attach_gradient_walls(sub, cfg, |ks, wall| ks.with_gradient_boundary(wall).0);
-        let solver = cfg.solver;
+        // the numerics every level carries: the base level with the excision, each fine level of
+        // a refined run without it, so a fine set never runs a scheme other than the base's
+        let settings = KernelSettings::of(cfg, <$regime_ty as Regime<f64, $dof>>::SPEC);
+        let sub = gas_kernels(sim.substrate(), &settings, LevelRole::Root)?;
         let mut hier = into_hierarchy!(sim, sub, cfg, $d, |s| {
-            // the fine set carries the same non-ideal knobs as the base: the hierarchy
-            // applies the viscous pass on the finest level only, so a fine set without
-            // nu would make the whole refined run silently inviscid. the reconstruction
-            // is likewise per-level: a fine set left on plm under ppm evolution would
-            // silently evolve every refined region one order low.
-            let ks = s
-                .substrate()
-                .theta(theta)
-                .reconstruction(build_recon(cfg))
-                .ppm_flatten(cfg.ppm_flatten_onset, cfg.ppm_flatten_full)
-                .well_balanced_reconstruction(cfg.wb_reconstruction)
-                .with_eos(build_eos(cfg))
-                .with_solver(solver)
-                .expect("fine-level kernel set")
-                .with_viscosity(cfg.viscosity).with_alpha(cfg.alpha)
-                .with_resistivity(cfg.resistivity);
-            // register the same driven-boundary DAGs on each fine level, in Driven-id order: a
-            // fine level flush against a driven physical face inherits `Driven(id)` there (an
-            // interior fine level has only CoarseFine faces and never consults the dags). the
-            // prescription is a pure coordinate DAG, so the fine level evaluates it at its own
-            // finer ghost coordinates; the fill runs at the tail of ghost_fill, after
-            // prolong_cf, so it deterministically owns the driven/coarse-fine corner overlap.
-            // already validated at the base registration.
-            let mut ks = ks;
-            for json in &cfg.driven_exprs {
-                let bcfg = symbi_source_compile::SourceConfig::from_json(json)
-                    .expect("fine-level boundary parse");
-                let built = symbi_source_compile::expr_bridge::build_boundary_dag(
-                    &bcfg,
-                    <$regime_ty as Regime<f64, $dof>>::SPEC,
-                )
-                .expect("fine-level boundary lower");
-                ks = ks.with_driven_boundary(built, bcfg.params.clone()).0;
-            }
-            ks = attach_gradient_walls(ks, cfg, |ks, wall| ks.with_gradient_boundary(wall).0);
-            let ks = ks;
-            // attach the same user source to each fine level as the base level, so a source
-            // overlapping a refined region still acts there (a base-only attach would be restricted
-            // away by the fine solution). the source was already validated at the base attach.
-            attach_configured_sources(
-                ks,
-                &cfg.source_jsons,
-                <$regime_ty as Regime<f64, $dof>>::SPEC,
-                &state_law_of(cfg, <$regime_ty as Regime<f64, $dof>>::SPEC),
-            )
-            .expect("fine-level source attach")
+            gas_kernels(s.substrate(), &settings, LevelRole::Fine).expect("fine-level kernel set")
         });
         // a refined run attaches its immersed bodies to the hierarchy: the finest level owns the full
         // (accreting) bodies, coarser levels carry a gravity-only proxy (finest-owns-bodies, so the
@@ -6379,7 +6459,7 @@ where
 macro_rules! build_and_run_hydro_decomposed_refined {
     (
         $cfg:expr, $prims:expr, $regime:expr, $regime_ty:ty, $d:literal, $geom:expr, $geom_ty:ty,
-        $eos:expr, $eos_ty:ty, prim = |$row:ident| $prim:expr, kernels = |$s:ident, $root:ident| $kernels:expr
+        $eos:expr, $eos_ty:ty, prim = |$row:ident| $prim:expr, kernels = |$s:ident, $role:ident| $kernels:expr
     ) => {{
         use symbi::sim::decomp::unflatten;
         let cfg: &Config = $cfg;
@@ -6469,47 +6549,11 @@ macro_rules! build_and_run_hydro_decomposed_refined {
                     seed_tile_dye(&sim, &cfg.chi_ic, tile_lo, n);
                     sim
                 };
-                // the tile set carries the same reconstruction, non-ideal and excision knobs as
-                // the monolithic base; a tile set without them runs a different scheme silently
-                let kernels_of = |$s: &Sim, $root: bool| $kernels;
-                let sub = kernels_of(&sim, true);
-                // register the driven (dynamic) boundary DAGs on the tile root and every fine
-                // level, in Driven-id order: an edge tile's exterior faces carry Driven(id)
-                // from the physical-boundary copy above, and a fine level flush against one
-                // inherits it; interior faces and cuts are CoarseFine and never consult the
-                // dags. each level evaluates the coordinate prescription at its own global
-                // coordinates (tiles and their hierarchies share the global origin).
-                let register = |mut ks: <Sim as symbi::prelude::SimSubstrate<DefaultMemory, f64, $d>>::KernelSet|
-                    -> <Sim as symbi::prelude::SimSubstrate<DefaultMemory, f64, $d>>::KernelSet {
-                    for json in &cfg.driven_exprs {
-                        let bcfg = symbi_source_compile::SourceConfig::from_json(json)
-                            .expect("tile boundary parse");
-                        let built = symbi_source_compile::expr_bridge::build_boundary_dag(
-                            &bcfg,
-                            <$regime_ty as Regime<f64, $d>>::SPEC,
-                        )
-                        .expect("tile boundary lower");
-                        ks = ks.with_driven_boundary(built, bcfg.params.clone()).0;
-                    }
-                    ks = attach_gradient_walls(ks, cfg, |ks, wall| ks.with_gradient_boundary(wall).0);
-                    // the same user source on the tile root and every fine level: each level of
-                    // each tile evaluates S at its own global coordinates, so a position-dependent
-                    // force is correct across cuts and level seams; the canonical per-level stage
-                    // drives source_apply. already validated at the front door.
-                    attach_configured_sources(
-                        ks,
-                        &cfg.source_jsons,
-                        <$regime_ty as Regime<f64, $d>>::SPEC,
-                        &state_law_of(cfg, <$regime_ty as Regime<f64, $d>>::SPEC),
-                    )
-                    .expect("tile source attach")
-                };
-                let sub = register(sub);
-                let make = |s: &Sim| {
-                    // same non-ideal knobs as the base (the viscous pass runs on the
-                    // finest level only).
-                    register(kernels_of(s, false))
-                };
+                // every level of the tile carries the configured numerics, the user sources, the
+                // driven boundaries and the gradient walls; the tile root carries the excision
+                let kernels_of = |$s: &Sim, $role: LevelRole| $kernels;
+                let sub = kernels_of(&sim, LevelRole::Root);
+                let make = |s: &Sim| kernels_of(s, LevelRole::Fine);
                 let mut h = if tile_regions.is_empty() {
                     Hierarchy::single(sim, sub)
                 } else {
@@ -6604,7 +6648,7 @@ macro_rules! build_and_run_hydro_decomposed_refined {
         // seeding alone
         if cfg.n_tracers > 0 {
             let global = symbi::symbi_xpu::with_device(0, || -> Result<Hier, String> {
-                let kernels_of = |$s: &Sim, $root: bool| $kernels;
+                let kernels_of = |$s: &Sim, $role: LevelRole| $kernels;
                 let groot = Sim::build($regime, $eos, $geom)
                     .cells(n)
                     .ghosts(ghost_width(cfg))
@@ -6622,8 +6666,8 @@ macro_rules! build_and_run_hydro_decomposed_refined {
                         $prim
                     })
                     .build();
-                let gsub = kernels_of(&groot, false);
-                let gh = Hierarchy::with_refinement(groot, gsub, &regions, prolong, |s: &Sim| kernels_of(s, false))
+                let gsub = kernels_of(&groot, LevelRole::Fine);
+                let gh = Hierarchy::with_refinement(groot, gsub, &regions, prolong, |s: &Sim| kernels_of(s, LevelRole::Fine))
                     .map_err(|e| format!("global refinement build: {e:?}"))?;
                 gh.seed_fine_from_coarse().map_err(|e| format!("global fine seed: {e:?}"))?;
                 Ok(gh)
@@ -6672,9 +6716,6 @@ macro_rules! build_and_run_magnetized_decomposed_refined {
         let counts = partition.counts();
         let dx: [f64; $d] = std::array::from_fn(|ax| cfg.dx[ax]);
         let ntiles: usize = counts.iter().product();
-        let theta = build_theta(cfg);
-        let solver = cfg.solver;
-        let ct = cfg.ct_method;
         let prolong = prolong_order_for(&cfg.reconstruction_name);
         let regions = refinement_regions_nd::<$d>(&cfg.refinement_regions)?;
         if regions.len() > 1 && !cfg.bodies.is_empty() {
@@ -6686,27 +6727,10 @@ macro_rules! build_and_run_magnetized_decomposed_refined {
             ));
         }
         // the kernels the single magnetized hierarchy installs on every level: the solver, the edge
-        // EMF method, the viscosity, the resistivity and the driven boundaries in Driven-id order
-        let kernels_of = |s: &Sim| {
-            let mut ks = s
-                .substrate()
-                .theta(theta)
-                .with_solver(solver)
-                .expect("refined kernel set")
-                .ct_method(ct)
-                .with_viscosity(cfg.viscosity).with_alpha(cfg.alpha)
-                .with_resistivity(cfg.resistivity);
-            for json in &cfg.driven_exprs {
-                let bcfg = symbi_source_compile::SourceConfig::from_json(json).expect("tile boundary parse");
-                let built = symbi_source_compile::expr_bridge::build_boundary_dag(
-                    &bcfg,
-                    <$regime_ty as Regime<f64, $d>>::SPEC,
-                )
-                .expect("tile boundary lower");
-                ks = ks.with_driven_boundary(built, bcfg.params.clone()).0;
-            }
-            ks
-        };
+        // EMF method, the viscosity, the resistivity and the driven boundaries in Driven-id order;
+        // the tile root alone carries the excision
+        let settings = KernelSettings::of(cfg, <$regime_ty as Regime<f64, $d>>::SPEC);
+        let kernels_of = |s: &Sim| mhd_kernels(s.substrate(), &settings, LevelRole::Fine).expect("refined kernel set");
 
         let whole = whole_grid::<$d>(cfg);
         let mut tiles = Vec::with_capacity(ntiles);
@@ -6744,11 +6768,7 @@ macro_rules! build_and_run_magnetized_decomposed_refined {
                 // hierarchy
                 sim.time = cfg.start_time;
                 sim.max_dt = cfg.max_dt;
-                let sub = kernels_of(&sim).with_excision(
-                    cfg.excision_radius,
-                    cfg.excision_rho_scale,
-                    cfg.excision_pre_scale,
-                );
+                let sub = mhd_kernels(sim.substrate(), &settings, LevelRole::Root).map_err(|e| format!("tile {flat}: {e}"))?;
                 let mut h = if tile_regions.is_empty() {
                     Hierarchy::single(sim, sub)
                 } else {
@@ -6847,30 +6867,11 @@ macro_rules! build_and_run_hydro_decomposed {
         // refinement + gpus>1 takes the decomposed-hierarchy path (per-tile hierarchies + the
         // root/fine halo exchange); plain single-level continues below.
         if cfg.refinement_enabled {
-            let theta = build_theta(cfg);
-            let solver = cfg.solver;
+            let settings = KernelSettings::of(cfg, <$regime_ty as Regime<f64, $d>>::SPEC);
             return build_and_run_hydro_decomposed_refined!(
                 $cfg, $prims, $regime, $regime_ty, $d, $geom, $geom_ty, host_eos(cfg), EosSelect<f64>,
                 prim = |row| Prim::adiabatic(Density(row[0]), Tensor::new(std::array::from_fn(|k| row[1 + k])), Pressure(row[1 + $d])),
-                // the reconstruction, eos, solver and non-ideal knobs of every level; the root
-                // carries the excision
-                kernels = |s, root| {
-                    let ks = s
-                        .substrate()
-                        .theta(theta)
-                        .reconstruction(build_recon(cfg))
-                        .ppm_flatten(cfg.ppm_flatten_onset, cfg.ppm_flatten_full)
-                        .with_eos(build_eos(cfg))
-                        .with_solver(solver)
-                        .expect("tile kernel set")
-                        .with_viscosity(cfg.viscosity).with_alpha(cfg.alpha)
-                        .with_resistivity(cfg.resistivity);
-                    if root {
-                        ks.with_excision(cfg.excision_radius, cfg.excision_rho_scale, cfg.excision_pre_scale)
-                    } else {
-                        ks
-                    }
-                }
+                kernels = |s, role| gas_kernels(s.substrate(), &settings, role).expect("tile kernel set")
             );
         }
         let n: [usize; $d] = std::array::from_fn(|ax| cfg.n_cells[ax]);
@@ -6890,10 +6891,9 @@ macro_rules! build_and_run_hydro_decomposed {
         let partition = tile_partition(n, cfg)?;
         let counts = partition.counts();
         let ntiles: usize = counts.iter().product();
-        let theta = build_theta(cfg);
-        let solver = cfg.solver;
         // the whole grid the tiles partition; faces between tiles become CoarseFine cuts.
         let whole = whole_grid::<$d>(cfg);
+        let settings = KernelSettings::of(cfg, <$regime_ty as Regime<f64, $dof>>::SPEC);
 
         // build N tiles, each allocated + substrate-built in its own device context.
         let mut tiles: Vec<(Sim, _)> = Vec::with_capacity(ntiles);
@@ -6965,59 +6965,10 @@ macro_rules! build_and_run_hydro_decomposed {
                 if cfg.equilibrium_json.is_none() {
                     lay_perturbation!(sim, cfg, $dof, has_energy);
                 }
-                // the reconstruction and its flatten as the single-grid build installs them:
-                // a tile left on the default reconstruction runs plm under a ppm request.
-                let sub = sim
-                    .substrate()
-                    .theta(theta)
-                    .reconstruction(build_recon(cfg))
-                    .ppm_flatten(cfg.ppm_flatten_onset, cfg.ppm_flatten_full)
-                    .with_eos(build_eos(cfg))
-                    .with_solver(solver)
-                    .map_err(|e| format!("tile {flat} substrate/solver: {e:?}"))?
-                    // the transport and excision settings the single-grid build installs; the
-                    // decomposed march drives the viscous pass and the excision sweeps per tile.
-                    .with_viscosity(cfg.viscosity).with_alpha(cfg.alpha)
-                    .with_resistivity(cfg.resistivity)
-                    .with_excision(
-                        cfg.excision_radius,
-                        cfg.excision_rho_scale,
-                        cfg.excision_pre_scale,
-                    );
-                // attach the user source per tile (two-pass via attach_runtime_source). each tile
-                // evaluates S at the whole grid's coordinates of its cells (the whole-grid origin
-                // and index offset above), so a position-dependent force is correct across cuts --
-                // decomposed == monolithic bit for bit. the global output sim carries no
-                // source (it is touched only at gather/output).
-                let sub = attach_configured_sources(
-                    sub,
-                    &cfg.source_jsons,
-                    <$regime_ty as Regime<f64, $dof>>::SPEC,
-                    &state_law_of(cfg, <$regime_ty as Regime<f64, $dof>>::SPEC),
-                )?;
-                // register the driven (dynamic) boundary DAGs on every tile, in Driven-id order:
-                // the ids ride the boundary enum copied from the physical faces, so only edge
-                // tiles carry Driven faces and interior tiles hold the dags inert. each tile
-                // evaluates the coordinate prescription at its own global coords, the same
-                // contract as the per-tile user source (decomposed == monolithic to round-off).
-                let sub = {
-                    let mut sub = sub;
-                    for json in &cfg.driven_exprs {
-                        let bcfg = symbi_source_compile::SourceConfig::from_json(json)
-                            .map_err(|e| format!("boundary expression parse: {e}"))?;
-                        let built = symbi_source_compile::expr_bridge::build_boundary_dag(
-                            &bcfg,
-                            <$regime_ty as Regime<f64, $dof>>::SPEC,
-                        )
-                        .map_err(|e| format!("boundary expression lower: {e}"))?;
-                        sub = sub.with_driven_boundary(built, bcfg.params.clone()).0;
-                    }
-                    sub
-                };
-                // the gradient (neumann / robin) walls in registry order, as the single grid
-                // registers them: an edge tile's exterior faces carry their ids from the
-                // physical-boundary copy
-                let sub = attach_gradient_walls(sub, cfg, |sub, gbc| sub.with_gradient_boundary(gbc).0);
+                // the numerics, sources, driven boundaries and gradient walls the single grid
+                // installs; each tile evaluates its sources and prescriptions at the whole grid's
+                // coordinates of its cells, so a tile carries the single grid's scheme bit for bit
+                let sub = gas_kernels(sim.substrate(), &settings, LevelRole::Root).map_err(|e| format!("tile {flat}: {e}"))?;
                 Ok((sim, sub))
             })?;
             tiles.push(built);
@@ -7469,75 +7420,18 @@ macro_rules! build_and_run_mhd {
             attach_configured_censuses(&mut sim, cfg)?;
             sim
         };
-        let theta = build_theta(cfg);
-        let sub = sim
-            .substrate()
-            .theta(theta)
-            .with_solver(cfg.solver)
-            .map_err(|e| format!("substrate/solver: {e:?}"))?
-            .ct_method(cfg.ct_method)
-            .with_viscosity(cfg.viscosity).with_alpha(cfg.alpha)
-            .with_resistivity(cfg.resistivity)
-            .with_excision(
-                cfg.excision_radius,
-                cfg.excision_rho_scale,
-                cfg.excision_pre_scale,
-            );
-        // attach a user source expression to the MHD hydro slots (den/mom/nrg).
-        // rmhd is relativistic -> only kind="raw"; nmhd takes force/cooling/relax.
-        // B is CT-evolved, so it takes no cell source. single-grid only.
+        // a user source acts on the hydro slots of the single grid; the refined march carries none
         if !cfg.source_jsons.is_empty() && cfg.refinement_enabled {
             return Err(
                 "user source expressions are not yet supported with mesh refinement".to_string(),
             );
         }
-        let sub = attach_configured_sources(
-            sub,
-            &cfg.source_jsons,
-            <$regime_ty as Regime<f64, $d>>::SPEC,
-            &state_law_of(cfg, <$regime_ty as Regime<f64, $d>>::SPEC),
-        )?;
-        // register driven (dynamic) boundaries in Driven-id order so `Driven(id)` on a face
-        // matches `driven_exprs[id]`. a complete prim prescription incl. the cell B (purely
-        // toroidal: in-plane B = 0, out-of-plane B_phi injected). single-grid only.
-        let mut sub = sub;
-        for json in &cfg.driven_exprs {
-            let bcfg = symbi_source_compile::SourceConfig::from_json(json)
-                .map_err(|e| format!("boundary expression parse: {e}"))?;
-            let built = symbi_source_compile::expr_bridge::build_boundary_dag(
-                &bcfg,
-                <$regime_ty as Regime<f64, $d>>::SPEC,
-            )
-            .map_err(|e| format!("boundary expression lower: {e}"))?;
-            sub = sub.with_driven_boundary(built, bcfg.params.clone()).0;
-        }
-        let solver = cfg.solver;
+        // the numerics every level carries: the base level with the excision, each fine level of
+        // a refined run without it, the CT method and the driven boundaries on every level
+        let settings = KernelSettings::of(cfg, <$regime_ty as Regime<f64, $d>>::SPEC);
+        let sub = mhd_kernels(sim.substrate(), &settings, LevelRole::Root)?;
         let mut hier = into_hierarchy!(sim, sub, cfg, $d, |s| {
-            // the fine kernel set mirrors the base: the same ct method (the constructor
-            // default is Contact, which would silently downgrade a UCT run's fine levels)
-            // and the same driven-boundary DAGs in Driven-id order — a fine level flush
-            // against a driven physical face inherits Driven(id) and evaluates the
-            // coordinate DAG at its own finer ghost coordinates. already validated at the
-            // base registration.
-            let mut ks = s
-                .substrate()
-                .theta(theta)
-                .with_solver(solver)
-                .expect("fine-level kernel set")
-                .ct_method(cfg.ct_method)
-                .with_viscosity(cfg.viscosity).with_alpha(cfg.alpha)
-                .with_resistivity(cfg.resistivity);
-            for json in &cfg.driven_exprs {
-                let bcfg = symbi_source_compile::SourceConfig::from_json(json)
-                    .expect("fine-level boundary parse");
-                let built = symbi_source_compile::expr_bridge::build_boundary_dag(
-                    &bcfg,
-                    <$regime_ty as Regime<f64, $d>>::SPEC,
-                )
-                .expect("fine-level boundary lower");
-                ks = ks.with_driven_boundary(built, bcfg.params.clone()).0;
-            }
-            ks
+            mhd_kernels(s.substrate(), &settings, LevelRole::Fine).expect("fine-level kernel set")
         });
         // the sinks on the finest level, gravity-only proxies below; a sink whose operator
         // support (accretion sphere, drain mask, slip shell, stencil reach) leaves the finest
@@ -7660,70 +7554,17 @@ macro_rules! build_and_run_imhd {
             attach_configured_censuses(&mut sim, cfg)?;
             sim
         };
-        let theta = build_theta(cfg);
-        let sub = sim
-            .substrate()
-            .theta(theta)
-            .with_solver(cfg.solver)
-            .map_err(|e| format!("substrate/solver: {e:?}"))?
-            .ct_method(cfg.ct_method)
-            .with_viscosity(cfg.viscosity).with_alpha(cfg.alpha)
-            .with_resistivity(cfg.resistivity);
-        // attach a user source. iso MHD has no energy -> momentum-only force/relax,
-        // raw den/mom (raw->nrg rejected); B is CT-evolved. single-grid only.
+        // a user source acts on the hydro slots of the single grid; the refined march carries none
         if !cfg.source_jsons.is_empty() && cfg.refinement_enabled {
             return Err(
                 "user source expressions are not yet supported with mesh refinement".to_string(),
             );
         }
-        let sub = attach_configured_sources(
-            sub,
-            &cfg.source_jsons,
-            <IsothermalMhd as Regime<f64, $d>>::SPEC,
-            &state_law_of(cfg, <IsothermalMhd as Regime<f64, $d>>::SPEC),
-        )?;
-        // register driven (dynamic) boundaries in Driven-id order so `Driven(id)` on a face
-        // matches `driven_exprs[id]`. the iso-MHD prescription is [rho, vel.., B..] (no
-        // pressure slot; the eos closure p = cs^2 rho covers the ghosts). purely toroidal
-        // injection: in-plane B = 0, out-of-plane B_phi injected (div-free by axisymmetry).
-        let mut sub = sub;
-        for json in &cfg.driven_exprs {
-            let bcfg = symbi_source_compile::SourceConfig::from_json(json)
-                .map_err(|e| format!("boundary expression parse: {e}"))?;
-            let built = symbi_source_compile::expr_bridge::build_boundary_dag(
-                &bcfg,
-                <IsothermalMhd as Regime<f64, $d>>::SPEC,
-            )
-            .map_err(|e| format!("boundary expression lower: {e}"))?;
-            sub = sub.with_driven_boundary(built, bcfg.params.clone()).0;
-        }
-        let solver = cfg.solver;
+        // the numerics every level carries, the CT method and the driven boundaries included
+        let settings = KernelSettings::of(cfg, <IsothermalMhd as Regime<f64, $d>>::SPEC);
+        let sub = mhd_kernels(sim.substrate(), &settings, LevelRole::Root)?;
         let mut hier = into_hierarchy!(sim, sub, cfg, $d, |s| {
-            // the fine kernel set mirrors the base: the same ct method (the constructor
-            // default is Contact, which would silently downgrade a UCT run's fine levels)
-            // and the same driven-boundary DAGs in Driven-id order — a fine level flush
-            // against a driven physical face inherits Driven(id) and evaluates the
-            // coordinate DAG at its own finer ghost coordinates. already validated at the
-            // base registration.
-            let mut ks = s
-                .substrate()
-                .theta(theta)
-                .with_solver(solver)
-                .expect("fine-level kernel set")
-                .ct_method(cfg.ct_method)
-                .with_viscosity(cfg.viscosity).with_alpha(cfg.alpha)
-                .with_resistivity(cfg.resistivity);
-            for json in &cfg.driven_exprs {
-                let bcfg = symbi_source_compile::SourceConfig::from_json(json)
-                    .expect("fine-level boundary parse");
-                let built = symbi_source_compile::expr_bridge::build_boundary_dag(
-                    &bcfg,
-                    <IsothermalMhd as Regime<f64, $d>>::SPEC,
-                )
-                .expect("fine-level boundary lower");
-                ks = ks.with_driven_boundary(built, bcfg.params.clone()).0;
-            }
-            ks
+            mhd_kernels(s.substrate(), &settings, LevelRole::Fine).expect("fine-level kernel set")
         });
         // the sinks on the finest level, gravity-only proxies below; a sink whose operator
         // support leaves the finest level is a configuration fault reported here.
@@ -7773,9 +7614,7 @@ macro_rules! build_and_run_mhd_decomposed {
         let partition = tile_partition(n, cfg)?;
         let counts = partition.counts();
         let ntiles: usize = counts.iter().product();
-        let theta = build_theta(cfg);
-        let solver = cfg.solver;
-        let ct = cfg.ct_method;
+        let settings = KernelSettings::of(cfg, <$regime_ty as Regime<f64, $d>>::SPEC);
         let whole = whole_grid::<$d>(cfg);
 
         let mut tiles: Vec<(Sim, _)> = Vec::with_capacity(ntiles);
@@ -7828,48 +7667,9 @@ macro_rules! build_and_run_mhd_decomposed {
                 } else {
                     attach_bodies_and_shapes!(sim, cfg, $d)
                 };
-                let sub = sim
-                    .substrate()
-                    .theta(theta)
-                    .with_solver(solver)
-                    .map_err(|e| format!("tile {flat} substrate/solver: {e:?}"))?
-                    .ct_method(ct)
-                    .with_viscosity(cfg.viscosity).with_alpha(cfg.alpha)
-                    .with_resistivity(cfg.resistivity)
-                    .with_excision(
-                        cfg.excision_radius,
-                        cfg.excision_rho_scale,
-                        cfg.excision_pre_scale,
-                    );
-                // attach the user source per tile (two-pass). targets the mhd hydro slots
-                // (den/mom/nrg); B is CT-evolved, so it takes no cell source. each tile evaluates S at its
-                // own global coords. rmhd is relativistic -> raw only (enforced in build_user_source).
-                let sub = attach_configured_sources(
-                    sub,
-                    &cfg.source_jsons,
-                    <$regime_ty as Regime<f64, $d>>::SPEC,
-                    &state_law_of(cfg, <$regime_ty as Regime<f64, $d>>::SPEC),
-                )?;
-                // register the driven (dynamic) boundary DAGs on every tile, in Driven-id order:
-                // only edge tiles carry Driven faces (interior cuts are CoarseFine), and each
-                // tile evaluates the coordinate prescription at its own global coords -- the
-                // same contract as the per-tile user source. the prescription covers the hydro
-                // prims + the cell B; the staggered face B rides the CT ghost fill and the
-                // transverse halo exchange, identically to the monolithic run.
-                let sub = {
-                    let mut sub = sub;
-                    for json in &cfg.driven_exprs {
-                        let bcfg = symbi_source_compile::SourceConfig::from_json(json)
-                            .map_err(|e| format!("boundary expression parse: {e}"))?;
-                        let built = symbi_source_compile::expr_bridge::build_boundary_dag(
-                            &bcfg,
-                            <$regime_ty as Regime<f64, $d>>::SPEC,
-                        )
-                        .map_err(|e| format!("boundary expression lower: {e}"))?;
-                        sub = sub.with_driven_boundary(built, bcfg.params.clone()).0;
-                    }
-                    sub
-                };
+                // the numerics, sources and driven boundaries the single grid installs, each tile
+                // evaluating its sources and prescriptions at the whole grid's coordinates
+                let sub = mhd_kernels(sim.substrate(), &settings, LevelRole::Root).map_err(|e| format!("tile {flat}: {e}"))?;
                 Ok((sim, sub))
             })?;
             tiles.push(built);
@@ -7973,9 +7773,7 @@ macro_rules! build_and_run_imhd_decomposed {
         let partition = tile_partition(n, cfg)?;
         let counts = partition.counts();
         let ntiles: usize = counts.iter().product();
-        let theta = build_theta(cfg);
-        let solver = cfg.solver;
-        let ct = cfg.ct_method;
+        let settings = KernelSettings::of(cfg, <IsothermalMhd as Regime<f64, $d>>::SPEC);
         let whole = whole_grid::<$d>(cfg);
 
         let mut tiles: Vec<(Sim, _)> = Vec::with_capacity(ntiles);
@@ -8023,46 +7821,9 @@ macro_rules! build_and_run_imhd_decomposed {
                 } else {
                     attach_bodies_and_shapes!(sim, cfg, $d)
                 };
-                let sub = sim
-                    .substrate()
-                    .theta(theta)
-                    .with_solver(solver)
-                    .map_err(|e| format!("tile {flat} substrate/solver: {e:?}"))?
-                    .ct_method(ct)
-                    .with_viscosity(cfg.viscosity).with_alpha(cfg.alpha)
-                    .with_resistivity(cfg.resistivity)
-                    .with_excision(
-                        cfg.excision_radius,
-                        cfg.excision_rho_scale,
-                        cfg.excision_pre_scale,
-                    );
-                // attach the user source per tile (two-pass). iso mhd has no energy -> momentum-only
-                // force/relax, raw den/mom; B is CT-evolved. each tile evaluates S at its own coords.
-                let sub = attach_configured_sources(
-                    sub,
-                    &cfg.source_jsons,
-                    <IsothermalMhd as Regime<f64, $d>>::SPEC,
-                    &state_law_of(cfg, <IsothermalMhd as Regime<f64, $d>>::SPEC),
-                )?;
-                // register the driven (dynamic) boundary DAGs on every tile, in Driven-id order:
-                // only edge tiles carry Driven faces (interior cuts are CoarseFine), and each
-                // tile evaluates the coordinate prescription at its own global coords. the iso-mhd
-                // prescription is [rho, vel.., B..] (no pressure slot; the eos closure is
-                // p = cs^2 rho); the staggered face B rides the CT ghost fill + halo exchange.
-                let sub = {
-                    let mut sub = sub;
-                    for json in &cfg.driven_exprs {
-                        let bcfg = symbi_source_compile::SourceConfig::from_json(json)
-                            .map_err(|e| format!("boundary expression parse: {e}"))?;
-                        let built = symbi_source_compile::expr_bridge::build_boundary_dag(
-                            &bcfg,
-                            <IsothermalMhd as Regime<f64, $d>>::SPEC,
-                        )
-                        .map_err(|e| format!("boundary expression lower: {e}"))?;
-                        sub = sub.with_driven_boundary(built, bcfg.params.clone()).0;
-                    }
-                    sub
-                };
+                // the numerics, sources and driven boundaries the single grid installs, each tile
+                // evaluating its sources and prescriptions at the whole grid's coordinates
+                let sub = mhd_kernels(sim.substrate(), &settings, LevelRole::Root).map_err(|e| format!("tile {flat}: {e}"))?;
                 seed_mhd_local_cs2!(sim, cfg, prims, tile_lo, n, &whole, $d);
                 Ok((sim, sub))
             })?;
@@ -8326,13 +8087,11 @@ macro_rules! build_and_run_iso_decomposed {
                         .to_string(),
                 );
             }
-            let theta = build_theta(cfg);
+            let settings = KernelSettings::of(cfg, <IsoNewtonian as Regime<f64, $d>>::SPEC);
             return build_and_run_hydro_decomposed_refined!(
                 cfg, prims, IsoNewtonian, IsoNewtonian, $d, $geom, $geom_ty, Isothermal { cs: cfg.cs }, Isothermal<f64>,
                 prim = |row| PrimG::<f64, $d, IsoModel>::isothermal(Density(row[0]), Tensor::new(std::array::from_fn(|k| row[1 + k]))),
-                // the limiter and the viscosity of every level, as the single isothermal hierarchy
-                // installs them
-                kernels = |s, _root| s.substrate().theta(theta).with_viscosity(cfg.viscosity).with_alpha(cfg.alpha)
+                kernels = |s, _role| iso_kernels(s.substrate(), &settings).expect("tile kernel set")
             );
         }
         let n: [usize; $d] = std::array::from_fn(|ax| cfg.n_cells[ax]);
@@ -8349,8 +8108,8 @@ macro_rules! build_and_run_iso_decomposed {
         let partition = tile_partition(n, cfg)?;
         let counts = partition.counts();
         let ntiles: usize = counts.iter().product();
-        let theta = build_theta(cfg);
         let whole = whole_grid::<$d>(cfg);
+        let settings = KernelSettings::of(cfg, <IsoNewtonian as Regime<f64, $d>>::SPEC);
 
         let mut tiles: Vec<(Sim, _)> = Vec::with_capacity(ntiles);
         for flat in 0..ntiles {
@@ -8406,42 +8165,9 @@ macro_rules! build_and_run_iso_decomposed {
                     lay_perturbation!(sim, cfg, $d, false);
                 }
                 let sim = sim;
-                let sub = sim
-                    .substrate()
-                    .theta(theta)
-                    .with_viscosity(cfg.viscosity)
-                    .with_alpha(cfg.alpha);
-                // attach the user source per tile (two-pass). iso has no energy -> momentum-only
-                // force/relax, raw den/mom. each tile evaluates S at its own global coords.
-                let sub = attach_configured_sources(
-                    sub,
-                    &cfg.source_jsons,
-                    <IsoNewtonian as Regime<f64, $d>>::SPEC,
-                    &state_law_of(cfg, <IsoNewtonian as Regime<f64, $d>>::SPEC),
-                )?;
-                // register the driven (dynamic) boundary DAGs on every tile, in Driven-id order:
-                // only edge tiles carry Driven faces (interior cuts are CoarseFine), and each
-                // tile evaluates the coordinate prescription at its own global coords -- the same
-                // contract as the per-tile user source. iso prescribes [rho, vel..]; the ghost
-                // pressure is the eos closure p = cs^2 rho (globally isothermal on this path).
-                let sub = {
-                    let mut sub = sub;
-                    for json in &cfg.driven_exprs {
-                        let bcfg = symbi_source_compile::SourceConfig::from_json(json)
-                            .map_err(|e| format!("boundary expression parse: {e}"))?;
-                        let built = symbi_source_compile::expr_bridge::build_boundary_dag(
-                            &bcfg,
-                            <IsoNewtonian as Regime<f64, $d>>::SPEC,
-                        )
-                        .map_err(|e| format!("boundary expression lower: {e}"))?;
-                        sub = sub.with_driven_boundary(built, bcfg.params.clone()).0;
-                    }
-                    sub
-                };
-                // the gradient (neumann / robin) walls in registry order, as the single grid
-                // registers them: an edge tile's exterior faces carry their ids from the
-                // physical-boundary copy
-                let sub = attach_gradient_walls(sub, cfg, |sub, gbc| sub.with_gradient_boundary(gbc).0);
+                // the limiter, viscosity, sources, driven boundaries and gradient walls the single
+                // grid installs, each tile evaluating them at the whole grid's coordinates
+                let sub = iso_kernels(sim.substrate(), &settings).map_err(|e| format!("tile {flat}: {e}"))?;
                 seed_local_cs2!(sim, sub, cfg, prims, tile_lo, n, $d);
                 Ok((sim, sub))
             })?;
@@ -8601,50 +8327,9 @@ macro_rules! build_and_run_iso {
             sim
         };
         // iso is HLLE-only; the substrate front door gives the kernel-set directly.
-        let theta = build_theta(cfg);
-        // the constant-nu viscosity — the iso path has its own
-        // build macro, so it needs its own .with_viscosity (the base hydro build
-        // at build_and_run_hydro does not cover it).
-        let sub = sim
-            .substrate()
-            .theta(theta)
-            .with_viscosity(cfg.viscosity)
-            .with_alpha(cfg.alpha);
-        // attach a user source expression. iso has no energy, so build_user_source
-        // (against the iso spec) drops the energy overlay for force/relax and rejects
-        // raw->nrg; den/mom sources work. refined runs re-attach the same source to
-        // each fine level in the into_hierarchy make-closure below.
-        let sub = attach_configured_sources(
-            sub,
-            &cfg.source_jsons,
-            <IsoNewtonian as Regime<f64, $d>>::SPEC,
-            &state_law_of(cfg, <IsoNewtonian as Regime<f64, $d>>::SPEC),
-        )?;
-
-        // register driven (dynamic) boundaries in Driven-id order, lowered against the iso
-        // spec: the prescription is [rho, vel..] only (no pressure slot; the ghost pressure
-        // re-derives as cs^2 * rho from the held temperature after every fill).
-        let sub = {
-            let mut sub = sub;
-            for json in &cfg.driven_exprs {
-                let bcfg = symbi_source_compile::SourceConfig::from_json(json)
-                    .map_err(|e| format!("boundary expression parse: {e}"))?;
-                let built = symbi_source_compile::expr_bridge::build_boundary_dag(
-                    &bcfg,
-                    <IsoNewtonian as Regime<f64, $d>>::SPEC,
-                )
-                .map_err(|e| format!("boundary expression lower: {e}"))?;
-                sub = sub.with_driven_boundary(built, bcfg.params.clone()).0;
-            }
-            sub
-        };
-        // register the Neumann/Robin gradient boundaries; iso re-derives pre = cs^2*rho at the ghost
-        // (the pressure coefficients are ignored — the substrate feeds cs^2 to the shared kernel).
-        let sub = {
-            let mut sub = sub;
-            sub = attach_gradient_walls(sub, cfg, |ks, wall| ks.with_gradient_boundary(wall).0);
-            sub
-        };
+        // the limiter, viscosity, sources, driven boundaries and gradient walls every level carries
+        let settings = KernelSettings::of(cfg, <IsoNewtonian as Regime<f64, $d>>::SPEC);
+        let sub = iso_kernels(sim.substrate(), &settings)?;
 
         if cfg.locally_isothermal {
             // derive cs^2(x) = p(x)/rho(x) from the per-cell initial pressure, then hold it.
@@ -8678,39 +8363,7 @@ macro_rules! build_and_run_iso {
         }
 
         let mut hier = into_hierarchy!(sim, sub, cfg, $d, |s| {
-            let ks = s
-                .substrate()
-                .theta(theta)
-                .with_viscosity(cfg.viscosity)
-                .with_alpha(cfg.alpha);
-            // register the same driven-boundary DAGs on each fine level, in Driven-id order: a
-            // fine level flush against a driven physical face inherits `Driven(id)` there; an
-            // interior fine level has only CoarseFine faces and never consults the dags. the
-            // fine ghost pressure re-derives as cs2 * rho after the fill (the fine cs2 is
-            // prolonged + clamp-extended). already validated at the base registration.
-            let mut ks = ks;
-            for json in &cfg.driven_exprs {
-                let bcfg = symbi_source_compile::SourceConfig::from_json(json)
-                    .expect("fine-level boundary parse");
-                let built = symbi_source_compile::expr_bridge::build_boundary_dag(
-                    &bcfg,
-                    <IsoNewtonian as Regime<f64, $d>>::SPEC,
-                )
-                .expect("fine-level boundary lower");
-                ks = ks.with_driven_boundary(built, bcfg.params.clone()).0;
-            }
-            ks = attach_gradient_walls(ks, cfg, |ks, wall| ks.with_gradient_boundary(wall).0);
-            let ks = ks;
-            // attach the same user source to each fine level (a base-only attach
-            // would be restricted away by the fine solution). already validated
-            // at the base attach.
-            attach_configured_sources(
-                ks,
-                &cfg.source_jsons,
-                <IsoNewtonian as Regime<f64, $d>>::SPEC,
-                &state_law_of(cfg, <IsoNewtonian as Regime<f64, $d>>::SPEC),
-            )
-            .expect("fine-level source attach")
+            iso_kernels(s.substrate(), &settings).expect("fine-level kernel set")
         });
         // a refined run attaches its immersed bodies to the hierarchy: the finest
         // level owns the full (accreting) bodies, coarser levels a gravity-only
@@ -11324,8 +10977,6 @@ fn run_refined_worker_process(
             let layout = refined_layout::<$d>(cfg, launch, prims.len())?;
             let n = layout.n;
             let counts = layout.partition.counts();
-            let theta = build_theta(cfg);
-            let solver = cfg.solver;
             // each held tile's place on the whole grid
             let whole = whole_grid::<$d>(cfg);
             let place = |flat: usize| whole.place(&layout.partition, unflatten(flat, counts));
@@ -11334,28 +10985,11 @@ fn run_refined_worker_process(
             macro_rules! refined_gas {
                 ($regime:ident) => {{
                     type Sim = SimDefault<$regime, $d, Cartesian, EosSelect<f64>>;
-                    // the numerics the single hierarchy installs on every level: reconstruction, the ppm
-                    // flatten, the eos, the solver, the viscosity, the user sources and the gradient walls
-                    let kernels_of = |s: &Sim| {
-                        let ks = s
-                            .substrate()
-                            .theta(theta)
-                            .reconstruction(build_recon(cfg))
-                            .ppm_flatten(cfg.ppm_flatten_onset, cfg.ppm_flatten_full)
-                            .with_eos(build_eos(cfg))
-                            .with_solver(solver)
-                            .expect("refined kernel set")
-                            .with_viscosity(cfg.viscosity).with_alpha(cfg.alpha);
-                        let ks = attach_configured_sources(
-                            ks,
-                            &cfg.source_jsons,
-                            <$regime as Regime<f64, $d>>::SPEC,
-                            &state_law_of(cfg, <$regime as Regime<f64, $d>>::SPEC),
-                        )
-                        .expect("refined source attach");
-                        let ks = attach_driven_boundaries(ks, cfg, <$regime as Regime<f64, $d>>::SPEC, |ks, built, params| ks.with_driven_boundary(built, params).0).expect("refined driven boundary");
-                        attach_gradient_walls(ks, cfg, |ks, gbc| ks.with_gradient_boundary(gbc).0)
-                    };
+                    // the numerics, sources, driven boundaries and gradient walls the single hierarchy
+                    // installs, on every level a worker holds; a launched refined run carries no
+                    // excision, so its root is built as every other level
+                    let settings = KernelSettings::of(cfg, <$regime as Regime<f64, $d>>::SPEC);
+                    let kernels_of = |s: &Sim| gas_kernels(s.substrate(), &settings, LevelRole::Fine).expect("refined kernel set");
                     let mut tiles = Vec::with_capacity(layout.mine.len());
                     for &flat in &layout.mine {
                         let tile = place(flat);
@@ -11423,20 +11057,11 @@ fn run_refined_worker_process(
                     if bufs.len() < 3 {
                         return Err(format!("mhd needs 3 staggered b-field generators, got {}", bufs.len()));
                     }
-                    let ct = cfg.ct_method;
-                    // the numerics the single hierarchy installs on every level: the solver, the edge EMF,
-                    // the viscosity and the resistivity
-                    let kernels_of = |s: &Sim| {
-                        let ks = s.substrate()
-                            .theta(theta)
-                            .with_solver(solver)
-                            .expect("refined kernel set")
-                            .ct_method(ct)
-                            .with_viscosity(cfg.viscosity).with_alpha(cfg.alpha)
-                            .with_resistivity(cfg.resistivity);
-                        attach_driven_boundaries(ks, cfg, <$regime as Regime<f64, $d>>::SPEC, |ks, built, params| ks.with_driven_boundary(built, params).0)
-                            .expect("refined driven boundary")
-                    };
+                    // the numerics, sources, driven boundaries and gradient walls the single hierarchy
+                    // installs, on every level a worker holds; a launched refined run carries no
+                    // excision, so its root is built as every other level
+                    let settings = KernelSettings::of(cfg, <$regime as Regime<f64, $d>>::SPEC);
+                    let kernels_of = |s: &Sim| mhd_kernels(s.substrate(), &settings, LevelRole::Fine).expect("refined kernel set");
                     let mut tiles = Vec::with_capacity(layout.mine.len());
                     for &flat in &layout.mine {
                         let tile = place(flat);
@@ -11490,20 +11115,11 @@ fn run_refined_worker_process(
                 "rmhd" => refined_mhd!(Rmhd),
                 "isothermal" => {
                     type Sim = SimDefault<IsoNewtonian, $d, Cartesian, Isothermal<f64>>;
-                    // the numerics the single isothermal hierarchy installs on every level: the limiter,
-                    // the viscosity, the user sources and the gradient walls; one sound speed per run
-                    let kernels_of = |s: &Sim| {
-                        let ks = s.substrate().theta(theta).with_viscosity(cfg.viscosity).with_alpha(cfg.alpha);
-                        let ks = attach_configured_sources(
-                            ks,
-                            &cfg.source_jsons,
-                            <IsoNewtonian as Regime<f64, $d>>::SPEC,
-                            &state_law_of(cfg, <IsoNewtonian as Regime<f64, $d>>::SPEC),
-                        )
-                        .expect("refined source attach");
-                        let ks = attach_driven_boundaries(ks, cfg, <IsoNewtonian as Regime<f64, $d>>::SPEC, |ks, built, params| ks.with_driven_boundary(built, params).0).expect("refined driven boundary");
-                        attach_gradient_walls(ks, cfg, |ks, gbc| ks.with_gradient_boundary(gbc).0)
-                    };
+                    // the numerics, sources, driven boundaries and gradient walls the single hierarchy
+                    // installs, on every level a worker holds; a launched refined run carries no
+                    // excision, so its root is built as every other level
+                    let settings = KernelSettings::of(cfg, <IsoNewtonian as Regime<f64, $d>>::SPEC);
+                    let kernels_of = |s: &Sim| iso_kernels(s.substrate(), &settings).expect("refined kernel set");
                     let mut tiles = Vec::with_capacity(layout.mine.len());
                     for &flat in &layout.mine {
                         let tile = place(flat);
@@ -11563,20 +11179,11 @@ fn run_refined_worker_process(
                     if bufs.len() < 3 {
                         return Err(format!("imhd needs 3 staggered b-field generators, got {}", bufs.len()));
                     }
-                    let ct = cfg.ct_method;
-                    // the numerics the single hierarchy installs on every level: the solver, the edge EMF,
-                    // the viscosity and the resistivity
-                    let kernels_of = |s: &Sim| {
-                        let ks = s.substrate()
-                            .theta(theta)
-                            .with_solver(solver)
-                            .expect("refined kernel set")
-                            .ct_method(ct)
-                            .with_viscosity(cfg.viscosity).with_alpha(cfg.alpha)
-                            .with_resistivity(cfg.resistivity);
-                        attach_driven_boundaries(ks, cfg, <IsothermalMhd as Regime<f64, $d>>::SPEC, |ks, built, params| ks.with_driven_boundary(built, params).0)
-                            .expect("refined driven boundary")
-                    };
+                    // the numerics, sources, driven boundaries and gradient walls the single hierarchy
+                    // installs, on every level a worker holds; a launched refined run carries no
+                    // excision, so its root is built as every other level
+                    let settings = KernelSettings::of(cfg, <IsothermalMhd as Regime<f64, $d>>::SPEC);
+                    let kernels_of = |s: &Sim| mhd_kernels(s.substrate(), &settings, LevelRole::Fine).expect("refined kernel set");
                     let mut tiles = Vec::with_capacity(layout.mine.len());
                     for &flat in &layout.mine {
                         let tile = place(flat);
@@ -12257,8 +11864,6 @@ fn run_worker_process(
     let topology = chart_topology(cfg, &whole, counts);
     wrap_capability(&topology, cfg.wb_reconstruction, false)?;
     let seam = polar_seam_of_partition::<$d>(&cfg.coord_system, &whole.boundaries, &topology, &partition);
-    let theta = build_theta(cfg);
-    let solver = cfg.solver;
     let mine: Vec<usize> = (0..partition.n_tiles())
         .filter(|&f| placement.owner_of(TileId(f as u32)) == me)
         .collect();
@@ -12332,30 +11937,10 @@ fn run_worker_process(
                 if cfg.equilibrium_json.is_none() {
                     lay_perturbation!(sim, cfg, $d, has_energy);
                 }
-                // the numerics the single path installs: reconstruction, the ppm flatten, the
-                // well-balanced reconstruction, the eos, and the solver
-                let sub = sim
-                    .substrate()
-                    .theta(theta)
-                    .reconstruction(build_recon(cfg))
-                    .ppm_flatten(cfg.ppm_flatten_onset, cfg.ppm_flatten_full)
-                    .well_balanced_reconstruction(cfg.wb_reconstruction)
-                    .with_eos(build_eos(cfg))
-                    .with_solver(solver)
-                    .map_err(|e| format!("tile {flat} substrate/solver: {e:?}"))?
-                    .with_viscosity(cfg.viscosity)
-                    .with_alpha(cfg.alpha)
-                    .with_excision(cfg.excision_radius, cfg.excision_rho_scale, cfg.excision_pre_scale);
-                // the user sources, per tile: pointwise, each tile evaluating them at its own
-                // global coordinates, as the single decomposed path attaches them
-                let sub = attach_configured_sources(
-                    sub,
-                    &cfg.source_jsons,
-                    <$regime_ty as Regime<f64, $d>>::SPEC,
-                    &state_law_of(cfg, <$regime_ty as Regime<f64, $d>>::SPEC),
-                )?;
-                let sub = attach_gradient_walls(sub, cfg, |sub, gbc| sub.with_gradient_boundary(gbc).0);
-                let sub = attach_driven_boundaries(sub, cfg, <$regime_ty as Regime<f64, $d>>::SPEC, |sub, built, params| sub.with_driven_boundary(built, params).0)?;
+                // the numerics, sources, driven boundaries and gradient walls the single grid
+                // installs, each tile evaluating them at the whole grid's coordinates of its cells
+                let settings = KernelSettings::of(cfg, <$regime_ty as Regime<f64, $d>>::SPEC);
+                let sub = gas_kernels(sim.substrate(), &settings, LevelRole::Root).map_err(|e| format!("tile {flat}: {e}"))?;
                 tiles.push((sim, sub));
             }
             // the tracer population seeds once from the whole-grid density, as the single grid's,
@@ -12415,7 +12000,6 @@ fn run_worker_process(
             if bufs.len() < 3 {
                 return Err(format!("mhd needs 3 staggered b-field generators, got {}", bufs.len()));
             }
-            let ct = cfg.ct_method;
             let mut tiles = Vec::with_capacity(mine.len());
             for &flat in &mine {
                 let tc = unflatten(flat, counts);
@@ -12451,17 +12035,10 @@ fn run_worker_process(
                     .build();
                 // the immersed bodies and their shaped walls, every tile holding the whole set
                 let sim = if cfg.bodies.is_empty() { sim } else { attach_bodies_and_shapes!(sim, cfg, $d) };
-                // the numerics the single magnetized path installs: the limiter, the solver,
-                // the ohmic resistivity and the edge EMF
-                let sub = sim
-                    .substrate()
-                    .theta(theta)
-                    .with_solver(solver)
-                    .map_err(|e| format!("tile {flat} substrate/solver: {e:?}"))?
-                    .with_viscosity(cfg.viscosity).with_alpha(cfg.alpha)
-                    .with_resistivity(cfg.resistivity)
-                    .ct_method(ct);
-                let sub = attach_driven_boundaries(sub, cfg, <NewtonianMhd as Regime<f64, $d>>::SPEC, |sub, built, params| sub.with_driven_boundary(built, params).0)?;
+                // the numerics, sources, driven boundaries and gradient walls the single grid
+                // installs, each tile evaluating them at the whole grid's coordinates of its cells
+                let settings = KernelSettings::of(cfg, <NewtonianMhd as Regime<f64, $d>>::SPEC);
+                let sub = mhd_kernels(sim.substrate(), &settings, LevelRole::Root).map_err(|e| format!("tile {flat}: {e}"))?;
                 tiles.push((sim, sub));
             }
             // the tracer population seeds once from the whole-grid density, as the single grid's,
@@ -12510,7 +12087,6 @@ fn run_worker_process(
             if bufs.len() < 3 {
                 return Err(format!("mhd needs 3 staggered b-field generators, got {}", bufs.len()));
             }
-            let ct = cfg.ct_method;
             let mut tiles = Vec::with_capacity(mine.len());
             for &flat in &mine {
                 let tc = unflatten(flat, counts);
@@ -12546,17 +12122,10 @@ fn run_worker_process(
                     .build();
                 // the immersed bodies and their shaped walls, every tile holding the whole set
                 let sim = if cfg.bodies.is_empty() { sim } else { attach_bodies_and_shapes!(sim, cfg, $d) };
-                // the numerics the single relativistic magnetized path installs: the limiter, the
-                // solver, the ohmic resistivity and the edge EMF
-                let sub = sim
-                    .substrate()
-                    .theta(theta)
-                    .with_solver(solver)
-                    .map_err(|e| format!("tile {flat} substrate/solver: {e:?}"))?
-                    .with_viscosity(cfg.viscosity).with_alpha(cfg.alpha)
-                    .with_resistivity(cfg.resistivity)
-                    .ct_method(ct);
-                let sub = attach_driven_boundaries(sub, cfg, <Rmhd as Regime<f64, $d>>::SPEC, |sub, built, params| sub.with_driven_boundary(built, params).0)?;
+                // the numerics, sources, driven boundaries and gradient walls the single grid
+                // installs, each tile evaluating them at the whole grid's coordinates of its cells
+                let settings = KernelSettings::of(cfg, <Rmhd as Regime<f64, $d>>::SPEC);
+                let sub = mhd_kernels(sim.substrate(), &settings, LevelRole::Root).map_err(|e| format!("tile {flat}: {e}"))?;
                 tiles.push((sim, sub));
             }
             // the tracer population seeds once from the whole-grid density, as the single grid's,
@@ -12640,21 +12209,10 @@ fn run_worker_process(
                 if cfg.equilibrium_json.is_none() {
                     lay_perturbation!(sim, cfg, $d, false);
                 }
-                // the numerics the single isothermal path installs: the limiter, then the
-                // user sources; the closure is globally isothermal, one sound speed per run
-                let sub = sim
-                    .substrate()
-                    .theta(theta)
-                    .with_viscosity(cfg.viscosity)
-                    .with_alpha(cfg.alpha);
-                let sub = attach_configured_sources(
-                    sub,
-                    &cfg.source_jsons,
-                    <IsoNewtonian as Regime<f64, $d>>::SPEC,
-                    &state_law_of(cfg, <IsoNewtonian as Regime<f64, $d>>::SPEC),
-                )?;
-                let sub = attach_gradient_walls(sub, cfg, |sub, gbc| sub.with_gradient_boundary(gbc).0);
-                let sub = attach_driven_boundaries(sub, cfg, <IsoNewtonian as Regime<f64, $d>>::SPEC, |sub, built, params| sub.with_driven_boundary(built, params).0)?;
+                // the numerics, sources, driven boundaries and gradient walls the single grid
+                // installs, each tile evaluating them at the whole grid's coordinates of its cells
+                let settings = KernelSettings::of(cfg, <IsoNewtonian as Regime<f64, $d>>::SPEC);
+                let sub = iso_kernels(sim.substrate(), &settings).map_err(|e| format!("tile {flat}: {e}"))?;
                 seed_local_cs2!(sim, sub, cfg, prims, tile_lo, n, $d);
                 tiles.push((sim, sub));
             }
@@ -12715,7 +12273,6 @@ fn run_worker_process(
             if bufs.len() < 3 {
                 return Err(format!("imhd needs 3 staggered b-field generators, got {}", bufs.len()));
             }
-            let ct = cfg.ct_method;
             let mut tiles = Vec::with_capacity(mine.len());
             for &flat in &mine {
                 let tc = unflatten(flat, counts);
@@ -12749,15 +12306,10 @@ fn run_worker_process(
                     .build();
                 // the immersed bodies and their shaped walls, every tile holding the whole set
                 let sim = if cfg.bodies.is_empty() { sim } else { attach_bodies_and_shapes!(sim, cfg, $d) };
-                let sub = sim
-                    .substrate()
-                    .theta(theta)
-                    .with_solver(solver)
-                    .map_err(|e| format!("tile {flat} substrate/solver: {e:?}"))?
-                    .with_viscosity(cfg.viscosity).with_alpha(cfg.alpha)
-                    .with_resistivity(cfg.resistivity)
-                    .ct_method(ct);
-                let sub = attach_driven_boundaries(sub, cfg, <IsothermalMhd as Regime<f64, $d>>::SPEC, |sub, built, params| sub.with_driven_boundary(built, params).0)?;
+                // the numerics, sources, driven boundaries and gradient walls the single grid
+                // installs, each tile evaluating them at the whole grid's coordinates of its cells
+                let settings = KernelSettings::of(cfg, <IsothermalMhd as Regime<f64, $d>>::SPEC);
+                let sub = mhd_kernels(sim.substrate(), &settings, LevelRole::Root).map_err(|e| format!("tile {flat}: {e}"))?;
                 seed_mhd_local_cs2!(sim, cfg, prims, tile_lo, n, &whole, $d);
                 tiles.push((sim, sub));
             }
@@ -13766,5 +13318,171 @@ mod tests {
 
         let bodies = wrap_capability(&ring, true, true).unwrap_err();
         assert!(bodies.contains("body potentials"), "{bodies}");
+    }
+}
+
+#[cfg(test)]
+mod kernel_construction_tests {
+    use super::*;
+
+    const GAMMA: f64 = 1.4;
+
+    // a force pushing +x, a fixed inflow state on the driven face, and a zero-gradient wall: one
+    // entry in each registry, so the ids each construction assigns are observable
+    fn force() -> Vec<SourcePayload> {
+        vec![SourcePayload {
+            origin: "test force".into(),
+            json: r#"{"kind": "force", "dim": 2, "outputs": [0, 1], "params": [0.5],
+                      "vocabulary": {"reads": [], "params": [0]},
+                      "nodes": [{"op": "PARAMETER", "param_idx": 0}, {"op": "CONSTANT", "value": 0.0}]}"#
+                .into(),
+        }]
+    }
+    fn inflow() -> Vec<String> {
+        vec![r#"{"kind": "dirichlet", "dim": 2, "outputs": [0, 1, 2, 3], "params": [],
+                 "nodes": [{"op": "CONSTANT", "value": 1.3}, {"op": "CONSTANT", "value": 0.2},
+                           {"op": "CONSTANT", "value": 0.0}, {"op": "CONSTANT", "value": 1.1}]}"#
+            .into()]
+    }
+    fn walls() -> Vec<GradientBc> {
+        vec![GradientBc::Neumann(vec![0.0; 4])]
+    }
+
+    // every door away from its constructor default: theta 1.0, plm, no flattening, plain
+    // reconstruction, hlle, contact CT, zero viscosity, alpha, resistivity and excision
+    fn settings<'c>(
+        spec: &'static symbi_hydro::regime_spec::RegimeSpec,
+        sources: &'c [SourcePayload],
+        driven: &'c [String],
+        gradient_walls: &'c [GradientBc],
+    ) -> KernelSettings<'c> {
+        KernelSettings {
+            spec,
+            theta: 1.5,
+            recon: symbi::Recon::Ppm,
+            flatten: (0.3, 0.8),
+            well_balanced: true,
+            eos: symbi::EosArm::IdealGamma,
+            solver: Solver::Hllc,
+            ct_method: CtMethod::Uct,
+            viscosity: 2.0e-3,
+            alpha: 1.0e-2,
+            resistivity: 3.0e-3,
+            excision: [0.25, 2.0, 3.0],
+            sources,
+            law: symbi_hydro::state_law::StateLaw::newtonian(GAMMA),
+            driven,
+            gradient_walls,
+        }
+    }
+
+    type GasSim = SimDefault<Newtonian, 2, Cartesian, EosSelect<f64>>;
+
+    // a 2:1 box with a driven inflow on x_lo, a neumann wall on x_hi and periodic y, seeded with a
+    // smooth density and pressure bump so every door acts on a nonuniform state
+    fn gas_sim() -> GasSim {
+        GasSim::build(Newtonian, EosSelect::Ideal(IdealGas { gamma: GAMMA }), Cartesian)
+            .cells([32, 16])
+            .ghosts(3)
+            .bounds([0.0, 0.0], [2.0, 1.0])
+            .boundaries(Boundaries([
+                [BoundaryType::Driven(0), BoundaryType::Neumann(0)],
+                [BoundaryType::Periodic, BoundaryType::Periodic],
+            ]))
+            .allocate()
+            .expect("gas sim")
+            .set_initial(|x| {
+                let b = 0.2 * (-((x[0] - 1.0).powi(2) + (x[1] - 0.5).powi(2)) / 0.02).exp();
+                Prim::adiabatic(Density(1.0 + b), Tensor::new([0.1, 0.0]), Pressure(1.0 + b))
+            })
+            .build()
+    }
+
+    #[test]
+    fn the_gas_set_carries_every_configured_door() {
+        let (sources, driven, walls) = (force(), inflow(), walls());
+        let s = settings(&symbi_hydro::regime_spec::NEWTONIAN_SPEC, &sources, &driven, &walls);
+        let ks = gas_kernels(gas_sim().substrate(), &s, LevelRole::Root).expect("gas kernels");
+        assert_eq!(ks.theta, 1.5);
+        assert_eq!(ks.recon, symbi::Recon::Ppm);
+        assert_eq!(ks.flatten, (0.3, 0.8));
+        assert_ne!(ks.balance, gas_sim().substrate().balance, "the balance-aware reconstruction is on");
+        assert_eq!(ks.solver, Solver::Hllc);
+        assert_eq!((ks.viscosity, ks.alpha), (2.0e-3, 1.0e-2));
+        assert!(ks.runtime_source.is_some(), "the configured source is attached");
+        assert_eq!(ks.boundary_dags.len(), 1, "the driven face has its prescription");
+        assert_eq!(ks.gradient_bcs, walls);
+    }
+
+    // the shared construction runs the scheme its doors name: a short run matches a set whose doors
+    // are set one at a time, bit for bit, and differs from the default doors
+    #[test]
+    fn the_gas_set_runs_the_scheme_its_settings_name() {
+        let (sources, driven, walls) = (force(), inflow(), walls());
+        let mut s = settings(&symbi_hydro::regime_spec::NEWTONIAN_SPEC, &sources, &driven, &walls);
+        // balance-aware reconstruction acts through a body potential, which this box has none of
+        s.well_balanced = false;
+        let run = |ks: AdiabaticSubstrateKernelSet<DefaultMemory, f64, 2>| -> Vec<u64> {
+            let mut h = Hierarchy::single(gas_sim(), ks);
+            h.evolve(0.05).expect("evolve");
+            let st = &h.levels[0].state;
+            st.geom.interior.iter().map(|c| st.fields.cons.den.view().at(c).to_bits()).collect()
+        };
+        let registries = |ks: AdiabaticSubstrateKernelSet<DefaultMemory, f64, 2>| {
+            let ks = attach_configured_sources(ks, &sources, &symbi_hydro::regime_spec::NEWTONIAN_SPEC, &s.law).expect("source");
+            let bcfg = symbi_source_compile::SourceConfig::from_json(&driven[0]).expect("inflow parse");
+            let built = symbi_source_compile::expr_bridge::build_boundary_dag(&bcfg, &symbi_hydro::regime_spec::NEWTONIAN_SPEC).expect("inflow lower");
+            ks.with_driven_boundary(built, bcfg.params.clone()).0.with_gradient_boundary(walls[0].clone()).0
+        };
+        let shared = run(gas_kernels(gas_sim().substrate(), &s, LevelRole::Root).expect("gas kernels"));
+        let by_door = run(registries(
+            gas_sim()
+                .substrate()
+                .theta(1.5)
+                .reconstruction(symbi::Recon::Ppm)
+                .ppm_flatten(0.3, 0.8)
+                .with_solver(Solver::Hllc)
+                .expect("hllc")
+                .with_viscosity(2.0e-3)
+                .with_alpha(1.0e-2),
+        ));
+        let defaults = run(registries(gas_sim().substrate()));
+        assert_ne!(by_door, defaults, "premise: the configured doors must change the run");
+        assert_eq!(shared, by_door, "the shared construction runs a scheme other than its settings name");
+    }
+
+    #[test]
+    fn the_isothermal_set_carries_every_configured_door() {
+        let (sources, driven) = (force(), inflow());
+        let walls = vec![GradientBc::Robin(vec![[1.0, 0.0, 1.0]; 3])];
+        let mut s = settings(&symbi_hydro::regime_spec::ISO_NEWTONIAN_SPEC, &sources, &driven[..0], &walls);
+        s.law = symbi_hydro::state_law::StateLaw::newtonian(1.0);
+        let domain = gas_sim().geom.allocated.clone();
+        let ks = iso_kernels::<2>(IsoSubstrateKernelSet::new(1.0, 0.4, &domain), &s).expect("iso kernels");
+        assert_eq!(ks.theta, 1.5);
+        assert_eq!((ks.viscosity, ks.alpha), (2.0e-3, 1.0e-2));
+        assert!(ks.runtime_source.is_some(), "the configured source is attached");
+        assert_eq!(ks.gradient_bcs, walls);
+    }
+
+    // the root carries the excision, a fine level none; every other door is the same on both
+    #[test]
+    fn the_magnetized_set_carries_every_configured_door_and_excises_on_the_root() {
+        let mut s = settings(&symbi_hydro::regime_spec::NEWTONIAN_MHD_SPEC, &[], &[], &[]);
+        s.solver = Solver::Hlld;
+        let domain = gas_sim().geom.allocated.clone();
+        let fresh = || {
+            symbi::regimes::substrate_mhd::MhdSubstrateKernelSet::<NewtonianMhd, DefaultMemory, f64, 2>::new(GAMMA, 0.4, 1.0, &domain)
+        };
+        let root = mhd_kernels(fresh(), &s, LevelRole::Root).expect("root kernels");
+        let fine = mhd_kernels(fresh(), &s, LevelRole::Fine).expect("fine kernels");
+        for ks in [&root, &fine] {
+            assert_eq!(ks.theta, 1.5);
+            assert_eq!(ks.solver, Solver::Hlld);
+            assert_eq!(ks.ct_method, CtMethod::Uct);
+            assert_eq!((ks.viscosity, ks.alpha, ks.resistivity), (2.0e-3, 1.0e-2, 3.0e-3));
+        }
+        assert_eq!(root.excision_radius, 0.25);
+        assert_eq!(fine.excision_radius, 0.0);
     }
 }
