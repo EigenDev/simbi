@@ -450,11 +450,16 @@ fn decomposed_refined_source_spawning_matches_composite_added_mass() {
         "represented source mass {represented_added:e} != analytic source integral \
          {expected_added:e}"
     );
-    // the wrap legs close the periodic seam, so the fluid budget is conservative to the
-    // round-off of summing the composite mass: N cells of mass 1/N each accumulate at most
-    // N eps = 7e-15 (measured 7e-18)
+    // the wrap legs close the periodic seam, so the fluid budget closes up to rounding, which has
+    // two parts. measuring it: each of the two composite sums adds 40 positive cell masses
+    // totaling M = 1, in error by at most about 42 u M = 4.7e-15 (Higham 2002, sec. 4.2).
+    // evolving it: each RK2 stage rounds every cell update at about 3 u |U|, so a root step with
+    // its two fine substeps, the stage average, restriction and reflux contributes roughly
+    // 10 u M, and 6 root steps about 6.7e-15. the sum, about 1.6e-14, is an engineering estimate
+    // of the evolution part rather than a forward bound; the tolerance keeps a factor of 6 over
+    // it (measured 7e-18) and sits 240 times below the 2.4e-11 a self-wrapped seam leaks.
     assert!(
-        (fluid_added - expected_added).abs() < 1.0e-14,
+        (fluid_added - expected_added).abs() < 1.0e-13,
         "composite fluid addition {fluid_added:e} != analytic source integral \
          {expected_added:e}"
     );

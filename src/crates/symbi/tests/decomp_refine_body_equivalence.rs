@@ -35,6 +35,7 @@ const CFL: f64 = 0.4;
 const N: usize = 32;
 const DX: f64 = 1.0 / N as f64;
 const T_FINAL: f64 = 0.04;
+const R_ACC: f64 = 0.08;
 
 type Sim = SimState<Newtonian, 2, Cartesian, IdealGas<f64>, CpuSpace, HostMemory>;
 type Kern = AdiabaticSubstrateKernelSet<HostMemory, f64, 2>;
@@ -46,6 +47,18 @@ fn kset(sim: &Sim) -> Kern {
 
 // an accreting sink at `pos`: gravitating mass fixed, drain + accretion bookkeeping active.
 // a fresh collection per attach (with_bodies takes ownership); same global position everywhere.
+// the tally on every tile and on the single grid sums the same drain partials (the fields agree
+// bit for bit), grouped per tile instead of over the whole patch. each partial is a nonnegative
+// removal, so the sum of their magnitudes is the accreted mass `acc`, and a summation tree whose
+// longest addition chain is h errs by at most h u acc to first order (Higham 2002, sec. 4.2). h is
+// the support-box cells summed in one fine step, plus the tiles' partials, plus the fine steps
+// accumulated into the tally; each of the two groupings carries that error.
+fn reassociation_bound(acc: f64, fine_dx: f64, fine_steps: u64, tiles: usize) -> f64 {
+    let box_per_axis = (2.0 * R_ACC / fine_dx).ceil() + 2.0;
+    let chain = box_per_axis * box_per_axis + tiles as f64 + fine_steps as f64;
+    2.0 * chain * (f64::EPSILON / 2.0) * acc
+}
+
 fn sink_at(pos: [f64; 2]) -> BodyCollection<f64, 2> {
     BodyCollection::new().add(Body::black_hole(
         0,
@@ -56,7 +69,7 @@ fn sink_at(pos: [f64; 2]) -> BodyCollection<f64, 2> {
         0.08, // softening
         10.0, // sink_rate
         0.5,  // sink_delta
-        0.08, // accretion_radius
+        R_ACC, // accretion_radius
     ))
 }
 
@@ -247,12 +260,15 @@ fn assert_matches(counts: [usize; 2], region: RefinementRegion<2>, sink_pos: [f6
         mono_acc > 1e-6,
         "the sink accreted nothing ({mono_acc:e}); test is vacuous"
     );
-    // every tile carries the identical global accreted-mass tally, equal to the monolithic one.
+    // every tile carries the global accreted-mass tally, equal to the monolithic one up to the
+    // regrouping of its sum (measured 4e-17 against a bound of about 1.5e-15)
+    let finest = &mono.levels[mono.levels.len() - 1].state;
+    let bound = reassociation_bound(mono_acc, finest.geom.dx[0], finest.iteration, counts.iter().product());
     for (i, h) in tiles.iter().enumerate() {
         let a = accreted(h);
         assert!(
-            (a - mono_acc).abs() < 1e-12 * mono_acc.max(1.0),
-            "{counts:?} tile {i}: accreted mass {a:e} != mono {mono_acc:e}"
+            (a - mono_acc).abs() <= bound,
+            "{counts:?} tile {i}: accreted mass {a:e} != mono {mono_acc:e} (bound {bound:e})"
         );
     }
     let err = mono_den

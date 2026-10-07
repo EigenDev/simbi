@@ -190,6 +190,12 @@ fn assert_matches(counts: [usize; 2], ts: Timestepping) {
         }
         let _ = i;
     }
+    // each fragment's force sums drag partials over the cells under it, grouped per tile on the
+    // decomposed run, so the two runs integrate forces that differ in the last bits and the
+    // trajectories separate by that rounding carried through the bond and drag dynamics. no
+    // forward bound is derived for the propagation; 1e-12 is an engineering tolerance on
+    // positions in [-1, 1] and velocities of order WIND = 0.5 (measured at most 2e-16 by
+    // T_FINAL = 0.12)
     assert!(
         max_err < 1e-12,
         "fragment decomposition {counts:?} ({ts:?}) vs monolithic max err {max_err:e} \
