@@ -2175,16 +2175,19 @@ fn attach_gradient_walls<K>(
     sub
 }
 
-/// the polar seam a launched partition carries: a spherical shell gridded over a pole, or a
-/// cylinder holding the R = 0 axis, with the azimuth periodic and cut into tiles. the ghost
-/// band beyond such a pole is the interior half a turn away on other tiles, so the plan
-/// carries antipodal transfers for it and the pole faces of the tiles are cuts. an uncut
-/// azimuth needs none: the tile's own half-turn fill covers the band.
-fn polar_seam_of_partition<const D: usize>(
+/// the polar seam a decomposed run carries, in process or launched: a spherical shell gridded
+/// over a pole, or a cylinder holding the R = 0 axis, with the azimuth wrapping and cut into
+/// tiles. the ghost band beyond such a pole is the interior half a turn away on other tiles, so
+/// the schedule carries antipodal transfers for it and the pole faces of the tiles are cuts. an
+/// uncut azimuth needs none: the tile's own half-turn fill covers the band. admission holds a
+/// gridded azimuth under an axis face to a periodic full turn of even cell count, the domain the
+/// half-turn maps onto itself. `slab(azimuth, i)` is the i-th azimuth tile's interior cell count.
+fn polar_seam<const D: usize>(
     coord_system: &str,
     phys: &Boundaries<D>,
     topology: &symbi::sim::decomp::Topology<D>,
-    partition: &Partition<D>,
+    counts: [usize; D],
+    slab: impl Fn(usize, usize) -> usize,
 ) -> Option<symbi::sim::decomp::PolarSeam> {
     if D != 3 {
         return None;
@@ -2195,7 +2198,6 @@ fn polar_seam_of_partition<const D: usize>(
         _ => return None,
     };
     let sides = [phys.lo(mirror) == BoundaryType::Axis, phys.hi(mirror) == BoundaryType::Axis];
-    let counts = partition.counts();
     if !(sides[0] || sides[1]) || !topology.is_periodic(azimuth) || counts[azimuth] < 2 {
         return None;
     }
@@ -2203,7 +2205,7 @@ fn polar_seam_of_partition<const D: usize>(
         mirror,
         sides,
         azimuth,
-        slabs: (0..counts[azimuth]).map(|i| partition.tile_range(azimuth, i).1).collect(),
+        slabs: (0..counts[azimuth]).map(|i| slab(azimuth, i)).collect(),
     })
 }
 
@@ -5671,7 +5673,13 @@ fn tiled_schedule<const D: usize, const DOF: usize, Mem: MemorySpace>(
     stores: &mut [&mut symbi_sim::state::FieldStore<D, DOF, Mem, f64>],
 ) -> symbi::sim::decomp::Schedule<D> {
     let topology = chart_topology(cfg, &whole_grid::<D>(cfg), counts);
-    let seam = polar_seam_of(cfg, counts, &stores.iter().map(|s| &**s).collect::<Vec<_>>());
+    // each azimuth tile's interior cell count, read off the tiles in the partition's order
+    let seam = polar_seam::<D>(&cfg.coord_system, &boundaries_nd::<D>(&cfg.boundaries), &topology, counts, |az, i| {
+        let mut tc = [0usize; D];
+        tc[az] = i;
+        let g = &stores[symbi::sim::decomp::flatten(tc, counts)].geom.interior;
+        (g.spaces[az].hi - g.spaces[az].lo) as usize
+    });
     if let Some(seam) = seam.as_ref() {
         for (flat, store) in stores.iter_mut().enumerate() {
             let tc = symbi::sim::decomp::unflatten(flat, counts);
@@ -8745,48 +8753,6 @@ fn checkpoint_write_error(path: &str, err: impl std::fmt::Debug) -> String {
     format!("checkpoint write failed: {path}: {err:?}")
 }
 
-/// the polar seam of a decomposed run, when a polar axis face sits on a chart whose gridded
-/// azimuth is cut: the mirror axis and its axis faces from the declared boundaries, the azimuth
-/// axis from the chart, and each azimuth tile's interior cell count read off the tiles.
-fn polar_seam_of<const D: usize, const DOF: usize, Mem: MemorySpace>(
-    cfg: &Config,
-    counts: [usize; D],
-    tiles: &[&symbi::sim::state::FieldStore<D, DOF, Mem, f64>],
-) -> Option<symbi::sim::decomp::PolarSeam> {
-    if D != 3 {
-        return None;
-    }
-    let (mirror, azimuth) = match cfg.coord_system.as_str() {
-        "spherical" => (1usize, 2usize),
-        "cylindrical" => (0usize, 1usize),
-        _ => return None,
-    };
-    if counts[azimuth] < 2 {
-        return None;
-    }
-    let phys = boundaries_nd::<D>(&cfg.boundaries);
-    let sides = [
-        phys.lo(mirror) == BoundaryType::Axis,
-        phys.hi(mirror) == BoundaryType::Axis,
-    ];
-    if !(sides[0] || sides[1]) {
-        return None;
-    }
-    let slabs = (0..counts[azimuth])
-        .map(|i| {
-            let mut tc = [0usize; D];
-            tc[azimuth] = i;
-            let g = &tiles[symbi::sim::decomp::flatten(tc, counts)].geom.interior;
-            (g.spaces[azimuth].hi - g.spaces[azimuth].lo) as usize
-        })
-        .collect();
-    Some(symbi::sim::decomp::PolarSeam {
-        mirror,
-        sides,
-        azimuth,
-        slabs,
-    })
-}
 
 /// the mesh motion a run admits: hydro on an unrefined grid
 fn validate_mesh_motion(cfg: &Config) -> Result<(), String> {
@@ -11915,7 +11881,7 @@ fn run_worker_process(
     let whole = whole_grid::<$d>(cfg);
     let topology = chart_topology(cfg, &whole, counts);
     wrap_capability(&topology, cfg.wb_reconstruction, false)?;
-    let seam = polar_seam_of_partition::<$d>(&cfg.coord_system, &whole.boundaries, &topology, &partition);
+    let seam = polar_seam::<$d>(&cfg.coord_system, &whole.boundaries, &topology, partition.counts(), |az, i| partition.tile_range(az, i).1);
     let mine: Vec<usize> = (0..partition.n_tiles())
         .filter(|&f| placement.owner_of(TileId(f as u32)) == me)
         .collect();
@@ -12513,7 +12479,7 @@ where
     let tile_ids: Vec<TileId> = mine.iter().map(|&f| TileId(f as u32)).collect();
     let my_offsets: Vec<[isize; D]> = mine.iter().map(|&f| offsets[f]).collect();
     let schema = plan_schema(&*tiles[0].0);
-    let seam = polar_seam_of_partition::<D>(&cfg.coord_system, &boundaries_nd::<D>(&cfg.boundaries), topology, partition);
+    let seam = polar_seam::<D>(&cfg.coord_system, &boundaries_nd::<D>(&cfg.boundaries), topology, partition.counts(), |az, i| partition.tile_range(az, i).1);
     let plan = ExchangePlan::compile_with_seam(partition, topology, &schema, ng, seam).map_err(|e| e.to_string())?;
     let table = PhaseTable::flat(cfg.timestepping.stages().len() as u8).map_err(|e| e.to_string())?;
     let exchange = PlanExchange::new(&plan, &placement, me, table.clone());
@@ -12522,7 +12488,7 @@ where
     let continuous_traced = cfg.n_tracers > 0 && configured_ito_order(cfg)?.is_some();
     let coefficient_plan = if continuous_traced {
         let schema = (0..3 * D).fold(symbi_sim::atlas::FieldSchema::new(), |schema, ii| schema.cell(&format!("ito_coefficient_{ii}")));
-        let seam = polar_seam_of_partition::<D>(&cfg.coord_system, &boundaries_nd::<D>(&cfg.boundaries), topology, partition);
+        let seam = polar_seam::<D>(&cfg.coord_system, &boundaries_nd::<D>(&cfg.boundaries), topology, partition.counts(), |az, i| partition.tile_range(az, i).1);
         Some(ExchangePlan::compile_with_seam(partition, topology, &schema, ng, seam).map_err(|e| e.to_string())?)
     } else {
         None
@@ -13333,6 +13299,23 @@ mod tests {
         BUILD_GIT_DIRTY, BUILD_GIT_SHA, build_source_id, build_source_label, wrap_capability,
     };
     use symbi::sim::decomp::Topology;
+
+    // the seam exists exactly when an axis face meets a wrapping azimuth cut into tiles, and
+    // carries each azimuth tile's width
+    #[test]
+    fn a_polar_seam_needs_an_axis_face_on_a_wrapping_cut_azimuth() {
+        use super::polar_seam;
+        use symbi::sim::state::{Boundaries, BoundaryType::{Axis, Outflow, Periodic}};
+        let pole = Boundaries([[Outflow, Outflow], [Axis, Axis], [Periodic, Periodic]]);
+        let wrapping = Topology::wrapping([false, false, true]);
+        let seam = polar_seam::<3>("spherical", &pole, &wrapping, [1, 1, 3], |_, i| [6, 4, 2][i]).expect("the seam");
+        assert_eq!((seam.mirror, seam.azimuth, seam.sides, seam.slabs.clone()), (1, 2, [true, true], vec![6, 4, 2]));
+        let open = Topology::wrapping([false, false, false]);
+        assert!(polar_seam::<3>("spherical", &pole, &open, [1, 1, 3], |_, _| 4).is_none(), "the azimuth must wrap");
+        assert!(polar_seam::<3>("spherical", &pole, &wrapping, [2, 1, 1], |_, _| 12).is_none(), "an uncut azimuth needs none");
+        let walls = Boundaries([[Outflow, Outflow], [Outflow, Outflow], [Periodic, Periodic]]);
+        assert!(polar_seam::<3>("spherical", &walls, &wrapping, [1, 1, 3], |_, _| 4).is_none(), "the pole must be an axis face");
+    }
 
     #[test]
     fn compiled_backend_carries_a_self_consistent_source_identity() {
