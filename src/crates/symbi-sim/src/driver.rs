@@ -6,11 +6,15 @@
 // `evolve` loop (symbi) and the refinement hierarchy driver (symbi-refinement) need them, so they
 // live in the sim-state core below both drivers:
 // - check_dt / check_dt_or_panic — dt-livelock guard (NaN/Inf/non-positive)
+// - agree_timestep — the root timestep every march agrees on: candidates judged before any cap,
+//   the valid minimum reduced across ranks, then the final-time and user caps
+// - retry_timestep — the halved step after a rejection
 // - the SYMBI_PROFILE per-phase profiler (prof / reset_profile / report_profile)
 // - stage_tag / stage_time_fractions — SSP Shu-Osher stage bookkeeping
 // - evolve_bodies — immersed-body diagnostics consolidation + prescribed binary motion
 //
 // usage:
+//  let agreed = agree_timestep(candidates, max_dt, t_final - t, reduce_min)?;
 //  let dt = sim.timestepping...; check_dt_or_panic(dt, iter, time);
 //  prof("flux", || k.flux(sim, dd));
 // =============================================================================
@@ -49,39 +53,63 @@ pub fn check_dt(dt: f64, iter: u64, time: f64) -> symbi_xpu::Result<()> {
     Ok(())
 }
 
-/// validate every local CFL candidate before reducing to the global step.
-/// validating first is required because `f64::min` discards a NaN operand.
-pub fn select_timestep(
+/// a raw timestep candidate that cannot advance a march: its position among the candidates the
+/// caller passed (the caller maps it to its tile, level or worker) and its value, NaN, infinite or
+/// non-positive.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct InvalidCandidate {
+    pub index: usize,
+    pub value: f64,
+}
+
+/// the root timestep a march agreed on: the step after the final-time and user caps, and the raw
+/// cfl minimum it came from, before any cap.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct AgreedTimestep {
+    pub dt: f64,
+    pub raw: f64,
+}
+
+/// why a march agreed no timestep: a candidate it cannot step on, or the collective reducing the
+/// candidates across workers failed.
+#[derive(Debug)]
+pub enum TimestepFailure<E> {
+    Invalid(InvalidCandidate),
+    Collective(E),
+}
+
+/// the root timestep of one step, agreed across every tile or worker of a march. each raw
+/// candidate is a cfl limit already in root-step units (a level that subcycles ratio^l times
+/// enters scaled by ratio^l), and each is judged before any cap, since `f64::min` replaces a NaN
+/// with its other operand; an empty candidate set is invalid. the valid minimum is reduced across
+/// ranks by `reduce_min` (the identity in process, the fabric minimum across workers), so an
+/// invalid value never enters the collective: a rank holding one fails before it and ends the
+/// session through its own abort path. the agreed step is the reduced minimum capped by the
+/// `remaining` time to `t_final` and by a positive user `max_dt`; a march calls this while
+/// `remaining` is positive, so reaching `t_final` ends the march by its own loop condition.
+pub fn agree_timestep<E>(
     candidates: impl IntoIterator<Item = f64>,
+    max_dt: f64,
     remaining: f64,
-    iter: u64,
-    time: f64,
-) -> symbi_xpu::Result<f64> {
-    check_dt(remaining, iter, time)?;
-    let mut dt = remaining;
+    reduce_min: impl FnOnce(f64) -> Result<f64, E>,
+) -> Result<AgreedTimestep, TimestepFailure<E>> {
+    debug_assert!(remaining > 0.0, "a march agrees a timestep only before its final time: remaining {remaining:e}");
+    let mut local = f64::INFINITY;
     let mut count = 0usize;
-    for (ii, candidate) in candidates.into_iter().enumerate() {
-        count += 1;
-        if !candidate.is_finite() || candidate <= 0.0 {
-            return Err(symbi_xpu::XpuError {
-                operation: "evolve",
-                code: -1,
-                detail: format!(
-                    "evolve: invalid CFL candidate {ii} = {candidate:e} at iter {iter} \
-                     (time {time:.4e}); state went NaN/inf"
-                ),
-            });
+    for (index, value) in candidates.into_iter().enumerate() {
+        if !value.is_finite() || value <= 0.0 {
+            return Err(TimestepFailure::Invalid(InvalidCandidate { index, value }));
         }
-        dt = dt.min(candidate);
+        local = local.min(value);
+        count += 1;
     }
     if count == 0 {
-        return Err(symbi_xpu::XpuError {
-            operation: "evolve",
-            code: -1,
-            detail: format!("evolve: no CFL candidates at iter {iter} (time {time:.4e})"),
-        });
+        return Err(TimestepFailure::Invalid(InvalidCandidate { index: 0, value: f64::INFINITY }));
     }
-    Ok(dt)
+    let raw = reduce_min(local).map_err(TimestepFailure::Collective)?;
+    let dt = raw.min(remaining);
+    let dt = if max_dt > 0.0 { dt.min(max_dt) } else { dt };
+    Ok(AgreedTimestep { dt, raw })
 }
 
 /// reduce a rejected explicit timestep while preserving a representable clock
@@ -365,8 +393,8 @@ pub fn evolve_bodies<R: Regime<f64, D>, const D: usize, const DOF: usize, M, E, 
 #[cfg(test)]
 mod tests {
     use super::{
-        advance_clock, check_dt_or_panic, downstream_injection_weight, needs_step_snapshot,
-        retry_timestep, select_timestep, stage_schedule,
+        AgreedTimestep, InvalidCandidate, TimestepFailure, advance_clock, agree_timestep, check_dt_or_panic,
+        downstream_injection_weight, needs_step_snapshot, retry_timestep, stage_schedule,
     };
 
     #[test]
@@ -434,19 +462,7 @@ mod tests {
         assert_eq!(schedule[2].entry, 0.5);
     }
 
-    #[test]
-    fn timestep_selection_rejects_a_nan_candidate_before_reduction() {
-        let err = select_timestep([0.2, f64::NAN, 0.1], 0.5, 7, 1.25)
-            .expect_err("a NaN tile CFL must not be hidden by f64::min");
-        assert!(err.detail.contains("candidate 1"));
-        assert!(err.detail.contains("NaN"));
-    }
 
-    #[test]
-    fn timestep_selection_uses_the_smallest_valid_candidate_and_remaining_time() {
-        assert_eq!(select_timestep([0.2, 0.1], 0.5, 0, 0.0).unwrap(), 0.1);
-        assert_eq!(select_timestep([0.2, 0.1], 0.05, 0, 0.0).unwrap(), 0.05);
-    }
 
     #[test]
     fn rejected_timestep_is_halved_without_advancing_the_clock() {
@@ -487,5 +503,48 @@ mod tests {
         assert_eq!(w(Timestepping::Euler), vec![1.0]);
         assert_eq!(w(Timestepping::Rk2), vec![0.5, 1.0]);
         assert_eq!(w(Timestepping::Rk3), vec![1.0 / 6.0, 2.0 / 3.0, 1.0]);
+    }
+
+    // a NaN candidate under a positive user cap is judged before the cap could replace it
+    #[test]
+    fn an_invalid_candidate_under_a_positive_cap_is_refused() {
+        let out = agree_timestep([0.02, f64::NAN, 0.03], 0.001, 1.0, Ok::<f64, ()>);
+        assert!(matches!(out, Err(TimestepFailure::Invalid(InvalidCandidate { index: 1, value })) if value.is_nan()));
+        let zero = agree_timestep([0.02, 0.0], 0.001, 1.0, Ok::<f64, ()>);
+        assert!(matches!(zero, Err(TimestepFailure::Invalid(InvalidCandidate { index: 1, value: 0.0 }))));
+        let none = agree_timestep(std::iter::empty::<f64>(), 0.001, 1.0, Ok::<f64, ()>);
+        assert!(matches!(none, Err(TimestepFailure::Invalid(_))));
+    }
+
+    // the step is the smallest of the raw minimum, the remaining time and a positive user cap,
+    // and the raw minimum is reported uncapped
+    #[test]
+    fn the_caps_shorten_the_step_and_leave_the_raw_minimum() {
+        let free = agree_timestep([0.03, 0.02], 0.0, 1.0, Ok::<f64, ()>).unwrap();
+        assert_eq!(free, AgreedTimestep { dt: 0.02, raw: 0.02 });
+        let last = agree_timestep([0.03, 0.02], 0.0, 0.005, Ok::<f64, ()>).unwrap();
+        assert_eq!(last, AgreedTimestep { dt: 0.005, raw: 0.02 });
+        let capped = agree_timestep([0.03, 0.02], 0.004, 1.0, Ok::<f64, ()>).unwrap();
+        assert_eq!(capped, AgreedTimestep { dt: 0.004, raw: 0.02 });
+    }
+
+    // the collective reduces this rank's valid minimum only, and its failure is passed through
+    #[test]
+    fn the_collective_sees_the_valid_local_minimum() {
+        let mut seen = None;
+        let agreed = agree_timestep([0.03, 0.02], 0.0, 1.0, |local| {
+            seen = Some(local);
+            Ok::<f64, ()>(0.01)
+        })
+        .unwrap();
+        assert_eq!((seen, agreed), (Some(0.02), AgreedTimestep { dt: 0.01, raw: 0.01 }));
+        let mut reached = false;
+        let refused = agree_timestep([f64::NAN], 0.0, 1.0, |local| {
+            reached = true;
+            Ok::<f64, ()>(local)
+        });
+        assert!(matches!(refused, Err(TimestepFailure::Invalid(_))) && !reached, "an invalid value reached the collective");
+        let failed = agree_timestep([0.02], 0.0, 1.0, |_| Err::<f64, &str>("lost"));
+        assert!(matches!(failed, Err(TimestepFailure::Collective("lost"))));
     }
 }

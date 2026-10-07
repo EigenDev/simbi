@@ -33,7 +33,7 @@ use symbi_grid::Field;
 use symbi_hydro::regime::Regime;
 use symbi_sim::atlas::{AuditAt, ExchangePoint, FinePoint, TileId};
 use symbi_sim::decomp::{HaloTransport, plan_cons_fields, plan_fields};
-use symbi_sim::driver::{advance_clock, retry_timestep, select_timestep};
+use symbi_sim::driver::{TimestepFailure, advance_clock, agree_timestep, retry_timestep};
 use symbi_sim::hydro_ops::scan_c2p_errors;
 use symbi_sim::plan_exchange::{AuditError, PlanExchange, PlanRole, StagingFault, audit_plans};
 use symbi_sim::state::FieldStore;
@@ -781,33 +781,38 @@ where
         // workers, consumed as the coordinator's bits
         // every level's raw candidate is judged before the user clamp, which would replace a
         // NaN with the cap
-        let mut local = f64::INFINITY;
+        // every held tile's levels in root units, tile by tile, each candidate named by its tile
+        // and level
+        let mut origin: Vec<(usize, usize)> = Vec::new();
+        let mut candidates: Vec<f64> = Vec::new();
         for (k, h) in tiles.iter().enumerate() {
-            let mut raw = f64::INFINITY;
-            for (ll, mut candidate) in with_device(root_dev(k), || h.level_cfl_candidates()).into_iter().enumerate() {
-                if k == 0 && (base.injection.invalid_cfl_at == Some(iter) && ll == 0 || cfg.invalid_level_cfl_at == Some((iter, ll))) {
-                    candidate = f64::NAN;
-                }
-                if !candidate.is_finite() || candidate <= 0.0 {
-                    return Err(fail(
-                        fabric,
-                        WorkerError::Numerics(format!(
-                            "invalid CFL candidate {candidate:e} on level {ll} of tile {:?} at iter {iter} (time {t:.4e})",
-                            held.root_ids[k]
-                        )),
-                    ));
-                }
-                raw = raw.min(candidate);
+            for (ll, candidate) in with_device(root_dev(k), || h.level_cfl_candidates()).into_iter().enumerate() {
+                let poisoned = k == 0 && (base.injection.invalid_cfl_at == Some(iter) && ll == 0 || cfg.invalid_level_cfl_at == Some((iter, ll)));
+                origin.push((k, ll));
+                candidates.push(if poisoned { f64::NAN } else { candidate });
             }
-            local = local.min(h.clamp_dt(raw));
         }
-        let clock = Instant::now();
-        let global = fabric
-            .collective(OpKind::Min, local.to_bits(), deadline)
-            .map_err(|e| fail(fabric, e.into()))?;
-        timing.collectives += clock.elapsed();
-        let mut dt = select_timestep([f64::from_bits(global)], base.t_final - t, iter, t)
-            .map_err(|e| fail(fabric, WorkerError::Numerics(e.detail)))?;
+        let max_dt = tiles[0].levels[0].state.max_dt;
+        let agreed = agree_timestep(candidates, max_dt, base.t_final - t, |local| {
+            let clock = Instant::now();
+            let global = fabric.collective(OpKind::Min, local.to_bits(), deadline);
+            timing.collectives += clock.elapsed();
+            global.map(f64::from_bits)
+        });
+        let mut dt = match agreed {
+            Ok(agreed) => agreed.dt,
+            Err(TimestepFailure::Invalid(bad)) => {
+                let (k, ll) = origin[bad.index];
+                return Err(fail(
+                    fabric,
+                    WorkerError::Numerics(format!(
+                        "invalid CFL candidate {:e} on level {ll} of tile {:?} at iter {iter} (time {t:.4e})",
+                        bad.value, held.root_ids[k]
+                    )),
+                ));
+            }
+            Err(TimestepFailure::Collective(e)) => return Err(fail(fabric, e.into())),
+        };
         if let Some((at, bits)) = base.injection.cap_dt_at {
             if at == iter {
                 dt = dt.min(f64::from_bits(bits));

@@ -2799,23 +2799,17 @@ where
         // global dt = min over tiles' cfl, clamped so the last step lands exactly on t_final.
         let mut dt = {
             let sh = shared!();
-            let candidates: Vec<f64> =
-                (0..n).map(|i| symbi_xpu::with_device(devices[i], || kernels[i].cfl(sh[i]))).collect();
-            // the estimate that decides the halt: the first unusable one, else the minimum
-            let dt_cfl = candidates
-                .iter()
-                .copied()
-                .find(|c| !c.is_finite() || *c <= 0.0)
-                .unwrap_or_else(|| candidates.iter().copied().fold(f64::INFINITY, f64::min));
-            match crate::driver::select_timestep(candidates, t_final - t, iter, t) {
-                Ok(dt) => {
-                    dt_prev = dt_cfl;
-                    clamp_user_dt(dt, sh[0].max_dt)
+            let candidates = (0..n).map(|i| symbi_xpu::with_device(devices[i], || kernels[i].cfl(sh[i])));
+            match crate::driver::agree_timestep(candidates, sh[0].max_dt, t_final - t, Ok::<f64, std::convert::Infallible>) {
+                Ok(agreed) => {
+                    dt_prev = agreed.raw;
+                    agreed.dt
                 }
-                Err(_) => {
-                    halt = Some(crate::run_diagnostics::TimestepHalt { iter: sh[0].iteration, time: t, dt_cfl, dt_prev });
+                Err(crate::driver::TimestepFailure::Invalid(bad)) => {
+                    halt = Some(crate::run_diagnostics::TimestepHalt { iter: sh[0].iteration, time: t, dt_cfl: bad.value, dt_prev });
                     break 'march;
                 }
+                Err(crate::driver::TimestepFailure::Collective(never)) => match never {},
             }
         };
         // homologous mesh motion: each stage's dispatches bind geometry / grid-velocity

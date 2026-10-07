@@ -126,7 +126,7 @@ use symbi_sim::decomp::{
     HaloTransport, Topology, drain_devices, exchange_grid, flatten, schedule_of_tiles, unflatten,
 };
 use symbi_sim::driver::{
-    advance_clock, advance_state_clock, book_horizon_receipt, check_dt_or_panic, evolve_bodies,
+    TimestepFailure, advance_clock, advance_state_clock, agree_timestep, book_horizon_receipt, evolve_bodies,
     horizon_request, needs_step_snapshot, prof, stage_time_fractions,
 };
 use symbi_sim::hydro_ops::scan_c2p_errors;
@@ -2665,54 +2665,25 @@ where
         // full-grid read of prim on every level, once per step, and sits outside the substage loop:
         // at a small domain / high step count it is a large fraction of the step that per-phase
         // timing inside the substage loop would leave unattributed.
-        let Some(dt) = self.watchdog_root_dt(t_final) else {
+        let Some(dt) = agree_tiles_dt(std::slice::from_mut(self), None, t_final) else {
             return;
         };
         self.step_root_with_dt(dt);
     }
 
-    /// the watchdog-screened root timestep. the crash detection runs ahead of the `t_final`
-    /// clamp: the clamp `dt_cfl.min(t_final - time)` silently replaces a NaN dt with the
-    /// remaining time (f64::min returns the non-NaN operand). a larger positive CFL timestep is
-    /// never itself unsafe: it means the maximum signal speed fell. in particular, a transient
-    /// pressure-supported low-density cell can make one estimate tiny and then refill on the next
-    /// step; rejecting the ensuing increase mislabels that recovery as a wave-speed reduction
-    /// failure. a fatal estimate is therefore only NaN or non-positive. it records the crash and
-    /// yields nothing, so the caller halts on the last computed state.
-    fn watchdog_root_dt(&mut self, t_final: f64) -> Option<f64> {
-        let dt_cfl = prof("cfl", || self.raw_root_cfl());
-        let (iter, time) = {
-            let r = &self.levels[0].state;
-            (r.iteration, r.time)
-        };
-        let dt_prev = self.prev_dt_cfl; // 0.0 before the first step
-        let crashed = fatal_cfl_dt(dt_cfl);
-        if crashed {
-            // record the crash and halt on this state: the evolve loop reports it and the driver
-            // snapshots `.crashed.h5` from the last computed state and stops. the run therefore
-            // terminates by report, in place of a panic or a march past t_final on garbage.
-            self.crash = Some(CrashReport {
-                iter,
-                time,
-                dt_cfl,
-                dt_prev,
-                panic: None,
-            });
-            return None;
-        }
-        // Retain the raw rate-derived value for any next-step crash report, before user/final-time
-        // clamps or a rejected-step replay reduce the accepted step.
-        self.prev_dt_cfl = dt_cfl;
-        let root = &self.levels[0];
-        let user_clamp = root.state.max_dt;
-        let dt_cfl = if user_clamp > 0.0 {
-            dt_cfl.min(user_clamp)
-        } else {
-            dt_cfl
-        };
-        let dt = dt_cfl.min(t_final - root.state.time);
-        check_dt_or_panic(dt, root.state.iteration, root.state.time);
-        Some(dt)
+    /// record a fatal timestep estimate and halt on this state: the evolve loop reports it and the
+    /// driver snapshots `.crashed.h5` from the last computed state. a larger positive estimate is
+    /// never itself unsafe (it means the maximum signal speed fell), so a fatal estimate is only a
+    /// NaN, infinite or non-positive one.
+    fn record_cfl_crash(&mut self, dt_cfl: f64) {
+        let root = &self.levels[0].state;
+        self.crash = Some(CrashReport {
+            iter: root.iteration,
+            time: root.time,
+            dt_cfl,
+            dt_prev: self.prev_dt_cfl,
+            panic: None,
+        });
     }
 
     /// one root step at an already-selected dt: the retry-snapshot transaction, the stage
@@ -6361,6 +6332,45 @@ fn migrate_continuous_to_finest_decomposed<R, const NDIM: usize, const DOF: usiz
     }
 }
 
+/// the root timestep every tile of a lockstep march takes: each tile's raw estimate over its
+/// levels in root units, agreed through the shared timestep agreement under the root's user cap
+/// and the time left to `t_final`. each tile keeps its own raw estimate for the next crash report;
+/// a fatal estimate is recorded on the tile that holds it, and the march halts on its last state.
+fn agree_tiles_dt<R, const NDIM: usize, const DOF: usize, M, E, S, Mem, K>(
+    tiles: &mut [Hierarchy<R, NDIM, DOF, M, E, S, Mem, K>],
+    devices: Option<&[i32]>,
+    t_final: f64,
+) -> Option<f64>
+where
+    R: Regime<f64, NDIM> + Copy,
+    M: Metric<f64, NDIM> + Copy + Send + Sync,
+    E: symbi_hydro::eos::EosFor<f64, <R as Regime<f64, NDIM>>::Energy> + Copy + Send + Sync,
+    S: ExecutionSpace,
+    Mem: MemorySpace + Sync,
+    K: KernelSet<NDIM, DOF, Mem, f64>,
+{
+    let raws: Vec<f64> = (0..tiles.len())
+        .map(|i| match devices {
+            Some(devices) => symbi_xpu::with_device(devices[i], || prof("cfl", || tiles[i].raw_root_cfl())),
+            None => prof("cfl", || tiles[i].raw_root_cfl()),
+        })
+        .collect();
+    let root = &tiles[0].levels[0].state;
+    match agree_timestep(raws.iter().copied(), root.max_dt, t_final - root.time, Ok::<f64, std::convert::Infallible>) {
+        Ok(agreed) => {
+            for (tile, raw) in tiles.iter_mut().zip(&raws) {
+                tile.prev_dt_cfl = *raw;
+            }
+            Some(agreed.dt)
+        }
+        Err(TimestepFailure::Invalid(bad)) => {
+            tiles[bad.index].record_cfl_crash(bad.value);
+            None
+        }
+        Err(TimestepFailure::Collective(never)) => match never {},
+    }
+}
+
 /// the one hierarchy march: N tiles advance in lockstep behind an agreed timestep, with
 /// the per-tile watchdog, the step-panic catch, the crash report, and the observer
 /// cadence shared by every shape. a single tile with no decomposition context steps
@@ -6442,23 +6452,9 @@ where
         for tile in tiles.iter() {
             tile.assert_cf_order_pairing();
         }
-        let mut gdt = f64::INFINITY;
-        let mut dt_crashed = false;
-        for i in 0..n {
-            let d = match decomp {
-                Some((devices, _, _)) => {
-                    symbi_xpu::with_device(devices[i], || tiles[i].watchdog_root_dt(t_final))
-                }
-                None => tiles[i].watchdog_root_dt(t_final),
-            };
-            match d {
-                Some(v) => gdt = gdt.min(v),
-                None => {
-                    dt_crashed = true;
-                    break;
-                }
-            }
-        }
+        let agreed = agree_tiles_dt(tiles, decomp.map(|(devices, _, _)| devices), t_final);
+        let dt_crashed = agreed.is_none();
+        let gdt = agreed.unwrap_or(f64::INFINITY);
         if !dt_crashed {
             // a panic inside the step (the FOFC freeze-streak halt, a poisoned-cell
             // assertion) carries the same diagnostic value as a watchdog crash and

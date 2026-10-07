@@ -29,7 +29,7 @@ use crate::atlas::{AuditAt, ExchangePoint, TileId};
 use crate::decomp::{HaloTransport, plan_fields};
 use crate::driver::{
     advance_clock, advance_state_clock, downstream_injection_weight, needs_step_snapshot,
-    retry_timestep, select_timestep, stage_schedule,
+    TimestepFailure, agree_timestep, retry_timestep, stage_schedule,
 };
 use crate::plan_exchange::{AuditCost, AuditError, PlanExchange, StagingFault};
 use crate::stage::{
@@ -1078,34 +1078,35 @@ where
         // workers, consumed as the coordinator's bits, then the final-time clamp.
         // every tile's candidate is validated before the fold: a minimum over f64 prefers the
         // finite operand, so one bad tile would vanish behind a good one.
-        let mut local = f64::INFINITY;
-        {
+        let (candidates, max_dt) = {
             let sh = shared!();
-            for k in 0..n {
-                let mut candidate = with_device(dev(k), || kernels[k].cfl(sh[k]));
-                if k == 0 && cfg.injection.invalid_cfl_at == Some(iter) {
-                    candidate = f64::NAN;
-                }
-                if !candidate.is_finite() || candidate <= 0.0 {
-                    return Err(fail(
-                        fabric,
-                        WorkerError::Numerics(format!(
-                            "invalid CFL candidate {candidate:e} on tile {:?} at iter {iter} (time {t:.4e})",
-                            tiles[k]
-                        )),
-                    ));
-                }
-                local = local.min(candidate);
+            let candidates: Vec<f64> = (0..n)
+                .map(|k| {
+                    let candidate = with_device(dev(k), || kernels[k].cfl(sh[k]));
+                    if k == 0 && cfg.injection.invalid_cfl_at == Some(iter) { f64::NAN } else { candidate }
+                })
+                .collect();
+            (candidates, sh[0].max_dt)
+        };
+        let agreed = agree_timestep(candidates, max_dt, cfg.t_final - t, |local| {
+            let clock = Instant::now();
+            let global = fabric.collective(OpKind::Min, local.to_bits(), deadline);
+            timing.collectives += clock.elapsed();
+            global.map(f64::from_bits)
+        });
+        let mut dt = match agreed {
+            Ok(agreed) => agreed.dt,
+            Err(TimestepFailure::Invalid(bad)) => {
+                return Err(fail(
+                    fabric,
+                    WorkerError::Numerics(format!(
+                        "invalid CFL candidate {:e} on tile {:?} at iter {iter} (time {t:.4e})",
+                        bad.value, tiles[bad.index]
+                    )),
+                ));
             }
-        }
-        let clock = Instant::now();
-        let global = fabric
-            .collective(OpKind::Min, local.to_bits(), deadline)
-            .map_err(|e| fail(fabric, e.into()))?;
-        timing.collectives += clock.elapsed();
-        let mut dt = select_timestep([f64::from_bits(global)], cfg.t_final - t, iter, t)
-            .map_err(|e| fail(fabric, WorkerError::Numerics(e.detail)))?;
-        dt = crate::decomp::clamp_user_dt(dt, shared!()[0].max_dt);
+            Err(TimestepFailure::Collective(e)) => return Err(fail(fabric, e.into())),
+        };
         if let Some((at, bits)) = cfg.injection.cap_dt_at {
             if at == iter {
                 dt = dt.min(f64::from_bits(bits));

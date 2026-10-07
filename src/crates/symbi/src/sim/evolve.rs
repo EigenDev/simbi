@@ -26,7 +26,7 @@ pub use crate::sim::substrate_seam::KernelSet;
 // re-exported at the `sim::evolve::` path for the bench examples.
 use crate::sim::driver::{
     advance_state_clock, book_horizon_receipt, evolve_bodies, horizon_request, needs_step_snapshot,
-    prof, retry_timestep, select_timestep, set_stage_motion, stage_schedule,
+    TimestepFailure, agree_timestep, prof, retry_timestep, set_stage_motion, stage_schedule,
 };
 pub use crate::sim::driver::{check_dt, report_profile, reset_profile};
 
@@ -198,9 +198,22 @@ where
     let mut last_cb = sim.iteration;
     while sim.time < t_final {
         let cfl = prof("cfl", || kernels.cfl(sim));
-        let dt = match select_timestep([cfl], t_final - sim.time, sim.iteration, sim.time) {
-            Ok(dt) => dt,
-            Err(err) => {
+        // the standalone driver steps at the cfl and final-time limits alone (max_dt = 0)
+        let dt = match agree_timestep([cfl], 0.0, t_final - sim.time, Ok::<f64, std::convert::Infallible>) {
+            Ok(agreed) => agreed.dt,
+            Err(failure) => {
+                let (iter, time) = (sim.iteration, sim.time);
+                let err = match failure {
+                    TimestepFailure::Invalid(bad) => symbi_xpu::XpuError {
+                        operation: "evolve",
+                        code: -1,
+                        detail: format!(
+                            "evolve: invalid CFL candidate {} = {:e} at iter {iter} (time {time:.4e}); state went NaN/inf",
+                            bad.index, bad.value
+                        ),
+                    },
+                    TimestepFailure::Collective(never) => match never {},
+                };
                 // terminal NaN/inf cascade only: name the first bad cell before returning. one-time
                 // host scan confined to the failure boundary, off the happy path entirely (see report fn).
                 crate::regimes::substrate_gpu::device_sync::<Mem>();
