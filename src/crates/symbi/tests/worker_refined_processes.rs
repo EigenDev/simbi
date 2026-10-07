@@ -873,7 +873,8 @@ fn assert_matches_reference_after(test: &str, tag: &str, outcomes: &[Outcome], a
     let reports: Vec<&Report> = outcomes.iter().map(|o| o.report.as_ref().expect("report")).collect();
     for (w, r) in reports.iter().enumerate() {
         assert_eq!(r.dts, reports[0].dts, "{label}: worker {w} took other timesteps");
-        assert_eq!(r.steps, arm.steps, "{label}: worker {w} took {} steps", r.steps);
+        // the cap is the absolute root iteration: a resumed run takes the steps the checkpoint left
+        assert_eq!(r.steps, arm.steps - before.len() as u64, "{label}: worker {w} took {} steps", r.steps);
         assert!(
             r.high_water.iter().all(|&h| h <= 2),
             "{label}: worker {w} held more grants than one per axis per peer: {:?}",
