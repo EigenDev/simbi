@@ -48,6 +48,7 @@ use symbi_hydro::state::PrimG;
 use symbi_ib::{Body, BodyCollection, BodyKind};
 use symbi_io::Metadata;
 use symbi_sim::checkpoint::{time_at_or_after, write_hierarchy_checkpoint};
+use symbi_sim::placement::{PlacedTile, WholeGrid};
 use symbi_sim::state::CtMethod;
 use symbi_sim::state::SimStateGeneric;
 use symbi_sim::substrate_seam::{WithExcision, WithResistivity, WithViscosity};
@@ -1986,45 +1987,6 @@ fn boundaries_nd<const D: usize>(bcs: &[BoundaryType]) -> Boundaries<D> {
     }))
 }
 
-/// whether a decomposed axis closes into a ring: declared periodic on both sides and carrying
-/// more than one tile. an uncut periodic axis wraps its single tile onto itself, which spans
-/// the whole domain, so it stays an ordinary periodic boundary.
-fn axis_wraps<const D: usize>(phys: &Boundaries<D>, counts: [usize; D], ax: usize) -> bool {
-    phys.lo(ax) == BoundaryType::Periodic && phys.hi(ax) == BoundaryType::Periodic && counts[ax] > 1
-}
-
-/// the boundaries one tile of a decomposed grid carries. a face between two tiles is a cut; a
-/// face at the domain edge carries the run's declared condition, except on an axis that wraps,
-/// where the two faces at the domain seam are closed by the schedule's end-to-end legs and so
-/// are cuts like any other. a seam face left declared periodic is refilled from its own tile's
-/// opposite interior, which is the far side of the domain only when the axis is uncut.
-fn tile_boundaries<const D: usize>(
-    phys: &Boundaries<D>,
-    tc: [usize; D],
-    counts: [usize; D],
-) -> Boundaries<D> {
-    Boundaries(std::array::from_fn(|ax| {
-        let edge = |side: usize| {
-            if axis_wraps(phys, counts, ax) {
-                BoundaryType::CoarseFine
-            } else {
-                phys.0[ax][side]
-            }
-        };
-        let lo = if tc[ax] == 0 {
-            edge(0)
-        } else {
-            BoundaryType::CoarseFine
-        };
-        let hi = if tc[ax] == counts[ax] - 1 {
-            edge(1)
-        } else {
-            BoundaryType::CoarseFine
-        };
-        [lo, hi]
-    }))
-}
-
 /// the driven (dynamic) boundary prescriptions in registry order, `Driven(id)` naming the id-th:
 /// each lowered against the run's regime and handed to `register` with its parameters
 fn attach_driven_boundaries<K>(
@@ -2135,15 +2097,22 @@ fn wrap_capability<const D: usize>(
     Ok(())
 }
 
-/// the halo topology a decomposed run's declared boundaries imply.
-fn wrap_topology<const D: usize>(phys: &Boundaries<D>, counts: [usize; D]) -> Topology<D> {
-    Topology::wrapping(std::array::from_fn(|ax| axis_wraps(phys, counts, ax)))
+/// the whole grid a run decomposes: the configured cells, origin, spacing, coordinate maps and
+/// declared boundaries every tile is placed on.
+fn whole_grid<const D: usize>(cfg: &Config) -> WholeGrid<D> {
+    WholeGrid {
+        cells: std::array::from_fn(|ax| cfg.n_cells[ax]),
+        origin: std::array::from_fn(|ax| cfg.x_lo[ax]),
+        spacing: std::array::from_fn(|ax| cfg.dx[ax]),
+        maps: axis_maps::<D>(cfg),
+        boundaries: boundaries_nd::<D>(&cfg.boundaries),
+    }
 }
 
 /// the halo topology on the run's chart: a wrapping axis the metric depends on carries distinct
 /// end faces. the radius of a cylinder or a sphere and the polar angle vary face areas and edge
 /// lengths along themselves; a curved spacetime varies them along every axis.
-fn chart_topology<const D: usize>(cfg: &Config, phys: &Boundaries<D>, counts: [usize; D]) -> Topology<D> {
+fn chart_topology<const D: usize>(cfg: &Config, whole: &WholeGrid<D>, counts: [usize; D]) -> Topology<D> {
     let curved = cfg.spacetime != "minkowski";
     let distinct = std::array::from_fn(|ax| {
         curved
@@ -2153,7 +2122,7 @@ fn chart_topology<const D: usize>(cfg: &Config, phys: &Boundaries<D>, counts: [u
                 _ => false,
             }
     });
-    wrap_topology(phys, counts).with_distinct_ends(distinct)
+    whole.topology(counts).with_distinct_ends(distinct)
 }
 
 fn seed_configured_tracers<const D: usize, const DOF: usize, Mem: symbi::symbi_xpu::MemorySpace>(
@@ -2258,7 +2227,7 @@ macro_rules! seed_local_cs2 {
 /// from: the periodic image on an axis the domain closes into a ring, the nearest whole-grid
 /// interior cell otherwise. the closure is fixed in time, so no exchange carries it.
 macro_rules! seed_mhd_local_cs2 {
-    ($sim:expr, $cfg:expr, $prims:expr, $tile_lo:expr, $n:expr, $phys:expr, $d:literal) => {{
+    ($sim:expr, $cfg:expr, $prims:expr, $tile_lo:expr, $n:expr, $grid:expr, $d:literal) => {{
         let cfg: &Config = $cfg;
         if cfg.locally_isothermal {
             if $prims.first().is_some_and(|row: &Vec<f64>| row.len() < 5) {
@@ -2267,9 +2236,7 @@ macro_rules! seed_mhd_local_cs2 {
                     $prims[0].len()
                 ));
             }
-            let wraps: [bool; $d] = std::array::from_fn(|ax| {
-                $phys.lo(ax) == BoundaryType::Periodic && $phys.hi(ax) == BoundaryType::Periodic
-            });
+            let wraps: [bool; $d] = std::array::from_fn(|ax| $grid.periodic(ax));
             let ilo: [isize; $d] = std::array::from_fn(|ax| $sim.geom.interior.spaces[ax].lo);
             let cs2 = $sim.fields.cs2.as_ref().expect("the isothermal closure field exists on an energy-free regime");
             for c in $sim.geom.allocated.iter() {
@@ -3731,34 +3698,23 @@ fn refinement_regions_nd<const D: usize>(
     Ok(out)
 }
 
-/// clip each global refinement region to one tile's physical extent `[origin, origin + cells*dx]`,
-/// keeping only the regions that genuinely overlap (more than ~half a coarse cell on every axis, so
-/// region_to_domain rounds to >= 1 cell). a tile-local patch survives in exactly one tile; a patch
-/// spanning a cut is split into the abutting tiles, each clipped to its own slab (the per-tile
-/// hierarchies then share the cut on the fine level, exchanged by `evolve_hierarchy_decomposed`).
-/// clip the global refinement regions to one tile's physical box. `maps` carries the tile's own
-/// coordinate maps, so the tile's far corner and its cell widths come from the map rather than from
-/// `origin + cells * dx`: on a log radial axis the widths grow with radius and the linear form would
-/// place the tile's outer edge far short of where its last cell actually ends, silently dropping
-/// refinement regions that do overlap the tile.
+/// clip each global refinement region to one tile's physical extent, keeping only the regions that
+/// genuinely overlap (more than about half a cell on every axis, so region_to_domain rounds to at
+/// least one cell). a tile-local patch survives in exactly one tile; a patch spanning a cut is split
+/// into the abutting tiles, each clipped to its own slab, and the per-tile hierarchies share the cut
+/// on the fine level, exchanged by `evolve_hierarchy_decomposed`.
 ///
-/// the survival test compares each clipped extent against the width of the smallest cell in the
-/// overlap rather than a single global `dx`, which is the same "narrower than half a cell" rule the
-/// uniform path applied, expressed so it still means that when the cells are not all one size.
+/// the tile's corners and cell widths are the whole grid's face positions at the tile's own cell
+/// indices, so on a log radial axis the far corner sits where the tile's last cell ends. the
+/// survival test compares each clipped extent against the tile's narrowest cell, the "narrower
+/// than half a cell" rule expressed so it holds when the cells differ in size.
 fn clip_regions_to_tile<const D: usize>(
     regions: &[RefinementRegion<D>],
-    origin: [f64; D],
-    cells: [usize; D],
-    maps: &[symbi_geometry::AxisMap; D],
+    grid: &WholeGrid<D>,
+    tile: &PlacedTile<D>,
 ) -> Vec<(RefinementRegion<D>, RefinementRegion<D>)> {
-    let hi: [f64; D] = std::array::from_fn(|a| maps[a].face(cells[a] as isize));
-    // the narrowest cell on each axis: for a uniform map every cell has this width, for a log map it
-    // is the innermost one, so the test never discards a region an actual cell could resolve.
-    let min_w: [f64; D] = std::array::from_fn(|a| {
-        (0..cells[a])
-            .map(|i| maps[a].face(i as isize + 1) - maps[a].face(i as isize))
-            .fold(f64::INFINITY, f64::min)
-    });
+    let (origin, hi) = (tile.lower(grid), tile.upper(grid));
+    let min_w = tile.narrowest_cell(grid);
     // region k refines level k, whose cells are 2^-k of the root's: a tile keeps the regions down
     // to the first one it holds no cell of, so its levels are the run's first levels in order
     let mut out = Vec::new();
@@ -5195,67 +5151,6 @@ fn motion_state(cfg: &Config) -> MotionState<f64> {
     }
 }
 
-/// per-axis coordinate maps for a non-uniform grid. only the radial (x1) axis carries a
-/// configurable spacing; angular axes stay uniform. a uniform radial grid returns `None` (the
-/// builder keeps the bit-identical `x_lo + i*dx` path). a log-spaced radial axis maps to
-/// `face(i) = start * 10^(i * slope)`, the slope set so the last face reaches `r_hi = start + dx*n`
-/// (dx being the linear width the binding derived from the bounds). requires `start > 0`.
-/// the per-axis coordinate maps for one tile of a decomposed grid, and the tile's physical origin.
-///
-/// a tile holds local cell indices `0..m` positioned by an origin, so the map it carries must place
-/// local index `i` where the global grid places `g + i` (`g` = the tile's first global cell on that
-/// axis).
-///
-/// for a uniform axis that composes additively — `x_lo + g dx` then `+ i dx` — which is what the
-/// decomposed builder has always done. a log axis maps `face(i) = start * 10^(i * slope)`, so the
-/// composition is multiplicative: the tile's origin is `start * 10^(g * slope)`.
-///
-/// the slope is global and must be inherited, never re-derived from the tile's own extent: it is a
-/// per-cell stretching, so a tile that recomputed it from its local start and cell count would give
-/// itself a different stretching and the grid would break at every seam. re-deriving it from the
-/// correct tile origin is consistent — `log10(hi_local/start_local)/m = log10(10^(m s))/m = s` — so
-/// inheriting is the same value, obtained without the chance of getting it wrong.
-fn tile_axis_maps<const D: usize>(
-    cfg: &Config,
-    tile_lo: [usize; D],
-) -> Option<[symbi_geometry::AxisMap; D]> {
-    let global = axis_maps::<D>(cfg)?;
-    Some(std::array::from_fn(|ax| {
-        shift_axis_map(global[ax], tile_lo[ax])
-    }))
-}
-
-/// advance one axis map to a tile whose first cell is global index `tile_lo`, so the tile's local
-/// index `i` lands where the global grid puts `tile_lo + i`. uniform composes additively, log
-/// multiplicatively; the log slope is a per-cell stretching and is carried through unchanged.
-fn shift_axis_map(global: symbi_geometry::AxisMap, tile_lo: usize) -> symbi_geometry::AxisMap {
-    use symbi_geometry::AxisMap;
-    match global {
-        AxisMap::Log { start, log_slope } => AxisMap::Log {
-            start: start * 10.0_f64.powf(tile_lo as f64 * log_slope),
-            log_slope,
-        },
-        AxisMap::Uniform { start, dx } => AxisMap::Uniform {
-            start: start + tile_lo as f64 * dx,
-            dx,
-        },
-        AxisMap::Geometric {
-            start,
-            width,
-            ratio,
-        } => AxisMap::Geometric {
-            start: AxisMap::Geometric {
-                start,
-                width,
-                ratio,
-            }
-            .face(tile_lo as isize),
-            width: width * ratio.powf(tile_lo as f64),
-            ratio,
-        },
-    }
-}
-
 /// the tile partition for a decomposed run: the config's explicit per-axis cuts when
 /// given, the balanced longest-axis heuristic otherwise. an explicit partition must
 /// yield exactly `n_gpus` tiles, since each tile binds one device.
@@ -5279,21 +5174,6 @@ fn tile_partition<const D: usize>(n: [usize; D], cfg: &Config) -> Result<Partiti
         ));
     }
     Ok(partition)
-}
-
-/// the physical lower corner of a decomposed tile whose first global cell is `tile_lo`. the one
-/// place this formula lives: a uniform axis advances additively by `g dx`, a log axis
-/// multiplicatively by `10^(g slope)`, and a caller that assumed the uniform form on a log grid
-/// would silently place the tile at the wrong radius.
-fn tile_origin<const D: usize>(cfg: &Config, tile_lo: [usize; D]) -> [f64; D] {
-    match tile_axis_maps::<D>(cfg, tile_lo) {
-        Some(maps) => std::array::from_fn(|ax| match maps[ax] {
-            symbi_geometry::AxisMap::Log { start, .. } => start,
-            symbi_geometry::AxisMap::Uniform { start, .. } => start,
-            symbi_geometry::AxisMap::Geometric { start, .. } => start,
-        }),
-        None => std::array::from_fn(|ax| cfg.x_lo[ax] + tile_lo[ax] as f64 * cfg.dx[ax]),
-    }
 }
 
 fn axis_maps<const D: usize>(cfg: &Config) -> Option<[symbi_geometry::AxisMap; D]> {
@@ -5744,8 +5624,7 @@ fn tiled_schedule<const D: usize, const DOF: usize, Mem: MemorySpace>(
     counts: [usize; D],
     stores: &mut [&mut symbi_sim::state::FieldStore<D, DOF, Mem, f64>],
 ) -> symbi::sim::decomp::Schedule<D> {
-    let phys = boundaries_nd::<D>(&cfg.boundaries);
-    let topology = chart_topology(cfg, &phys, counts);
+    let topology = chart_topology(cfg, &whole_grid::<D>(cfg), counts);
     let seam = polar_seam_of(cfg, counts, &stores.iter().map(|s| &**s).collect::<Vec<_>>());
     if let Some(seam) = seam.as_ref() {
         for (flat, store) in stores.iter_mut().enumerate() {
@@ -5981,8 +5860,7 @@ where
             .map_err(|e| checkpoint_write_error(path, e))?;
         Ok(t_io.elapsed().as_secs_f64())
     };
-    let phys = boundaries_nd::<D>(&cfg.boundaries);
-    let topology = chart_topology(cfg, &phys, counts);
+    let topology = chart_topology(cfg, &whole_grid::<D>(cfg), counts);
     wrap_capability(&topology, cfg.wb_reconstruction, !cfg.bodies.is_empty())?;
 
     let ntiles = tiles.len();
@@ -6588,35 +6466,20 @@ macro_rules! build_and_run_hydro_decomposed_refined {
             ));
         }
 
+        let whole = whole_grid::<$d>(cfg);
         // build N per-tile hierarchies (root slab + the clipped region, or single-level).
         let mut tiles: Vec<Hier> = Vec::with_capacity(ntiles);
         for flat in 0..ntiles {
             let tc = unflatten(flat, counts);
-            // the tile's first global cell on each axis; the origin and the coordinate maps both
-            // derive from it, so a log radial axis advances multiplicatively rather than by g*dx.
-            let ext = partition.tile_extents(tc);
-            let tile_lo: [usize; $d] = std::array::from_fn(|ax| ext[ax].0);
-            let m: [usize; $d] = std::array::from_fn(|ax| ext[ax].1);
-            let origin: [f64; $d] = tile_origin::<$d>(cfg, tile_lo);
-            let phys = boundaries_nd::<$d>(&cfg.boundaries);
-            let bnd = tile_boundaries(&phys, tc, counts);
-            let tile_maps: [symbi_geometry::AxisMap; $d] = tile_axis_maps::<$d>(cfg, tile_lo)
-                .unwrap_or_else(|| std::array::from_fn(|ax| symbi_geometry::AxisMap::Uniform {
-                    start: origin[ax], dx: dx[ax],
-                }));
-            let tile_regions = clip_regions_to_tile::<$d>(&regions, origin, m, &tile_maps);
+            // the tile's place on the whole grid, and the refinement regions its extent holds
+            let tile = whole.place(&partition, tc);
+            let tile_lo = tile.offset;
+            let tile_regions = clip_regions_to_tile::<$d>(&regions, &whole, &tile);
             let dev = flat as i32;
             let built = symbi::symbi_xpu::with_device(dev, || -> Result<Hier, String> {
                 let sim = Sim::build($regime, $eos, $geom)
-                    .cells(m)
+                    .placed(&whole, &tile)
                     .ghosts(ghost_width(cfg))
-                    // the whole grid's origin and the tile's first cell: every level places its
-                    // cells where the single hierarchy places them, bit for bit
-                    .origin(std::array::from_fn(|ax| cfg.x_lo[ax]))
-                    .spacing(dx)
-                    .coord_maps(axis_maps::<$d>(cfg))
-                    .index_offset(std::array::from_fn(|ax| tile_lo[ax] as isize))
-                    .boundaries(bnd)
                     .cfl(cfg.cfl)
                     .timestepping(cfg.timestepping)
                     .cyl_plane(cfg.cyl_plane)
@@ -6722,7 +6585,7 @@ macro_rules! build_and_run_hydro_decomposed_refined {
                 }
                 // the root exchange closes a periodic axis cut into tiles across its seam; a refined
                 // patch keeps clear of the seam, whose faces are cuts to the refinement build
-                let ring = wrap_topology(&phys, counts);
+                let ring = whole.topology(counts);
                 h.set_root_layout(n, tile_lo, std::array::from_fn(|ax| ring.is_periodic(ax)));
                 Ok(h)
             })?;
@@ -6901,20 +6764,14 @@ macro_rules! build_and_run_magnetized_decomposed_refined {
             ks
         };
 
+        let whole = whole_grid::<$d>(cfg);
         let mut tiles = Vec::with_capacity(ntiles);
         for flat in 0..ntiles {
             let tc = unflatten(flat, counts);
-            let ext = partition.tile_extents(tc);
-            let tile_lo: [usize; $d] = std::array::from_fn(|ax| ext[ax].0);
-            let m: [usize; $d] = std::array::from_fn(|ax| ext[ax].1);
-            let origin: [f64; $d] = tile_origin::<$d>(cfg, tile_lo);
-            let phys = boundaries_nd::<$d>(&cfg.boundaries);
-            let bnd = tile_boundaries(&phys, tc, counts);
-            let tile_maps: [symbi_geometry::AxisMap; $d] = tile_axis_maps::<$d>(cfg, tile_lo)
-                .unwrap_or_else(|| std::array::from_fn(|ax| symbi_geometry::AxisMap::Uniform {
-                    start: origin[ax], dx: dx[ax],
-                }));
-            let tile_regions = clip_regions_to_tile::<$d>(&regions, origin, m, &tile_maps);
+            // the tile's place on the whole grid, and the refinement regions its extent holds
+            let tile = whole.place(&partition, tc);
+            let (tile_lo, m) = (tile.offset, tile.cells);
+            let tile_regions = clip_regions_to_tile::<$d>(&regions, &whole, &tile);
             let dev = flat as i32;
             let built = symbi::symbi_xpu::with_device(dev, || -> Result<_, String> {
                 // the tile's slice of each global face buffer: a face shared by two tiles reads the
@@ -6922,15 +6779,8 @@ macro_rules! build_and_run_magnetized_decomposed_refined {
                 let tile_faces: Vec<Vec<f64>> =
                     (0..$d).map(|d| tile_face_buffer::<$d>(&bufs[d], n, m, tile_lo, d)).collect();
                 let mut sim = Sim::build($regime, $eos, $geom)
-                    .cells(m)
+                    .placed(&whole, &tile)
                     .ghosts(ghost_width(cfg))
-                    // the whole grid's origin and the tile's first cell: every level places its
-                    // cells where the single hierarchy places them, bit for bit
-                    .origin(std::array::from_fn(|ax| cfg.x_lo[ax]))
-                    .spacing(dx)
-                    .coord_maps(axis_maps::<$d>(cfg))
-                    .index_offset(std::array::from_fn(|ax| tile_lo[ax] as isize))
-                    .boundaries(bnd)
                     .cfl(cfg.cfl)
                     .timestepping(cfg.timestepping)
                     .cyl_plane(cfg.cyl_plane)
@@ -6967,7 +6817,7 @@ macro_rules! build_and_run_magnetized_decomposed_refined {
                 if !cfg.bodies.is_empty() {
                     h = h.try_with_bodies(build_bodies_and_horizon::<$d>(cfg)).map_err(|e| format!("tile {flat}: {e}"))?;
                 }
-                let ring = wrap_topology(&phys, counts);
+                let ring = whole.topology(counts);
                 h.set_root_layout(n, tile_lo, std::array::from_fn(|ax| ring.is_periodic(ax)));
                 Ok(h)
             })?;
@@ -7098,34 +6948,22 @@ macro_rules! build_and_run_hydro_decomposed {
         let ntiles: usize = counts.iter().product();
         let theta = build_theta(cfg);
         let solver = cfg.solver;
-        // the physical (domain-external) boundaries; internal faces become CoarseFine cuts.
-        let phys = boundaries_nd::<$d>(&cfg.boundaries);
+        // the whole grid the tiles partition; faces between tiles become CoarseFine cuts.
+        let whole = whole_grid::<$d>(cfg);
 
         // build N tiles, each allocated + substrate-built in its own device context.
         let mut tiles: Vec<(Sim, _)> = Vec::with_capacity(ntiles);
         for flat in 0..ntiles {
             let tc = unflatten(flat, counts);
-            // the tile's first global cell on each axis; the origin and the coordinate maps both
-            // derive from it, so a log radial axis advances multiplicatively rather than by g*dx.
-            let ext = partition.tile_extents(tc);
-            let tile_lo: [usize; $d] = std::array::from_fn(|ax| ext[ax].0);
-            let m: [usize; $d] = std::array::from_fn(|ax| ext[ax].1);
-            // every tile carries the whole grid's origin and maps and the whole-grid index of its first
-            // cell, so each position it evaluates is the whole grid's bit for bit
-            let origin: [f64; $d] = std::array::from_fn(|ax| cfg.x_lo[ax]);
-            let offset: [isize; $d] = std::array::from_fn(|ax| tile_lo[ax] as isize);
-            let spacing: [f64; $d] = std::array::from_fn(|ax| cfg.dx[ax]);
-            let bnd = tile_boundaries(&phys, tc, counts);
+            // the tile's place on the whole grid: its first cell, its cells and the boundaries its
+            // faces carry; every position it evaluates is the whole grid's bit for bit
+            let tile = whole.place(&partition, tc);
+            let tile_lo = tile.offset;
             let dev = flat as i32;
             let built = symbi::symbi_xpu::with_device(dev, || -> Result<(Sim, _), String> {
                 let sim = Sim::build($regime, host_eos(cfg), $geom)
-                    .cells(m)
+                    .placed(&whole, &tile)
                     .ghosts(ghost_width(cfg))
-                    .origin(origin)
-                    .spacing(spacing)
-                    .coord_maps(axis_maps::<$d>(cfg))
-                    .index_offset(offset)
-                    .boundaries(bnd)
                     .cfl(cfg.cfl)
                     .timestepping(cfg.timestepping)
                     .cyl_plane(cfg.cyl_plane)
@@ -7250,12 +7088,8 @@ macro_rules! build_and_run_hydro_decomposed {
         // the whole-grid state lives for that seeding alone.
         if cfg.n_tracers > 0 {
         let global = Sim::build($regime, host_eos(cfg), $geom)
-            .cells(n)
+            .placed(&whole, &whole.single())
             .ghosts(ghost_width(cfg))
-            .origin(std::array::from_fn(|ax| cfg.x_lo[ax]))
-            .spacing(std::array::from_fn(|ax| cfg.dx[ax]))
-            .coord_maps(axis_maps::<$d>(cfg))
-            .boundaries(phys)
             .cfl(cfg.cfl)
             .timestepping(cfg.timestepping)
             .cyl_plane(cfg.cyl_plane)
@@ -7998,22 +7832,15 @@ macro_rules! build_and_run_mhd_decomposed {
         let theta = build_theta(cfg);
         let solver = cfg.solver;
         let ct = cfg.ct_method;
-        let phys = boundaries_nd::<$d>(&cfg.boundaries);
+        let whole = whole_grid::<$d>(cfg);
 
         let mut tiles: Vec<(Sim, _)> = Vec::with_capacity(ntiles);
         for flat in 0..ntiles {
             let tc = unflatten(flat, counts);
-            // the tile's first global cell on each axis; the origin and the coordinate maps both
-            // derive from it, so a log radial axis advances multiplicatively rather than by g*dx.
-            let ext = partition.tile_extents(tc);
-            let tile_lo: [usize; $d] = std::array::from_fn(|ax| ext[ax].0);
-            let m: [usize; $d] = std::array::from_fn(|ax| ext[ax].1);
-            // every tile carries the whole grid's origin and maps and the whole-grid index of its first
-            // cell, so each position it evaluates is the whole grid's bit for bit
-            let origin: [f64; $d] = std::array::from_fn(|ax| cfg.x_lo[ax]);
-            let offset: [isize; $d] = std::array::from_fn(|ax| tile_lo[ax] as isize);
-            let spacing: [f64; $d] = std::array::from_fn(|ax| cfg.dx[ax]);
-            let bnd = tile_boundaries(&phys, tc, counts);
+            // the tile's place on the whole grid: its first cell, its cells and the boundaries its
+            // faces carry; every position it evaluates is the whole grid's bit for bit
+            let tile = whole.place(&partition, tc);
+            let (tile_lo, m) = (tile.offset, tile.cells);
             let dev = flat as i32;
             let built = symbi::symbi_xpu::with_device(dev, || -> Result<(Sim, _), String> {
                 // per-tile slice of each global face buffer (axis-0-fastest over the tile face
@@ -8021,12 +7848,7 @@ macro_rules! build_and_run_mhd_decomposed {
                 let tile_faces: Vec<Vec<f64>> =
                     (0..$d).map(|d| tile_face_buffer::<$d>(&bufs[d], n, m, tile_lo, d)).collect();
                 let sim = Sim::build($regime, host_eos(cfg), $geom)
-                    .cells(m)
-                    .origin(origin)
-                    .spacing(spacing)
-                    .coord_maps(axis_maps::<$d>(cfg))
-                    .index_offset(offset)
-                    .boundaries(bnd)
+                    .placed(&whole, &tile)
                     .cfl(cfg.cfl)
                     .timestepping(cfg.timestepping)
                     .cyl_plane(cfg.cyl_plane)
@@ -8119,11 +7941,7 @@ macro_rules! build_and_run_mhd_decomposed {
         // the whole-grid state lives for that seeding alone.
         if cfg.n_tracers > 0 {
         let mut global = Sim::build($regime, host_eos(cfg), $geom)
-            .cells(n)
-            .origin(std::array::from_fn(|ax| cfg.x_lo[ax]))
-            .spacing(std::array::from_fn(|ax| cfg.dx[ax]))
-            .coord_maps(axis_maps::<$d>(cfg))
-            .boundaries(phys)
+            .placed(&whole, &whole.single())
             .cfl(cfg.cfl)
             .timestepping(cfg.timestepping)
             .cyl_plane(cfg.cyl_plane)
@@ -8214,33 +8032,21 @@ macro_rules! build_and_run_imhd_decomposed {
         let theta = build_theta(cfg);
         let solver = cfg.solver;
         let ct = cfg.ct_method;
-        let phys = boundaries_nd::<$d>(&cfg.boundaries);
+        let whole = whole_grid::<$d>(cfg);
 
         let mut tiles: Vec<(Sim, _)> = Vec::with_capacity(ntiles);
         for flat in 0..ntiles {
             let tc = unflatten(flat, counts);
-            // the tile's first global cell on each axis; the origin and the coordinate maps both
-            // derive from it, so a log radial axis advances multiplicatively rather than by g*dx.
-            let ext = partition.tile_extents(tc);
-            let tile_lo: [usize; $d] = std::array::from_fn(|ax| ext[ax].0);
-            let m: [usize; $d] = std::array::from_fn(|ax| ext[ax].1);
-            // every tile carries the whole grid's origin and maps and the whole-grid index of its first
-            // cell, so each position it evaluates is the whole grid's bit for bit
-            let origin: [f64; $d] = std::array::from_fn(|ax| cfg.x_lo[ax]);
-            let offset: [isize; $d] = std::array::from_fn(|ax| tile_lo[ax] as isize);
-            let spacing: [f64; $d] = std::array::from_fn(|ax| cfg.dx[ax]);
-            let bnd = tile_boundaries(&phys, tc, counts);
+            // the tile's place on the whole grid: its first cell, its cells and the boundaries its
+            // faces carry; every position it evaluates is the whole grid's bit for bit
+            let tile = whole.place(&partition, tc);
+            let (tile_lo, m) = (tile.offset, tile.cells);
             let dev = flat as i32;
             let built = symbi::symbi_xpu::with_device(dev, || -> Result<(Sim, _), String> {
                 let tile_faces: Vec<Vec<f64>> =
                     (0..$d).map(|d| tile_face_buffer::<$d>(&bufs[d], n, m, tile_lo, d)).collect();
                 let sim = Sim::build(IsothermalMhd, Isothermal { cs: cfg.cs }, $geom)
-                    .cells(m)
-                    .origin(origin)
-                    .spacing(spacing)
-                    .coord_maps(axis_maps::<$d>(cfg))
-                    .index_offset(offset)
-                    .boundaries(bnd)
+                    .placed(&whole, &tile)
                     .cfl(cfg.cfl)
                     .timestepping(cfg.timestepping)
                     .cyl_plane(cfg.cyl_plane)
@@ -8313,7 +8119,7 @@ macro_rules! build_and_run_imhd_decomposed {
                     }
                     sub
                 };
-                seed_mhd_local_cs2!(sim, cfg, prims, tile_lo, n, phys, $d);
+                seed_mhd_local_cs2!(sim, cfg, prims, tile_lo, n, &whole, $d);
                 Ok((sim, sub))
             })?;
             tiles.push(built);
@@ -8326,11 +8132,7 @@ macro_rules! build_and_run_imhd_decomposed {
         // the whole-grid state lives for that seeding alone.
         if cfg.n_tracers > 0 {
         let mut global = Sim::build(IsothermalMhd, Isothermal { cs: cfg.cs }, $geom)
-            .cells(n)
-            .origin(std::array::from_fn(|ax| cfg.x_lo[ax]))
-            .spacing(std::array::from_fn(|ax| cfg.dx[ax]))
-            .coord_maps(axis_maps::<$d>(cfg))
-            .boundaries(phys)
+            .placed(&whole, &whole.single())
             .cfl(cfg.cfl)
             .timestepping(cfg.timestepping)
             .cyl_plane(cfg.cyl_plane)
@@ -8604,31 +8406,19 @@ macro_rules! build_and_run_iso_decomposed {
         let counts = partition.counts();
         let ntiles: usize = counts.iter().product();
         let theta = build_theta(cfg);
-        let phys = boundaries_nd::<$d>(&cfg.boundaries);
+        let whole = whole_grid::<$d>(cfg);
 
         let mut tiles: Vec<(Sim, _)> = Vec::with_capacity(ntiles);
         for flat in 0..ntiles {
             let tc = unflatten(flat, counts);
-            // the tile's first global cell on each axis; the origin and the coordinate maps both
-            // derive from it, so a log radial axis advances multiplicatively rather than by g*dx.
-            let ext = partition.tile_extents(tc);
-            let tile_lo: [usize; $d] = std::array::from_fn(|ax| ext[ax].0);
-            let m: [usize; $d] = std::array::from_fn(|ax| ext[ax].1);
-            // every tile carries the whole grid's origin and maps and the whole-grid index of its first
-            // cell, so each position it evaluates is the whole grid's bit for bit
-            let origin: [f64; $d] = std::array::from_fn(|ax| cfg.x_lo[ax]);
-            let offset: [isize; $d] = std::array::from_fn(|ax| tile_lo[ax] as isize);
-            let spacing: [f64; $d] = std::array::from_fn(|ax| cfg.dx[ax]);
-            let bnd = tile_boundaries(&phys, tc, counts);
+            // the tile's place on the whole grid: its first cell, its cells and the boundaries its
+            // faces carry; every position it evaluates is the whole grid's bit for bit
+            let tile = whole.place(&partition, tc);
+            let tile_lo = tile.offset;
             let dev = flat as i32;
             let built = symbi::symbi_xpu::with_device(dev, || -> Result<(Sim, _), String> {
                 let sim = Sim::build(IsoNewtonian, Isothermal { cs: cfg.cs }, $geom)
-                    .cells(m)
-                    .origin(origin)
-                    .spacing(spacing)
-                    .coord_maps(axis_maps::<$d>(cfg))
-                    .index_offset(offset)
-                    .boundaries(bnd)
+                    .placed(&whole, &tile)
                     .cfl(cfg.cfl)
                     .timestepping(cfg.timestepping)
                     .cyl_plane(cfg.cyl_plane)
@@ -8719,11 +8509,7 @@ macro_rules! build_and_run_iso_decomposed {
         // the whole-grid state lives for that seeding alone.
         if cfg.n_tracers > 0 {
             let global = Sim::build(IsoNewtonian, Isothermal { cs: cfg.cs }, $geom)
-                .cells(n)
-                .origin(std::array::from_fn(|ax| cfg.x_lo[ax]))
-                .spacing(std::array::from_fn(|ax| cfg.dx[ax]))
-                .coord_maps(axis_maps::<$d>(cfg))
-                .boundaries(phys)
+                .placed(&whole, &whole.single())
                 .cfl(cfg.cfl)
                 .timestepping(cfg.timestepping)
                 .cyl_plane(cfg.cyl_plane)
@@ -11445,12 +11231,9 @@ fn validate_refined_launch_scope(cfg: &Config) -> Result<(), String> {
 
 /// the first periodic axis whose domain face the launch's refined patch reaches
 fn patch_on_periodic_face<const D: usize>(cfg: &Config) -> Result<Option<usize>, String> {
-    let phys = boundaries_nd::<D>(&cfg.boundaries);
+    let whole = whole_grid::<D>(cfg);
     let patch = launch_patch::<D>(cfg)?;
-    Ok((0..D).find(|&ax| {
-        let periodic = phys.lo(ax) == BoundaryType::Periodic && phys.hi(ax) == BoundaryType::Periodic;
-        periodic && (patch[ax].0 == 0 || patch[ax].1 >= cfg.n_cells[ax])
-    }))
+    Ok((0..D).find(|&ax| whole.periodic(ax) && (patch[ax].0 == 0 || patch[ax].1 >= cfg.n_cells[ax])))
 }
 
 /// the refined root patch of the launch's one region in root cells per axis, snapped as the
@@ -11550,8 +11333,8 @@ fn refined_tile<R, const D: usize, const DOF: usize, E, K>(
     cfg: &Config,
     layout: &RefinedLayout<D>,
     flat: usize,
-    origin: [f64; D],
-    m: [usize; D],
+    grid: &WholeGrid<D>,
+    tile: &PlacedTile<D>,
     sim: SimDefaultGeneric<R, D, DOF, Cartesian, E>,
     kernels_of: impl Fn(&SimDefaultGeneric<R, D, DOF, Cartesian, E>) -> K,
 ) -> Result<Hierarchy<R, D, DOF, Cartesian, E, DefaultSpace, DefaultMemory, K>, String>
@@ -11564,8 +11347,6 @@ where
     use symbi::sim::refinement::launched::receiving_faces_of_tile;
     use symbi_sim::atlas::TileId;
     let regions = refinement_regions_nd::<D>(&cfg.refinement_regions)?;
-    let maps: [symbi_geometry::AxisMap; D] =
-        std::array::from_fn(|ax| symbi_geometry::AxisMap::Uniform { start: origin[ax], dx: cfg.dx[ax] });
     // the physical clock starts at start_time on the root, and the hierarchy built from it
     // starts every fine level there, as on the single hierarchy; the root carries the user
     // timestep clamp the hierarchy applies
@@ -11573,7 +11354,7 @@ where
     sim.time = cfg.start_time;
     sim.max_dt = cfg.max_dt;
     let sub = kernels_of(&sim);
-    let clipped = clip_regions_to_tile::<D>(&regions, origin, m, &maps);
+    let clipped = clip_regions_to_tile::<D>(&regions, grid, tile);
     let mut h = if clipped.is_empty() {
         let h = Hierarchy::single(sim, sub);
         match receiving_faces_of_tile(&layout.partition, layout.patch, TileId(flat as u32)) {
@@ -11598,10 +11379,8 @@ where
     h.enable_nested_face_stencils(1 + regions.len()).map_err(|e| format!("tile {flat} nested face stencils: {e:?}"))?;
     // the tracer containers address the whole root lattice from the tile's first cell, the root
     // closed across its periodic seams
-    let counts = layout.partition.counts();
-    let ext = layout.partition.tile_extents(symbi::sim::decomp::unflatten(flat, counts));
-    let ring = wrap_topology(&boundaries_nd::<D>(&cfg.boundaries), counts);
-    h.set_root_layout(layout.n, std::array::from_fn(|ax| ext[ax].0), std::array::from_fn(|ax| ring.is_periodic(ax)));
+    let ring = grid.topology(layout.partition.counts());
+    h.set_root_layout(layout.n, tile.offset, std::array::from_fn(|ax| ring.is_periodic(ax)));
     Ok(h)
 }
 
@@ -11624,17 +11403,11 @@ fn run_refined_worker_process(
             let layout = refined_layout::<$d>(cfg, launch, prims.len())?;
             let n = layout.n;
             let counts = layout.partition.counts();
-            let phys = boundaries_nd::<$d>(&cfg.boundaries);
             let theta = build_theta(cfg);
             let solver = cfg.solver;
-            let dx: [f64; $d] = std::array::from_fn(|ax| cfg.dx[ax]);
-            let extents = |flat: usize| {
-                let tc = unflatten(flat, counts);
-                let ext = layout.partition.tile_extents(tc);
-                let tile_lo: [usize; $d] = std::array::from_fn(|ax| ext[ax].0);
-                let m: [usize; $d] = std::array::from_fn(|ax| ext[ax].1);
-                (tile_lo, tile_origin::<$d>(cfg, tile_lo), m, tile_boundaries(&phys, tc, counts))
-            };
+            // each held tile's place on the whole grid
+            let whole = whole_grid::<$d>(cfg);
+            let place = |flat: usize| whole.place(&layout.partition, unflatten(flat, counts));
             // the refined tiles of a gas regime (newtonian or relativistic hydro): each level installs
             // the numerics the single hierarchy installs
             macro_rules! refined_gas {
@@ -11664,14 +11437,11 @@ fn run_refined_worker_process(
                     };
                     let mut tiles = Vec::with_capacity(layout.mine.len());
                     for &flat in &layout.mine {
-                        let (tile_lo, origin, m, bnd) = extents(flat);
+                        let tile = place(flat);
+                        let tile_lo = tile.offset;
                         let sim = Sim::build($regime, host_eos(cfg), Cartesian)
-                            .cells(m)
+                            .placed(&whole, &tile)
                             .ghosts(ghost_width(cfg))
-                            .origin(std::array::from_fn(|ax| cfg.x_lo[ax]))
-                            .spacing(dx)
-                            .index_offset(std::array::from_fn(|ax| tile_lo[ax] as isize))
-                            .boundaries(bnd)
                             .cfl(cfg.cfl)
                             .timestepping(cfg.timestepping)
                             .allocate()
@@ -11683,15 +11453,12 @@ fn run_refined_worker_process(
                             .build();
                         // the dye on the root; the hierarchy carries it onto the fine levels
                         let sim = with_tile_dye!(sim, cfg, tile_lo, n, flat);
-                        tiles.push(refined_tile(cfg, &layout, flat, origin, m, sim, kernels_of)?);
+                        tiles.push(refined_tile(cfg, &layout, flat, &whole, &tile, sim, kernels_of)?);
                     }
                     seed_refined_worker_tracers(cfg, &mut tiles, || {
                         Ok(Sim::build($regime, host_eos(cfg), Cartesian)
-                            .cells(n)
+                            .placed(&whole, &whole.single())
                             .ghosts(ghost_width(cfg))
-                            .origin(std::array::from_fn(|ax| cfg.x_lo[ax]))
-                            .spacing(dx)
-                            .boundaries(phys)
                             .cfl(cfg.cfl)
                             .timestepping(cfg.timestepping)
                             .allocate()
@@ -11751,16 +11518,13 @@ fn run_refined_worker_process(
                     };
                     let mut tiles = Vec::with_capacity(layout.mine.len());
                     for &flat in &layout.mine {
-                        let (tile_lo, origin, m, bnd) = extents(flat);
+                        let tile = place(flat);
+                        let (tile_lo, m) = (tile.offset, tile.cells);
                         let tile_faces: Vec<Vec<f64>> = (0..$d).map(|d| tile_face_buffer::<$d>(&bufs[d], n, m, tile_lo, d)).collect();
                         // the rollback snapshot restores every level's faces when a step is rejected
                         let sim = Sim::build($regime, host_eos(cfg), Cartesian)
-                            .cells(m)
+                            .placed(&whole, &tile)
                             .ghosts(ghost_width(cfg))
-                            .origin(std::array::from_fn(|ax| cfg.x_lo[ax]))
-                            .spacing(dx)
-                            .index_offset(std::array::from_fn(|ax| tile_lo[ax] as isize))
-                            .boundaries(bnd)
                             .cfl(cfg.cfl)
                             .timestepping(cfg.timestepping)
                             .allocate()
@@ -11776,15 +11540,12 @@ fn run_refined_worker_process(
                             .build()
                             .with_rollback_snapshot()
                             .map_err(|e| format!("tile {flat} rollback snapshot: {e:?}"))?;
-                        tiles.push(refined_tile(cfg, &layout, flat, origin, m, sim, kernels_of)?);
+                        tiles.push(refined_tile(cfg, &layout, flat, &whole, &tile, sim, kernels_of)?);
                     }
                     seed_refined_worker_tracers(cfg, &mut tiles, || {
                         Ok(Sim::build($regime, host_eos(cfg), Cartesian)
-                            .cells(n)
+                            .placed(&whole, &whole.single())
                             .ghosts(ghost_width(cfg))
-                            .origin(std::array::from_fn(|ax| cfg.x_lo[ax]))
-                            .spacing(dx)
-                            .boundaries(phys)
                             .cfl(cfg.cfl)
                             .timestepping(cfg.timestepping)
                             .allocate()
@@ -11824,14 +11585,11 @@ fn run_refined_worker_process(
                     };
                     let mut tiles = Vec::with_capacity(layout.mine.len());
                     for &flat in &layout.mine {
-                        let (tile_lo, origin, m, bnd) = extents(flat);
+                        let tile = place(flat);
+                        let tile_lo = tile.offset;
                         let sim = Sim::build(IsoNewtonian, Isothermal { cs: cfg.cs }, Cartesian)
-                            .cells(m)
+                            .placed(&whole, &tile)
                             .ghosts(ghost_width(cfg))
-                            .origin(std::array::from_fn(|ax| cfg.x_lo[ax]))
-                            .spacing(dx)
-                            .index_offset(std::array::from_fn(|ax| tile_lo[ax] as isize))
-                            .boundaries(bnd)
                             .cfl(cfg.cfl)
                             .timestepping(cfg.timestepping)
                             .allocate()
@@ -11843,15 +11601,12 @@ fn run_refined_worker_process(
                             .build();
                         // the dye on the root; the hierarchy carries it onto the fine levels
                         let sim = with_tile_dye!(sim, cfg, tile_lo, n, flat);
-                        tiles.push(refined_tile(cfg, &layout, flat, origin, m, sim, kernels_of)?);
+                        tiles.push(refined_tile(cfg, &layout, flat, &whole, &tile, sim, kernels_of)?);
                     }
                     seed_refined_worker_tracers(cfg, &mut tiles, || {
                         Ok(Sim::build(IsoNewtonian, Isothermal { cs: cfg.cs }, Cartesian)
-                            .cells(n)
+                            .placed(&whole, &whole.single())
                             .ghosts(ghost_width(cfg))
-                            .origin(std::array::from_fn(|ax| cfg.x_lo[ax]))
-                            .spacing(dx)
-                            .boundaries(phys)
                             .cfl(cfg.cfl)
                             .timestepping(cfg.timestepping)
                             .allocate()
@@ -11903,16 +11658,13 @@ fn run_refined_worker_process(
                     };
                     let mut tiles = Vec::with_capacity(layout.mine.len());
                     for &flat in &layout.mine {
-                        let (tile_lo, origin, m, bnd) = extents(flat);
+                        let tile = place(flat);
+                        let (tile_lo, m) = (tile.offset, tile.cells);
                         let tile_faces: Vec<Vec<f64>> = (0..$d).map(|d| tile_face_buffer::<$d>(&bufs[d], n, m, tile_lo, d)).collect();
                         // the rollback snapshot restores every level's faces when a step is rejected
                         let sim = Sim::build(IsothermalMhd, Isothermal { cs: cfg.cs }, Cartesian)
-                            .cells(m)
+                            .placed(&whole, &tile)
                             .ghosts(ghost_width(cfg))
-                            .origin(std::array::from_fn(|ax| cfg.x_lo[ax]))
-                            .spacing(dx)
-                            .index_offset(std::array::from_fn(|ax| tile_lo[ax] as isize))
-                            .boundaries(bnd)
                             .cfl(cfg.cfl)
                             .timestepping(cfg.timestepping)
                             .allocate()
@@ -11928,15 +11680,12 @@ fn run_refined_worker_process(
                             .build()
                             .with_rollback_snapshot()
                             .map_err(|e| format!("tile {flat} rollback snapshot: {e:?}"))?;
-                        tiles.push(refined_tile(cfg, &layout, flat, origin, m, sim, kernels_of)?);
+                        tiles.push(refined_tile(cfg, &layout, flat, &whole, &tile, sim, kernels_of)?);
                     }
                     seed_refined_worker_tracers(cfg, &mut tiles, || {
                         Ok(Sim::build(IsothermalMhd, Isothermal { cs: cfg.cs }, Cartesian)
-                            .cells(n)
+                            .placed(&whole, &whole.single())
                             .ghosts(ghost_width(cfg))
-                            .origin(std::array::from_fn(|ax| cfg.x_lo[ax]))
-                            .spacing(dx)
-                            .boundaries(phys)
                             .cfl(cfg.cfl)
                             .timestepping(cfg.timestepping)
                             .allocate()
@@ -12039,7 +11788,7 @@ where
     let cons_schema = plan_cons_schema(root_store);
     let open = symbi::sim::decomp::Topology::open();
     // the root level wraps a periodic axis across its seam; the fine level lies inside the domain
-    let wrap = chart_topology(cfg, &boundaries_nd::<D>(&cfg.boundaries), counts);
+    let wrap = chart_topology(cfg, &whole_grid::<D>(cfg), counts);
     let root_plan = ExchangePlan::compile(partition, &wrap, &schema, ng).map_err(|e| e.to_string())?;
     let seed_plan = ExchangePlan::compile(partition, &wrap, &cons_schema, ng).map_err(|e| e.to_string())?;
     let fine_lo = |t: TileId| -> [isize; D] {
@@ -12581,10 +12330,12 @@ fn run_worker_process(
     let owner: Vec<WorkerId> = launch.owner.iter().map(|&w| WorkerId(w as u32)).collect();
     let placement = Placement::new(launch.workers as u32, owner)?;
     let me = WorkerId(launch.worker as u32);
-    let phys = boundaries_nd::<$d>(&cfg.boundaries);
-    let topology = chart_topology(cfg, &phys, counts);
+    // every tile is placed on the whole grid by the index of its first cell, so each cell sits
+    // bitwise where the whole grid puts it
+    let whole = whole_grid::<$d>(cfg);
+    let topology = chart_topology(cfg, &whole, counts);
     wrap_capability(&topology, cfg.wb_reconstruction, false)?;
-    let seam = polar_seam_of_partition::<$d>(&cfg.coord_system, &phys, &topology, &partition);
+    let seam = polar_seam_of_partition::<$d>(&cfg.coord_system, &whole.boundaries, &topology, &partition);
     let theta = build_theta(cfg);
     let solver = cfg.solver;
     let mine: Vec<usize> = (0..partition.n_tiles())
@@ -12596,12 +12347,6 @@ fn run_worker_process(
     let offsets = tile_offsets(&partition);
     // the gas regimes share one tile build: a conserved vector of density, momentum and energy
     // over the same primitive rows, with every numerics door of the single path
-    // every tile carries the whole grid's origin, spacing and maps and is placed by the index
-    // of its first cell, so each cell sits bitwise where the whole grid puts it
-    let origin: [f64; $d] = std::array::from_fn(|ax| cfg.x_lo[ax]);
-    let spacing: [f64; $d] = std::array::from_fn(|ax| cfg.dx[ax]);
-    let maps = axis_maps::<$d>(cfg);
-    let placed = |tile_lo: [usize; $d]| -> [isize; $d] { std::array::from_fn(|ax| tile_lo[ax] as isize) };
     // the tail every regime shares: the restart from a partitioned checkpoint, the clock, and
     // the fabric session over the built tiles
     macro_rules! session_over {
@@ -12630,18 +12375,12 @@ fn run_worker_process(
             let mut tiles = Vec::with_capacity(mine.len());
             for &flat in &mine {
                 let tc = unflatten(flat, counts);
-                let ext = partition.tile_extents(tc);
-                let tile_lo: [usize; $d] = std::array::from_fn(|ax| ext[ax].0);
-                let m: [usize; $d] = std::array::from_fn(|ax| ext[ax].1);
-                let bnd = seam_faces_as_cuts(tile_boundaries(&phys, tc, counts), seam.as_ref());
+                // the tile's place on the whole grid, its pole faces on a polar seam made cuts
+                let mut tile = whole.place(&partition, tc);
+                tile.boundaries = seam_faces_as_cuts(tile.boundaries.clone(), seam.as_ref());
+                let tile_lo = tile.offset;
                 let sim = Sim::build($regime, host_eos(cfg), $geom)
-                    .cells(m)
-                    .origin(origin)
-                    .spacing(spacing)
-                    .ghosts(ghost_width(cfg))
-                    .coord_maps(maps)
-                    .index_offset(placed(tile_lo))
-                    .boundaries(bnd)
+                    .placed(&whole, &tile)                    .ghosts(ghost_width(cfg))
                     .cfl(cfg.cfl)
                     .timestepping(cfg.timestepping)
                     .cyl_plane(cfg.cyl_plane)
@@ -12703,12 +12442,8 @@ fn run_worker_process(
             // seeding alone
             if cfg.n_tracers > 0 {
                 let global = Sim::build($regime, host_eos(cfg), $geom)
-                    .cells(n)
+                    .placed(&whole, &whole.single())
                     .ghosts(ghost_width(cfg))
-                    .origin(std::array::from_fn(|ax| cfg.x_lo[ax]))
-                    .spacing(std::array::from_fn(|ax| cfg.dx[ax]))
-                    .coord_maps(axis_maps::<$d>(cfg))
-                    .boundaries(phys)
                     .cfl(cfg.cfl)
                     .timestepping(cfg.timestepping)
                     .cyl_plane(cfg.cyl_plane)
@@ -12763,21 +12498,16 @@ fn run_worker_process(
             let mut tiles = Vec::with_capacity(mine.len());
             for &flat in &mine {
                 let tc = unflatten(flat, counts);
-                let ext = partition.tile_extents(tc);
-                let tile_lo: [usize; $d] = std::array::from_fn(|ax| ext[ax].0);
-                let m: [usize; $d] = std::array::from_fn(|ax| ext[ax].1);
-                let bnd = seam_faces_as_cuts(tile_boundaries(&phys, tc, counts), seam.as_ref());
+                // the tile's place on the whole grid, its pole faces on a polar seam made cuts
+                let mut tile = whole.place(&partition, tc);
+                tile.boundaries = seam_faces_as_cuts(tile.boundaries.clone(), seam.as_ref());
+                let (tile_lo, m) = (tile.offset, tile.cells);
                 // each tile's slice of the global staggered buffers: a shared interface face
                 // reads the same global value on both of its tiles
                 let tile_faces: Vec<Vec<f64>> =
                     (0..$d).map(|d| tile_face_buffer::<$d>(&bufs[d], n, m, tile_lo, d)).collect();
                 let sim = Sim::build(NewtonianMhd, host_eos(cfg), $geom)
-                    .cells(m)
-                    .origin(origin)
-                    .spacing(spacing)
-                    .coord_maps(maps)
-                    .index_offset(placed(tile_lo))
-                    .boundaries(bnd)
+                    .placed(&whole, &tile)
                     .cfl(cfg.cfl)
                     .timestepping(cfg.timestepping)
                     .cyl_plane(cfg.cyl_plane)
@@ -12818,12 +12548,8 @@ fn run_worker_process(
             // seeding alone
             if cfg.n_tracers > 0 {
                 let global = Sim::build(NewtonianMhd, host_eos(cfg), $geom)
-                    .cells(n)
+                    .placed(&whole, &whole.single())
                     .ghosts(ghost_width(cfg))
-                    .origin(std::array::from_fn(|ax| cfg.x_lo[ax]))
-                    .spacing(std::array::from_fn(|ax| cfg.dx[ax]))
-                    .coord_maps(axis_maps::<$d>(cfg))
-                    .boundaries(phys)
                     .cfl(cfg.cfl)
                     .timestepping(cfg.timestepping)
                     .cyl_plane(cfg.cyl_plane)
@@ -12867,21 +12593,16 @@ fn run_worker_process(
             let mut tiles = Vec::with_capacity(mine.len());
             for &flat in &mine {
                 let tc = unflatten(flat, counts);
-                let ext = partition.tile_extents(tc);
-                let tile_lo: [usize; $d] = std::array::from_fn(|ax| ext[ax].0);
-                let m: [usize; $d] = std::array::from_fn(|ax| ext[ax].1);
-                let bnd = seam_faces_as_cuts(tile_boundaries(&phys, tc, counts), seam.as_ref());
+                // the tile's place on the whole grid, its pole faces on a polar seam made cuts
+                let mut tile = whole.place(&partition, tc);
+                tile.boundaries = seam_faces_as_cuts(tile.boundaries.clone(), seam.as_ref());
+                let (tile_lo, m) = (tile.offset, tile.cells);
                 // each tile's slice of the global staggered buffers: a shared interface face
                 // reads the same global value on both of its tiles
                 let tile_faces: Vec<Vec<f64>> =
                     (0..$d).map(|d| tile_face_buffer::<$d>(&bufs[d], n, m, tile_lo, d)).collect();
                 let sim = Sim::build(Rmhd, host_eos(cfg), $geom)
-                    .cells(m)
-                    .origin(origin)
-                    .spacing(spacing)
-                    .coord_maps(maps)
-                    .index_offset(placed(tile_lo))
-                    .boundaries(bnd)
+                    .placed(&whole, &tile)
                     .cfl(cfg.cfl)
                     .timestepping(cfg.timestepping)
                     .cyl_plane(cfg.cyl_plane)
@@ -12922,12 +12643,8 @@ fn run_worker_process(
             // seeding alone
             if cfg.n_tracers > 0 {
                 let global = Sim::build(Rmhd, host_eos(cfg), $geom)
-                    .cells(n)
+                    .placed(&whole, &whole.single())
                     .ghosts(ghost_width(cfg))
-                    .origin(std::array::from_fn(|ax| cfg.x_lo[ax]))
-                    .spacing(std::array::from_fn(|ax| cfg.dx[ax]))
-                    .coord_maps(axis_maps::<$d>(cfg))
-                    .boundaries(phys)
                     .cfl(cfg.cfl)
                     .timestepping(cfg.timestepping)
                     .cyl_plane(cfg.cyl_plane)
@@ -12967,17 +12684,12 @@ fn run_worker_process(
             let mut tiles = Vec::with_capacity(mine.len());
             for &flat in &mine {
                 let tc = unflatten(flat, counts);
-                let ext = partition.tile_extents(tc);
-                let tile_lo: [usize; $d] = std::array::from_fn(|ax| ext[ax].0);
-                let m: [usize; $d] = std::array::from_fn(|ax| ext[ax].1);
-                let bnd = seam_faces_as_cuts(tile_boundaries(&phys, tc, counts), seam.as_ref());
+                // the tile's place on the whole grid, its pole faces on a polar seam made cuts
+                let mut tile = whole.place(&partition, tc);
+                tile.boundaries = seam_faces_as_cuts(tile.boundaries.clone(), seam.as_ref());
+                let tile_lo = tile.offset;
                 let sim = Sim::build(IsoNewtonian, Isothermal { cs: cfg.cs }, $geom)
-                    .cells(m)
-                    .origin(origin)
-                    .spacing(spacing)
-                    .coord_maps(maps)
-                    .index_offset(placed(tile_lo))
-                    .boundaries(bnd)
+                    .placed(&whole, &tile)
                     .cfl(cfg.cfl)
                     .timestepping(cfg.timestepping)
                     .cyl_plane(cfg.cyl_plane)
@@ -13030,12 +12742,8 @@ fn run_worker_process(
             // seeding alone
             if cfg.n_tracers > 0 {
                 let global = Sim::build(IsoNewtonian, Isothermal { cs: cfg.cs }, $geom)
-                    .cells(n)
+                    .placed(&whole, &whole.single())
                     .ghosts(ghost_width(cfg))
-                    .origin(std::array::from_fn(|ax| cfg.x_lo[ax]))
-                    .spacing(std::array::from_fn(|ax| cfg.dx[ax]))
-                    .coord_maps(axis_maps::<$d>(cfg))
-                    .boundaries(phys)
                     .cfl(cfg.cfl)
                     .timestepping(cfg.timestepping)
                     .cyl_plane(cfg.cyl_plane)
@@ -13090,19 +12798,14 @@ fn run_worker_process(
             let mut tiles = Vec::with_capacity(mine.len());
             for &flat in &mine {
                 let tc = unflatten(flat, counts);
-                let ext = partition.tile_extents(tc);
-                let tile_lo: [usize; $d] = std::array::from_fn(|ax| ext[ax].0);
-                let m: [usize; $d] = std::array::from_fn(|ax| ext[ax].1);
-                let bnd = seam_faces_as_cuts(tile_boundaries(&phys, tc, counts), seam.as_ref());
+                // the tile's place on the whole grid, its pole faces on a polar seam made cuts
+                let mut tile = whole.place(&partition, tc);
+                tile.boundaries = seam_faces_as_cuts(tile.boundaries.clone(), seam.as_ref());
+                let (tile_lo, m) = (tile.offset, tile.cells);
                 let tile_faces: Vec<Vec<f64>> =
                     (0..$d).map(|d| tile_face_buffer::<$d>(&bufs[d], n, m, tile_lo, d)).collect();
                 let sim = Sim::build(IsothermalMhd, Isothermal { cs: cfg.cs }, $geom)
-                    .cells(m)
-                    .origin(origin)
-                    .spacing(spacing)
-                    .coord_maps(maps)
-                    .index_offset(placed(tile_lo))
-                    .boundaries(bnd)
+                    .placed(&whole, &tile)
                     .cfl(cfg.cfl)
                     .timestepping(cfg.timestepping)
                     .cyl_plane(cfg.cyl_plane)
@@ -13134,7 +12837,7 @@ fn run_worker_process(
                     .with_resistivity(cfg.resistivity)
                     .ct_method(ct);
                 let sub = attach_driven_boundaries(sub, cfg, <IsothermalMhd as Regime<f64, $d>>::SPEC, |sub, built, params| sub.with_driven_boundary(built, params).0)?;
-                seed_mhd_local_cs2!(sim, cfg, prims, tile_lo, n, phys, $d);
+                seed_mhd_local_cs2!(sim, cfg, prims, tile_lo, n, &whole, $d);
                 tiles.push((sim, sub));
             }
             // the tracer population seeds once from the whole-grid density, as the single grid's,
@@ -13142,12 +12845,8 @@ fn run_worker_process(
             // seeding alone
             if cfg.n_tracers > 0 {
                 let global = Sim::build(IsothermalMhd, Isothermal { cs: cfg.cs }, $geom)
-                    .cells(n)
+                    .placed(&whole, &whole.single())
                     .ghosts(ghost_width(cfg))
-                    .origin(std::array::from_fn(|ax| cfg.x_lo[ax]))
-                    .spacing(std::array::from_fn(|ax| cfg.dx[ax]))
-                    .coord_maps(axis_maps::<$d>(cfg))
-                    .boundaries(phys)
                     .cfl(cfg.cfl)
                     .timestepping(cfg.timestepping)
                     .cyl_plane(cfg.cyl_plane)
@@ -14071,195 +13770,46 @@ fn gpu_ext(m: &Bound<'_, PyModule>) -> PyResult<()> {
 }
 
 #[cfg(test)]
-mod tile_coord_tests {
-    use super::shift_axis_map;
+mod tile_clip_tests {
+    use super::{PlacedTile, RefinementRegion, WholeGrid, clip_regions_to_tile};
+    use symbi::sim::state::{Boundaries, BoundaryType};
     use symbi_geometry::AxisMap;
 
-    // the law a decomposed grid must satisfy: a tile holds local indices, so its local cell `i` has
-    // to land exactly where the undecomposed grid puts global cell `tile_lo + i`. if it does not, the
-    // tiles describe different physical domains and the halo exchange glues together grids that do
-    // not meet.
-    #[test]
-    fn tile_local_faces_reproduce_the_global_grid_on_a_log_axis() {
-        let (n, tiles) = (64usize, 4usize);
-        let (start, r_hi) = (1.5_f64, 400.0_f64);
-        let global = AxisMap::Log {
-            start,
-            log_slope: (r_hi / start).log10() / n as f64,
-        };
-        let m = n / tiles;
-        let mut checked = 0;
-        for t in 0..tiles {
-            let g = t * m;
-            let local = shift_axis_map(global, g);
-            // every face of the tile including the far one must coincide with the global face.
-            for i in 0..=m {
-                let want = global.face((g + i) as isize);
-                let got = local.face(i as isize);
-                assert!(
-                    (got - want).abs() <= 1e-12 * want.abs(),
-                    "tile {t} local face {i} (global {}) sits at {got}, global grid puts it at {want}",
-                    g + i
-                );
-                checked += 1;
-            }
-        }
-        assert_eq!(
-            checked,
-            tiles * (m + 1),
-            "the sweep did not cover every tile face"
-        );
-        // the seam: tile t's far face is tile t+1's origin, so tiles abut with no gap or overlap.
-        for t in 0..tiles - 1 {
-            let far = shift_axis_map(global, t * m).face(m as isize);
-            let next = shift_axis_map(global, (t + 1) * m).face(0);
-            assert!(
-                (far - next).abs() <= 1e-12 * next.abs(),
-                "tiles {t}/{} do not abut: {far} vs {next}",
-                t + 1
-            );
-        }
-    }
-
-    #[test]
-    fn tile_local_faces_reproduce_the_global_grid_on_a_geometric_axis() {
-        let (n, tiles) = (60usize, 4usize);
-        let ratio = 0.97_f64;
-        let extent = 12.0_f64;
-        let width = extent * (ratio - 1.0) / (ratio.powf(n as f64) - 1.0);
-        let global = AxisMap::Geometric {
-            start: -2.0,
-            width,
-            ratio,
-        };
-        let cells_per_tile = n / tiles;
-
-        for tile in 0..tiles {
-            let offset = tile * cells_per_tile;
-            let local = shift_axis_map(global, offset);
-            for ii in 0..=cells_per_tile {
-                let got = local.face(ii as isize);
-                let want = global.face((offset + ii) as isize);
-                assert!(
-                    (got - want).abs() <= 1.0e-12 * want.abs().max(1.0),
-                    "tile {tile} face {ii}: local {got}, global {want}"
-                );
-            }
-        }
-    }
-
-    // the slope is a per-cell stretching and is global; a tile inherits it rather than re-deriving it
-    // from its own extent. re-derivation would give each tile its own stretching -- the failure mode
-    // this pins. the check is that re-deriving from the correct tile endpoints returns the same
-    // number, so inheriting is consistent rather than a special case.
-    #[test]
-    fn a_tile_re_deriving_its_slope_would_get_the_global_one() {
-        let (n, m) = (64usize, 16usize);
-        let (start, r_hi) = (1.5_f64, 400.0_f64);
-        let s_global = (r_hi / start).log10() / n as f64;
-        let global = AxisMap::Log {
-            start,
-            log_slope: s_global,
-        };
-        for t in 0..4 {
-            let local = shift_axis_map(global, t * m);
-            match local {
-                AxisMap::Log { log_slope, .. } => {
-                    assert_eq!(log_slope, s_global, "tile {t} carries a different slope");
-                    let (lo, hi) = (local.face(0), local.face(m as isize));
-                    let s_local = (hi / lo).log10() / m as f64;
-                    assert!(
-                        (s_local - s_global).abs() <= 1e-12 * s_global,
-                        "tile {t} endpoints imply slope {s_local}, global is {s_global}"
-                    );
-                }
-                _ => panic!("tile {t} lost its log map"),
-            }
-        }
-    }
-
-    // on a uniform axis the map reduces to the additive origin the linear form assumes, so the two
-    // agree there.
-
-    // the clip must use the tile's map, not `origin + cells * dx`. on a log radial axis the cells
-    // widen outward, so the linear form puts the tile's far corner well inside where its last cell
-    // actually ends and silently drops refinement regions that really do overlap the tile. this
-    // region sits in that gap: it is inside the true tile extent and outside the linear estimate.
+    // the clip reads the tile's far corner from the whole grid's faces. on a log radial axis the
+    // cells widen outward, so a linear estimate `origin + cells * innermost width` falls well short
+    // of where the tile's last cell ends and would drop a region that really overlaps the tile.
+    // this region sits in that gap: inside the true extent, outside the linear estimate.
     #[test]
     fn log_tile_clipping_keeps_a_region_the_linear_extent_would_drop() {
-        use super::{RefinementRegion, clip_regions_to_tile};
         let (m, start) = (16usize, 1.5_f64);
         let slope = (400.0_f64 / start).log10() / 64.0;
-        let map = AxisMap::Log {
-            start,
-            log_slope: slope,
+        let map = AxisMap::Log { start, log_slope: slope };
+        let uniform = AxisMap::Uniform { start: 0.0, dx: 1.0 };
+        let grid = WholeGrid {
+            cells: [64, 1, 1],
+            origin: [start, 0.0, 0.0],
+            spacing: [map.face(1) - map.face(0), 1.0, 1.0],
+            maps: Some([map, uniform, uniform]),
+            boundaries: Boundaries::uniform(BoundaryType::Outflow),
         };
-        let maps = [
-            map,
-            AxisMap::Uniform {
-                start: 0.0,
-                dx: 1.0,
-            },
-            AxisMap::Uniform {
-                start: 0.0,
-                dx: 1.0,
-            },
-        ];
-        let origin = [map.face(0), 0.0, 0.0];
-        let true_hi = map.face(m as isize);
-        // the linear extent estimate: origin + m * (innermost width).
-        let dx0 = map.face(1) - map.face(0);
-        let linear_hi = origin[0] + m as f64 * dx0;
-        assert!(
-            linear_hi < true_hi,
-            "setup is vacuous: the linear extent {linear_hi} must fall short of the true {true_hi}"
-        );
-        // a region living strictly between the two: genuinely on the tile, invisible to linear.
-        let r = RefinementRegion {
-            x_lo: [0.5 * (linear_hi + true_hi), 0.0, 0.0],
-            x_hi: [true_hi, 1.0, 1.0],
-        };
-        let kept = clip_regions_to_tile::<3>(&[r], origin, [m, 1, 1], &maps);
-        assert_eq!(
-            kept.len(),
-            1,
-            "the map-aware clip dropped a region that overlaps the tile (true hi {true_hi}, \
-             linear hi {linear_hi})"
-        );
-        assert!(
-            kept[0].0.x_hi[0] <= true_hi + 1e-12 * true_hi,
-            "clipped region extends past the tile's far face"
-        );
-    }
-
-    #[test]
-    fn a_uniform_axis_keeps_its_additive_origin() {
-        let global = AxisMap::Uniform {
-            start: -2.0,
-            dx: 0.125,
-        };
-        for g in [0usize, 16, 48] {
-            let local = shift_axis_map(global, g);
-            for i in 0..=8 {
-                let want = global.face((g + i) as isize);
-                let got = local.face(i as isize);
-                assert!(
-                    (got - want).abs() <= 1e-15 * want.abs().max(1.0),
-                    "uniform tile at {g}, local face {i}: {got} != {want}"
-                );
-            }
-        }
+        // the second tile of four along the radius
+        let tile = PlacedTile { offset: [m, 0, 0], cells: [m, 1, 1], boundaries: Boundaries::uniform(BoundaryType::Outflow) };
+        let (lo, true_hi) = (map.face(m as isize), map.face(2 * m as isize));
+        let linear_hi = lo + m as f64 * (map.face(m as isize + 1) - lo);
+        assert!(linear_hi < true_hi, "setup is vacuous: the linear extent {linear_hi} must fall short of {true_hi}");
+        let r = RefinementRegion { x_lo: [0.5 * (linear_hi + true_hi), 0.0, 0.0], x_hi: [true_hi, 1.0, 1.0] };
+        let kept = clip_regions_to_tile::<3>(&[r], &grid, &tile);
+        assert_eq!(kept.len(), 1, "the clip dropped a region that overlaps the tile (true hi {true_hi}, linear hi {linear_hi})");
+        assert_eq!(kept[0].0.x_hi[0], true_hi, "the clipped region ends at the tile's far face");
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::{
-        BUILD_GIT_DIRTY, BUILD_GIT_SHA, build_source_id, build_source_label, tile_boundaries,
-        wrap_capability, wrap_topology,
+        BUILD_GIT_DIRTY, BUILD_GIT_SHA, build_source_id, build_source_label, wrap_capability,
     };
     use symbi::sim::decomp::Topology;
-    use symbi::sim::state::{Boundaries, BoundaryType};
 
     #[test]
     fn compiled_backend_carries_a_self_consistent_source_identity() {
@@ -14269,80 +13819,6 @@ mod tests {
         assert!(id.starts_with(BUILD_GIT_SHA));
         assert_eq!(id.ends_with("-dirty"), BUILD_GIT_DIRTY);
         assert!(build_source_label().len() <= 18);
-    }
-
-    fn phys2(
-        lo0: BoundaryType,
-        hi0: BoundaryType,
-        lo1: BoundaryType,
-        hi1: BoundaryType,
-    ) -> Boundaries<2> {
-        Boundaries([[lo0, hi0], [lo1, hi1]])
-    }
-
-    // a cut periodic axis has no domain edge left: both seam faces are exchanged, and the
-    // schedule closes the ring. the uncut axis keeps the conditions the run declared.
-    #[test]
-    fn a_cut_periodic_axis_turns_its_seam_faces_into_cuts() {
-        use BoundaryType::{CoarseFine, Outflow, Periodic};
-        let phys = phys2(Periodic, Periodic, Outflow, Outflow);
-        let counts = [2usize, 1];
-
-        let first = tile_boundaries(&phys, [0, 0], counts);
-        assert_eq!(first.lo(0), CoarseFine, "the domain seam is exchanged");
-        assert_eq!(first.hi(0), CoarseFine, "the interior cut is exchanged");
-        assert_eq!(first.lo(1), Outflow);
-        assert_eq!(first.hi(1), Outflow);
-
-        let last = tile_boundaries(&phys, [1, 0], counts);
-        assert_eq!(last.lo(0), CoarseFine);
-        assert_eq!(
-            last.hi(0),
-            CoarseFine,
-            "the far domain seam is exchanged too"
-        );
-
-        assert!(wrap_topology(&phys, counts).is_periodic(0));
-        assert!(!wrap_topology(&phys, counts).is_periodic(1));
-    }
-
-    // one tile on a periodic axis wraps onto itself over the whole domain, so it keeps the
-    // periodic faces and the schedule carries no leg there.
-    #[test]
-    fn an_uncut_periodic_axis_keeps_its_own_wrap() {
-        use BoundaryType::{Outflow, Periodic};
-        let phys = phys2(Periodic, Periodic, Outflow, Outflow);
-        let counts = [1usize, 1];
-        let only = tile_boundaries(&phys, [0, 0], counts);
-        assert_eq!(only.lo(0), Periodic);
-        assert_eq!(only.hi(0), Periodic);
-        assert!(!wrap_topology(&phys, counts).is_periodic(0));
-    }
-
-    // a non-periodic cut axis is untouched: the end tiles keep the declared conditions and
-    // only the interior faces are cuts.
-    #[test]
-    fn a_cut_open_axis_keeps_its_domain_edges() {
-        use BoundaryType::{CoarseFine, Outflow, Reflect};
-        let phys = phys2(Reflect, Outflow, Outflow, Outflow);
-        let counts = [3usize, 1];
-        assert_eq!(tile_boundaries(&phys, [0, 0], counts).lo(0), Reflect);
-        assert_eq!(tile_boundaries(&phys, [0, 0], counts).hi(0), CoarseFine);
-        assert_eq!(tile_boundaries(&phys, [1, 0], counts).lo(0), CoarseFine);
-        assert_eq!(tile_boundaries(&phys, [2, 0], counts).hi(0), Outflow);
-        assert!(!wrap_topology(&phys, counts).is_periodic(0));
-    }
-
-    // a half-declared periodic axis is left exactly as the run declared it: closing a ring
-    // whose two ends disagree would invent a boundary condition the config never asked for.
-    #[test]
-    fn a_one_sided_periodic_declaration_does_not_wrap() {
-        use BoundaryType::{Outflow, Periodic};
-        let phys = phys2(Periodic, Outflow, Outflow, Outflow);
-        let counts = [2usize, 1];
-        assert_eq!(tile_boundaries(&phys, [0, 0], counts).lo(0), Periodic);
-        assert_eq!(tile_boundaries(&phys, [1, 0], counts).hi(0), Outflow);
-        assert!(!wrap_topology(&phys, counts).is_periodic(0));
     }
 
     // an open tile grid carries whatever the run declares; the refusal is about the wrap.

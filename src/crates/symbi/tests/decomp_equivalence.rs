@@ -44,7 +44,8 @@ use symbi::regimes::substrate_gpu::device_sync;
 use symbi::regimes::substrate_newton::AdiabaticSubstrateKernelSet;
 #[cfg(feature = "gpu")]
 use symbi::sim::decomp::{DeviceCopy, PeerCopy, StagedCopy};
-use symbi::sim::decomp::{LocalCopy, evolve_decomposed, flatten, unflatten};
+use symbi::sim::decomp::{LocalCopy, Partition, evolve_decomposed, flatten, unflatten};
+use symbi::sim::placement::{PlacedTile, WholeGrid};
 use symbi::sim::state::*;
 use symbi_algebra::Tensor;
 use symbi_geometry::Cartesian;
@@ -96,22 +97,23 @@ macro_rules! decomp_harness {
                 }
             }
 
+            // the unit box of N^D cells with outflow walls, which every tile is placed on
+            fn whole() -> WholeGrid<$d> {
+                WholeGrid {
+                    cells: [N; $d],
+                    origin: [0.0; $d],
+                    spacing: [DX; $d],
+                    maps: None,
+                    boundaries: Boundaries::uniform(BoundaryType::Outflow),
+                }
+            }
+
             // the integrator is set on the sim so the builder allocates the buffers it
             // needs (rk2's u_n snapshot); the harness drives the matching stage table.
-            // a tile of `cells` placed as production places it: the whole grid's origin and the
-            // index offset of its first cell
-            fn make(
-                cells: [usize; $d],
-                offset: [usize; $d],
-                bnd: Boundaries<$d>,
-                ts: Timestepping,
-            ) -> (Sim, Kern) {
+            // the tile is placed on the whole grid by the production placement
+            fn make(tile: &PlacedTile<$d>, ts: Timestepping) -> (Sim, Kern) {
                 let sim = Sim::build(Newtonian, IdealGas { gamma: GAMMA }, Cartesian)
-                    .cells(cells)
-                    .spacing([DX; $d])
-                    .origin([0.0; $d])
-                    .index_offset(std::array::from_fn(|a| offset[a] as isize))
-                    .boundaries(bnd)
+                    .placed(&whole(), tile)
                     .timestepping(ts)
                     .allocate()
                     .expect("sim construction failed")
@@ -124,35 +126,17 @@ macro_rules! decomp_harness {
                 (sim, k)
             }
 
-            // build the tile grid for `counts` tiles-per-axis. each tile is an equal slice
-            // of the domain; it gets a CoarseFine face wherever it borders a neighbor and
-            // physical outflow on the outer domain boundary. tiles are stored row-major.
+            // build the tile grid for `counts` tiles-per-axis: each tile an equal slice of the
+            // domain, placed by the production placement, stored row-major.
             fn grid_tiles(counts: [usize; $d], ts: Timestepping) -> Vec<(Sim, Kern)> {
-                let m: [usize; $d] = std::array::from_fn(|a| {
-                    assert!(N % counts[a] == 0, "N must split evenly into counts[{a}]");
-                    N / counts[a]
-                });
+                let partition = Partition::uniform([N; $d], counts).expect("N splits evenly into the counts");
                 let total: usize = counts.iter().product();
                 (0..total)
                     .map(|flat| {
-                        let tc = unflatten(flat, counts);
-                        let offset: [usize; $d] = std::array::from_fn(|a| tc[a] * m[a]);
-                        let bnd = Boundaries(std::array::from_fn(|a| {
-                            let lo = if tc[a] == 0 {
-                                BoundaryType::Outflow
-                            } else {
-                                BoundaryType::CoarseFine
-                            };
-                            let hi = if tc[a] == counts[a] - 1 {
-                                BoundaryType::Outflow
-                            } else {
-                                BoundaryType::CoarseFine
-                            };
-                            [lo, hi]
-                        }));
+                        let tile = whole().place(&partition, unflatten(flat, counts));
                         // allocate this tile's fields in its bound device's context, so the
                         // managed memory is hinted resident there (mirrors a real per-gpu tile).
-                        with_device(tile_device(flat), || make(m, offset, bnd, ts))
+                        with_device(tile_device(flat), || make(&tile, ts))
                     })
                     .collect()
             }
@@ -224,13 +208,9 @@ macro_rules! decomp_harness {
             // slot allocated + seeded from `chi_ic`. the kernel set is unchanged -- chi advection
             // is a runtime-gated phase in the substrate step (has_passive_scalar), dispatching
             // kernels baked unconditionally.
-            fn make_chi(
-                cells: [usize; $d],
-                offset: [usize; $d],
-                bnd: Boundaries<$d>,
-                ts: Timestepping,
-            ) -> (Sim, Kern) {
-                let (mut sim, k) = make(cells, offset, bnd, ts);
+            fn make_chi(tile: &PlacedTile<$d>, ts: Timestepping) -> (Sim, Kern) {
+                let (mut sim, k) = make(tile, ts);
+                let offset = tile.offset;
                 sim = sim.with_passive_scalar().expect("dye allocation failed");
                 let ilo: [isize; $d] = std::array::from_fn(|a| sim.geom.interior.spaces[a].lo);
                 let cons_chi = sim.fields.cons.chi_field().expect("cons chi");
@@ -255,18 +235,12 @@ macro_rules! decomp_harness {
             }
 
             fn grid_tiles_chi(counts: [usize; $d], ts: Timestepping) -> Vec<(Sim, Kern)> {
-                let m: [usize; $d] = std::array::from_fn(|a| N / counts[a]);
+                let partition = Partition::uniform([N; $d], counts).expect("N splits evenly into the counts");
                 let total: usize = counts.iter().product();
                 (0..total)
                     .map(|flat| {
-                        let tc = unflatten(flat, counts);
-                        let offset: [usize; $d] = std::array::from_fn(|a| tc[a] * m[a]);
-                        let bnd = Boundaries(std::array::from_fn(|a| {
-                            let lo = if tc[a] == 0 { BoundaryType::Outflow } else { BoundaryType::CoarseFine };
-                            let hi = if tc[a] == counts[a] - 1 { BoundaryType::Outflow } else { BoundaryType::CoarseFine };
-                            [lo, hi]
-                        }));
-                        with_device(tile_device(flat), || make_chi(m, offset, bnd, ts))
+                        let tile = whole().place(&partition, unflatten(flat, counts));
+                        with_device(tile_device(flat), || make_chi(&tile, ts))
                     })
                     .collect()
             }
@@ -321,8 +295,7 @@ macro_rules! decomp_harness {
                 // full-size global sim and confirm its density equals the direct read. this covers
                 // the gather index arithmetic (mirror of the IC scatter) across every topology
                 // here -- the one piece the python path uses that `evolve_decomposed` does not.
-                let bnd = Boundaries(std::array::from_fn(|_| [BoundaryType::Outflow; 2]));
-                let global = make([N; $d], [0; $d], bnd, ts);
+                let global = make(&whole().single(), ts);
                 let stores: Vec<_> = dec.iter().map(|(s, _)| &**s).collect();
                 device_sync::<$mem>();
                 symbi::sim::decomp::gather_interiors(&*global.0, &stores, counts);

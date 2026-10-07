@@ -32,6 +32,7 @@ pub mod driver;
 pub mod hydro_ops;
 pub mod mass_transport;
 pub mod phase_table;
+pub mod placement;
 pub mod plan_exchange;
 pub mod retry_guard;
 pub mod stage;

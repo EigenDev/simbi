@@ -1356,6 +1356,16 @@ where
         self.index_offset = offset;
         self
     }
+    /// place this grid as `tile` of `grid`: its cells, the whole grid's origin, spacing and maps,
+    /// the index offset of its first cell, and the boundaries its faces carry.
+    pub fn placed(self, grid: &crate::placement::WholeGrid<D>, tile: &crate::placement::PlacedTile<D>) -> Self {
+        self.cells(tile.cells)
+            .origin(grid.origin)
+            .spacing(grid.spacing)
+            .coord_maps(grid.maps)
+            .index_offset(tile.index_offset())
+            .boundaries(tile.boundaries.clone())
+    }
     /// the cell widths directly. mutually exclusive with [`Self::bounds`] (last one wins).
     pub fn spacing(mut self, dx: [f64; D]) -> Self {
         self.dx = Some(dx);
@@ -1772,9 +1782,8 @@ impl<const D: usize> PartitionGeometry<D> {
         std::array::from_fn(|ax| {
             let i = coord[ax] + self.index_offset[ax];
             match (self.maps.as_ref(), loc[ax]) {
-                (Some(maps), Loc::Face) => maps[ax].face(i),
+                (maps, Loc::Face) => crate::placement::face_position(self.x_lo[ax], self.dx[ax], maps.map(|m| &m[ax]), i),
                 (Some(maps), Loc::Center) => maps[ax].center(i),
-                (None, Loc::Face) => self.x_lo[ax] + (i as f64) * self.dx[ax],
                 (None, Loc::Center) => self.x_lo[ax] + (i as f64 + 0.5) * self.dx[ax],
             }
         })

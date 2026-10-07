@@ -28,8 +28,9 @@
 use symbi::regimes::substrate_gpu::device_sync;
 use symbi::regimes::substrate_newton::AdiabaticSubstrateKernelSet;
 use symbi::sim::decomp::{
-    LocalCopy, Partition, Schedule, Topology, evolve_decomposed, evolve_scheduled, flatten, unflatten,
+    LocalCopy, Partition, Schedule, evolve_decomposed, evolve_scheduled, flatten, unflatten,
 };
+use symbi::sim::placement::{PlacedTile, WholeGrid};
 use symbi::sim::state::*;
 use symbi_algebra::Tensor;
 use symbi_geometry::{AxisMap, Cylindrical, Spherical};
@@ -114,21 +115,25 @@ macro_rules! curvilinear_harness {
                 }
             }
 
-            // a tile placed as production places it: the whole grid's origin and maps and the
-            // index offset of its first cell
-            fn make(
-                cells: [usize; 2],
-                offset: [usize; 2],
-                bnd: Boundaries<2>,
-                ts: Timestepping,
-            ) -> (Sim, Kern) {
+            // the whole grid every tile is placed on: radial ends outflow, the transverse axis
+            // periodic, the maps of this harness's spacing
+            fn whole() -> WholeGrid<2> {
+                WholeGrid {
+                    cells: [NR, NT],
+                    origin: [R_LO, 0.0],
+                    spacing: [DR, DT_AX],
+                    maps: whole_maps(MAP_MODE),
+                    boundaries: Boundaries::per_axis([
+                        [BoundaryType::Outflow, BoundaryType::Outflow],
+                        [BoundaryType::Periodic, BoundaryType::Periodic],
+                    ]),
+                }
+            }
+
+            // a tile placed on the whole grid by the production placement
+            fn make(tile: &PlacedTile<2>, ts: Timestepping) -> (Sim, Kern) {
                 let sim = Sim::build(Newtonian, IdealGas { gamma: GAMMA }, $chart_val)
-                    .cells(cells)
-                    .origin([R_LO, 0.0])
-                    .spacing([DR, DT_AX])
-                    .coord_maps(whole_maps(MAP_MODE))
-                    .index_offset(std::array::from_fn(|a| offset[a] as isize))
-                    .boundaries(bnd)
+                    .placed(&whole(), tile)
                     .timestepping(ts)
                     .allocate()
                     .expect("curvilinear sim construction failed")
@@ -147,47 +152,16 @@ macro_rules! curvilinear_harness {
                 (sim, k)
             }
 
-            // each tile's radial and transverse extents come from the partition, so unequal
-            // cuts are as ordinary as even ones. a tile gets a CoarseFine face wherever it
-            // borders a neighbor; the radial ends are outflow and the transverse axis is
-            // periodic. on an uncut transverse axis the one tile wraps onto itself; on a cut one
-            // the two seam faces are cuts too, filled by the schedule's end-to-end legs, as
-            // production declares them.
+            // each tile's extents come from the partition, so unequal cuts are as ordinary as even
+            // ones; the production placement makes every face between tiles a cut, keeps the
+            // radial walls, and on a cut transverse axis makes both seam faces cuts the wrapping
+            // schedule fills
             fn grid_tiles(partition: &Partition<2>, ts: Timestepping) -> Vec<(Sim, Kern)> {
                 let counts = partition.counts();
                 (0..partition.n_tiles())
                     .map(|flat| {
-                        let tc = unflatten(flat, counts);
-                        let ext = partition.tile_extents(tc);
-                        let m: [usize; 2] = [ext[0].1, ext[1].1];
-                        let offset = [ext[0].0, ext[1].0];
-                        let bnd = Boundaries::per_axis([
-                            [
-                                if tc[0] == 0 {
-                                    BoundaryType::Outflow
-                                } else {
-                                    BoundaryType::CoarseFine
-                                },
-                                if tc[0] == counts[0] - 1 {
-                                    BoundaryType::Outflow
-                                } else {
-                                    BoundaryType::CoarseFine
-                                },
-                            ],
-                            [
-                                if tc[1] == 0 && counts[1] == 1 {
-                                    BoundaryType::Periodic
-                                } else {
-                                    BoundaryType::CoarseFine
-                                },
-                                if tc[1] == counts[1] - 1 && counts[1] == 1 {
-                                    BoundaryType::Periodic
-                                } else {
-                                    BoundaryType::CoarseFine
-                                },
-                            ],
-                        ]);
-                        with_device(tile_device(flat), || make(m, offset, bnd, ts))
+                        let tile = whole().place(partition, unflatten(flat, counts));
+                        with_device(tile_device(flat), || make(&tile, ts))
                     })
                     .collect()
             }
@@ -200,9 +174,8 @@ macro_rules! curvilinear_harness {
                     stores.push(&mut **s);
                     kernels.push(&*k);
                 }
-                // the transverse axis closes into a ring across the tiles
-                let schedule =
-                    Schedule::derive(counts, stores[0].geom.ng, &Topology::wrapping([false, true]));
+                // a cut transverse axis closes into a ring across the tiles
+                let schedule = Schedule::derive(counts, stores[0].geom.ng, &whole().topology(counts));
                 evolve_scheduled(
                     &mut stores,
                     &kernels,
