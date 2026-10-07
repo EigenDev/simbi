@@ -145,8 +145,8 @@ def test_a_launch_resumed_from_a_log_checkpoint_continues_the_schedule(tmp_path:
     written_at = scheduled[resume_from][0]
     assert 0 < written_at < STEPS, f"the first segment's last log checkpoint sits at iteration {written_at}"
     resumed = tmp_path / "resumed"
-    # the launched driver counts its step budget from the checkpoint it resumes (D14)
-    done = subprocess.run(base + ["--max-steps", str(STEPS - written_at), "--data-directory", str(resumed), "--checkpoint", str(first / resume_from)],
+    # the step cap is absolute on the root iteration: the resumed run stops where the uninterrupted one does
+    done = subprocess.run(base + ["--max-steps", str(STEPS),"--data-directory", str(resumed), "--checkpoint", str(first / resume_from)],
                           capture_output=True, text=True, timeout=900, env=env)
     assert done.returncode == 0, f"resumed launch failed:\n{done.stderr[-3000:]}"
     union = _by_index({name: v for name, v in scheduled.items() if v[0] <= written_at})

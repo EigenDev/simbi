@@ -135,5 +135,7 @@ def test_launched_workers_move_the_mesh_as_the_single_grid(tmp_path: Path, varia
     _assert_same(_launch(variants, problem, tmp_path / "launched", two, STEPS), want, f"{problem}: two launched workers")
     first = _launch(variants, problem, tmp_path / "first", two, STEPS // 2)
     three = _layout(tmp_path / "three.toml", workers=3, cuts=[[10, 21], []])
-    resumed = _launch(variants, problem, tmp_path / "resumed", three, STEPS - STEPS // 2, checkpoint=first)
+    # `max_steps` caps the absolute root iteration: the checkpoint sits at STEPS // 2 and the
+    # resumed launch takes the remaining STEPS - STEPS // 2 steps
+    resumed = _launch(variants, problem, tmp_path / "resumed", three, STEPS, checkpoint=first)
     _assert_same(resumed, want, f"{problem}: resumed onto three uneven workers")

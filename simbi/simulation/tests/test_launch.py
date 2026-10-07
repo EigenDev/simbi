@@ -197,9 +197,9 @@ def test_a_launch_resumed_onto_three_uneven_workers_matches(tmp_path: Path) -> N
     with h5py.File(partial.final, "r") as f:
         written_at = int(f["level_0"].attrs["iteration"])
     assert 0 < written_at < STEPS
-    # three unevenly cut workers resume that file for the remaining steps
+    # three unevenly cut workers resume that file up to the reference's absolute step cap
     layout3 = _layout(tmp_path / "three.toml", workers=3, cuts=[[10, 21], []])
-    resumed = _launch(tmp_path / "three", layout3, STEPS - written_at, workers=3, checkpoint=partial.final)
+    resumed = _launch(tmp_path / "three", layout3, STEPS, workers=3, checkpoint=partial.final)
     assert resumed.backend == backend
     assert resumed.exits == {0: 0, 1: 0, 2: 0}
     with h5py.File(resumed.final, "r") as fr, h5py.File(reference, "r") as fs:
@@ -531,7 +531,7 @@ def test_a_magnetized_launch_resumed_onto_three_uneven_workers_matches(tmp_path:
         written_at = int(f["level_0"].attrs["iteration"])
     assert 0 < written_at < MHD_STEPS
     layout3 = _layout(tmp_path / "three.toml", workers=3, cuts=[[10, 21], []])
-    resumed = _mhd_launch(tmp_path / "three", layout3, MHD_STEPS - written_at, workers=3, checkpoint=partial.final)
+    resumed = _mhd_launch(tmp_path / "three", layout3, MHD_STEPS, workers=3, checkpoint=partial.final)
     with h5py.File(resumed.final, "r") as fr, h5py.File(reference, "r") as fs:
         assert fr["level_0"].attrs["time"] == fs["level_0"].attrs["time"]
         assert int(fr["level_0"].attrs["iteration"]) == MHD_STEPS
@@ -725,7 +725,7 @@ def test_a_relativistic_launch_resumed_onto_three_uneven_workers_matches(tmp_pat
         written_at = int(f["level_0"].attrs["iteration"])
     assert 0 < written_at < RHD_STEPS
     layout3 = _layout(tmp_path / "three.toml", workers=3, cuts=[[10, 21], []])
-    resumed, _ = _rhd_launch(tmp_path / "three", layout3, RHD_STEPS - written_at, workers=3, checkpoint=partial)
+    resumed, _ = _rhd_launch(tmp_path / "three", layout3, RHD_STEPS, workers=3, checkpoint=partial)
     with h5py.File(resumed, "r") as fr, h5py.File(reference, "r") as fs:
         assert fr["level_0"].attrs["time"] == fs["level_0"].attrs["time"]
         assert int(fr["level_0"].attrs["iteration"]) == RHD_STEPS

@@ -164,8 +164,8 @@ def test_a_second_nested_level_resumed_on_two_refined_tiles_matches_the_uninterr
     with h5py.File(partial, "r") as f:
         written_at = int(f["level_0"].attrs["iteration"])
     assert 0 < written_at < STEPS
-    # the tiled driver counts its step budget from the checkpoint it resumes
-    resumed = _run(RefinedBlast, tmp_path / "resumed", 2, steps=STEPS - written_at, checkpoint_file=str(partial), **NESTED)
+    # the step cap is an absolute root iteration: the resume from written_at runs to STEPS
+    resumed = _run(RefinedBlast, tmp_path / "resumed", 2, steps=STEPS, checkpoint_file=str(partial), **NESTED)
     _assert_same(resumed, single, "two refined tiles, three levels, resumed")
 
 

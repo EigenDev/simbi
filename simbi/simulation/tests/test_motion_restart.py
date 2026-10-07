@@ -90,8 +90,9 @@ def test_a_resumed_moving_mesh_continues_its_integrated_scale_factor(tmp_path: P
 
     # premise: the callable's own curve departs from the integrated scale factor at the write
     assert abs(math.exp(20.0 * t) - a) > 1e-6, f"a = {a} equals the callable's exp(20 t) = {math.exp(20.0 * t)}; the gate is vacuous"
-    steps = STEPS if gpus == 1 else STEPS - written_at
-    xs, ys = _state(_run(tmp_path, tmp_path / "resumed", gpus, steps, checkpoint=first)), _state(want)
+    # the step cap is an absolute root iteration on every driver: the resume from written_at runs to STEPS
+    assert 0 < written_at < STEPS
+    xs, ys = _state(_run(tmp_path, tmp_path / "resumed", gpus, STEPS, checkpoint=first)), _state(want)
     assert xs.keys() == ys.keys(), f"datasets {sorted(set(xs) ^ set(ys))} differ"
     for name, x in xs.items():
         np.testing.assert_array_equal(x, ys[name], err_msg=f"{gpus} device(s): {name}")

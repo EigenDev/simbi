@@ -179,7 +179,7 @@ def test_tiles_hold_the_declared_target_as_the_single_grid(tmp_path: Path, varia
 def test_tiles_resume_against_the_declared_target(tmp_path: Path, variants: Path) -> None:
     want = _run("Atmosphere", tmp_path / "single", 1)
     first = _run("Atmosphere", tmp_path / "first", 2, steps=STEPS // 2)
-    resumed = _run("Atmosphere", tmp_path / "resumed", 3, steps=STEPS - _iteration(first), extra=UNEVEN, checkpoint=first)
+    resumed = _run("Atmosphere", tmp_path / "resumed", 3, steps=STEPS, extra=UNEVEN, checkpoint=first)
     assert _iteration(resumed) == STEPS
     _assert_same(resumed, want, "resumed onto three uneven tiles")
 
@@ -226,7 +226,7 @@ def test_launched_workers_hold_the_declared_target_as_the_single_grid(tmp_path: 
     # resumed from a two-worker checkpoint: the probe reads the build-time target before the
     # restart restores the state, as the single grid does
     first, _ = _launch_probed(variants, problem, tmp_path / "first", two, STEPS // 2)
-    resumed, _ = _launch_probed(variants, problem, tmp_path / "resumed", three, STEPS - _iteration(first), checkpoint=first)
+    resumed, _ = _launch_probed(variants, problem, tmp_path / "resumed", three, STEPS, checkpoint=first)
     assert _iteration(resumed) == STEPS
     _assert_same(resumed, want, f"{problem}: resumed onto three uneven workers")
 
@@ -268,8 +268,8 @@ def test_refined_tiles_hold_the_declared_target_as_the_single_hierarchy(tmp_path
     assert uneven_probes == probes, f"{problem}: three uneven tiles probed at {uneven_probes}, the single hierarchy at {probes}"
     _assert_same(uneven, want, f"{problem}: three uneven refined tiles")
     first, _ = _level_probes(problem, tmp_path / "first", 2, steps=STEPS // 2)
-    # a resumed run on tiles takes `max_steps` further steps
-    resumed, _ = _level_probes(problem, tmp_path / "resumed", 3, steps=STEPS - _iteration(first), extra=REFINED_UNEVEN, checkpoint=first)
+    # the step cap is absolute on the root iteration: the resumed run stops where the uninterrupted one does
+    resumed, _ = _level_probes(problem, tmp_path / "resumed", 3, steps=STEPS, extra=REFINED_UNEVEN, checkpoint=first)
     _assert_same(resumed, want, f"{problem}: resumed onto three uneven refined tiles")
 
 
@@ -300,8 +300,8 @@ def test_launched_refined_workers_hold_the_declared_target_as_the_single_hierarc
     assert got_probes == probes, f"{problem}: three uneven refined workers probed at {got_probes}, the single hierarchy at {probes}"
     _assert_same(got, want, f"{problem}: three uneven refined workers")
     first, _ = _launch_probed(variants, problem, tmp_path / "first", two, STEPS // 2, levels=True)
-    # a resumed launch takes `max_steps` further steps
-    resumed, _ = _launch_probed(variants, problem, tmp_path / "resumed", three, STEPS - _iteration(first), checkpoint=first, levels=True)
+    # the step cap is absolute on the root iteration: the resumed launch stops where the uninterrupted one does
+    resumed, _ = _launch_probed(variants, problem, tmp_path / "resumed", three, STEPS, checkpoint=first, levels=True)
     _assert_same(resumed, want, f"{problem}: resumed onto three uneven refined workers")
 
 

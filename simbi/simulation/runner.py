@@ -783,9 +783,11 @@ def run(
         validate: if True, validate generator output before running
         live_monitor: if True, write a read-only snapshot each cadence so
             `simbi attach <data_directory>` can monitor a headless run
-        max_steps: stop after this many steps (0 = run to end_time); the final
-            checkpoint is written either way — a bounded run is a truncated
-            but otherwise ordinary run (smoke tests, profiling probes)
+        max_steps: stop at this root iteration (0 = run to end_time). the cap counts
+            from the start of the simulation, so a run resumed from a checkpoint at
+            iteration k takes max_steps - k further steps and none when k has reached
+            it. the final checkpoint is written either way — a bounded run is a
+            truncated but otherwise ordinary run (smoke tests, profiling probes)
 
     example:
         >>> from simbi.simulation import SimbiProblem, ProblemParam, run

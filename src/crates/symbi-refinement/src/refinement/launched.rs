@@ -775,7 +775,8 @@ where
         Ok(ControlFlow::Break(())) => return Ok(report),
         Err(e) => return Err(fail(fabric, e)),
     }
-    while t < base.t_final && (base.max_steps == 0 || iter < base.max_steps) {
+    // the cap bounds the root iteration itself, a resumed run's checkpointed iterations included
+    while t < base.t_final && (base.max_steps == 0 || tiles[0].levels[0].state.iteration < base.max_steps) {
         // the global timestep: the minimum root cfl over the held hierarchies, then over the
         // workers, consumed as the coordinator's bits
         // every level's raw candidate is judged before the user clamp, which would replace a

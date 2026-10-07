@@ -179,7 +179,8 @@ def test_tiles_and_workers_carry_the_local_closure_as_the_single_grid(tmp_path: 
     _assert_same(_launch(variants, "LocalIso", tmp_path / "launched", four, STEPS), want, "a 2x2 launch")
     first = _launch(variants, "LocalIso", tmp_path / "first", four, STEPS // 2)
     three = _layout(tmp_path / "three.toml", workers=3, cuts=[[10, 21], []])
-    _assert_same(_launch(variants, "LocalIso", tmp_path / "resumed", three, STEPS - STEPS // 2, checkpoint=first), want, "resumed onto three uneven workers")
+    # the step cap is an absolute root iteration: the resume from STEPS // 2 runs to STEPS
+    _assert_same(_launch(variants, "LocalIso", tmp_path / "resumed", three, STEPS, checkpoint=first), want, "resumed onto three uneven workers")
 
 
 def test_a_troubled_cell_against_a_cut_corrects_alike_under_the_local_closure(tmp_path: Path, variants: Path) -> None:
@@ -207,4 +208,5 @@ def test_isothermal_mhd_workers_carry_the_local_closure_as_the_single_grid(tmp_p
     _assert_same(_launch(variants, problem, tmp_path / "two", two, STEPS), want, f"{problem}: two workers")
     first = _launch(variants, problem, tmp_path / "first", two, STEPS // 2)
     three = _layout(tmp_path / "three.toml", workers=3, cuts=[[10, 21], []])
-    _assert_same(_launch(variants, problem, tmp_path / "resumed", three, STEPS - STEPS // 2, checkpoint=first), want, f"{problem}: resumed onto three uneven workers")
+    # the step cap is an absolute root iteration: the resume from STEPS // 2 runs to STEPS
+    _assert_same(_launch(variants, problem, tmp_path / "resumed", three, STEPS, checkpoint=first), want, f"{problem}: resumed onto three uneven workers")

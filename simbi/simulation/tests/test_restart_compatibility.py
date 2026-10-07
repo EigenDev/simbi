@@ -64,22 +64,28 @@ def _assert_refused(done: subprocess.CompletedProcess, out: Path, reason: str, l
 @pytest.mark.parametrize("gpus", [1, 2], ids=["single", "tiles"])
 def test_a_checkpoint_resumed_onto_other_bounds_is_refused(tmp_path: Path, gpus: int) -> None:
     written = _written(tmp_path / "first", FLAT)
-    done = _run(tmp_path / "resumed", gpus, f"{FLAT}, bounds=[(-2.0, 2.0), (-2.0, 2.0)]", checkpoint=written)
+    # the checkpoint's two iterations and one more on the single grid, two more on host tiles
+    steps = 3 if gpus == 1 else 4
+    done = _run(tmp_path / "resumed", gpus, f"{FLAT}, bounds=[(-2.0, 2.0), (-2.0, 2.0)]", steps=steps, checkpoint=written)
     _assert_refused(done, tmp_path / "resumed", "level 0 axis 0 spans", f"other bounds on {gpus} device(s)")
 
 
 @pytest.mark.parametrize("gpus", [1, 2], ids=["single", "tiles"])
 def test_a_checkpoint_resumed_onto_a_moved_fine_region_is_refused(tmp_path: Path, gpus: int) -> None:
     written = _written(tmp_path / "first", "refinement_regions=[[-0.25, 0.25, -0.25, 0.25]]")
+    # the checkpoint's two iterations and one more on the single grid, two more on host tiles
+    steps = 3 if gpus == 1 else 4
     # two root cells (dx = 1/16) to the left: the same fine cell count over another region
-    done = _run(tmp_path / "resumed", gpus, "refinement_regions=[[-0.375, 0.125, -0.25, 0.25]]", checkpoint=written)
+    done = _run(tmp_path / "resumed", gpus, "refinement_regions=[[-0.375, 0.125, -0.25, 0.25]]", steps=steps, checkpoint=written)
     _assert_refused(done, tmp_path / "resumed", "level 1 axis 0 spans", f"moved fine region on {gpus} device(s)")
 
 
 @pytest.mark.parametrize("gpus", [1, 2], ids=["single", "tiles"])
 def test_a_deeper_checkpoint_is_refused_rather_than_truncated(tmp_path: Path, gpus: int) -> None:
     written = _written(tmp_path / "first", NESTED)
-    done = _run(tmp_path / "resumed", gpus, "refinement_regions=[[-0.25, 0.25, -0.25, 0.25]]", checkpoint=written)
+    # the checkpoint's two iterations and one more on the single grid, two more on host tiles
+    steps = 3 if gpus == 1 else 4
+    done = _run(tmp_path / "resumed", gpus, "refinement_regions=[[-0.25, 0.25, -0.25, 0.25]]", steps=steps, checkpoint=written)
     reason = "carries 3 refinement level(s) but this run builds 2" if gpus == 1 else "the checkpoint holds 3 level(s), this run refines to 2"
     _assert_refused(done, tmp_path / "resumed", reason, f"deeper checkpoint on {gpus} device(s)")
 
@@ -96,7 +102,8 @@ def test_a_launch_resumed_onto_other_bounds_is_refused(tmp_path: Path) -> None:
         "    bounds: Annotated[list, ProblemParam([(-2.0, 2.0), (-2.0, 2.0)], description='box')]\n"
     )
     layout = _layout(tmp_path / "two.toml", workers=2, shape=(2, 1))
-    cmd = [sys.executable, "-m", "simbi.cli", "launch", str(script), "--layout", str(layout), "--max-steps", "2",
+    # the checkpoint's two iterations and two more
+    cmd = [sys.executable, "-m", "simbi.cli", "launch", str(script), "--layout", str(layout), "--max-steps", "4",
            "--resolution", "16,16,1", "--data-directory", str(tmp_path / "launched"), "--checkpoint-interval", "1e9",
            "--checkpoint", str(written)]
     env = dict(os.environ)
@@ -108,7 +115,8 @@ def test_a_launch_resumed_onto_other_bounds_is_refused(tmp_path: Path) -> None:
 @pytest.mark.parametrize("gpus", [1, 2], ids=["single", "tiles"])
 def test_a_checkpoint_resumes_onto_its_own_grid(tmp_path: Path, gpus: int) -> None:
     written = _written(tmp_path / "first", "refinement_regions=[[-0.25, 0.25, -0.25, 0.25]]")
-    done = _run(tmp_path / "resumed", gpus, "refinement_regions=[[-0.25, 0.25, -0.25, 0.25]]", steps=1, checkpoint=written)
+    # the checkpoint's two iterations and one more
+    done = _run(tmp_path / "resumed", gpus, "refinement_regions=[[-0.25, 0.25, -0.25, 0.25]]", steps=3, checkpoint=written)
     assert done.returncode == 0, f"the resume onto the written grid failed on {gpus} device(s):\n{done.stderr[-2000:]}"
     assert list((tmp_path / "resumed").glob("*final*.h5")), "the resume published no final checkpoint"
 
@@ -144,9 +152,9 @@ def test_a_resumed_isothermal_run_keeps_its_recorded_sound_speed(tmp_path: Path,
     assert _iso(tmp_path / "first", 1, "", 2).returncode == 0
     first = _final(tmp_path / "first")
     with h5py.File(first, "r") as f:
-        written_at = int(f["level_0"].attrs["iteration"])
         assert float(f["metadata"].attrs["sound_speed"]) == 1.0
-    steps = 4 if gpus == 1 else 4 - written_at
+    # the checkpoint's two iterations and two more
+    steps = 4
     script = tmp_path / "hot_channel.py"
     script.write_text(
         "from typing import Annotated\n"
@@ -189,19 +197,22 @@ def test_a_resume_continues_the_tracer_population_its_checkpoint_records(tmp_pat
     )
     assert _iso(tmp_path / "first", 1, "", 2).returncode == 0
     first = _final(tmp_path / "first")
+    # the checkpoint's two iterations and two more on the single grid, four more on host tiles
+    steps = 4 if gpus == 1 else 6
     if resumed == "TRACED":
         snippet = (
             "import sys\n"
             f"sys.path.insert(0, {str(tmp_path)!r})\n"
             "from simbi.simulation import runner\n"
             "from traced_channel import Traced\n"
-            f"runner.run(Traced(resolution=(32, 16), gpus={gpus}, checkpoint_interval=1e9, data_directory=sys.argv[1], checkpoint_file={str(first)!r}), compute_mode='cpu', max_steps=4)\n"
+            f"runner.run(Traced(resolution=(32, 16), gpus={gpus}, checkpoint_interval=1e9, data_directory=sys.argv[1], checkpoint_file={str(first)!r}), compute_mode='cpu', max_steps={steps})\n"
         )
         done = subprocess.run([sys.executable, "-c", snippet, str(tmp_path / "resumed")], capture_output=True, text=True, timeout=600,
                               env=dict(os.environ, SYMBI_GPU_OVERSUBSCRIBE="1"))
         _assert_refused(done, tmp_path / "resumed", reason, f"a traced resume of an untraced file on {gpus} device(s)")
     else:
-        done = _iso(tmp_path / "resumed", gpus, "", 4 if gpus == 1 else 2, checkpoint=first)
+        # the checkpoint's two iterations and two more
+        done = _iso(tmp_path / "resumed", gpus, "", 4, checkpoint=first)
         assert done.returncode == 0, f"the untraced resume failed:\n{done.stderr[-2000:]}"
 
 
@@ -215,12 +226,14 @@ def test_a_dyed_resume_of_an_undyed_checkpoint_is_refused(tmp_path: Path, gpus: 
         "        return (0.5 for _ in range(16 * 16))\n"
     )
     written = _written(tmp_path / "first", FLAT)
+    # the checkpoint's two iterations and two more on the single grid, four more on host tiles
+    steps = 4 if gpus == 1 else 6
     snippet = (
         "import sys\n"
         f"sys.path.insert(0, {str(tmp_path)!r})\n"
         "from simbi.simulation import runner\n"
         "from dyed_blast import DyedBlast\n"
-        f"runner.run(DyedBlast(resolution=(16, 16, 1), gpus={gpus}, checkpoint_interval=1e9, data_directory=sys.argv[1], {FLAT}, checkpoint_file={str(written)!r}), compute_mode='cpu', max_steps=4)\n"
+        f"runner.run(DyedBlast(resolution=(16, 16, 1), gpus={gpus}, checkpoint_interval=1e9, data_directory=sys.argv[1], {FLAT}, checkpoint_file={str(written)!r}), compute_mode='cpu', max_steps={steps})\n"
     )
     done = subprocess.run([sys.executable, "-c", snippet, str(tmp_path / "resumed")], capture_output=True, text=True, timeout=600,
                           env=dict(os.environ, SYMBI_GPU_OVERSUBSCRIBE="1"))

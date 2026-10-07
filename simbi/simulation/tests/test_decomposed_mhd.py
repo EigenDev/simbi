@@ -105,8 +105,9 @@ def test_refined_tiles_carry_the_single_hierarchy(tmp_path: Path, problem: str) 
 def test_refined_tiles_resume_onto_another_partition(tmp_path: Path) -> None:
     want = _run("RefinedMhdBlast", tmp_path / "single", 1)
     first = _run("RefinedMhdBlast", tmp_path / "first", 2, steps=STEPS // 2)
-    # a resumed run on tiles takes `max_steps` further steps
-    resumed = _run("RefinedMhdBlast", tmp_path / "resumed", 3, REFINED_LAYOUTS[3], steps=STEPS - STEPS // 2, checkpoint=first)
+    # `max_steps` caps the absolute root iteration: the checkpoint sits at STEPS // 2 and the
+    # resumed run takes the remaining STEPS - STEPS // 2 steps
+    resumed = _run("RefinedMhdBlast", tmp_path / "resumed", 3, REFINED_LAYOUTS[3], steps=STEPS, checkpoint=first)
     _assert_same(resumed, want, "resumed onto three uneven refined tiles")
 
 

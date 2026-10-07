@@ -73,9 +73,10 @@ def test_a_resumed_assembly_continues_its_bonds_and_contacts(tmp_path: Path, arm
             assert (intact == 0).any(), "no bond had broken at the checkpoint; the broken arm is vacuous"
         else:
             assert np.abs(slip[intact == 1]).max() > 0.0, "no intact bond carried slip at the checkpoint; the arm is vacuous"
-    # the single grid caps the absolute iteration, the tiles count further steps from the checkpoint
-    steps = STEPS if gpus == 1 else STEPS - written_at
-    resumed = _run(tmp_path / "resumed", gpus, fields, steps, checkpoint=first)
+    # max_steps caps the absolute root iteration on every driver; the checkpoint sits at or
+    # below SPLIT < STEPS, so the resumed run steps from written_at up to STEPS
+    assert written_at < STEPS, f"the checkpoint at iteration {written_at} leaves no step to resume"
+    resumed = _run(tmp_path / "resumed", gpus, fields, STEPS, checkpoint=first)
     xs, ys = _datasets(resumed), _datasets(want)
     assert any(name.startswith("bodies/fragments/") for name in ys), "the reference records no fragment state"
     assert xs.keys() == ys.keys(), f"datasets {sorted(set(xs) ^ set(ys))} differ"

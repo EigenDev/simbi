@@ -104,9 +104,9 @@ def test_an_excised_relativistic_launch_matches_the_single_grid(tmp_path: Path, 
     first = _script_launch(_script(module), resolution, tmp_path / "first", two, STEPS // 2, workers=2, flags=_flags(fields))
     written_at = _iteration(first)
     assert 0 < written_at < STEPS
-    # a resumed launch takes `max_steps` further steps
+    # `max_steps` caps the absolute root iteration: the resumed launch steps from written_at to STEPS
     resumed = _script_launch(
-        _script(module), resolution, tmp_path / "resumed", many, STEPS - written_at, workers=workers, checkpoint=first, flags=_flags(fields)
+        _script(module), resolution, tmp_path / "resumed", many, STEPS, workers=workers, checkpoint=first, flags=_flags(fields)
     )
     _assert_same(resumed, want, f"resumed onto {workers} uneven workers")
 
@@ -161,8 +161,8 @@ def test_excised_host_tiles_resume_on_the_stored_primitives(tmp_path: Path) -> N
     first = _tiles(tmp_path / "first", 2, STEPS // 2)
     written_at = _iteration(first)
     assert 0 < written_at < STEPS
-    # a resumed run on tiles takes `max_steps` further steps
-    _assert_same(_tiles(tmp_path / "resumed", 3, STEPS - written_at, checkpoint=first, decompose=[[40, 90]]), want, "resumed onto three uneven host tiles")
+    # `max_steps` caps the absolute root iteration: the resumed tiles step from written_at to STEPS
+    _assert_same(_tiles(tmp_path / "resumed", 3, STEPS, checkpoint=first, decompose=[[40, 90]]), want, "resumed onto three uneven host tiles")
 
 
 # the bondi box on a spinning hole, and the unexcised z = 0 plane of the box
@@ -255,7 +255,8 @@ def test_a_spinning_box_launches_as_the_single_grid(tmp_path: Path, gr_variants:
     first = _script_launch(str(script), resolution, tmp_path / "first", two, STEPS // 2, workers=2, flags=_flags(fields))
     written_at = _iteration(first)
     assert 0 < written_at < STEPS
-    resumed = _script_launch(str(script), resolution, tmp_path / "resumed", many, STEPS - written_at, workers=workers, checkpoint=first, flags=_flags(fields))
+    # `max_steps` caps the absolute root iteration: the resumed launch steps from written_at to STEPS
+    resumed = _script_launch(str(script), resolution, tmp_path / "resumed", many, STEPS, workers=workers, checkpoint=first, flags=_flags(fields))
     _assert_same(resumed, want, f"{case}: resumed onto {workers} uneven workers")
 
 

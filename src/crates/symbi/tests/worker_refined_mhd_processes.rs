@@ -1423,7 +1423,8 @@ fn a_magnetized_refined_restart_onto_another_partition_continues_bitwise() {
     // the patch face at 17 lies inside the middle column of a three-by-two layout
     let off_cut = Arm { cuts0: vec![10, 22], cuts1: vec![16], owner: vec![0, 0, 1, 1, 2, 2], ..patch_face_on_cut() };
     let resume = ("W_RESTART_FROM", ckpt.to_str().unwrap().to_string());
-    let steps = ("W_STEPS", "4".to_string());
+    // the cap is the absolute root iteration: the checkpoint's four steps and four more
+    let steps = ("W_STEPS", "8".to_string());
     let resumed = run_arm(test, "off_cut", &off_cut, &[resume.clone(), steps.clone()]);
     assert_matches_reference_after(test, "off_cut", &resumed, &off_cut, "resumed with the face off the cut", &before, 4);
     let rejecting = run_arm(

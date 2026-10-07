@@ -1344,7 +1344,8 @@ fn a_refined_restart_onto_another_partition_continues_bitwise() {
     let dir = run_dir(test, "files");
     let (ckpt, before) = quad_checkpoint(test, &dir);
     for (tag, arm) in [("18_14", ragged_18_14()), ("no_fine", no_fine_on_two_workers())] {
-        let arm = arm.with_steps(STEPS - 4);
+        // the cap is the absolute root iteration: the checkpoint's four steps and the rest
+        let arm = arm.with_steps(STEPS);
         let resumed = run_arm(test, tag, &arm, &[("W_RESTART_FROM", ckpt.to_str().unwrap().into())]);
         assert_matches_reference_after(test, tag, &resumed, &arm, &format!("resumed on {tag}"), &before);
     }

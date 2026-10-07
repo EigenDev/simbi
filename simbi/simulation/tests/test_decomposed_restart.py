@@ -71,24 +71,46 @@ def _assert_same_state(a: Path, b: Path, label: str) -> None:
 
 
 
+def _iteration(path: Path) -> int:
+    with h5py.File(path, "r") as f:
+        return int(f["level_0"].attrs["iteration"])
+
+
+# `max_steps` caps the root iteration itself, a resumed run's checkpointed iterations included:
+# resumed at the cap a run takes no step and leaves the state as the checkpoint holds it, and
+# resumed with a cap one higher it takes exactly one step
+@pytest.mark.parametrize("gpus", [1, 2])
+def test_max_steps_caps_the_root_iteration_across_a_resume(tmp_path: Path, monkeypatch, gpus) -> None:
+    monkeypatch.setenv("SYMBI_GPU_OVERSUBSCRIBE", "1")
+    first = _run(tmp_path / "first", gpus=gpus, steps=2)
+    assert _iteration(first) == 2, "premise: the first run stops at iteration two"
+    at_cap = _run(tmp_path / "at_cap", gpus=gpus, steps=2, checkpoint=first)
+    assert _iteration(at_cap) == 2, f"{gpus} tile(s): a run resumed at its cap took a step"
+    _assert_same_state(first, at_cap, f"{gpus} tile(s): resumed at the cap")
+    past = _run(tmp_path / "past", gpus=gpus, steps=3, checkpoint=first)
+    assert _iteration(past) == 3, f"{gpus} tile(s): resumed with cap three, stopped at {_iteration(past)}"
+
+
 @pytest.mark.parametrize("gpus,decompose", [(1, None), (2, None), (3, [[3, 5], []])])
 def test_a_restart_under_the_same_partition_continues_bit_for_bit(tmp_path: Path, monkeypatch, gpus, decompose) -> None:
     monkeypatch.setenv("SYMBI_GPU_OVERSUBSCRIBE", "1")
     whole = _run(tmp_path / "whole", gpus=gpus, steps=3, decompose=decompose)
     first = _run(tmp_path / "first", gpus=gpus, steps=2, decompose=decompose)
-    resumed = _run(tmp_path / "resumed", gpus=gpus, steps=1, checkpoint=first, decompose=decompose)
+    # the cap is the absolute root iteration: the checkpoint's two and one more
+    resumed = _run(tmp_path / "resumed", gpus=gpus, steps=3, checkpoint=first, decompose=decompose)
     _assert_same_state(whole, resumed, f"{gpus} tiles: three steps vs two then one")
 
 
 def test_a_checkpoint_resumes_under_any_partition(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.setenv("SYMBI_GPU_OVERSUBSCRIBE", "1")
+    # each resume caps the absolute root iteration one past its checkpoint's
     start = _run(tmp_path / "start", gpus=1, steps=2)
-    one = _run(tmp_path / "one", gpus=1, steps=1, checkpoint=start)
-    two = _run(tmp_path / "two", gpus=2, steps=1, checkpoint=start)
+    one = _run(tmp_path / "one", gpus=1, steps=3, checkpoint=start)
+    two = _run(tmp_path / "two", gpus=2, steps=3, checkpoint=start)
     _assert_same_state(one, two, "one tile -> two tiles")
-    one_again = _run(tmp_path / "one_again", gpus=1, steps=1, checkpoint=one)
-    from_two_to_one = _run(tmp_path / "two_to_one", gpus=1, steps=1, checkpoint=two)
-    from_two_to_three = _run(tmp_path / "two_to_three", gpus=3, steps=1, checkpoint=two, decompose=[[3, 5], []])
+    one_again = _run(tmp_path / "one_again", gpus=1, steps=4, checkpoint=one)
+    from_two_to_one = _run(tmp_path / "two_to_one", gpus=1, steps=4, checkpoint=two)
+    from_two_to_three = _run(tmp_path / "two_to_three", gpus=3, steps=4, checkpoint=two, decompose=[[3, 5], []])
     _assert_same_state(one_again, from_two_to_one, "two tiles -> one tile")
     _assert_same_state(one_again, from_two_to_three, "two tiles -> three uneven tiles")
 
@@ -112,8 +134,9 @@ def test_a_refined_checkpoint_resumes_across_partitions(tmp_path: Path, monkeypa
     start = run(tmp_path / "start", gpus=2, steps=2)
     with h5py.File(start, "r") as f:
         assert "level_1" in f, "the tiled refined checkpoint carries its fine level"
-    one = run(tmp_path / "one", gpus=1, steps=1, checkpoint=start)
-    two = run(tmp_path / "two", gpus=2, steps=1, checkpoint=start)
+    # the cap is the absolute root iteration: the checkpoint's two and one more
+    one = run(tmp_path / "one", gpus=1, steps=3, checkpoint=start)
+    two = run(tmp_path / "two", gpus=2, steps=3, checkpoint=start)
     with h5py.File(one, "r") as fa, h5py.File(two, "r") as fb:
         for level in ("level_0", "level_1"):
             names = []

@@ -188,8 +188,8 @@ def test_a_dyed_launch_resumed_onto_three_workers_reaches_the_single_grid(tmp_pa
     two = _layout(tmp_path / "two.toml", workers=2, shape=(2, 1))
     first = _launch(script, resolution, tmp_path / "first", two, STEPS // 2)
     three = _layout(tmp_path / "three.toml", workers=3, cuts=[[10, 21], []])
-    # the launched driver counts its step budget from the checkpoint it resumes
-    resumed = _launch(script, resolution, tmp_path / "resumed", three, STEPS - STEPS // 2, checkpoint=first)
+    # the step cap is an absolute root iteration: the resume from STEPS // 2 runs to STEPS
+    resumed = _launch(script, resolution, tmp_path / "resumed", three, STEPS, checkpoint=first)
     _assert_same(resumed, want, f"{arm}: resumed onto three workers")
 
 

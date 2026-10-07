@@ -110,7 +110,7 @@ def _resume(tmp_path: Path, script: str, module: str, cls: str, resolution, step
         written_at = int(f["level_0"].attrs["iteration"])
     assert 0 < written_at < steps
     three = _layout(tmp_path / "three.toml", workers=3, cuts=layout["restart"])
-    resumed = _script_launch(script, resolution, tmp_path / "three", three, steps - written_at, workers=3, checkpoint=partial, flags=flags)
+    resumed = _script_launch(script, resolution, tmp_path / "three", three, steps, workers=3, checkpoint=partial, flags=flags)
     _assert_same_state(resumed, reference, "resumed onto three uneven workers against the uninterrupted run")
 
 

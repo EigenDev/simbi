@@ -74,7 +74,8 @@ pub struct WorkerConfig {
     pub timestepping: Timestepping,
     pub start_time: f64,
     pub t_final: f64,
-    /// steps to take; zero is unbounded
+    /// the root iteration the march stops at, a resumed run's checkpointed iterations included;
+    /// zero is unbounded
     pub max_steps: u64,
     pub deadline: Duration,
     pub injection: Injection,
@@ -1071,7 +1072,8 @@ where
     };
     let mut t = cfg.start_time;
     let mut iter: u64 = 0;
-    while t < cfg.t_final && (cfg.max_steps == 0 || iter < cfg.max_steps) {
+    // the cap bounds the root iteration itself, a resumed run's checkpointed iterations included
+    while t < cfg.t_final && (cfg.max_steps == 0 || stores[0].iteration < cfg.max_steps) {
         // the timestep: the exact minimum over owned cells, then the fabric minimum over
         // workers, consumed as the coordinator's bits, then the final-time clamp.
         // every tile's candidate is validated before the fold: a minimum over f64 prefers the

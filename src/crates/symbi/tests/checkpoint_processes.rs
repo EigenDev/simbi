@@ -203,7 +203,8 @@ fn run_worker(arm: &Arm, me: WorkerId, out: PathBuf) -> Result<(), WorkerError> 
         .collect();
     let grid = whole_grid();
     let mut start_time = 0.0;
-    let mut max_steps = STEPS;
+    // the cap is the absolute root iteration, the same for a fresh run and its resumption
+    let max_steps = STEPS;
     if let Ok(from) = std::env::var("W_RESTART_FROM") {
         let meta =
             read_checkpoint_meta(&from).map_err(|e| WorkerError::Checkpoint(e.to_string()))?;
@@ -212,7 +213,6 @@ fn run_worker(arm: &Arm, me: WorkerId, out: PathBuf) -> Result<(), WorkerError> 
                 .map_err(|e| WorkerError::Checkpoint(e.to_string()))?;
         }
         start_time = meta.time;
-        max_steps = env_u64("W_RESTART_STEPS").unwrap();
     }
     let identity = PhysicsIdentity::of(&built[0].0);
     let schema = plan_schema(&*built[0].0);
@@ -663,7 +663,6 @@ fn restart_onto_a_new_partition_continues_bitwise() {
         &ragged_three(),
         &[
             ("W_RESTART_FROM", file.to_string_lossy().into_owned()),
-            ("W_RESTART_STEPS", (STEPS - CKPT_STEP).to_string()),
         ],
     );
     assert_all_ok(&restarted);

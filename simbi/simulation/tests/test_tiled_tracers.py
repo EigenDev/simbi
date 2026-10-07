@@ -224,14 +224,16 @@ def test_tiles_carry_the_single_grid_tracer_population(tmp_path: Path, variants:
 def test_tiles_resume_the_tracer_population(tmp_path: Path, variants: Path, problem: str) -> None:
     group = GROUP[problem]
     want = _run(problem, tmp_path / "single", 1, STEPS)
-    # the single grid resumed from its own checkpoint (its step budget counts from the start)
+    # the single grid resumed from its own checkpoint; the step cap is an absolute root iteration
     single_first = _run(problem, tmp_path / "single-first", 1, STEPS // 2)
     _assert_same(_run(problem, tmp_path / "single-resumed", 1, STEPS, checkpoint=single_first), want, group, f"{problem}: the single grid resumed")
     first = _run(problem, tmp_path / "first", 2, STEPS // 2)
     if problem in INJECTING:
         with h5py.File(first, "r") as f:
             assert int(f[group].attrs["n_tracers"]) > SEEDED, "the checkpoint holds no injected tracer; the resume arm is vacuous"
-    resumed = _run(problem, tmp_path / "resumed", 3, STEPS - _iteration(first), extra=", decompose=[[10, 21], []]", checkpoint=first)
+    # the resume from the checkpoint's root iteration runs to the absolute cap STEPS
+    assert 0 < _iteration(first) < STEPS
+    resumed = _run(problem, tmp_path / "resumed", 3, STEPS, extra=", decompose=[[10, 21], []]", checkpoint=first)
     assert _iteration(resumed) == STEPS
     _assert_same(resumed, want, group, f"{problem}: resumed onto three uneven tiles")
 

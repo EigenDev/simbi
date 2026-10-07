@@ -101,7 +101,8 @@ def test_an_isothermal_launch_resumed_onto_three_uneven_workers_matches(tmp_path
         written_at = int(f["level_0"].attrs["iteration"])
     assert 0 < written_at < STEPS
     layout3 = _layout(tmp_path / "three.toml", workers=3, cuts=[[10, 21], []])
-    resumed = _script_launch(ISO_KH_SCRIPT, (32, 32), tmp_path / "three", layout3, STEPS - written_at, workers=3, checkpoint=partial)
+    # the step cap is an absolute root iteration: the resume from written_at runs to STEPS
+    resumed = _script_launch(ISO_KH_SCRIPT, (32, 32), tmp_path / "three", layout3, STEPS, workers=3, checkpoint=partial)
     _assert_same_state(resumed, reference, "isothermal, resumed on three workers")
 
 
@@ -143,10 +144,11 @@ def test_an_isothermal_magnetized_launch_with_a_correction_against_the_cut_match
 
 
 def test_a_refined_locally_isothermal_launch_resumed_from_a_checkpoint_is_refused_by_name(tmp_path: Path) -> None:
-    # a resumed launch passes the same front door before any tile is built or seeded
+    # a resumed launch passes the same front door before any tile is built or seeded; the
+    # reference stops at root iteration 1, so the cap of 2 leaves the resume one step to take
     reference = _script_reference(RefinedLocallyIso.__module__, "RefinedLocallyIso", (16, 16, 1), tmp_path / "single", 1)
     layout = _layout(tmp_path / "two.toml", workers=2, shape=(2, 1))
-    cmd = [sys.executable, "-m", "simbi.cli", "launch", LOCAL_ISO_SCRIPT, "--layout", str(layout), "--max-steps", "1", "--resolution", "16,16,1",
+    cmd = [sys.executable, "-m", "simbi.cli", "launch", LOCAL_ISO_SCRIPT, "--layout", str(layout), "--max-steps", "2", "--resolution", "16,16,1",
            "--data-directory", str(tmp_path / "out"), "--checkpoint-interval", "1e9", "--checkpoint", str(reference)]
     done = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
     assert done.returncode != 0, f"the resumed launch succeeded:\n{done.stdout}"

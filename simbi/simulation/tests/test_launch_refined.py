@@ -157,8 +157,9 @@ def test_a_refined_launch_resumed_onto_another_partition_matches(tmp_path: Path,
     with h5py.File(first, "r") as f:
         written_at = int(f["level_0"].attrs["iteration"])
     assert 0 < written_at < STEPS
+    # the step cap is an absolute root iteration: the resume from written_at runs to STEPS
     resumed = problem.launch(
-        tmp_path / "four", _layout(tmp_path / "four.toml", workers=4, cuts=[[13], [18]]), STEPS - written_at, 4, checkpoint=first
+        tmp_path / "four", _layout(tmp_path / "four.toml", workers=4, cuts=[[13], [18]]), STEPS, 4, checkpoint=first
     )
     with h5py.File(resumed, "r") as f:
         assert int(f["level_0"].attrs["iteration"]) == STEPS
@@ -343,7 +344,8 @@ def test_scheduler_started_refined_workers_match_and_resume_onto_another_partiti
     with h5py.File(first, "r") as f:
         written_at = int(f["level_0"].attrs["iteration"])
     assert 0 < written_at < STEPS
-    resumed = _scheduler_launch(problem, tmp_path / "resumed", 4, "cuts = [[13], [18]]", STEPS - written_at, checkpoint=first)
+    # the step cap is an absolute root iteration: the resume from written_at runs to STEPS
+    resumed = _scheduler_launch(problem, tmp_path / "resumed", 4, "cuts = [[13], [18]]", STEPS, checkpoint=first)
     with h5py.File(resumed, "r") as f:
         assert int(f["level_0"].attrs["iteration"]) == STEPS
     _assert_same_levels(resumed, reference, "scheduler-started, resumed on four workers")

@@ -86,7 +86,8 @@ def test_a_1d_launch_matches_the_single_grid_fresh_resumed_and_corrected(tmp_pat
     _assert_same(_launch(module, tmp_path / "two", two, STEPS), want, f"{case}: two workers")
     first = _launch(module, tmp_path / "first", two, STEPS // 2)
     three = _layout(tmp_path / "three.toml", workers=3, cuts=THREE)
-    _assert_same(_launch(module, tmp_path / "resumed", three, STEPS - STEPS // 2, checkpoint=first), want, f"{case}: resumed onto three")
+    # the cap is absolute: the resume from root iteration STEPS // 2 runs to STEPS
+    _assert_same(_launch(module, tmp_path / "resumed", three, STEPS, checkpoint=first), want, f"{case}: resumed onto three")
     # the troubled cell beside the cut at the discontinuity, in the first stage of step 3
     one = _layout(tmp_path / "one.toml", workers=1, shape=(1,))
     inject = "trouble:3:0:63:0"
@@ -137,4 +138,5 @@ def test_a_refined_1d_launch_matches_the_single_hierarchy_fresh_and_resumed(tmp_
     _assert_same(_launch_script(script, tmp_path / "two", two, STEPS), want, "refined sod: two workers")
     first = _launch_script(script, tmp_path / "first", two, STEPS // 2)
     three = _layout(tmp_path / "three.toml", workers=3, cuts=THREE)
-    _assert_same(_launch_script(script, tmp_path / "resumed", three, STEPS - STEPS // 2, checkpoint=first), want, "refined sod: resumed onto three uneven workers")
+    # the cap is absolute: the resume from root iteration STEPS // 2 runs to STEPS
+    _assert_same(_launch_script(script, tmp_path / "resumed", three, STEPS, checkpoint=first), want, "refined sod: resumed onto three uneven workers")

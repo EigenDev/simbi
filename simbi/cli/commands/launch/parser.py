@@ -53,7 +53,7 @@ def setup_parser(subparsers) -> None:
         dest="max_steps",
         type=int,
         default=0,
-        help="stop after this many steps (0 = run to end_time); the final checkpoint is written either way",
+        help="stop at this root iteration, a resumed checkpoint's iterations included (0 = run to end_time); the final checkpoint is written either way",
     )
     bounded.add_argument(
         "--info",

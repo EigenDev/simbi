@@ -40,7 +40,9 @@ def test_every_run_shape_carries_the_configured_policy(tmp_path: Path, monkeypat
     decomposed = _announced(capfd.readouterr().err)
     final = sorted((tmp_path / "one").glob("*final*.h5"))
     assert len(final) == 1, f"expected one final checkpoint, found {final}"
-    runner.run(_bondi(tmp_path / "resumed", 1, checkpoint_file=str(final[0])), compute_mode="cpu", max_steps=1)
+    # `max_steps` caps the absolute root iteration: the checkpoint sits at iteration 1, so the
+    # resumed run takes one step
+    runner.run(_bondi(tmp_path / "resumed", 1, checkpoint_file=str(final[0])), compute_mode="cpu", max_steps=1 + 1)
     resumed = _announced(capfd.readouterr().err)
     assert single and single[0].startswith("legacy euclidean sphere |x| < "), f"single-grid run announced {single}"
     assert decomposed == single, f"the decomposed run announced {decomposed}, the single-grid run {single}"

@@ -199,6 +199,11 @@ def _final(out: Path) -> Path:
     return files[0]
 
 
+def _iteration(path: Path) -> int:
+    with h5py.File(path, "r") as f:
+        return int(f["level_0"].attrs["iteration"])
+
+
 def _tiles(problem: str, resolution: tuple | None, out: Path, steps: int, checkpoint: Path | None = None, cuts: list | None = None) -> Path:
     fields = [f"resolution={resolution!r}"] if resolution is not None else []
     gpus = 2
@@ -291,9 +296,12 @@ def test_a_sink_resumed_onto_three_uneven_workers_publishes_the_host_tiles_ledge
     # the reference sums over the same three tiles, cut at the same cells
     cuts = [[7, 15], [], []]
     first = _tiles("Bondi", None, tmp_path / "tiles-first", STEPS // 2)
-    want = _tiles("Bondi", None, tmp_path / "tiles", STEPS - STEPS // 2, checkpoint=first, cuts=cuts)
+    # `max_steps` caps the absolute root iteration: both resumed runs take STEPS - STEPS // 2 steps
+    # past the checkpoint
+    cap = _iteration(first) + STEPS - STEPS // 2
+    want = _tiles("Bondi", None, tmp_path / "tiles", cap, checkpoint=first, cuts=cuts)
     three = _layout(tmp_path / "three.toml", workers=3, cuts=cuts)
-    got = _launch(variants, "Bondi", None, tmp_path / "launched", three, STEPS - STEPS // 2, checkpoint=first)
+    got = _launch(variants, "Bondi", None, tmp_path / "launched", three, cap, checkpoint=first)
     _assert_same(got, want, "sink resumed onto three uneven workers")
 
 
@@ -391,8 +399,12 @@ def test_a_worker_holding_no_fine_tile_joins_the_refined_body_step(tmp_path: Pat
     # publishes after the restart is the host tiles' after theirs
     first = _launch(variants, problem, resolution, tmp_path / "launched-first", three, STEPS // 2)
     tiles_first = _tiles(problem, resolution, tmp_path / "tiles-first", STEPS // 2, cuts=cuts)
-    resumed = _launch(variants, problem, resolution, tmp_path / "launched-resumed", three, STEPS - STEPS // 2, checkpoint=first)
-    tiles_resumed = _tiles(problem, resolution, tmp_path / "tiles-resumed", STEPS - STEPS // 2, checkpoint=tiles_first, cuts=cuts)
+    # `max_steps` caps the absolute root iteration: each resumed run takes STEPS - STEPS // 2 steps
+    # past its checkpoint
+    resumed = _launch(variants, problem, resolution, tmp_path / "launched-resumed", three, _iteration(first) + STEPS - STEPS // 2, checkpoint=first)
+    tiles_resumed = _tiles(
+        problem, resolution, tmp_path / "tiles-resumed", _iteration(tiles_first) + STEPS - STEPS // 2, checkpoint=tiles_first, cuts=cuts
+    )
     with h5py.File(resumed, "r") as f:
         assert "body_diagnostics/time" in f and f["body_diagnostics/time"].shape[0] > 0, (
             f"{arm}: the coordinator published no body history after the restart"

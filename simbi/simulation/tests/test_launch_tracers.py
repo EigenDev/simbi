@@ -241,7 +241,7 @@ def test_launched_workers_carry_the_single_grid_tracer_population(tmp_path: Path
             assert float(g.attrs["injection_remainder"]) != 0.0, "the checkpoint carries no injection remainder"
             assert int(g.attrs["next_id"]) > int(g.attrs["n_tracers"]) - 1
     three = _layout(tmp_path / "three.toml", workers=3, cuts=[[10, 21], []])
-    resumed = _launch(variants, problem, tmp_path / "resumed", three, STEPS - _iteration(first), checkpoint=first)
+    resumed = _launch(variants, problem, tmp_path / "resumed", three, STEPS, checkpoint=first)
     assert _iteration(resumed) == STEPS
     _assert_same(resumed, want, group, f"{problem}: resumed onto three uneven workers")
 
@@ -258,7 +258,7 @@ def test_magnetized_tiles_and_workers_carry_the_single_grid_tracer_population(tm
     _assert_same(_launch(variants, problem, tmp_path / "two", two, STEPS), want, group, f"{problem}: two workers")
     first = _launch(variants, problem, tmp_path / "first", two, STEPS // 2)
     three = _layout(tmp_path / "three.toml", workers=3, cuts=[[10, 21], []])
-    resumed = _launch(variants, problem, tmp_path / "resumed", three, STEPS - _iteration(first), checkpoint=first)
+    resumed = _launch(variants, problem, tmp_path / "resumed", three, STEPS, checkpoint=first)
     _assert_same(resumed, want, group, f"{problem}: resumed onto three uneven workers")
     # the population moved: the gate compares a population the magnetized transport displaced
     start, end = _population(first, group), _population(want, group)
@@ -342,7 +342,7 @@ def test_tracers_cross_into_a_sink_on_tiles_and_workers_as_on_the_single_grid(tm
     _assert_same(_launch(variants, problem, tmp_path / "two", two, STEPS), want, group, f"{problem}: two workers")
     first = _launch(variants, problem, tmp_path / "first", two, STEPS // 2)
     three = _layout(tmp_path / "three.toml", workers=3, cuts=[[10, 21], []])
-    resumed = _launch(variants, problem, tmp_path / "resumed", three, STEPS - _iteration(first), checkpoint=first)
+    resumed = _launch(variants, problem, tmp_path / "resumed", three, STEPS, checkpoint=first)
     _assert_same(resumed, want, group, f"{problem}: resumed onto three uneven workers")
 
 

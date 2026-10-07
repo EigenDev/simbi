@@ -151,7 +151,7 @@ def test_a_refined_launch_carries_the_setting_fresh_and_resumed(tmp_path: Path, 
     with h5py.File(first, "r") as f:
         written_at = int(f["level_0"].attrs["iteration"])
     assert 0 < written_at < STEPS
-    resumed = _script_launch(script, RESOLUTION, tmp_path / "resumed", four, STEPS - written_at, workers=4, checkpoint=first)
+    resumed = _script_launch(script, RESOLUTION, tmp_path / "resumed", four, STEPS, workers=4, checkpoint=first)
     _assert_same_levels(resumed, reference, f"{name}: resumed onto four workers")
 
 
@@ -175,7 +175,7 @@ def test_a_periodic_refined_launch_matches_fresh_and_resumed(tmp_path: Path) -> 
     with h5py.File(first, "r") as f:
         written_at = int(f["level_0"].attrs["iteration"])
     assert 0 < written_at < STEPS
-    resumed = _script_launch(script, KH_RESOLUTION, tmp_path / "resumed", four, STEPS - written_at, workers=4, checkpoint=first)
+    resumed = _script_launch(script, KH_RESOLUTION, tmp_path / "resumed", four, STEPS, workers=4, checkpoint=first)
     _assert_same_levels(resumed, reference, "periodic kh: resumed onto four workers")
 
 
@@ -218,7 +218,7 @@ def test_a_relativistic_refined_launch_matches_fresh_and_resumed(tmp_path: Path,
     with h5py.File(first, "r") as f:
         written_at = int(f["level_0"].attrs["iteration"])
     assert 0 < written_at < STEPS
-    resumed = _script_launch(script, RHD_RESOLUTION, tmp_path / "resumed", four, STEPS - written_at, workers=4, checkpoint=first)
+    resumed = _script_launch(script, RHD_RESOLUTION, tmp_path / "resumed", four, STEPS, workers=4, checkpoint=first)
     _assert_same_levels(resumed, reference, f"rhd {eos}: resumed onto four workers")
 
 
@@ -247,7 +247,7 @@ def test_an_isothermal_refined_launch_matches_fresh_and_resumed(tmp_path: Path, 
     with h5py.File(first, "r") as f:
         written_at = int(f["level_0"].attrs["iteration"])
     assert 0 < written_at < STEPS
-    resumed = _script_launch(script, resolution, tmp_path / "resumed", four, STEPS - written_at, workers=4, checkpoint=first)
+    resumed = _script_launch(script, resolution, tmp_path / "resumed", four, STEPS, workers=4, checkpoint=first)
     _assert_same_levels(resumed, reference, f"{name}: resumed onto four workers")
 
 
@@ -320,7 +320,7 @@ def test_a_3d_refined_launch_matches_fresh_and_resumed(tmp_path: Path, name: str
     with h5py.File(first, "r") as f:
         written_at = int(f["level_0"].attrs["iteration"])
     assert 0 < written_at < STEPS
-    resumed = _script_launch(script, RESOLUTION_3D, tmp_path / "resumed", eight, STEPS - written_at, workers=8, checkpoint=first)
+    resumed = _script_launch(script, RESOLUTION_3D, tmp_path / "resumed", eight, STEPS, workers=8, checkpoint=first)
     _assert_same_levels(resumed, reference, f"3d {name}: resumed onto eight workers")
 
 
@@ -458,7 +458,7 @@ def test_nested_levels_on_a_refined_launch_match_fresh_and_resumed(tmp_path: Pat
         assert "level_2" in f, "the half-run checkpoint carries no second refined level"
     assert 0 < written_at < STEPS
     four = _layout(tmp_path / "four_resumed.toml", workers=4, cuts=[[15], [17]])
-    resumed = _script_launch(script, RESOLUTION, tmp_path / "resumed", four, STEPS - written_at, workers=4, checkpoint=first)
+    resumed = _script_launch(script, RESOLUTION, tmp_path / "resumed", four, STEPS, workers=4, checkpoint=first)
     _assert_same_all_levels(resumed, reference, "three levels resumed onto four workers")
 
 

@@ -2905,10 +2905,10 @@ where
         let (iter, time, dt) = (st.iteration, st.time, st.dt);
         let mut dirty = false;
 
-        // bounded march: stop after `max_steps` root iterations (0 = unbounded).
-        // the break exits through the success epilogue, which writes the final
-        // checkpoint — a truncated but otherwise ordinary run.
-        if cfg.max_steps > 0 && iter >= cfg.max_steps {
+        // bounded march: stop at the `max_steps` root iteration (0 = unbounded). the break
+        // exits through the success epilogue, which writes the final checkpoint — a truncated
+        // but otherwise ordinary run.
+        if step_cap_reached(cfg, iter) {
             return std::ops::ControlFlow::Break(());
         }
 
@@ -3241,7 +3241,10 @@ where
         }
         std::ops::ControlFlow::Continue(())
     };
-    let diagnostics = if cfg.restart_path.is_some() {
+    // a run resumed at its step cap takes no step and ends through the same epilogue
+    let diagnostics = if step_cap_reached(cfg, hier.levels[0].state.iteration) {
+        symbi_sim::run_diagnostics::RunDiagnostics::default()
+    } else if cfg.restart_path.is_some() {
         hier.resume_with_callback(cfg.t_final, 1, callback)?
     } else {
         hier.evolve_with_callback(cfg.t_final, 1, callback)?
@@ -5256,6 +5259,13 @@ fn prolong_order_for(reconstruction: &str) -> ProlongOrder {
     }
 }
 
+/// whether a march whose root level stands at `iteration` has reached the configured step cap.
+/// `max_steps` bounds the root iteration itself, a resumed run's checkpointed iterations included,
+/// so a run resumed at or past the cap takes no step; zero leaves the march unbounded.
+fn step_cap_reached(cfg: &Config, iteration: u64) -> bool {
+    cfg.max_steps > 0 && iteration >= cfg.max_steps
+}
+
 /// pin a state's clock to the run's start time and give it the user timestep clamp. the march
 /// advances from start_time, the checkpoint's time on a restart, and every level, tile and worker
 /// clamps its step alike.
@@ -5992,7 +6002,10 @@ where
     }
 
     let cp_error: std::cell::RefCell<Option<String>> = std::cell::RefCell::new(None);
-    let diagnostics = {
+    // a run resumed at its step cap takes no step and ends through the same epilogue
+    let diagnostics = if step_cap_reached(cfg, tiles[0].0.iteration) {
+        symbi_sim::run_diagnostics::RunDiagnostics::default()
+    } else {
         // the decomposed loop owns the tiles by `&mut` (the per-step immersed-body bookkeeping
         // mutates the bodies). build the `&mut` store handles + the `&` kernels from the same tiles
         // (disjoint tuple fields). the checkpoint callback receives the shared tile slice it needs
@@ -6049,10 +6062,10 @@ where
             &mut stage_hook,
             |iter, time, sh| {
                 reporter.progress(iter, time);
-                // bounded march: stop after `max_steps` root iterations (0 = unbounded), ahead of
+                // bounded march: stop at the `max_steps` root iteration (0 = unbounded), ahead of
                 // the cadence and the diagnostics as on the single grid; the final snapshot
                 // records the step that ends the march.
-                if cfg.max_steps > 0 && iter >= cfg.max_steps {
+                if step_cap_reached(cfg, sh[0].iteration) {
                     return std::ops::ControlFlow::Break(());
                 }
                 if cadence.due(time) {
@@ -6368,7 +6381,11 @@ where
     }
     announce_retry_guard(&tiles[0].levels[0].state);
     reporter.milestone("priming the hierarchy levels, their halos and the first exchange");
-    let diagnostics = evolve_hierarchy_decomposed(
+    // a run resumed at its step cap takes no step and ends through the same epilogue
+    let diagnostics = if step_cap_reached(cfg, tiles[0].levels[0].state.iteration) {
+        symbi_sim::run_diagnostics::RunDiagnostics::default()
+    } else {
+        evolve_hierarchy_decomposed(
         &mut tiles,
         counts,
         &devices,
@@ -6379,9 +6396,9 @@ where
         1,
         |iter, time, tiles| {
             reporter.progress(iter, time);
-            // bounded march: stop after `max_steps` root iterations (0 = unbounded), ahead of the
+            // bounded march: stop at the `max_steps` root iteration (0 = unbounded), ahead of the
             // cadence as on the single grid; the final snapshot records the step that ends it.
-            if cfg.max_steps > 0 && iter >= cfg.max_steps {
+            if step_cap_reached(cfg, tiles[0].levels[0].state.iteration) {
                 return std::ops::ControlFlow::Break(());
             }
             if cadence.due(time) {
@@ -6405,7 +6422,8 @@ where
             }
             std::ops::ControlFlow::Continue(())
         },
-    );
+    )
+    };
 
     if let Some(msg) = cp_error.into_inner() {
         reporter.fail(&msg);
@@ -11735,9 +11753,9 @@ where
         if let Some(r) = reporter.as_mut() {
             r.progress(accepted, time);
         }
-        // the step that exhausts the march's `max_steps` budget publishes through the final
+        // the step that reaches the `max_steps` root iteration publishes through the final
         // snapshot alone, as on the single grid
-        if cfg.max_steps > 0 && accepted >= cfg.max_steps {
+        if step_cap_reached(cfg, tiles[0].levels[0].state.iteration) {
             return Ok(std::ops::ControlFlow::Continue(()));
         }
         if cadence.due(time) {
@@ -12817,9 +12835,9 @@ where
                 if let Some(r) = reporter.as_mut() {
                     r.progress(iter, time);
                 }
-                // the step that exhausts the march's `max_steps` budget publishes through the
+                // the step that reaches the `max_steps` root iteration publishes through the
                 // final snapshot alone, as on the single grid
-                if cfg.max_steps > 0 && iter >= cfg.max_steps {
+                if step_cap_reached(cfg, sh[0].iteration) {
                     return Ok(std::ops::ControlFlow::Continue(()));
                 }
                 if cadence.due(time) {

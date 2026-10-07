@@ -187,19 +187,21 @@ def test_a_resumed_run_reaches_the_uninterrupted_single_grid(tmp_path: Path, var
     problem, resolution, launchable = CASES[case]
     want = _run(problem, resolution, tmp_path / "single", 1, STEPS)
     assert _iteration(want) == STEPS
-    # the single grid resumed from its own checkpoint (its step budget counts from the start)
+    # `max_steps` caps the absolute root iteration on every driver: each resumed run steps from its
+    # checkpoint up to STEPS
+    # the single grid resumed from its own checkpoint
     single_first = _run(problem, resolution, tmp_path / "single-first", 1, STEPS // 2)
     _assert_same(_run(problem, resolution, tmp_path / "single-resumed", 1, STEPS, checkpoint=single_first), want, f"{case}: the single grid resumed")
-    # host tiles and launched workers count their step budget from the checkpoint they resume
+    # host tiles and launched workers resumed from their own checkpoints
     first = _run(problem, resolution, tmp_path / "tiles-first", 2, STEPS // 2)
-    resumed = _run(problem, resolution, tmp_path / "tiles-resumed", 2, STEPS - _iteration(first), checkpoint=first)
+    resumed = _run(problem, resolution, tmp_path / "tiles-resumed", 2, STEPS, checkpoint=first)
     assert _iteration(resumed) == STEPS, f"{case}: the resumed tiles ended at iteration {_iteration(resumed)}"
     _assert_same(resumed, want, f"{case}: two host tiles resumed")
     if launchable:
         two = _layout(tmp_path / "two.toml", workers=2, shape=(2, 1))
         first = _launch(variants, problem, resolution, tmp_path / "launch-first", two, STEPS // 2)
         three = _layout(tmp_path / "three.toml", workers=3, cuts=[[10, 21], []])
-        resumed = _launch(variants, problem, resolution, tmp_path / "launch-resumed", three, STEPS - _iteration(first), checkpoint=first)
+        resumed = _launch(variants, problem, resolution, tmp_path / "launch-resumed", three, STEPS, checkpoint=first)
         _assert_same(resumed, want, f"{case}: resumed onto three launched workers")
 
 
@@ -227,7 +229,9 @@ def test_the_body_ledger_resumes_on_tiles_as_on_the_single_grid(tmp_path: Path) 
     want_path = bondi(tmp_path / "single", 1, STEPS, checkpoint=single_first)
     first = bondi(tmp_path / "first", 2, STEPS // 2)
     assert _iteration(first) == _iteration(single_first)
-    resumed = bondi(tmp_path / "resumed", 2, STEPS - _iteration(first), checkpoint=first)
+    # `max_steps` caps the absolute root iteration: both resumed runs step from their checkpoint
+    # up to STEPS
+    resumed = bondi(tmp_path / "resumed", 2, STEPS, checkpoint=first)
     assert _iteration(resumed) == _iteration(want_path) == STEPS
     want, cells = _groups(want_path)
     got, _ = _groups(resumed)

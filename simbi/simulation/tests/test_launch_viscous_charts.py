@@ -112,12 +112,14 @@ def test_a_viscous_launch_resumed_onto_another_partition_matches(tmp_path: Path,
     with h5py.File(partial_one, "r") as f:
         written_at = int(f["level_0"].attrs["iteration"])
     assert 0 < written_at < STEPS
-    resumed_one = _script_launch(script, resolution, tmp_path / "resumed_one", one, STEPS - written_at, workers=1, checkpoint=partial_one)
+    # `max_steps` caps the absolute root iteration: each resumed launch steps from its checkpoint
+    # at written_at to STEPS
+    resumed_one = _script_launch(script, resolution, tmp_path / "resumed_one", one, STEPS, workers=1, checkpoint=partial_one)
     _assert_same_state(resumed_one, reference, f"{name}: resumed on one worker against the uninterrupted run")
     four = _layout(tmp_path / "four.toml", workers=4, cuts=case["cuts"])
     partial = _script_launch(script, resolution, tmp_path / "first", four, STEPS // 2, workers=4)
     three = _layout(tmp_path / "three.toml", workers=3, cuts=case["restart"])
-    resumed = _script_launch(script, resolution, tmp_path / "three", three, STEPS - written_at, workers=3, checkpoint=partial)
+    resumed = _script_launch(script, resolution, tmp_path / "three", three, STEPS, workers=3, checkpoint=partial)
     _assert_same_state(resumed, reference, f"{name}: resumed onto three uneven workers against the uninterrupted run")
 
 

@@ -123,7 +123,7 @@ def test_a_launch_resumed_onto_three_uneven_workers_matches(tmp_path: Path, name
         written_at = int(f["level_0"].attrs["iteration"])
     assert 0 < written_at < steps
     three = _layout(tmp_path / "three.toml", workers=3, cuts=case["restart"])
-    resumed = _script_launch(script, resolution, tmp_path / "three", three, steps - written_at, workers=3, checkpoint=partial, flags=flags)
+    resumed = _script_launch(script, resolution, tmp_path / "three", three, steps, workers=3, checkpoint=partial, flags=flags)
     _assert_same_state(resumed, reference, f"{name}: resumed onto three uneven workers against the uninterrupted run")
 
 
@@ -186,7 +186,7 @@ def test_mhd_on_an_annulus_wrapped_in_radius_matches_fresh_corrected_and_resumed
         written_at = int(f["level_0"].attrs["iteration"])
     assert 0 < written_at < steps
     three = _layout(tmp_path / "three.toml", workers=3, cuts=case["restart"])
-    resumed = _script_launch(script, resolution, tmp_path / "three", three, steps - written_at, workers=3, checkpoint=partial, env=audit, flags=flags)
+    resumed = _script_launch(script, resolution, tmp_path / "three", three, steps, workers=3, checkpoint=partial, env=audit, flags=flags)
     _assert_same_state(resumed, reference, f"annulus {ct}: resumed onto three uneven workers")
 
 
