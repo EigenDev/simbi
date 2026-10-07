@@ -49,6 +49,7 @@ use symbi_ib::{Body, BodyCollection, BodyKind};
 use symbi_io::Metadata;
 use symbi_sim::checkpoint::{time_at_or_after, write_hierarchy_checkpoint};
 use symbi_sim::placement::{PlacedTile, WholeGrid};
+use symbi::regimes::substrate_kernels::GradientBc;
 use symbi_sim::state::CtMethod;
 use symbi_sim::state::SimStateGeneric;
 use symbi_sim::substrate_seam::{WithExcision, WithResistivity, WithViscosity};
@@ -221,7 +222,7 @@ struct Config {
     driven_exprs: Vec<String>,
     // gradient (Neumann / Robin) boundary coefficients, in registry order (gradient_bcs[id] <-> the
     // face marked BoundaryType::Neumann(id) / Robin(id)). the convenience prescribed-gradient wall.
-    gradient_bcs: Vec<GradientBcSpec>,
+    gradient_bcs: Vec<GradientBc>,
     // the config author's own params (subclass fields), grouped, for the live dashboard's
     // problem-setup panel: each is [group, label, value].
     custom_params: Vec<[String; 3]>,
@@ -1017,22 +1018,13 @@ fn boundary_from_str(s: &str) -> PyResult<BoundaryType> {
     }
 }
 
-/// a gradient-boundary (Neumann / Robin) prescription in registry order: the kind plus the flattened
-/// per-variable coefficients in prim order `[rho, vel.., pre]` — Neumann is one `q` per variable,
-/// Robin one `(a, b, c)` triple per variable. built from a python `Neumann`/`Robin` object.
-struct GradientBcSpec {
-    kind: String,
-    coeffs: Vec<f64>,
-}
-
-/// read the per-variable coefficients off a python `Neumann`/`Robin` object (attributes `rho`,
-/// `velocity`, `pressure`). Neumann flattens to `[rho, vel.., pre]`; Robin flattens each variable's
-/// `(a, b, c)` triple in the same order.
-/// the flattened coefficients of a neumann or robin wall: rho, then exactly `n_vel` velocity
-/// entries, then pre. an omitted trailing velocity component takes the documented default, a zero
-/// gradient for neumann and the dirichlet triple `(1, 0, 0)` for robin; more components than the
-/// regime carries are refused by name.
-fn extract_gradient_spec(obj: &Bound<'_, PyAny>, kind: &str, n_vel: usize) -> PyResult<GradientBcSpec> {
+/// the gradient wall a python `Neumann`/`Robin` object (attributes `rho`, `velocity`, `pressure`)
+/// prescribes, per variable in prim order: rho, then exactly `n_vel` velocity entries, then pre.
+/// Neumann carries one normal derivative `q` per variable, Robin one `(a, b, c)` triple. an omitted
+/// trailing velocity component takes the documented default, a zero gradient for neumann and the
+/// dirichlet triple `(1, 0, 0)` for robin; more components than the regime carries are refused by
+/// name.
+fn extract_gradient_spec(obj: &Bound<'_, PyAny>, kind: &str, n_vel: usize) -> PyResult<GradientBc> {
     let rho = obj.getattr("rho")?;
     let velocity = obj.getattr("velocity")?;
     let pressure = obj.getattr("pressure")?;
@@ -1042,31 +1034,27 @@ fn extract_gradient_spec(obj: &Bound<'_, PyAny>, kind: &str, n_vel: usize) -> Py
             "a {kind} wall gives {given} velocity components; the regime carries {n_vel}"
         )));
     }
-    let mut coeffs = Vec::new();
     if kind == "neumann" {
-        coeffs.push(rho.extract::<f64>()?);
+        let mut q = vec![rho.extract::<f64>()?];
         for v in velocity.try_iter()? {
-            coeffs.push(v?.extract::<f64>()?);
+            q.push(v?.extract::<f64>()?);
         }
-        coeffs.extend(std::iter::repeat_n(0.0, n_vel - given));
-        coeffs.push(pressure.extract::<f64>()?);
+        q.extend(std::iter::repeat_n(0.0, n_vel - given));
+        q.push(pressure.extract::<f64>()?);
+        Ok(GradientBc::Neumann(q))
     } else {
+        let mut triples: Vec<[f64; 3]> = Vec::new();
         let (a, b, c): (f64, f64, f64) = rho.extract()?;
-        coeffs.extend_from_slice(&[a, b, c]);
+        triples.push([a, b, c]);
         for v in velocity.try_iter()? {
             let (a, b, c): (f64, f64, f64) = v?.extract()?;
-            coeffs.extend_from_slice(&[a, b, c]);
+            triples.push([a, b, c]);
         }
-        for _ in given..n_vel {
-            coeffs.extend_from_slice(&[1.0, 0.0, 0.0]);
-        }
+        triples.extend(std::iter::repeat_n([1.0, 0.0, 0.0], n_vel - given));
         let (a, b, c): (f64, f64, f64) = pressure.extract()?;
-        coeffs.extend_from_slice(&[a, b, c]);
+        triples.push([a, b, c]);
+        Ok(GradientBc::Robin(triples))
     }
-    Ok(GradientBcSpec {
-        kind: kind.to_string(),
-        coeffs,
-    })
 }
 
 /// parse the exec_dict into a plain Config. only the fields the solver needs;
@@ -1121,7 +1109,7 @@ fn parse_config(dict: &Bound<'_, PyDict>) -> PyResult<Config> {
     let mut driven_exprs: Vec<String> = Vec::new();
     // gradient (Neumann / Robin) boundary coefficients in registry order; id == registration order,
     // so `Neumann(id)` / `Robin(id)` on a face matches `gradient_bcs[id]`.
-    let mut gradient_bcs: Vec<GradientBcSpec> = Vec::new();
+    let mut gradient_bcs: Vec<GradientBc> = Vec::new();
     // the velocity components a primitive carries: three for a magnetized regime, one per
     // spatial axis otherwise
     let n_vel = if enum_str(dict, "regime")?.contains("mhd") { 3 } else { dims };
@@ -2005,26 +1993,18 @@ fn attach_driven_boundaries<K>(
     Ok(ks)
 }
 
-/// register the configured neumann / robin walls on a tile's kernel set in registry order, so
-/// the `Neumann(id)` / `Robin(id)` faces of the tile name the same coefficients as on the single
-/// grid. a tile away from the wall carries no such face and the table stays unread.
+/// register the configured neumann / robin walls on a kernel set in registry order, so the
+/// `Neumann(id)` / `Robin(id)` faces name the same coefficients on every level, tile and worker. a
+/// level or tile away from every wall carries no such face and the table stays unread.
 fn attach_gradient_walls<K>(
     mut sub: K,
     cfg: &Config,
     register: impl Fn(K, symbi::regimes::substrate_kernels::GradientBc) -> K,
-) -> Result<K, String> {
-    use symbi::regimes::substrate_kernels::GradientBc;
-    for spec in &cfg.gradient_bcs {
-        let gbc = match spec.kind.as_str() {
-            "neumann" => GradientBc::Neumann(spec.coeffs.clone()),
-            "robin" => GradientBc::Robin(
-                spec.coeffs.chunks_exact(3).map(|c| [c[0], c[1], c[2]]).collect(),
-            ),
-            other => return Err(format!("unknown gradient boundary kind '{other}'")),
-        };
-        sub = register(sub, gbc);
+) -> K {
+    for wall in &cfg.gradient_bcs {
+        sub = register(sub, wall.clone());
     }
-    Ok(sub)
+    sub
 }
 
 /// the polar seam a launched partition carries: a spherical shell gridded over a pole, or a
@@ -5506,17 +5486,7 @@ macro_rules! build_and_run_hydro {
         }
         // register the Neumann/Robin gradient boundaries (the convenience prescribed-gradient walls);
         // the flattened coeffs are re-grouped into the registry entry (Robin: (a,b,c) triples).
-        for spec in &cfg.gradient_bcs {
-            use symbi::regimes::substrate_kernels::GradientBc;
-            let gbc = match spec.kind.as_str() {
-                "neumann" => GradientBc::Neumann(spec.coeffs.clone()),
-                "robin" => GradientBc::Robin(
-                    spec.coeffs.chunks_exact(3).map(|c| [c[0], c[1], c[2]]).collect(),
-                ),
-                other => return Err(format!("unknown gradient boundary kind '{other}'")),
-            };
-            sub = sub.with_gradient_boundary(gbc).0;
-        }
+        sub = attach_gradient_walls(sub, cfg, |ks, wall| ks.with_gradient_boundary(wall).0);
         let solver = cfg.solver;
         let mut hier = into_hierarchy!(sim, sub, cfg, $d, |s| {
             // the fine set carries the same non-ideal knobs as the base: the hierarchy
@@ -5553,20 +5523,7 @@ macro_rules! build_and_run_hydro {
                 .expect("fine-level boundary lower");
                 ks = ks.with_driven_boundary(built, bcfg.params.clone()).0;
             }
-            for spec in &cfg.gradient_bcs {
-                use symbi::regimes::substrate_kernels::GradientBc;
-                let boundary = match spec.kind.as_str() {
-                    "neumann" => GradientBc::Neumann(spec.coeffs.clone()),
-                    "robin" => GradientBc::Robin(
-                        spec.coeffs
-                            .chunks_exact(3)
-                            .map(|coeff| [coeff[0], coeff[1], coeff[2]])
-                            .collect(),
-                    ),
-                    other => panic!("unknown fine-level gradient boundary kind '{other}'"),
-                };
-                ks = ks.with_gradient_boundary(boundary).0;
-            }
+            ks = attach_gradient_walls(ks, cfg, |ks, wall| ks.with_gradient_boundary(wall).0);
             let ks = ks;
             // attach the same user source to each fine level as the base level, so a source
             // overlapping a refined region still acts there (a base-only attach would be restricted
@@ -6534,20 +6491,7 @@ macro_rules! build_and_run_hydro_decomposed_refined {
                         .expect("tile boundary lower");
                         ks = ks.with_driven_boundary(built, bcfg.params.clone()).0;
                     }
-                    for spec in &cfg.gradient_bcs {
-                        use symbi::regimes::substrate_kernels::GradientBc;
-                        let boundary = match spec.kind.as_str() {
-                            "neumann" => GradientBc::Neumann(spec.coeffs.clone()),
-                            "robin" => GradientBc::Robin(
-                                spec.coeffs
-                                    .chunks_exact(3)
-                                    .map(|coeff| [coeff[0], coeff[1], coeff[2]])
-                                    .collect(),
-                            ),
-                            other => panic!("unknown tile gradient boundary kind '{other}'"),
-                        };
-                        ks = ks.with_gradient_boundary(boundary).0;
-                    }
+                    ks = attach_gradient_walls(ks, cfg, |ks, wall| ks.with_gradient_boundary(wall).0);
                     // the same user source on the tile root and every fine level: each level of
                     // each tile evaluates S at its own global coordinates, so a position-dependent
                     // force is correct across cuts and level seams; the canonical per-level stage
@@ -7073,7 +7017,7 @@ macro_rules! build_and_run_hydro_decomposed {
                 // the gradient (neumann / robin) walls in registry order, as the single grid
                 // registers them: an edge tile's exterior faces carry their ids from the
                 // physical-boundary copy
-                let sub = attach_gradient_walls(sub, cfg, |sub, gbc| sub.with_gradient_boundary(gbc).0)?;
+                let sub = attach_gradient_walls(sub, cfg, |sub, gbc| sub.with_gradient_boundary(gbc).0);
                 Ok((sim, sub))
             })?;
             tiles.push(built);
@@ -8497,7 +8441,7 @@ macro_rules! build_and_run_iso_decomposed {
                 // the gradient (neumann / robin) walls in registry order, as the single grid
                 // registers them: an edge tile's exterior faces carry their ids from the
                 // physical-boundary copy
-                let sub = attach_gradient_walls(sub, cfg, |sub, gbc| sub.with_gradient_boundary(gbc).0)?;
+                let sub = attach_gradient_walls(sub, cfg, |sub, gbc| sub.with_gradient_boundary(gbc).0);
                 seed_local_cs2!(sim, sub, cfg, prims, tile_lo, n, $d);
                 Ok((sim, sub))
             })?;
@@ -8698,17 +8642,7 @@ macro_rules! build_and_run_iso {
         // (the pressure coefficients are ignored — the substrate feeds cs^2 to the shared kernel).
         let sub = {
             let mut sub = sub;
-            for spec in &cfg.gradient_bcs {
-                use symbi::regimes::substrate_kernels::GradientBc;
-                let gbc = match spec.kind.as_str() {
-                    "neumann" => GradientBc::Neumann(spec.coeffs.clone()),
-                    "robin" => GradientBc::Robin(
-                        spec.coeffs.chunks_exact(3).map(|c| [c[0], c[1], c[2]]).collect(),
-                    ),
-                    other => return Err(format!("unknown gradient boundary kind '{other}'")),
-                };
-                sub = sub.with_gradient_boundary(gbc).0;
-            }
+            sub = attach_gradient_walls(sub, cfg, |ks, wall| ks.with_gradient_boundary(wall).0);
             sub
         };
 
@@ -8765,20 +8699,7 @@ macro_rules! build_and_run_iso {
                 .expect("fine-level boundary lower");
                 ks = ks.with_driven_boundary(built, bcfg.params.clone()).0;
             }
-            for spec in &cfg.gradient_bcs {
-                use symbi::regimes::substrate_kernels::GradientBc;
-                let boundary = match spec.kind.as_str() {
-                    "neumann" => GradientBc::Neumann(spec.coeffs.clone()),
-                    "robin" => GradientBc::Robin(
-                        spec.coeffs
-                            .chunks_exact(3)
-                            .map(|coeff| [coeff[0], coeff[1], coeff[2]])
-                            .collect(),
-                    ),
-                    other => panic!("unknown fine-level gradient boundary kind '{other}'"),
-                };
-                ks = ks.with_gradient_boundary(boundary).0;
-            }
+            ks = attach_gradient_walls(ks, cfg, |ks, wall| ks.with_gradient_boundary(wall).0);
             let ks = ks;
             // attach the same user source to each fine level (a base-only attach
             // would be restricted away by the fine solution). already validated
@@ -11433,7 +11354,7 @@ fn run_refined_worker_process(
                         )
                         .expect("refined source attach");
                         let ks = attach_driven_boundaries(ks, cfg, <$regime as Regime<f64, $d>>::SPEC, |ks, built, params| ks.with_driven_boundary(built, params).0).expect("refined driven boundary");
-                        attach_gradient_walls(ks, cfg, |ks, gbc| ks.with_gradient_boundary(gbc).0).expect("refined gradient wall")
+                        attach_gradient_walls(ks, cfg, |ks, gbc| ks.with_gradient_boundary(gbc).0)
                     };
                     let mut tiles = Vec::with_capacity(layout.mine.len());
                     for &flat in &layout.mine {
@@ -11581,7 +11502,7 @@ fn run_refined_worker_process(
                         )
                         .expect("refined source attach");
                         let ks = attach_driven_boundaries(ks, cfg, <IsoNewtonian as Regime<f64, $d>>::SPEC, |ks, built, params| ks.with_driven_boundary(built, params).0).expect("refined driven boundary");
-                        attach_gradient_walls(ks, cfg, |ks, gbc| ks.with_gradient_boundary(gbc).0).expect("refined gradient wall")
+                        attach_gradient_walls(ks, cfg, |ks, gbc| ks.with_gradient_boundary(gbc).0)
                     };
                     let mut tiles = Vec::with_capacity(layout.mine.len());
                     for &flat in &layout.mine {
@@ -12433,7 +12354,7 @@ fn run_worker_process(
                     <$regime_ty as Regime<f64, $d>>::SPEC,
                     &state_law_of(cfg, <$regime_ty as Regime<f64, $d>>::SPEC),
                 )?;
-                let sub = attach_gradient_walls(sub, cfg, |sub, gbc| sub.with_gradient_boundary(gbc).0)?;
+                let sub = attach_gradient_walls(sub, cfg, |sub, gbc| sub.with_gradient_boundary(gbc).0);
                 let sub = attach_driven_boundaries(sub, cfg, <$regime_ty as Regime<f64, $d>>::SPEC, |sub, built, params| sub.with_driven_boundary(built, params).0)?;
                 tiles.push((sim, sub));
             }
@@ -12732,7 +12653,7 @@ fn run_worker_process(
                     <IsoNewtonian as Regime<f64, $d>>::SPEC,
                     &state_law_of(cfg, <IsoNewtonian as Regime<f64, $d>>::SPEC),
                 )?;
-                let sub = attach_gradient_walls(sub, cfg, |sub, gbc| sub.with_gradient_boundary(gbc).0)?;
+                let sub = attach_gradient_walls(sub, cfg, |sub, gbc| sub.with_gradient_boundary(gbc).0);
                 let sub = attach_driven_boundaries(sub, cfg, <IsoNewtonian as Regime<f64, $d>>::SPEC, |sub, built, params| sub.with_driven_boundary(built, params).0)?;
                 seed_local_cs2!(sim, sub, cfg, prims, tile_lo, n, $d);
                 tiles.push((sim, sub));

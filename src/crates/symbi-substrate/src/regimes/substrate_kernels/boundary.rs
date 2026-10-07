@@ -323,6 +323,7 @@ fn apply_boundary_dag_gpu<const D: usize, const DOF: usize, Mem, Sc>(
 /// `Neumann` carries the outward normal derivative `q` per variable; `Robin` the `(a, b, c)` triple
 /// per variable (`a*U_face + b*dU/dn = c`). the side table the kernel-set holds, indexed by the id
 /// riding on `BoundaryType::Neumann(id)` / `Robin(id)`.
+#[derive(Clone, Debug, PartialEq)]
 pub enum GradientBc {
     Neumann(Vec<f64>),
     Robin(Vec<[f64; 3]>),
