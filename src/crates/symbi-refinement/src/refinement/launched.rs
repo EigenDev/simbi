@@ -1643,9 +1643,13 @@ where
         let mut rejected = false;
         for (r, &k) in ks.iter().enumerate() {
             let level = &tiles[k].levels[ll];
+            // the probe is a diagnostic stage: each kernel's freeze count stands where the probe
+            // found it, so the march's level-wide count starts equal on every tile of every worker
+            let streak = level.kernels.freeze_streak();
             let outcome = with_device(devices[ids[r].0 as usize], || {
                 fold_stage_from_correction(&level.state, &level.kernels, args, cut_trouble[r], &mut |_| {})
             });
+            level.kernels.set_freeze_streak(streak);
             rejected |= outcome != StageOutcome::Accepted;
             level.state.reset_state_clock();
         }

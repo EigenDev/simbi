@@ -11,7 +11,10 @@
 // single grid halts at the sixteenth step; the two-tile march, which agrees one
 // level-wide count before each correction pass, halts at the same step with
 // the same message, in process and on a launched worker holding both tiles.
-// the same freezes kept inside one tile halt both alike.
+// the same freezes kept inside one tile halt both alike. an equilibrium probe
+// run before the march, whose correction freezes on one tile, leaves every
+// tile's count where it found it: the march still halts where the single grid
+// does.
 //
 // run: cargo test -p symbi --test freeze_streak_partition
 // =============================================================================
@@ -254,4 +257,35 @@ fn a_streak_inside_one_tile_halts_both_alike() {
     let one = single(Schedule::FirstTile).expect("the single grid never halted");
     assert!(one.contains(HALT) && one.contains("at iteration 15"), "the single grid halted elsewhere: {one}");
     assert_eq!(tiled(Schedule::FirstTile).as_deref(), Some(one.as_str()), "the two-tile march halted elsewhere than the single grid");
+}
+
+/// the halt message of a two-tile run whose march follows an equilibrium probe of the same tiles
+fn tiled_after_probe(schedule: Schedule) -> (Option<String>, [u32; 2]) {
+    let mut a = store(8, 0.0, BoundaryType::Outflow, BoundaryType::CoarseFine);
+    let mut b = store(8, 0.5, BoundaryType::CoarseFine, BoundaryType::Outflow);
+    let (ka, kb) = (StreakMock::new(Some(0), schedule), StreakMock::new(Some(1), schedule));
+    {
+        let tiles = [&*a, &*b];
+        let probe = symbi::sim::decomp::schedule_of_tiles(&tiles, [2], &Topology::open());
+        symbi::sim::decomp::probe_stage(&tiles, &[&ka, &kb], &probe, &[0, 0], &LocalCopy, 0.01).expect("the probe stage");
+    }
+    let after_probe = [ka.freeze_streak(), kb.freeze_streak()];
+    let caught = catch_unwind(AssertUnwindSafe(|| {
+        let mut stores = vec![&mut *a, &mut *b];
+        evolve_decomposed(&mut stores, &[&ka, &kb], [2], &[0, 0], Timestepping::Euler, 0.0, 1.0, 1, &LocalCopy, |_, _, _| {
+            ControlFlow::Continue(())
+        });
+    }));
+    let halt = caught.err().map(|payload| {
+        payload.downcast_ref::<String>().cloned().or_else(|| payload.downcast_ref::<&str>().map(|s| s.to_string())).unwrap_or_default()
+    });
+    (halt, after_probe)
+}
+
+#[test]
+fn an_equilibrium_probe_leaves_every_tile_s_freeze_count_where_it_found_it() {
+    let one = single(Schedule::FirstTile).expect("the single grid never halted");
+    let (many, after_probe) = tiled_after_probe(Schedule::FirstTile);
+    assert_eq!(after_probe, [0, 0], "the probe's freeze moved a tile's count");
+    assert_eq!(many.as_deref(), Some(one.as_str()), "the march after a probe halted elsewhere than the single grid");
 }

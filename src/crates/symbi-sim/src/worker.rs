@@ -301,7 +301,11 @@ where
     }
     let mut rejected = false;
     for k in 0..stores.len() {
+        // the probe is a diagnostic stage: each kernel's freeze count stands where the probe
+        // found it, so the march's level-wide count starts equal on every tile of every worker
+        let streak = kernels[k].freeze_streak();
         let outcome = with_device(dev(k), || fold_stage_from_correction(stores[k], kernels[k], args, cut_trouble[k], &mut |_| {}));
+        kernels[k].set_freeze_streak(streak);
         rejected |= outcome != StageOutcome::Accepted;
         stores[k].reset_state_clock();
     }

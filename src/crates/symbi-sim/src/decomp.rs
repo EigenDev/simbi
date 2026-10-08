@@ -2588,7 +2588,7 @@ pub fn prime_tiles<const D: usize, const DOF: usize, M, K, T>(
 
 /// one forward-euler stage of length `dt` over every tile, split as the march splits it: every
 /// tile marks its troubled cells, the flags cross the cuts, and every tile corrects. the stored
-/// clocks stand at their entry afterwards. an admissibility redo that rejects the stage on any
+/// clocks and the kernels' freeze counts stand at their entry afterwards. an admissibility redo that rejects the stage on any
 /// tile is an error.
 pub fn probe_stage<const D: usize, const DOF: usize, M, K, T>(
     tiles: &[&FieldStore<D, DOF, M, f64>],
@@ -2633,9 +2633,13 @@ where
     }
     let mut rejected = false;
     for i in 0..n {
+        // the probe is a diagnostic stage: each kernel's freeze count stands where the probe
+        // found it, so the march's level-wide count starts equal on every tile
+        let streak = kernels[i].freeze_streak();
         let outcome = symbi_xpu::with_device(devices[i], || {
             crate::stage::fold_stage_from_correction(tiles[i], kernels[i], args, cut_trouble[i], &mut |_| {})
         });
+        kernels[i].set_freeze_streak(streak);
         rejected |= outcome != crate::stage::StageOutcome::Accepted;
         tiles[i].reset_state_clock();
     }

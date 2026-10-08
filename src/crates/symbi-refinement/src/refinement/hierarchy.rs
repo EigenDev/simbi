@@ -4423,6 +4423,9 @@ where
                 "the stationary target has no finite cfl step ({probe_dt:.3e}), so it cannot be \
                  advanced to read off its imbalance"
             );
+            // the probe is a diagnostic stage: the kernel's freeze count stands where the probe
+            // found it, as on every tiled march
+            let streak = level.kernels.freeze_streak();
             let outcome = fold_stage(
                 &level.state,
                 &level.kernels,
@@ -4438,6 +4441,7 @@ where
                 },
                 &mut |_hp: HookPoint| {},
             );
+            level.kernels.set_freeze_streak(streak);
             // the probe stage reads the imbalance off; the stored state stands at the clock
             level.state.reset_state_clock();
             assert!(
