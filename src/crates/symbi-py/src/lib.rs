@@ -10639,6 +10639,7 @@ fn launch_experimental_opt_in() -> bool {
 /// - newtonian, relativistic and isothermal hydro: the 2D and 3D spherical shells, the (r, z)
 ///   and (r, phi) planes, the 3D cylindrical annulus
 /// - newtonian and isothermal MHD: the (r, phi) and (r, z) planes and the 2D spherical shell
+/// - special-relativistic MHD: the 2D spherical shell
 fn gated_grid(cfg: &Config) -> bool {
     let cylindrical = cfg.coord_system == "cylindrical";
     let spherical = cfg.coord_system == "spherical";
@@ -10651,6 +10652,7 @@ fn gated_grid(cfg: &Config) -> bool {
     match cfg.regime.as_str() {
         "newtonian" | "rhd" | "isothermal" => spherical || cylindrical,
         "nmhd" | "imhd" => r_phi || r_z || shell_2d || (cfg.dims == 3 && (spherical || cylindrical)),
+        "rmhd" => shell_2d,
         _ => false,
     }
 }
