@@ -10816,12 +10816,16 @@ fn validate_refined_launch_scope(cfg: &Config) -> Result<(), String> {
     if cfg.wb_reconstruction {
         return refused("a well-balanced reconstruction");
     }
-    // the root and seed plans carry the wrap of a periodic axis; the fine level, its registers and
-    // its face stencils live inside the domain, so the patch keeps clear of a periodic face
+    // the root and seed plans carry the wrap of a periodic axis cut into tiles; the fine level, its
+    // registers and its parent face stencils exchange inside the domain, so on a cut periodic axis,
+    // and on any periodic axis of a magnetized run, the patch keeps clear of the faces. an uncut
+    // periodic axis of a gas run wraps within each tile, and the fine level of a patch spanning it
+    // wraps with it
+    let magnetized = matches!(cfg.regime.as_str(), "nmhd" | "imhd" | "rmhd");
     let seam = match cfg.dims {
-        1 => patch_on_periodic_face::<1>(cfg)?,
-        2 => patch_on_periodic_face::<2>(cfg)?,
-        _ => patch_on_periodic_face::<3>(cfg)?,
+        1 => patch_on_periodic_face::<1>(cfg, magnetized)?,
+        2 => patch_on_periodic_face::<2>(cfg, magnetized)?,
+        _ => patch_on_periodic_face::<3>(cfg, magnetized)?,
     };
     if let Some(ax) = seam {
         return refused(&format!("a refined patch on the periodic face of axis {ax}"));
@@ -10836,11 +10840,16 @@ fn validate_refined_launch_scope(cfg: &Config) -> Result<(), String> {
     Ok(())
 }
 
-/// the first periodic axis whose domain face the launch's refined patch reaches
-fn patch_on_periodic_face<const D: usize>(cfg: &Config) -> Result<Option<usize>, String> {
+/// the first periodic axis whose domain face the launch's refined patch reaches, among the axes
+/// cut into tiles, or among every axis when `every_axis`
+fn patch_on_periodic_face<const D: usize>(cfg: &Config, every_axis: bool) -> Result<Option<usize>, String> {
     let whole = whole_grid::<D>(cfg);
     let patch = launch_patch::<D>(cfg)?;
-    Ok((0..D).find(|&ax| whole.periodic(ax) && (patch[ax].0 == 0 || patch[ax].1 >= cfg.n_cells[ax])))
+    let n: [usize; D] = std::array::from_fn(|ax| cfg.n_cells[ax]);
+    let counts = tile_partition(n, cfg)?.counts();
+    Ok((0..D).find(|&ax| {
+        whole.periodic(ax) && (every_axis || counts[ax] > 1) && (patch[ax].0 == 0 || patch[ax].1 >= cfg.n_cells[ax])
+    }))
 }
 
 /// the refined root patch of the launch's one region in root cells per axis, snapped as the

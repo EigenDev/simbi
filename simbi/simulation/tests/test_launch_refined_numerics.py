@@ -179,6 +179,30 @@ def test_a_periodic_refined_launch_matches_fresh_and_resumed(tmp_path: Path) -> 
     _assert_same_levels(resumed, reference, "periodic kh: resumed onto four workers")
 
 
+def test_a_patch_spanning_an_uncut_periodic_axis_launches_as_the_single_grid_runs(tmp_path: Path, monkeypatch) -> None:
+    # the kh fine box widened over the whole periodic x axis, whose fine level wraps onto itself;
+    # the workers cut y alone, so every tile holds the whole x axis and its wrap
+    stem = "spanning_kh"
+    (tmp_path / f"{stem}.py").write_text(
+        "from typing import Annotated\n"
+        "from simbi import ProblemParam\n"
+        f"from {KH[0]} import {KH[1]}\n\n\n"
+        f"class Spanning({KH[1]}):\n"
+        "    refinement_regions: Annotated[list[list[float]], ProblemParam([[-0.5, 0.5, -0.375, 0.375]], description='r')]\n"
+    )
+    monkeypatch.setenv("PYTHONPATH", os.pathsep.join([str(tmp_path), os.getcwd(), os.environ.get("PYTHONPATH", "")]))
+    script = str(tmp_path / f"{stem}.py")
+    reference = _script_reference(stem, "Spanning", KH_RESOLUTION, tmp_path / "single", STEPS)
+    walled = _script_reference(stem, "Spanning", KH_RESOLUTION, tmp_path / "walled", STEPS, fields="boundary_conditions='outflow'")
+    assert _differs(reference, walled), "the periodic seam left the spanning kh run unchanged; the wrap is never exercised"
+    for label, workers, layout in [
+        ("two workers", 2, _layout(tmp_path / "two.toml", workers=2, cuts=[[], [36]])),
+        ("three uneven workers", 3, _layout(tmp_path / "three.toml", workers=3, cuts=[[], [30, 60]])),
+    ]:
+        launched = _script_launch(script, KH_RESOLUTION, tmp_path / label.replace(" ", "_"), layout, STEPS, workers=workers)
+        _assert_same_levels(launched, reference, f"spanning kh: {label}")
+
+
 RHD = ("simbi_configs.examples.srhd.refined_synge_blast", "RefinedSyngeBlast")
 RHD_RESOLUTION = (32, 32)
 
