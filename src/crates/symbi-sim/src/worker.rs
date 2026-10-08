@@ -1523,7 +1523,9 @@ where
     }
     {
         let sh = shared!();
-        refuse(&sh, kernels, cfg.regime == crate::substrate_seam::RegimeKind::Rhd).map_err(|e| fail(fabric, e))?;
+        // the relativistic gas and the relativistic magnetized gas carry a curved spacetime
+        let curved = matches!(cfg.regime, crate::substrate_seam::RegimeKind::Rhd | crate::substrate_seam::RegimeKind::Rmhd);
+        refuse(&sh, kernels, curved).map_err(|e| fail(fabric, e))?;
         // a rejection replays the step from its entry, which needs the whole entry state kept
         if !cfg.injection.reject_at.is_empty() {
             for (store, kernel) in sh.iter().zip(kernels) {

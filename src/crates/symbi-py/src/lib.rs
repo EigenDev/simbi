@@ -7119,6 +7119,19 @@ fn baked_gr_hydro(dims: usize, coords: &str, spacetime: &str) -> bool {
     )
 }
 
+/// the baked GR-MHD combinations: the arms of `mhd_dispatch`, which the launched rmhd workers build
+/// alike
+fn baked_gr_mhd(dims: usize, coords: &str, spacetime: &str) -> bool {
+    matches!(
+        (dims, coords, spacetime),
+        (1, "spherical", "schwarzschild_ks")
+            | (2, "spherical", "kerr_ks")
+            | (3, "cartesian", "schwarzschild_ks")
+            | (3, "cartesian", "kerr_ks")
+            | (2, "cylindrical", "schwarzschild_ks")
+    )
+}
+
 /// the baked GR-hydro combinations the launched gas workers build: the kerr-schild box in three
 /// dimensions, the radial line, the spherical meridional plane and the cylindrical charts, the arms
 /// of `charted!` in `run_worker_process`
@@ -7932,15 +7945,7 @@ macro_rules! mhd_dispatch {
             // no baked gr-mhd arm; silently running it on Minkowski applies the wrong metric. the matches! set
             // mirrors the baked gr-mhd arms; test_dispatch_rejects_unbaked_gr keeps them in lockstep.
             (d, c)
-                if $cfg.spacetime != "minkowski"
-                    && !matches!(
-                        (d, c, $cfg.spacetime.as_str()),
-                        (1, "spherical", "schwarzschild_ks")
-                            | (2, "spherical", "kerr_ks")
-                            | (3, "cartesian", "schwarzschild_ks")
-                            | (3, "cartesian", "kerr_ks")
-                            | (2, "cylindrical", "schwarzschild_ks")
-                    ) =>
+                if $cfg.spacetime != "minkowski" && !baked_gr_mhd(d, c, &$cfg.spacetime) =>
             {
                 Err(format!(
                     "no baked GR-MHD kernel for (dims={d}, coords={c}, spacetime={}): refusing to \
@@ -10652,7 +10657,8 @@ fn gated_grid(cfg: &Config) -> bool {
     match cfg.regime.as_str() {
         "newtonian" | "rhd" | "isothermal" => spherical || cylindrical,
         "nmhd" | "imhd" => r_phi || r_z || shell_2d || (cfg.dims == 3 && (spherical || cylindrical)),
-        "rmhd" => shell_2d,
+        // a curved spacetime's charts are the GR-MHD set the launch scope checks
+        "rmhd" => shell_2d || (cfg.spacetime != "minkowski" && baked_gr_mhd(cfg.dims, &cfg.coord_system, &cfg.spacetime)),
         _ => false,
     }
 }
@@ -10711,15 +10717,18 @@ fn validate_launch_scope(cfg: &Config) -> Result<(), String> {
     if !matches!(cfg.dims, 1..=3) {
         return refused(&format!("a {}-dimensional grid", cfg.dims));
     }
-    // a curved spacetime carries the relativistic gas on the kerr-schild charts, with or without
-    // excision, on a static unrefined mesh without bodies or tracers
+    // a curved spacetime carries the relativistic gas and the relativistic magnetized gas on the
+    // kerr-schild charts, with or without excision, on a static unrefined mesh without bodies or
+    // tracers
     if cfg.spacetime != "minkowski" {
-        if cfg.regime != "rhd" {
-            return refused(&format!("the {} spacetime with the {} regime", cfg.spacetime, cfg.regime));
-        }
-        // the single grid runs the baked GR-hydro combinations, the launched workers the ones the
-        // worker chart arms build
-        if !launched_gr_hydro(cfg.dims, &cfg.coord_system, &cfg.spacetime) {
+        // the single grid runs the baked GR-hydro and GR-MHD combinations, the launched workers the
+        // ones the worker chart arms build
+        let built = match cfg.regime.as_str() {
+            "rhd" => launched_gr_hydro(cfg.dims, &cfg.coord_system, &cfg.spacetime),
+            "rmhd" => baked_gr_mhd(cfg.dims, &cfg.coord_system, &cfg.spacetime),
+            _ => return refused(&format!("the {} spacetime with the {} regime", cfg.spacetime, cfg.regime)),
+        };
+        if !built {
             return refused(&format!("the {} spacetime on the {}-dimensional {} chart", cfg.spacetime, cfg.dims, cfg.coord_system));
         }
         if cfg.refinement_enabled {
@@ -12393,6 +12402,40 @@ fn run_worker_process(
     // a black hole on the horizon-penetrating cylindrical chart, built as the single grid builds
     // it: the (R, phi) plane with one momentum per axis, the (R, z) plane with the azimuthal
     // momentum, the full three-dimensional chart, schwarzschild or spinning
+    // the relativistic magnetized gas on the horizon-penetrating charts, built as the single grid's
+    // `mhd_dispatch` builds it: the radial line, the spinning (r, theta) plane, the three-dimensional
+    // box and the cylindrical planes, each only on its own dimension
+    macro_rules! kerr_schild_mhd {
+        (1) => {
+            match (cfg.coord_system.as_str(), cfg.spacetime.as_str()) {
+                ("spherical", "schwarzschild_ks") => rmhd_tiles!(SchwarzschildKS { mass: cfg.schwarzschild_mass }, SchwarzschildKS<f64>),
+                (chart, spacetime) => Err(format!("the {spacetime} spacetime on the 1-dimensional {chart} chart is outside the distributed first release")),
+            }
+        };
+        (2) => {
+            match (cfg.coord_system.as_str(), cfg.spacetime.as_str(), cfg.cyl_plane) {
+                ("spherical", "kerr_ks", _) => rmhd_tiles!(KerrKS { mass: cfg.schwarzschild_mass, spin: cfg.kerr_spin }, KerrKS<f64>),
+                ("cylindrical", "schwarzschild_ks", CylPlane::RPhi) => {
+                    rmhd_tiles!(SchwarzschildKSCylindrical { mass: cfg.schwarzschild_mass }, SchwarzschildKSCylindrical<f64>)
+                }
+                ("cylindrical", "schwarzschild_ks", CylPlane::Rz) => {
+                    rmhd_tiles!(SchwarzschildKSCylindricalRz { mass: cfg.schwarzschild_mass }, SchwarzschildKSCylindricalRz<f64>)
+                }
+                (chart, spacetime, _) => Err(format!("the {spacetime} spacetime on the 2-dimensional {chart} chart is outside the distributed first release")),
+            }
+        };
+        (3) => {
+            match (cfg.coord_system.as_str(), cfg.spacetime.as_str()) {
+                ("cartesian", "schwarzschild_ks") => {
+                    rmhd_tiles!(SchwarzschildKSCartesian { mass: cfg.schwarzschild_mass }, SchwarzschildKSCartesian<f64>)
+                }
+                ("cartesian", "kerr_ks") => {
+                    rmhd_tiles!(KerrKSCartesian { mass: cfg.schwarzschild_mass, spin: cfg.kerr_spin }, KerrKSCartesian<f64>)
+                }
+                (chart, spacetime) => Err(format!("the {spacetime} spacetime on the 3-dimensional {chart} chart is outside the distributed first release")),
+            }
+        };
+    }
     macro_rules! kerr_schild_cylinder {
         (2, $arm:ident, $regime:expr, $regime_ty:ty) => {
             match (cfg.spacetime.as_str(), cfg.cyl_plane) {
@@ -12463,6 +12506,7 @@ fn run_worker_process(
         "newtonian" => charted!(gas_tiles, Newtonian, Newtonian),
         "rhd" => charted!(gas_tiles, Rhd, Rhd),
         "nmhd" => charted!(nmhd_tiles),
+        "rmhd" if cfg.spacetime != "minkowski" => kerr_schild_mhd!($d),
         "rmhd" => charted!(rmhd_tiles),
         "isothermal" => charted!(iso_tiles),
         "imhd" => charted!(imhd_tiles),
