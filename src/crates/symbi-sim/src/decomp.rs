@@ -2976,6 +2976,9 @@ where
     restorable: bool,
     /// each tile's tracer injections of the last attempt, spawned once the step is accepted
     injection_ledgers: Vec<std::collections::BTreeMap<crate::mass_transport::ContainerId, f64>>,
+    /// each tile's tracers at the step entry: the stages migrate records across the cuts, and every
+    /// tile restoring its own entry populations returns each record to the tile that held it
+    tracer_entry: Option<Vec<crate::tracers::TileTracerSnapshot<D>>>,
 }
 
 impl<const D: usize, const DOF: usize, M, K, T> crate::step_transaction::RootAttempt for FlatRootAttempt<'_, '_, '_, D, DOF, M, K, T>
@@ -2993,6 +2996,10 @@ where
 
     fn capture(&mut self, dt: f64, restorable: bool) -> Result<(), Self::Error> {
         self.restorable = restorable;
+        if restorable && (self.has_discrete_tracers || self.has_continuous_tracers) && self.tracer_entry.is_none() {
+            let entry = self.stores.iter().map(|s| crate::tracers::TileTracerSnapshot::of(&**s)).collect::<Result<Vec<_>, _>>();
+            self.tracer_entry = Some(entry.unwrap_or_else(|err| panic!("tracer retry snapshot: {err}")));
+        }
         for ii in 0..self.stores.len() {
             let (store, kernel) = (&*self.stores[ii], self.kernels[ii]);
             if restorable {
@@ -3119,18 +3126,12 @@ where
 
     fn restore(&mut self) -> Result<(), Self::Error> {
         assert!(self.restorable, "a root step restored from an incomplete capture");
-        // per-tile rollback restores the fields and each tracer's step-entry ancestry, but the
-        // stage loop migrates tracer records between tiles as they cross a cut. a migrated
-        // record lives in a different tile's storage once it crosses, and a per-tile restore
-        // leaves it there.
-        assert!(
-            !self.has_discrete_tracers && !self.has_continuous_tracers,
-            "a decomposed step was rejected with tracers attached: cross-tile tracer \
-             migration has no per-tile inverse"
-        );
         for (ii, store) in self.stores.iter_mut().enumerate() {
             symbi_xpu::with_device(self.devices[ii], || self.kernels[ii].restore_step(&**store));
             crate::tracers::restore_transport_state(&mut **store);
+            if let Some(entry) = self.tracer_entry.as_ref() {
+                entry[ii].restore(&mut **store).unwrap_or_else(|err| panic!("tracer retry restore: {err}"));
+            }
             store.motion = self.motion_n[ii];
             // the tile stands at its step entry again, the clock its ghost refills read
             store.reset_state_clock();
@@ -3345,6 +3346,7 @@ where
             a_n: a_n.clone(),
             restorable: false,
             injection_ledgers: Vec::new(),
+            tracer_entry: None,
         };
         let guard = attempt.stores[0].retry_guard;
         let dt = match crate::step_transaction::take_root_step(&mut attempt, &guard, dt, t) {

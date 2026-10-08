@@ -32,6 +32,8 @@ pytestmark = pytest.mark.simulation
 
 PROBE = '''
 import os
+
+from pydantic import computed_field
 from typing import Annotated, Any
 
 from simbi import ProblemParam, SimbiProblem
@@ -70,6 +72,11 @@ class Poisoned(SimbiProblem):
             for _ in range(16 * 16):
                 yield (1.0, 0.0, 0.0, 1.0)
         return gas
+
+    @computed_field
+    @property
+    def n_tracers(self) -> int:
+        return int(os.environ.get("POISON_TRACERS", "0"))
 
     @property
     def source_expressions(self):
@@ -136,9 +143,9 @@ def test_a_crashed_refined_launch_publishes_no_final_checkpoint(tmp_path: Path, 
 GUARD = "1 consecutive root steps accepted at or below 1 of their candidate timestep"
 
 
-def _refusing(gpus: int, refined: bool) -> dict:
+def _refusing(gpus: int, refined: bool, tracers: int = 0) -> dict:
     """a clean box under a guard that refuses its first step"""
-    return dict(_env(gpus, refined), POISON_CLEAN="1", POISON_SEVERE_RATIO="1.0", POISON_SUSTAINED="1")
+    return dict(_env(gpus, refined), POISON_CLEAN="1", POISON_SEVERE_RATIO="1.0", POISON_SUSTAINED="1", POISON_TRACERS=str(tracers))
 
 
 def _assert_guard_halt(done: subprocess.CompletedProcess, out: Path, label: str, snapshot: bool) -> None:
@@ -164,3 +171,18 @@ def test_a_run_the_retry_guard_ends_publishes_the_step_entry_as_crashed(tmp_path
     else:
         gpus = 1 if driver == "single" else 2
         _assert_guard_halt(_in_process(probe, out, gpus, _refusing(gpus, refined)), out, label, snapshot=True)
+
+
+# a traced run restores its tracers with the step entry: the tiles and workers whose tracers crossed
+# a cut during the refused step take their own records back, so the guard's halt publishes the step
+# entry on every driver
+@pytest.mark.parametrize("refined", [True, False], ids=["refined", "flat"])
+@pytest.mark.parametrize("driver", ["single", "host-tiles", "launch"])
+def test_a_traced_run_the_retry_guard_ends_publishes_the_step_entry(tmp_path: Path, probe: Path, driver: str, refined: bool) -> None:
+    out = tmp_path / "out"
+    label = f"traced {driver}, {'refined' if refined else 'flat'}"
+    if driver == "launch":
+        _assert_guard_halt(_launch(probe, out, tmp_path, _refusing(1, refined, tracers=200)), out, label, snapshot=False)
+    else:
+        gpus = 1 if driver == "single" else 2
+        _assert_guard_halt(_in_process(probe, out, gpus, _refusing(gpus, refined, tracers=200)), out, label, snapshot=True)

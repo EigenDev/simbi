@@ -3731,3 +3731,28 @@ fn partition_seeded<const D: usize>(
     }
     per_tile
 }
+
+/// one tile's tracer populations at a root step's entry: a march whose tracers cross the cuts
+/// during an attempt restores every tile from its own snapshot, so each record returns to the tile
+/// that held it at the entry
+pub struct TileTracerSnapshot<const D: usize> {
+    discrete: Option<TracerSet<D>>,
+    continuous: Option<ContinuousTracerSnapshot<D>>,
+}
+
+impl<const D: usize> TileTracerSnapshot<D> {
+    pub fn of<const DOF: usize, Mem: MemorySpace>(store: &FieldStore<D, DOF, Mem, f64>) -> Result<Self, String> {
+        Ok(Self {
+            discrete: store.tracers.clone(),
+            continuous: store.continuous_tracers.as_ref().map(|set| set.snapshot_retry()).transpose()?,
+        })
+    }
+
+    pub fn restore<const DOF: usize, Mem: MemorySpace>(&self, store: &mut FieldStore<D, DOF, Mem, f64>) -> Result<(), String> {
+        store.tracers.clone_from(&self.discrete);
+        if let (Some(set), Some(saved)) = (store.continuous_tracers.as_mut(), self.continuous.as_ref()) {
+            set.restore_retry(saved)?;
+        }
+        Ok(())
+    }
+}

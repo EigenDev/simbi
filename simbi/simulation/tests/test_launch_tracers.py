@@ -393,3 +393,23 @@ def test_refined_tiles_and_workers_carry_the_single_hierarchy_population_across_
     _assert_same(_launch(variants, problem, tmp_path / "two", two, STEPS), want, group, f"{problem} on two workers")
     three = _layout(tmp_path / "three.toml", workers=3, cuts=cuts)
     _assert_same(_launch(variants, problem, tmp_path / "three", three, STEPS), want, group, f"{problem} on three uneven workers")
+
+
+# a rejection forced on worker 1 in the corrector of step 3, after the predictor carried tracers
+# across the cuts: every worker restores its own tiles' step-entry populations, so each migrated
+# record returns to the tile that held it, and three uneven workers reach the one worker's run
+# under the same rejection, tracers included, bit for bit
+@pytest.mark.parametrize("problem", ["DiscreteDrift", "Ito3Drift"])
+def test_a_rejection_with_tracers_rolls_every_worker_back(tmp_path: Path, variants: Path, problem: str) -> None:
+    group = GROUP[problem]
+    one = _layout(tmp_path / "one.toml", workers=1, shape=(1, 1))
+    three = _layout(tmp_path / "three.toml", workers=3, cuts=[[10, 21], []])
+    clean = _launch(variants, problem, tmp_path / "clean", one, STEPS)
+    want = _launch(variants, problem, tmp_path / "one", one, STEPS, inject="reject:0:3:1")
+    a, b = _population(clean, group), _population(want, group)
+    assert any(not np.array_equal(x, b[n]) for n, x in a.items()), f"{problem}: the rejection left the population unchanged; the arm is vacuous"
+    done = _launch_run(variants, problem, tmp_path / "three", three, STEPS, inject="reject:1:3:1")
+    assert done.returncode == 0, f"launch failed:\nstdout:\n{done.stdout}\nstderr:\n{done.stderr[-3000:]}"
+    counts = {(int(m), int(c)) for m, c in MIGRATIONS.findall(done.stderr)}
+    assert counts and all(m > 0 for m, _ in counts), f"{problem}: no tracer crossed a cut; the restore arm is vacuous ({counts})"
+    _assert_same(_final(tmp_path / "three"), want, group, f"{problem}: three uneven workers under the rejection")

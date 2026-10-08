@@ -1121,6 +1121,10 @@ where
     restorable: bool,
     /// each tile's tracer injections of the last attempt, spawned once the step is accepted
     injection_ledgers: Vec<std::collections::BTreeMap<crate::mass_transport::ContainerId, f64>>,
+    /// each held tile's tracers at the step entry: the stages migrate records across the cuts and
+    /// the workers, and every worker restoring its own tiles' entry populations returns each record
+    /// to the tile that held it
+    tracer_entry: Option<Vec<crate::tracers::TileTracerSnapshot<D>>>,
 }
 
 impl<const D: usize, const DOF: usize, M, K, T, L> crate::step_transaction::RootAttempt
@@ -1140,6 +1144,10 @@ where
 
     fn capture(&mut self, dt: f64, restorable: bool) -> Result<(), WorkerError> {
         self.restorable = restorable;
+        if restorable && (self.has_tracers || self.has_continuous) && self.tracer_entry.is_none() {
+            let entry = self.stores.iter().map(|s| crate::tracers::TileTracerSnapshot::of(&**s)).collect::<Result<Vec<_>, _>>();
+            self.tracer_entry = Some(entry.map_err(|e| fail(self.fabric, WorkerError::Numerics(format!("tracer retry snapshot: {e}"))))?);
+        }
         let (tiles, devices) = (self.tiles, self.devices);
         let dev = |k: usize| devices[tiles[k].0 as usize];
         for k in 0..self.stores.len() {
@@ -1283,26 +1291,23 @@ where
 
     fn restore(&mut self) -> Result<(), WorkerError> {
         assert!(self.restorable, "a root step restored from an incomplete capture");
-        // a migrated tracer lives in another tile's storage, and a per-tile restore leaves it
-        // there, so a traced run ends in place of a replay
-        if self.has_tracers || self.has_continuous {
-            return Err(fail(
-                self.fabric,
-                WorkerError::Numerics(
-                    "a step was rejected with tracers attached: cross-tile tracer migration has no per-tile inverse".into(),
-                ),
-            ));
-        }
         for (k, s) in self.stores.iter_mut().enumerate() {
             s.motion = self.motion_n[k];
+            if let Some(entry) = self.tracer_entry.as_ref() {
+                if let Err(e) = entry[k].restore(&mut **s) {
+                    return Err(fail(self.fabric, WorkerError::Numerics(format!("tracer retry restore: {e}"))));
+                }
+            }
         }
         let (tiles, devices, kernels) = (self.tiles, self.devices, self.kernels);
         let dev = |k: usize| devices[tiles[k].0 as usize];
         let sh: Vec<&FieldStore<D, DOF, M, f64>> = self.stores.iter().map(|s| &**s).collect();
         for k in 0..sh.len() {
             // a replay from anything but the step entry is a different computation dressed as a
-            // retry: every worker ends the session instead
-            if !kernels[k].rollback_snapshot_is_complete(sh[k]) {
+            // retry: every worker ends the session instead. the attempt restores the tracers
+            // itself; the kernel set restores the fields, and an immersed body's state has no
+            // restore on this march
+            if !kernels[k].field_rollback_is_complete(sh[k]) || sh[k].immersed.is_some() {
                 return Err(fail(
                     self.fabric,
                     WorkerError::Numerics(
@@ -1522,7 +1527,7 @@ where
         // a rejection replays the step from its entry, which needs the whole entry state kept
         if !cfg.injection.reject_at.is_empty() {
             for (store, kernel) in sh.iter().zip(kernels) {
-                if !kernel.rollback_snapshot_is_complete(store) {
+                if !kernel.field_rollback_is_complete(store) || store.immersed.is_some() {
                     return Err(fail(
                         fabric,
                         WorkerError::Refused(
@@ -1793,6 +1798,7 @@ where
             attempt: 0,
             restorable: false,
             injection_ledgers: Vec::new(),
+            tracer_entry: None,
         };
         let step = crate::step_transaction::take_root_step(&mut root, &guard, dt, t)?;
         injection_ledgers = std::mem::take(&mut root.injection_ledgers);
