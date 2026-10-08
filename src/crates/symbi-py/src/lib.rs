@@ -7120,9 +7120,10 @@ fn baked_gr_hydro(dims: usize, coords: &str, spacetime: &str) -> bool {
 }
 
 /// the baked GR-hydro combinations the launched gas workers build: the kerr-schild box in three
-/// dimensions and the radial line, the arms of `charted!` in `run_worker_process`
+/// dimensions, the radial line and the meridional plane, the arms of `charted!` in
+/// `run_worker_process`
 fn launched_gr_hydro(dims: usize, coords: &str, spacetime: &str) -> bool {
-    baked_gr_hydro(dims, coords, spacetime) && matches!((dims, coords), (3, "cartesian") | (1, "spherical"))
+    baked_gr_hydro(dims, coords, spacetime) && matches!((dims, coords), (3, "cartesian") | (1 | 2, "spherical"))
 }
 
 /// expand the (geometry x dims) arms for one hydro regime. cartesian / spherical
@@ -11851,7 +11852,7 @@ fn run_worker_process(
     // the tiles are built and evolved at the grid's dimension; every helper below is
     // dimension-generic, so one body serves the plane and the volume
     macro_rules! worker_of_dims {
-        ($d:literal) => {{
+        ($d:tt) => {{
     let n: [usize; $d] = std::array::from_fn(|ax| cfg.n_cells[ax]);
     let total: usize = n.iter().product();
     if prims.len() != total {
@@ -11908,8 +11909,13 @@ fn run_worker_process(
         }};
     }
     macro_rules! gas_tiles {
-        ($geom:expr, $geom_ty:ty, $regime:expr, $regime_ty:ty) => {{
-            type Sim = SimDefaultGeneric<$regime_ty, $d, $d, $geom_ty, EosSelect<f64>>;
+        ($geom:expr, $geom_ty:ty, $regime:expr, $regime_ty:ty) => {
+            gas_tiles!($geom, $geom_ty, $regime, $regime_ty, $d)
+        };
+        // `$dof` momentum components on the `$d`-dimensional grid: one more on a swirl run, whose
+        // azimuthal momentum rides a two-dimensional kerr-schild grid
+        ($geom:expr, $geom_ty:ty, $regime:expr, $regime_ty:ty, $dof:tt) => {{
+            type Sim = SimDefaultGeneric<$regime_ty, $d, $dof, $geom_ty, EosSelect<f64>>;
             let mut tiles = Vec::with_capacity(mine.len());
             for &flat in &mine {
                 let tc = unflatten(flat, counts);
@@ -11927,7 +11933,7 @@ fn run_worker_process(
                     .set_initial_indexed(|idx, _x| {
                         let lin = global_lin::<$d>(&tile_lo, &idx, &n);
                         let row = &prims[lin];
-                        Prim::adiabatic(Density(row[0]), Tensor::new(std::array::from_fn(|k| row[1 + k])), Pressure(row[1 + $d]))
+                        Prim::adiabatic(Density(row[0]), Tensor::new(std::array::from_fn(|k| row[1 + k])), Pressure(row[1 + $dof]))
                     })
                     .build();
                 // the dye on this tile, indexed from the global dye by the tile's global cells;
@@ -11947,7 +11953,7 @@ fn run_worker_process(
                 // declared stationary target the session lays it over the target, after the probe
                 let has_energy = sim.fields.cons.has_energy();
                 if cfg.equilibrium_json.is_none() {
-                    lay_perturbation!(sim, cfg, $d, has_energy);
+                    lay_perturbation!(sim, cfg, $dof, has_energy);
                 }
                 // the numerics, sources, driven boundaries and gradient walls the single grid
                 // installs, each tile evaluating them at the whole grid's coordinates of its cells
@@ -11969,7 +11975,7 @@ fn run_worker_process(
                     .map_err(|e| format!("global seeding sim allocate: {e:?}"))?
                     .set_initial_indexed(|idx, _x| {
                         let row = &prims[global_lin::<$d>(&[0; $d], &idx, &n)];
-                        Prim::adiabatic(Density(row[0]), Tensor::new(std::array::from_fn(|k| row[1 + k])), Pressure(row[1 + $d]))
+                        Prim::adiabatic(Density(row[0]), Tensor::new(std::array::from_fn(|k| row[1 + k])), Pressure(row[1 + $dof]))
                     })
                     .build();
                 let mut per_tile = partition_configured_tracers(&global, cfg, &partition);
@@ -12000,10 +12006,10 @@ fn run_worker_process(
                 }
             });
             let perturb = |sim: &mut Sim| -> Result<(), String> {
-                lay_perturbation!(sim, cfg, $d, has_energy);
+                lay_perturbation!(sim, cfg, $dof, has_energy);
                 Ok(())
             };
-            session_over!($regime_ty, $d, tiles, seed.as_ref().map(|f| f as &dyn Fn(&Sim)), expression.as_ref().map(|_| &perturb as &dyn Fn(&mut Sim) -> Result<(), String>))
+            session_over!($regime_ty, $dof, tiles, seed.as_ref().map(|f| f as &dyn Fn(&Sim)), expression.as_ref().map(|_| &perturb as &dyn Fn(&mut Sim) -> Result<(), String>))
         }};
     }
     macro_rules! nmhd_tiles {
@@ -12366,6 +12372,22 @@ fn run_worker_process(
         }};
     }
     // one arm per chart the flat spacetime is gridded on
+    // the meridional plane of a black hole on the horizon-penetrating chart, built only on a
+    // two-dimensional grid: the rows choose one momentum per axis or the swirl's three, as the
+    // single grid's dispatch chooses (spinning kerr always carries the swirl)
+    macro_rules! kerr_schild_plane {
+        (2, $arm:ident, $regime:expr, $regime_ty:ty) => {{
+            let dof = primitive_row_dof(cfg, prims.first().map_or(0, |row| row.len()))?;
+            match (cfg.spacetime.as_str(), dof) {
+                ("kerr_ks", _) => $arm!(KerrKS { mass: cfg.schwarzschild_mass, spin: cfg.kerr_spin }, KerrKS<f64>, $regime, $regime_ty, 3),
+                (_, 3) => $arm!(SchwarzschildKS { mass: cfg.schwarzschild_mass }, SchwarzschildKS<f64>, $regime, $regime_ty, 3),
+                _ => $arm!(SchwarzschildKS { mass: cfg.schwarzschild_mass }, SchwarzschildKS<f64>, $regime, $regime_ty, 2),
+            }
+        }};
+        ($other:tt, $arm:ident, $regime:expr, $regime_ty:ty) => {
+            Err(format!("the {} spacetime on the {}-dimensional spherical chart is outside the distributed first release", cfg.spacetime, $other))
+        };
+    }
     macro_rules! charted {
         ($arm:ident) => {
             match cfg.coord_system.as_str() {
@@ -12400,6 +12422,7 @@ fn run_worker_process(
                     $regime,
                     $regime_ty
                 ),
+                ("spherical", "schwarzschild_ks" | "kerr_ks", 2) => kerr_schild_plane!($d, $arm, $regime, $regime_ty),
                 (chart, "minkowski", _) => Err(format!("the {chart} chart is outside the distributed first release")),
                 (chart, spacetime, d) => Err(format!(
                     "the {spacetime} spacetime on the {d}-dimensional {chart} chart is outside the distributed first release"
