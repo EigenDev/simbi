@@ -19,6 +19,7 @@ import subprocess
 import sys
 from pathlib import Path
 
+import numpy as np
 import pytest
 
 from simbi.simulation.tests.test_launch import _assert_same_state, _layout, bounded_processes  # noqa: F401  the autouse process guard
@@ -82,6 +83,14 @@ class Atmosphere2d(SimbiProblem):
         return gas
 
 
+class RefinedAtmosphere2d(Atmosphere2d):
+    resolution: Annotated[tuple[int, int], ProblemParam((32, 32), cli=True, description="grid")]
+    refinement_enabled: Annotated[bool, ProblemParam(True, description="refined")]
+    refinement_max_levels: Annotated[int, ProblemParam(2, description="levels")]
+    refinement_regions: Annotated[list[list[float]], ProblemParam([[0.25, 0.75, 0.25, 0.75]], description="box")]
+    refinement_ratios: Annotated[list[int], ProblemParam([2], description="ratios")]
+
+
 class Atmosphere2dWithoutTarget(Atmosphere2d):
     seed_from_equilibrium: Annotated[bool, ProblemParam(False, description="unseeded")]
 
@@ -114,6 +123,14 @@ def _single(fixture: Path, cls: str, out: Path, gpus: int = 1, extra: str = "") 
     return files[0], done.stdout + done.stderr
 
 
+def _launch(fixture: Path, cls: str, resolution: tuple, out: Path, layout: Path, workers: int) -> Path:
+    # the launch evolves the one problem its script defines
+    script = fixture.parent / f"launched_{cls.lower()}.py"
+    script.write_text(f"from atmosphere_2d import {cls} as Base\n\n\nclass Launched{cls}(Base):\n    pass\n")
+    env = {"PYTHONPATH": os.pathsep.join([str(fixture.parent), os.getcwd(), os.environ.get("PYTHONPATH", "")])}
+    return _script_launch(str(script), resolution, out, layout, STEPS, workers=workers, env=env)
+
+
 def _probe_dt(output: str, label: str) -> set[str]:
     bits = set(PROBE_DT.findall(output))
     assert bits, f"{label}: no equilibrium probe was reported; the target never reached the backend"
@@ -137,10 +154,30 @@ def test_a_two_dimensional_target_holds_on_every_decomposition(tmp_path: Path, f
         got, out = _single(fixture, "Atmosphere2d", tmp_path / f"tiles{gpus}", gpus=gpus, extra=extra)
         assert _probe_dt(out, label) == probe, f"{label} probed at another timestep"
         _assert_same_state(got, reference, label)
-    # the launch loads one problem from its script
-    script = tmp_path / "launch" / "atmosphere_2d.py"
-    script.parent.mkdir()
-    script.write_text(FIXTURE.split("class Atmosphere2dWithoutTarget")[0])
     layout = _layout(tmp_path / "four.toml", workers=4, cuts=[[11], [17]])
-    launched = _script_launch(str(script), RESOLUTION, tmp_path / "launched", layout, STEPS, workers=4)
+    launched = _launch(fixture, "Atmosphere2d", RESOLUTION, tmp_path / "launched", layout, workers=4)
     _assert_same_state(launched, reference, "a two-by-two launch")
+
+
+PROBE_LEVEL = re.compile(r"SIMBI equilibrium probe: level=(\d+) dt_bits=([0-9a-f]+)")
+
+
+def test_a_refined_two_dimensional_target_holds_on_every_decomposition(tmp_path: Path, fixture: Path) -> None:
+    from simbi.simulation.tests.test_launch_refined_numerics import _all_levels
+
+    reference, out = _single(fixture, "RefinedAtmosphere2d", tmp_path / "single")
+    probes = set(PROBE_LEVEL.findall(out))
+    assert {level for level, _ in probes} == {"0", "1"}, f"the single hierarchy probed levels {probes}"
+    want = _all_levels(reference)
+    assert "level_1/conserved/den" in want, "the single hierarchy published no fine level; the refined arm is vacuous"
+    got, out = _single(fixture, "RefinedAtmosphere2d", tmp_path / "tiles", gpus=2, extra=", decompose=[[16], []]")
+    assert set(PROBE_LEVEL.findall(out)) == probes, "the refined host tiles probed at other timesteps"
+    tiles = _all_levels(got)
+    assert tiles.keys() == want.keys(), f"datasets {sorted(tiles.keys() ^ want.keys())} differ"
+    for name, x in want.items():
+        np.testing.assert_array_equal(tiles[name], x, err_msg=f"two refined host tiles: {name}")
+    layout = _layout(tmp_path / "two.toml", workers=2, cuts=[[16], []])
+    launched = _all_levels(_launch(fixture, "RefinedAtmosphere2d", (32, 32), tmp_path / "launched", layout, workers=2))
+    assert launched.keys() == want.keys(), f"datasets {sorted(launched.keys() ^ want.keys())} differ"
+    for name, x in want.items():
+        np.testing.assert_array_equal(launched[name], x, err_msg=f"two launched refined workers: {name}")
