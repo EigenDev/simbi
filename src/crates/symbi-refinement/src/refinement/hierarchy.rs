@@ -2742,11 +2742,11 @@ where
         // horizon-ledger / penalize run in the finest level's tail (level_step_tail),
         // in the uni-grid driver's exact order.
 
-        self.census_sample_root_step();
-
         let root = &mut self.levels[0];
         // homologous linear advance, taken when the run leaves the motion law untraced.
         advance_state_clock(&mut root.state, dt);
+        // the census rows of the step carry the clock of the state they hold
+        self.census_sample_root_step();
         self.root_body_step(dt);
     }
 
@@ -2775,12 +2775,14 @@ where
         // nothing while its volume stayed excluded from the parent.
         let registrations = &self.levels[0].state.store.censuses;
         let root_step = Some(symbi_sim::census::Cadence::RootStep);
+        let time = self.levels[0].state.time;
         let mut totals = symbi_substrate::census_sample::level_partials(
             &self.levels[0].state,
             registrations,
             0,
             root_step,
             self.levels[0].state.composite_ownership.coverage.as_ref(),
+            time,
         );
         for level in 1..self.levels.len() {
             let partial = symbi_substrate::census_sample::level_partials(
@@ -2793,10 +2795,10 @@ where
                     .composite_ownership
                     .coverage
                     .as_ref(),
+                time,
             );
             symbi_substrate::census_sample::combine_partials(&mut totals, partial, &ops);
         }
-        let time = self.levels[0].state.time;
         symbi_substrate::census_sample::record_samples(&mut self.levels[0].state, time, totals);
     }
 
@@ -3672,14 +3674,18 @@ where
                 .unwrap_or_else(|detail| panic!("continuous tracer accretion transport: {detail}"));
             }
         }
-        self.sample_per_level_censuses(level);
+        // the level's rows carry the clock of the state they hold, the end of this substep; the
+        // root's own clock advances at the root step's tail, by the same sum
+        let end = advance_clock(self.levels[level].state.time, 0, dt).0;
         self.level_clock(level, dt);
+        self.sample_per_level_censuses(level, end);
         if level + 1 == self.run_levels() {
             phase_probe::sample("tail", level, &self.levels[level].state);
         }
     }
 
-    /// record a per-level census sample from this level's own accepted subcycle step.
+    /// record a per-level census sample from this level's own accepted subcycle step, stamped
+    /// `time`, the end of that substep.
     ///
     /// levels are time-aligned only at root-step boundaries, so this row is this level's alone: it
     /// covers this level's leaf cells at this level's clock, and carries the level index so a
@@ -3687,11 +3693,10 @@ where
     /// therefore left to the consumer.
     ///
     /// the registrations live on the root, which owns the history; a finer level defers to it.
-    fn sample_per_level_censuses(&mut self, level: usize) {
+    fn sample_per_level_censuses(&mut self, level: usize, time: f64) {
         if self.levels[0].state.store.censuses.is_empty() {
             return;
         }
-        let time = self.levels[level].state.time;
         let partial = symbi_substrate::census_sample::level_partials(
             &self.levels[level].state,
             &self.levels[0].state.store.censuses,
@@ -3702,6 +3707,7 @@ where
                 .composite_ownership
                 .coverage
                 .as_ref(),
+            time,
         );
         if partial.iter().all(|(values, _)| values.is_empty()) {
             return;

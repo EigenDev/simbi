@@ -293,7 +293,7 @@ fn a_cell_that_becomes_covered_is_excluded_on_the_reused_scratch() {
 
     // uncovered first, which is what leaves a live bucket in every cell of the scratch.
     let full =
-        symbi_substrate::census_sample::level_partials(&sim, &sim.store.censuses, 0, None, None);
+        symbi_substrate::census_sample::level_partials(&sim, &sim.store.censuses, 0, None, None, sim.time);
     let half = span(mid, sp.hi);
     let masked = symbi_substrate::census_sample::level_partials(
         &sim,
@@ -301,6 +301,7 @@ fn a_cell_that_becomes_covered_is_excluded_on_the_reused_scratch() {
         0,
         None,
         Some(&half),
+        sim.time,
     );
 
     let (total, part) = (full[0].0[0], masked[0].0[0]);
@@ -319,6 +320,7 @@ fn a_cell_that_becomes_covered_is_excluded_on_the_reused_scratch() {
         0,
         None,
         Some(&outer),
+        sim.time,
     );
     let sum = part + other[0].0[0];
     assert!(

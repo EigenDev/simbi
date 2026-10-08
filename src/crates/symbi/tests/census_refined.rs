@@ -302,3 +302,58 @@ fn a_root_step_census_is_not_also_sampled_per_level() {
         "a root-step census must record exactly one row per accepted root step"
     );
 }
+
+// a census row carries the time of the state it holds: a root row the root clock after the root
+// step it closes, a per-level row that level's clock after its own substep. one root step of a
+// two-level hierarchy, sampled per level, leaves the fine rows at t + dt/2 and t + dt and the root
+// row at t + dt, equal to the clocks the levels stand at afterwards.
+#[test]
+fn a_census_row_carries_the_time_of_the_state_it_holds() {
+    let mut hier = refined_with(&mass_census_at("per_level_step"));
+    let t0 = hier.levels[0].state.time;
+    hier.evolve_with_callback(1.0, 1, |h| {
+        if h.levels[0].state.iteration >= 1 { std::ops::ControlFlow::Break(()) } else { std::ops::ControlFlow::Continue(()) }
+    })
+    .expect("evolve");
+    let root = &hier.levels[0].state;
+    let dt = root.time - t0;
+    assert!(root.iteration == 1 && dt > 0.0, "premise: one root step");
+    let history = &root.store.censuses[0].history;
+    let rows: Vec<(u64, f64)> = history.level().iter().copied().zip(history.time().iter().copied()).collect();
+    let fine: Vec<f64> = rows.iter().filter(|r| r.0 == 1).map(|r| r.1).collect();
+    let coarse: Vec<f64> = rows.iter().filter(|r| r.0 == 0).map(|r| r.1).collect();
+    assert_eq!(coarse, vec![root.time], "the root row is stamped other than the root clock it closes");
+    assert_eq!(fine.len(), 2, "premise: two fine substeps sampled");
+    assert_eq!(fine[1], hier.levels[1].state.time, "the last fine row is stamped other than the fine clock after it");
+    assert_eq!(fine[0], t0 + 0.5 * dt, "the first fine row is stamped other than the end of the first substep");
+}
+
+// the cadence measures the interval between the times rows carry: a per-level census whose
+// interval is far below any timestep records every level on every one of its own steps, the root's
+// included, so four root steps leave four root rows and eight fine rows
+#[test]
+fn a_per_level_cadence_measures_the_interval_between_stamped_rows() {
+    let cfg = CensusConfig::from_json(
+        r#"{
+            "name": "mass", "op": "add", "axes": [],
+            "value_names": ["mass"], "values": [2], "params": [],
+            "cadence": "per_level_step", "sample_interval": 1e-9,
+            "nodes": [
+                {"op": "VARIABLE_RHO"},
+                {"op": "VARIABLE_DV"},
+                {"op": "MULTIPLY", "left": 0, "right": 1}
+            ]
+        }"#,
+    )
+    .expect("census parses");
+    let mut hier = refined_with(&cfg);
+    hier.evolve_with_callback(1.0, 1, |h| {
+        if h.levels[0].state.iteration >= 4 { std::ops::ControlFlow::Break(()) } else { std::ops::ControlFlow::Continue(()) }
+    })
+    .expect("evolve");
+    assert_eq!(hier.levels[0].state.iteration, 4, "premise: four root steps");
+    let history = &hier.levels[0].state.store.censuses[0].history;
+    let root_rows = history.level().iter().filter(|&&l| l == 0).count();
+    let fine_rows = history.level().iter().filter(|&&l| l == 1).count();
+    assert_eq!((root_rows, fine_rows), (4, 8), "a level skipped a step whose row was due");
+}

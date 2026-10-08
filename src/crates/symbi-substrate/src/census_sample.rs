@@ -26,6 +26,8 @@ use symbi_xpu::{ExecutionSpace, MemorySpace};
 /// reduce one level's leaf cells into a partial sample per registered census.
 ///
 /// `covered` is the region a finer level resolves; those cells are not this level's to count.
+/// `now` is the time the sample will carry, the time of the state it holds: a registration is due
+/// when `now` lies at least its interval past the time its previous row carries.
 /// returns one `(values, dropped)` per registration, in registration order.
 ///
 /// the registrations are supplied rather than read from `sim`, because a census is registered once
@@ -40,6 +42,7 @@ pub fn level_partials<R, const D: usize, const DOF: usize, M, E, S, Mem>(
     level: usize,
     cadence: Option<symbi_sim::census::Cadence>,
     covered: Option<&symbi_algebra::Domain<D>>,
+    now: f64,
 ) -> Vec<(Vec<f64>, u64)>
 where
     R: Regime<f64, D>,
@@ -49,7 +52,6 @@ where
     Mem: MemorySpace,
 {
     symbi_sim::driver::prof("census", || {
-        let now = sim.time;
         censuses
             .iter()
             .enumerate()
@@ -139,7 +141,7 @@ pub fn sample_censuses<R, const D: usize, const DOF: usize, M, E, S, Mem>(
         return;
     }
     let time = sim.time;
-    let samples = level_partials(sim, &sim.store.censuses, 0, None, None);
+    let samples = level_partials(sim, &sim.store.censuses, 0, None, None, time);
     record_samples(sim, time, samples);
 }
 
