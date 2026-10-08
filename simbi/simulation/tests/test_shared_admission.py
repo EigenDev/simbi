@@ -12,7 +12,9 @@
 # - a neumann wall on a magnetized regime (no gradient ghost fill);
 # - the balanced reconstruction outside the newtonian regime;
 # - a non-hlle solver on isothermal hydro;
-# - mesh refinement of a one-dimensional magnetized grid.
+# - mesh refinement of a one-dimensional magnetized grid;
+# - the balanced reconstruction with an immersed body across a periodic wrap (the
+#   periodic images sit at different body potentials).
 # a driven face whose prescription does not lower against the regime is refused at
 # admission, naming the face, on every driver including the refined tiles, which
 # otherwise build each level's kernels after the run is admitted. a periodic
@@ -46,7 +48,7 @@ from pydantic import computed_field
 
 from simbi import Neumann, ProblemParam, SimbiProblem
 from simbi.types import BoundaryCondition, CoordSystem, Regime, Solver
-from simbi.types.bodies import BondedAssembly, BondMaterial
+from simbi.types.bodies import BodyCapability, BondedAssembly, BondMaterial, ImmersedBodyConfig, RigidProperties
 
 OV: dict[str, Any] = json.loads(os.environ["ADMISSION_PROBE"])
 RES = tuple(OV.get("res", [16, 16]))
@@ -94,6 +96,14 @@ class Probe(SimbiProblem):
     @property
     def n_tracers(self) -> int:
         return OV.get("n_tracers", 0)
+
+    @computed_field
+    @property
+    def immersed_bodies(self) -> list[Any]:
+        if not OV.get("body"):
+            return []
+        return [ImmersedBodyConfig(capability=BodyCapability.RIGID, mass=0.0, radius=0.1, position=(0.5, 0.5),
+                                   velocity=(0.0, 0.0), rigid=RigidProperties(inertia=1.0, apply_no_slip=True))]
 
     @computed_field
     @property
@@ -146,6 +156,7 @@ REFUSED = {
     "balanced-isothermal": ({"regime": "isothermal", "cs": 1.0, "row": [1.0, 0.1, 0.0], "wb": True}, "wb_reconstruction with the isothermal regime"),
     "balanced-mhd": ({**MHD, "wb": True}, "wb_reconstruction with the nmhd regime"),
     "hllc-isothermal": ({"regime": "isothermal", "cs": 1.0, "row": [1.0, 0.1, 0.0], "solver": "hllc"}, "solver = 'hllc' with the isothermal regime"),
+    "balanced-body-periodic": ({"wb": True, "body": True, "bcs": ["periodic"]}, "a periodic axis with an immersed body cannot use the balance-aware reconstruction"),
     "refined-mhd-line": ({"regime": "nmhd", "res": [32], "row": [1.0, 0.1, 0.0, 0.0, 1.0], "regions": [[0.25, 0.75]]}, "mhd refinement requires a 3d or 2.5d cartesian grid"),
 }
 

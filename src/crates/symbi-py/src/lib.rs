@@ -2227,12 +2227,8 @@ fn seam_faces_as_cuts<const D: usize>(
 /// what a decomposed run may carry once an axis wraps. closing the domain seam with exchanged
 /// legs moves the periodic law out of the tile faces and into the schedule. what still reads a
 /// tile's own faces to learn it is refused rather than approximated.
-fn wrap_capability<const D: usize>(
-    topology: &Topology<D>,
-    wb_reconstruction: bool,
-    has_bodies: bool,
-) -> Result<(), String> {
-    if !(0..D).any(|ax| topology.is_periodic(ax)) {
+fn wrap_capability(periodic: bool, wb_reconstruction: bool, has_bodies: bool) -> Result<(), String> {
+    if !periodic {
         return Ok(());
     }
     if wb_reconstruction && has_bodies {
@@ -5916,8 +5912,6 @@ where
             .map_err(|e| checkpoint_write_error(path, e))?;
         Ok(t_io.elapsed().as_secs_f64())
     };
-    let topology = chart_topology(cfg, &whole_grid::<D>(cfg), counts);
-    wrap_capability(&topology, cfg.wb_reconstruction, !cfg.bodies.is_empty())?;
 
     let ntiles = tiles.len();
     let devices: Vec<i32> = (0..ntiles as i32).collect();
@@ -8923,6 +8917,8 @@ fn validate_declared_target(cfg: &Config, dof: usize) -> Result<(), String> {
 /// host tiles and the launched workers all call it, so a capability decision lives in one place
 fn validate_run(cfg: &Config) -> Result<(), String> {
     validate_porous_body_overlaps(&cfg.bodies)?;
+    // a declared periodic face wraps the grid on one device and across tiles and workers alike
+    wrap_capability(cfg.boundaries.contains(&BoundaryType::Periodic), cfg.wb_reconstruction, !cfg.bodies.is_empty())?;
     validate_axis_boundaries(cfg)?;
     validate_magnetic_slip_bodies(
         &cfg.bodies,
@@ -11897,7 +11893,6 @@ fn run_worker_process(
     // bitwise where the whole grid puts it
     let whole = whole_grid::<$d>(cfg);
     let topology = chart_topology(cfg, &whole, counts);
-    wrap_capability(&topology, cfg.wb_reconstruction, false)?;
     let seam = polar_seam::<$d>(&cfg.coord_system, &whole.boundaries, &topology, partition.counts(), |az, i| partition.tile_range(az, i).1);
     let mine: Vec<usize> = (0..partition.n_tiles())
         .filter(|&f| placement.owner_of(TileId(f as u32)) == me)
@@ -13344,29 +13339,21 @@ mod tests {
         assert!(build_source_label().len() <= 18);
     }
 
-    // an open tile grid carries whatever the run declares; the refusal is about the wrap.
+    // a run with no periodic face carries whatever it declares; the refusal is about the wrap.
     #[test]
-    fn an_open_decomposition_carries_everything() {
-        let open = Topology::<2>::open();
-        assert!(wrap_capability(&open, true, true).is_ok());
+    fn an_open_grid_carries_everything() {
+        assert!(wrap_capability(false, true, true).is_ok());
     }
 
     // the balance-aware reconstruction reads a body potential across the seam, which the wrap
     // cannot make sound, so it is refused by name. each half alone is carried.
     #[test]
-    fn a_wrapping_decomposition_refuses_what_it_cannot_carry() {
-        let ring = Topology::<2>::wrapping([true, false]);
-        assert!(wrap_capability(&ring, false, false).is_ok());
-        assert!(
-            wrap_capability(&ring, true, false).is_ok(),
-            "balancing alone is fine"
-        );
-        assert!(
-            wrap_capability(&ring, false, true).is_ok(),
-            "a body alone is fine"
-        );
+    fn a_wrapping_grid_refuses_what_it_cannot_carry() {
+        assert!(wrap_capability(true, false, false).is_ok());
+        assert!(wrap_capability(true, true, false).is_ok(), "balancing alone is fine");
+        assert!(wrap_capability(true, false, true).is_ok(), "a body alone is fine");
 
-        let bodies = wrap_capability(&ring, true, true).unwrap_err();
+        let bodies = wrap_capability(true, true, true).unwrap_err();
         assert!(bodies.contains("body potentials"), "{bodies}");
     }
 }
