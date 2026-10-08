@@ -726,6 +726,162 @@ pub fn fail<L: Link>(fabric: &mut Fabric<L>, err: WorkerError) -> WorkerError {
     err
 }
 
+/// one stage of a worker's tiles: each tile folds on its device under the run's stage hook, the
+/// axis rings are assembled across the workers, the troubled flags cross the cuts at the stage's
+/// troubled exchange point, and every agreement is one vote of this worker over the fabric
+struct WorkerStage<'a, 'p, 'h, const D: usize, const DOF: usize, M, K, T, L>
+where
+    M: MemorySpace,
+    K: KernelSet<D, DOF, M, f64>,
+    T: HaloTransport,
+    L: Link,
+{
+    stores: &'a [&'a FieldStore<D, DOF, M, f64>],
+    kernels: &'a [&'a K],
+    tiles: &'a [TileId],
+    devices: &'a [i32],
+    exchange: &'a PlanExchange<'p, D>,
+    transport: &'a T,
+    fabric: &'a mut Fabric<L>,
+    timing: &'a mut WorkerTiming,
+    stage_hook: &'a mut crate::decomp::TileStageHook<'h, D, DOF, M>,
+    args: StageArgs,
+    axis_rings: bool,
+    n_cells: [usize; D],
+    ring_len: u64,
+    deadline: Duration,
+    iter: u64,
+    attempt: u16,
+    /// the global cell a test fault raises troubled at this stage
+    injected: Option<[isize; D]>,
+    /// a test fault rejects this stage
+    forced: bool,
+}
+
+impl<const D: usize, const DOF: usize, M, K, T, L> WorkerStage<'_, '_, '_, D, DOF, M, K, T, L>
+where
+    M: MemorySpace,
+    K: KernelSet<D, DOF, M, f64>,
+    T: HaloTransport,
+    L: Link,
+{
+    fn dev(&self, k: usize) -> i32 {
+        self.devices[self.tiles[k].0 as usize]
+    }
+}
+
+impl<const D: usize, const DOF: usize, M, K, T, L> crate::collective_stage::StageCollective for WorkerStage<'_, '_, '_, D, DOF, M, K, T, L>
+where
+    M: MemorySpace,
+    K: KernelSet<D, DOF, M, f64>,
+    T: HaloTransport,
+    L: Link,
+{
+    type Error = WorkerError;
+
+    fn tiles(&self) -> usize {
+        self.stores.len()
+    }
+
+    fn mark(&mut self, k: usize) -> Result<u64, WorkerError> {
+        let (store, kernel, args, dev, hook) = (self.stores[k], self.kernels[k], self.args, self.dev(k), &mut *self.stage_hook);
+        Ok(with_device(dev, || fold_stage_through_mark(store, kernel, args, &mut |hp| hook(k, store, hp, args))))
+    }
+
+    fn axis_rings(&self) -> bool {
+        self.axis_rings
+    }
+
+    fn mark_through_emf(&mut self, k: usize) -> Result<(), WorkerError> {
+        let (store, kernel, args, dev, hook) = (self.stores[k], self.kernels[k], self.args, self.dev(k), &mut *self.stage_hook);
+        with_device(dev, || fold_stage_through_emf(store, kernel, args, &mut |hp| hook(k, store, hp, args)));
+        Ok(())
+    }
+
+    // every worker supplies the ring copies its tiles own to one assembled vector and reconciles
+    // the rings it holds from it
+    fn reconcile_rings(&mut self) -> Result<(), WorkerError> {
+        let entries: Vec<(u64, u64)> =
+            self.stores.iter().flat_map(|s| crate::axis_ring::ring_entries(s, self.n_cells)).collect();
+        let clock = Instant::now();
+        let deadline = self.deadline;
+        let assembled = self
+            .fabric
+            .assemble_windowed(self.ring_len, &entries, deadline)
+            .map_err(|e| fail(self.fabric, e.into()))?;
+        self.timing.collectives += clock.elapsed();
+        for s in self.stores {
+            crate::axis_ring::apply_assembled(s, self.n_cells, &assembled, symbi_fabric::ABSENT);
+        }
+        Ok(())
+    }
+
+    fn mark_from_curl(&mut self, k: usize) -> Result<u64, WorkerError> {
+        let (store, kernel, args, dev, hook) = (self.stores[k], self.kernels[k], self.args, self.dev(k), &mut *self.stage_hook);
+        Ok(with_device(dev, || fold_stage_curl_through_mark(store, kernel, args, &mut |hp| hook(k, store, hp, args))))
+    }
+
+    fn injected_trouble(&mut self, k: usize) -> u64 {
+        self.injected
+            .and_then(|cell| self.exchange.local_cell(self.tiles[k], cell))
+            .map_or(0, |local| raise_troubled_cell(self.stores[k], local))
+    }
+
+    fn any(&mut self, local: bool) -> Result<bool, WorkerError> {
+        let clock = Instant::now();
+        let deadline = self.deadline;
+        let any = self.fabric.collective(OpKind::Any, u64::from(local), deadline).map_err(|e| fail(self.fabric, e.into()))?;
+        self.timing.collectives += clock.elapsed();
+        Ok(any != 0)
+    }
+
+    // a face on a cut takes the first-order flux when either cell sharing it is troubled: every
+    // flag ghost on a cut is rewritten here, so none survives from an earlier stage or attempt
+    fn exchange_trouble(&mut self) -> Result<Vec<bool>, WorkerError> {
+        let deadline = self.deadline;
+        exchange_point(
+            self.exchange,
+            self.tiles,
+            self.stores,
+            self.devices.len(),
+            self.devices,
+            self.transport,
+            self.fabric,
+            ExchangePoint::Troubled(self.args.stage as u8),
+            self.iter,
+            self.attempt,
+            deadline,
+            &mut self.timing.exchange,
+        )
+        .map_err(|e| fail(self.fabric, e.into()))?;
+        Ok((0..self.stores.len())
+            .map(|k| {
+                with_device(self.dev(k), || {
+                    self.exchange.trouble_regions(self.tiles[k]).iter().any(|region| self.kernels[k].fofc_flags_in(self.stores[k], region) > 0)
+                })
+            })
+            .collect())
+    }
+
+    fn correct(&mut self, k: usize, cut_trouble: bool) -> Result<bool, WorkerError> {
+        let (store, kernel, args, dev, hook) = (self.stores[k], self.kernels[k], self.args, self.dev(k), &mut *self.stage_hook);
+        let outcome = with_device(dev, || fold_stage_from_correction(store, kernel, args, cut_trouble, &mut |hp| hook(k, store, hp, args)));
+        Ok(outcome == StageOutcome::RetryStep)
+    }
+
+    fn freeze_streak(&self, k: usize) -> u32 {
+        self.kernels[k].freeze_streak()
+    }
+
+    fn set_freeze_streak(&mut self, k: usize, streak: u32) {
+        self.kernels[k].set_freeze_streak(streak);
+    }
+
+    fn forced_rejection(&mut self) -> bool {
+        self.forced
+    }
+}
+
 /// the attempts of one root step on a worker: every held tile captures its retry snapshot, the
 /// stages advance with the troubled marks, the freeze streak and the rejection agreed across the
 /// workers, and a rejection restores every held tile and refreshes the halos at the rollback
@@ -842,7 +998,6 @@ where
                 crate::driver::set_stage_motion(&mut s.motion, law_value, dt, a_n[k], stage.entry);
             }
             let sh = shared!();
-            let mut retry = false;
             let args = StageArgs {
                 dt,
                 a0: stage.a0,
@@ -853,125 +1008,38 @@ where
                 allow_elision: false,
                 exit_fraction: crate::driver::stage_exit_fraction(stages, stage.index),
             };
-            // the stage runs in two spans. the first ends with every owned tile's troubled
-            // cells marked; the worker then makes one vote for all of them, so workers
-            // holding different numbers of tiles issue the same collective sequence.
-            let mut troubled = 0u64;
-            if has_axis_rings {
-                // the edges on a coordinate axis are reconciled over the whole ring between
-                // the stage's complete EMF and its curl: every worker supplies the copies its
-                // tiles own to one assembled vector and reconciles the rings it holds from it
-                for k in 0..n {
-                    with_device(dev(k), || fold_stage_through_emf(sh[k], kernels[k], args, &mut |hp| stage_hook(k, sh[k], hp, args)));
-                }
-                let entries: Vec<(u64, u64)> =
-                    (0..n).flat_map(|k| crate::axis_ring::ring_entries(sh[k], n_cells)).collect();
-                let clock = Instant::now();
-                let assembled = fabric
-                    .assemble_windowed(ring_len, &entries, deadline)
-                    .map_err(|e| fail(fabric, e.into()))?;
-                timing.collectives += clock.elapsed();
-                for k in 0..n {
-                    crate::axis_ring::apply_assembled(sh[k], n_cells, &assembled, symbi_fabric::ABSENT);
-                    troubled += with_device(dev(k), || fold_stage_curl_through_mark(sh[k], kernels[k], args, &mut |hp| stage_hook(k, sh[k], hp, args)));
-                }
-            } else {
-                for k in 0..n {
-                    troubled += with_device(dev(k), || {
-                        fold_stage_through_mark(sh[k], kernels[k], args, &mut |hp| stage_hook(k, sh[k], hp, args))
-                    });
-                }
-            }
-            if attempt == 0 {
-                if let Some((at_step, at_stage, cell)) = cfg.injection.trouble_at {
-                    if (at_step, at_stage) == (iter, stage.index) {
-                        let cell: [isize; D] = std::array::from_fn(|ax| cell[ax]);
-                        for k in 0..n {
-                            if let Some(local) = exchange.local_cell(tiles[k], cell) {
-                                troubled += raise_troubled_cell(sh[k], local);
-                            }
-                        }
-                    }
-                }
-            }
-            let clock = Instant::now();
-            let any_troubled = fabric
-                .collective(OpKind::Any, u64::from(troubled > 0), deadline)
-                .map_err(|e| fail(fabric, e.into()))?;
-            timing.collectives += clock.elapsed();
-            // a face on a cut takes the first-order flux when either cell sharing it is
-            // troubled, and those cells sit on different tiles: the flags cross the cuts
-            // before any tile corrects, and a tile whose cut ghosts received a set flag
-            // corrects with a clean interior. every flag ghost on a cut is rewritten here,
-            // so none survives from an earlier stage or attempt.
-            let mut cut_trouble = vec![false; n];
-            let mut clean = vec![false; n];
-            if any_troubled != 0 {
-                report.troubled_exchanges += 1;
-                for k in 0..n {
-                    clean[k] = with_device(dev(k), || {
-                        kernels[k].fofc_flags_in(sh[k], &sh[k].geom.interior) == 0
-                    });
-                }
-                exchange_point(
-                    exchange,
-                    tiles,
-                    &sh,
-                    n_tiles,
-                    devices,
-                    transport,
-                    fabric,
-                    ExchangePoint::Troubled(stage.index as u8),
-                    iter,
-                    attempt,
-                    deadline,
-                    &mut timing.exchange,
-                )
-                .map_err(|e| fail(fabric, e.into()))?;
-                for k in 0..n {
-                    cut_trouble[k] = with_device(dev(k), || {
-                        exchange
-                            .trouble_regions(tiles[k])
-                            .iter()
-                            .any(|region| kernels[k].fofc_flags_in(sh[k], region) > 0)
-                    });
-                }
-            }
-            // every tile, on every worker, holds the level's agreed freeze count between passes
-            let prior_streak = kernels[0].freeze_streak();
-            for k in 0..n {
-                let outcome = with_device(dev(k), || {
-                    fold_stage_from_correction(
-                        sh[k],
-                        kernels[k],
-                        args,
-                        cut_trouble[k],
-                        &mut |hp| stage_hook(k, sh[k], hp, args),
-                    )
-                });
-                retry |= outcome == StageOutcome::RetryStep;
-                report.neighbor_corrections += u64::from(cut_trouble[k] && clean[k]);
-            }
-            let clock = Instant::now();
-            let froze = fabric
-                .collective(OpKind::Any, u64::from((0..n).any(|k| kernels[k].freeze_streak() > 0)), deadline)
-                .map_err(|e| fail(fabric, e.into()))?;
-            timing.collectives += clock.elapsed();
-            let streak = crate::stage::agreed_freeze_streak(prior_streak, froze != 0);
-            for k in 0..n {
-                kernels[k].set_freeze_streak(streak);
-            }
-            if attempt == 0 && cfg.injection.reject_at.contains(&(iter, stage.index)) {
-                retry = true;
-            }
-            // the rejection is decided before this stage's halos move, so no halo is
-            // computed from a rejected state.
-            let clock = Instant::now();
-            let reject = fabric
-                .collective(OpKind::Any, u64::from(retry), deadline)
-                .map_err(|e| fail(fabric, e.into()))?;
-            timing.collectives += clock.elapsed();
-            if reject != 0 {
+            // the stage runs in two spans around the correction, every agreement one vote of this
+            // worker for all of its tiles, so workers holding different numbers of tiles issue the
+            // same collective sequence
+            let injected = cfg
+                .injection
+                .trouble_at
+                .filter(|&(at_step, at_stage, _)| attempt == 0 && (at_step, at_stage) == (iter, stage.index))
+                .map(|(_, _, cell)| std::array::from_fn(|ax| cell[ax]));
+            let mut level_stage = WorkerStage {
+                stores: &sh,
+                kernels,
+                tiles,
+                devices,
+                exchange,
+                transport,
+                fabric: &mut *fabric,
+                timing: &mut *timing,
+                stage_hook: &mut *stage_hook,
+                args,
+                axis_rings: has_axis_rings,
+                n_cells,
+                ring_len,
+                deadline,
+                iter,
+                attempt,
+                injected,
+                forced: attempt == 0 && cfg.injection.reject_at.contains(&(iter, stage.index)),
+            };
+            let agreed = crate::collective_stage::collective_stage(&mut level_stage)?;
+            report.troubled_exchanges += u64::from(agreed.exchanged);
+            report.neighbor_corrections += agreed.neighbor_corrections;
+            if agreed.retry {
                 rejected = true;
                 break;
             }

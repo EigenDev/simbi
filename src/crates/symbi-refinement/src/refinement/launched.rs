@@ -46,7 +46,7 @@ use symbi_sim::worker::{
 use symbi_xpu::{ExecutionSpace, MemorySpace, with_device};
 use symbi_geometry::Metric;
 
-use super::hierarchy::{Hierarchy, RATIO, StageMark};
+use super::hierarchy::{Hierarchy, RATIO};
 use super::launched_tracers::{
     LevelAtlas, exchange_level_coefficients, exchange_level_tracers, migrate_level_continuous, relocate_continuous_to_finest,
     spawn_level_continuous, spawn_level_injection,
@@ -855,46 +855,37 @@ where
                     let mut rejected = false;
                     // the root stages
                     for ii in 0..nstages {
-                        let marks: Vec<StageMark> = (0..n)
-                            .map(|k| with_device(root_dev(k), || tiles[k].level_stage_through_mark(0, ii, dt, 0.0)))
-                            .collect();
-                        let mut troubled: u64 = marks.iter().map(|m| m.troubled).sum();
-                        if attempt == 0 {
-                            if let Some((at_step, at_stage, cell)) = base.injection.trouble_at {
-                                if (at_step, at_stage) == (iter, ii) {
-                                    let cell: [isize; D] = std::array::from_fn(|ax| cell[ax]);
-                                    for k in 0..n {
-                                        if let Some(local) = plans.root.local_cell(held.root_ids[k], cell) {
-                                            *tiles[k].levels[0].state.workspace.fofc_flag.view_mut().at_mut(local) = 1.0;
-                                            troubled += 1;
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                        let cut_trouble = level_trouble(
-                            tiles, &plans.root, held.root_ids, held.root_devices, 0, troubled,
-                            ExchangePoint::Troubled(ii as u8), iter, attempt, transport, fabric, deadline, &mut timing,
-                            &mut report.troubled_exchanges,
-                        )?;
-                        // every held root tile holds the root's agreed freeze count between passes
-                        let prior_streak = tiles[0].levels[0].kernels.freeze_streak();
-                        let mut retry = false;
-                        for k in 0..n {
-                            report.neighbor_corrections += u64::from(cut_trouble[k] && marks[k].troubled == 0);
-                            retry |= with_device(root_dev(k), || {
-                                tiles[k].level_stage_from_correction(0, ii, dt, 0.0, cut_trouble[k], marks[k].receipt_start)
-                            });
-                        }
-                        let froze = (0..n).any(|k| tiles[k].levels[0].kernels.freeze_streak() > 0);
-                        let streak = vote_freeze_streak(fabric, prior_streak, froze, deadline, &mut timing)?;
-                        for k in 0..n {
-                            tiles[k].levels[0].kernels.set_freeze_streak(streak);
-                        }
-                        if attempt == 0 && base.injection.reject_at.contains(&(iter, ii)) {
-                            retry = true;
-                        }
-                        if vote_retry(fabric, retry, deadline, &mut timing)? {
+                        let injected = base
+                            .injection
+                            .trouble_at
+                            .filter(|&(at_step, at_stage, _)| attempt == 0 && (at_step, at_stage) == (iter, ii))
+                            .map(|(_, _, cell)| std::array::from_fn(|ax| cell[ax]));
+                        let all: Vec<usize> = (0..n).collect();
+                        let mut level_stage = LaunchedLevelStage {
+                            tiles: &mut *tiles,
+                            mine: &all,
+                            ids: held.root_ids,
+                            devices: held.root_devices,
+                            plan: &plans.root,
+                            level: 0,
+                            ii,
+                            dt,
+                            alpha: 0.0,
+                            point: ExchangePoint::Troubled(ii as u8),
+                            step: iter,
+                            attempt,
+                            transport,
+                            fabric: &mut *fabric,
+                            deadline,
+                            timing: &mut timing,
+                            injected,
+                            forced: attempt == 0 && base.injection.reject_at.contains(&(iter, ii)),
+                            receipt_starts: vec![0; n],
+                        };
+                        let agreed = symbi_sim::collective_stage::collective_stage(&mut level_stage)?;
+                        report.troubled_exchanges += u64::from(agreed.exchanged);
+                        report.neighbor_corrections += agreed.neighbor_corrections;
+                        if agreed.retry {
                             rejected = true;
                             break;
                         }
@@ -980,44 +971,36 @@ where
                                 });
                             }
                             for jj in 0..nstages {
-                                let marks: Vec<StageMark> = refined
-                                    .iter()
-                                    .map(|&k| with_device(fine_dev(k), || tiles[k].level_stage_through_mark(1, jj, fine_dt, alpha)))
-                                    .collect();
-                                let mut troubled: u64 = marks.iter().map(|m| m.troubled).sum();
                                 let fine_ids: Vec<TileId> = refined.iter().map(|&k| held.fine_ids[k].unwrap()).collect();
-                                if attempt == 0 {
-                                    if let Some((at_step, at_sub, at_stage, cell)) = cfg.fine_trouble_at {
-                                        if (at_step, at_sub, at_stage) == (iter, sub as u8, jj) {
-                                            let cell: [isize; D] = std::array::from_fn(|ax| cell[ax]);
-                                            for (r, &k) in refined.iter().enumerate() {
-                                                if let Some(local) = plans.fine.local_cell(fine_ids[r], cell) {
-                                                    *tiles[k].levels[1].state.workspace.fofc_flag.view_mut().at_mut(local) = 1.0;
-                                                    troubled += 1;
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-                                let cut_trouble = fine_level_trouble(
-                                    tiles, 1, &refined, &plans.fine, &fine_ids, held.fine_devices, troubled,
-                                    ExchangePoint::Fine { substep: sub as u8, point: FinePoint::Troubled(jj as u8) },
-                                    iter, attempt, transport, fabric, deadline, &mut timing, &mut report.fine_troubled_exchanges,
-                                )?;
-                                let prior_streak = refined.first().map_or(0, |&k| tiles[k].levels[1].kernels.freeze_streak());
-                                let mut retry = false;
-                                for (r, &k) in refined.iter().enumerate() {
-                                    report.fine_neighbor_corrections += u64::from(cut_trouble[r] && marks[r].troubled == 0);
-                                    retry |= with_device(fine_dev(k), || {
-                                        tiles[k].level_stage_from_correction(1, jj, fine_dt, alpha, cut_trouble[r], marks[r].receipt_start)
-                                    });
-                                }
-                                let froze = refined.iter().any(|&k| tiles[k].levels[1].kernels.freeze_streak() > 0);
-                                let streak = vote_freeze_streak(fabric, prior_streak, froze, deadline, &mut timing)?;
-                                for &k in &refined {
-                                    tiles[k].levels[1].kernels.set_freeze_streak(streak);
-                                }
-                                if vote_retry(fabric, retry, deadline, &mut timing)? {
+                                let injected = cfg
+                                    .fine_trouble_at
+                                    .filter(|&(at_step, at_sub, at_stage, _)| attempt == 0 && (at_step, at_sub, at_stage) == (iter, sub as u8, jj))
+                                    .map(|(_, _, _, cell)| std::array::from_fn(|ax| cell[ax]));
+                                let mut level_stage = LaunchedLevelStage {
+                                    tiles: &mut *tiles,
+                                    mine: &refined,
+                                    ids: &fine_ids,
+                                    devices: held.fine_devices,
+                                    plan: &plans.fine,
+                                    level: 1,
+                                    ii: jj,
+                                    dt: fine_dt,
+                                    alpha,
+                                    point: ExchangePoint::Fine { substep: sub as u8, point: FinePoint::Troubled(jj as u8) },
+                                    step: iter,
+                                    attempt,
+                                    transport,
+                                    fabric: &mut *fabric,
+                                    deadline,
+                                    timing: &mut timing,
+                                    injected,
+                                    forced: false,
+                                    receipt_starts: vec![0; refined.len()],
+                                };
+                                let agreed = symbi_sim::collective_stage::collective_stage(&mut level_stage)?;
+                                report.fine_troubled_exchanges += u64::from(agreed.exchanged);
+                                report.fine_neighbor_corrections += agreed.neighbor_corrections;
+                                if agreed.retry {
                                     rejected = true;
                                     break 'subcycle;
                                 }
@@ -1390,30 +1373,31 @@ where
             });
         }
         for jj in 0..cx.nstages {
-            let marks: Vec<StageMark> = mine
-                .iter()
-                .enumerate()
-                .map(|(r, &k)| with_device(dev(r), || tiles[k].level_stage_through_mark(level, jj, level_dt, alpha)))
-                .collect();
-            let troubled: u64 = marks.iter().map(|m| m.troubled).sum();
-            let cut_trouble = fine_level_trouble(
-                tiles, level, &mine, plan, &ids, devices, troubled, at(FinePoint::Troubled(jj as u8)),
-                step, attempt, cx.transport, fabric, deadline, timing, &mut report.fine_troubled_exchanges,
-            )?;
-            let prior_streak = mine.first().map_or(0, |&k| tiles[k].levels[level].kernels.freeze_streak());
-            let mut retry = false;
-            for (r, &k) in mine.iter().enumerate() {
-                report.fine_neighbor_corrections += u64::from(cut_trouble[r] && marks[r].troubled == 0);
-                retry |= with_device(dev(r), || {
-                    tiles[k].level_stage_from_correction(level, jj, level_dt, alpha, cut_trouble[r], marks[r].receipt_start)
-                });
-            }
-            let froze = mine.iter().any(|&k| tiles[k].levels[level].kernels.freeze_streak() > 0);
-            let streak = vote_freeze_streak(fabric, prior_streak, froze, deadline, timing)?;
-            for &k in &mine {
-                tiles[k].levels[level].kernels.set_freeze_streak(streak);
-            }
-            if vote_retry(fabric, retry, deadline, timing)? {
+            let mut level_stage = LaunchedLevelStage {
+                tiles: &mut *tiles,
+                mine: &mine,
+                ids: &ids,
+                devices,
+                plan,
+                level,
+                ii: jj,
+                dt: level_dt,
+                alpha,
+                point: at(FinePoint::Troubled(jj as u8)),
+                step,
+                attempt,
+                transport: cx.transport,
+                fabric: &mut *fabric,
+                deadline,
+                timing: &mut *timing,
+                injected: None,
+                forced: false,
+                receipt_starts: vec![0; mine.len()],
+            };
+            let agreed = symbi_sim::collective_stage::collective_stage(&mut level_stage)?;
+            report.fine_troubled_exchanges += u64::from(agreed.exchanged);
+            report.fine_neighbor_corrections += agreed.neighbor_corrections;
+            if agreed.retry {
                 return Ok(true);
             }
             if let Some(atlas) = cx.atlas.filter(|_| cx.discrete) {
@@ -1716,24 +1700,6 @@ where
     Ok(())
 }
 
-/// the level's agreed freeze count after a correction pass, voted across the workers: the count
-/// every held tile of the level held before the pass, advanced when any tile of the level on any
-/// worker froze (`symbi_sim::stage::agreed_freeze_streak`)
-fn vote_freeze_streak<L: Link>(
-    fabric: &mut Fabric<L>,
-    prior: u32,
-    froze: bool,
-    deadline: Duration,
-    timing: &mut WorkerTiming,
-) -> Result<u32, WorkerError> {
-    let clock = Instant::now();
-    let any = fabric
-        .collective(OpKind::Any, u64::from(froze), deadline)
-        .map_err(|e| fail(fabric, e.into()))?;
-    timing.collectives += clock.elapsed();
-    Ok(symbi_sim::stage::agreed_freeze_streak(prior, any != 0))
-}
-
 fn vote_retry<L: Link>(
     fabric: &mut Fabric<L>,
     retry: bool,
@@ -1748,17 +1714,17 @@ fn vote_retry<L: Link>(
     Ok(reject != 0)
 }
 
-/// the troubled marks of the root level across the cuts: one vote for every tile this
-/// worker holds, the flag exchange when any worker is troubled, and per tile whether a cut
-/// ghost received a flag (a clean tile then corrects at the cut)
+/// the troubled flags of one level across its cuts at `point`, from the tiles `mine` this worker
+/// holds at the level (`ids` their tile ids, `devices` the level's devices by tile id); per held
+/// tile, whether a cut ghost received a flag (a clean tile then corrects at the cut)
 #[allow(clippy::too_many_arguments)]
-fn level_trouble<R, const D: usize, const DOF: usize, M, E, S, Mem, K, T, L>(
+fn exchange_level_flags<R, const D: usize, const DOF: usize, M, E, S, Mem, K, T, L>(
     tiles: &[Hierarchy<R, D, DOF, M, E, S, Mem, K>],
+    level: usize,
+    mine: &[usize],
     plan: &PlanExchange<'_, D>,
     ids: &[TileId],
     devices: &[i32],
-    level: usize,
-    troubled: u64,
     point: ExchangePoint,
     step: u64,
     attempt: u16,
@@ -1766,7 +1732,6 @@ fn level_trouble<R, const D: usize, const DOF: usize, M, E, S, Mem, K, T, L>(
     fabric: &mut Fabric<L>,
     deadline: Duration,
     timing: &mut WorkerTiming,
-    exchanges: &mut u64,
 ) -> Result<Vec<bool>, WorkerError>
 where
     R: Regime<f64, D> + Copy,
@@ -1778,33 +1743,27 @@ where
     T: HaloTransport,
     L: Link,
 {
-    let clock = Instant::now();
-    let any = fabric
-        .collective(OpKind::Any, u64::from(troubled > 0), deadline)
-        .map_err(|e| fail(fabric, e.into()))?;
-    timing.collectives += clock.elapsed();
-    let mut cut_trouble = vec![false; tiles.len()];
-    if any == 0 {
-        return Ok(cut_trouble);
-    }
-    *exchanges += 1;
     let mut lists: Vec<Vec<&Field<f64, D, Mem>>> = (0..plan.plan().n_tiles()).map(|_| Vec::new()).collect();
-    for (k, h) in tiles.iter().enumerate() {
-        lists[ids[k].0 as usize] = plan_fields(&h.levels[level].state);
+    for (r, &k) in mine.iter().enumerate() {
+        lists[ids[r].0 as usize] = plan_fields(&tiles[k].levels[level].state);
     }
     let part = PlanPart { plan, fields: &lists, devices, fault: None, dst_fields: None };
     exchange_point_plans(&[part], transport, fabric, point, step, attempt, deadline, &mut timing.exchange)
         .map_err(|e| fail(fabric, e.into()))?;
-    for (k, h) in tiles.iter().enumerate() {
-        let l = &h.levels[level];
-        cut_trouble[k] = with_device(devices[ids[k].0 as usize], || {
-            plan.trouble_regions(ids[k]).iter().any(|region| l.kernels.fofc_flags_in(&l.state, region) > 0)
-        });
-    }
-    Ok(cut_trouble)
+    Ok(mine
+        .iter()
+        .enumerate()
+        .map(|(r, &k)| {
+            let l = &tiles[k].levels[level];
+            with_device(devices[ids[r].0 as usize], || {
+                plan.trouble_regions(ids[r]).iter().any(|region| l.kernels.fofc_flags_in(&l.state, region) > 0)
+            })
+        })
+        .collect())
 }
 
-/// `level_trouble` for the fine level, over the refined tiles alone
+/// the troubled marks of one level across the cuts for a single probe stage: one vote for every
+/// tile this worker holds, then the flag exchange when any worker is troubled
 #[allow(clippy::too_many_arguments)]
 fn fine_level_trouble<R, const D: usize, const DOF: usize, M, E, S, Mem, K, T, L>(
     tiles: &[Hierarchy<R, D, DOF, M, E, S, Mem, K>],
@@ -1838,25 +1797,128 @@ where
         .collective(OpKind::Any, u64::from(troubled > 0), deadline)
         .map_err(|e| fail(fabric, e.into()))?;
     timing.collectives += clock.elapsed();
-    let mut cut_trouble = vec![false; refined.len()];
     if any == 0 {
-        return Ok(cut_trouble);
+        return Ok(vec![false; refined.len()]);
     }
     *exchanges += 1;
-    let mut lists: Vec<Vec<&Field<f64, D, Mem>>> = (0..plan.plan().n_tiles()).map(|_| Vec::new()).collect();
-    for (r, &k) in refined.iter().enumerate() {
-        lists[fine_ids[r].0 as usize] = plan_fields(&tiles[k].levels[level].state);
+    exchange_level_flags(tiles, level, refined, plan, fine_ids, devices, point, step, attempt, transport, fabric, deadline, timing)
+}
+
+/// one stage of one refined level on a worker: the tiles `mine` it holds at the level fold through
+/// the hierarchy's own stage halves on the level's devices, a test fault may write a global cell
+/// troubled, the flags cross the level's cuts at the stage's troubled exchange point, and every
+/// agreement is one vote of this worker over the fabric. a worker holding no tile at the level
+/// votes with neutral inputs
+struct LaunchedLevelStage<'a, 'p, R, const D: usize, const DOF: usize, M, E, S, Mem, K, T, L>
+where
+    R: Regime<f64, D> + Copy,
+    M: Metric<f64, D> + Copy + Send + Sync,
+    E: symbi_hydro::eos::EosFor<f64, <R as Regime<f64, D>>::Energy> + Copy + Send + Sync,
+    S: ExecutionSpace,
+    Mem: MemorySpace + Sync,
+    K: KernelSet<D, DOF, Mem, f64>,
+    T: HaloTransport,
+    L: Link,
+{
+    tiles: &'a mut [Hierarchy<R, D, DOF, M, E, S, Mem, K>],
+    mine: &'a [usize],
+    ids: &'a [TileId],
+    devices: &'a [i32],
+    plan: &'a PlanExchange<'p, D>,
+    level: usize,
+    ii: usize,
+    dt: f64,
+    alpha: f64,
+    point: ExchangePoint,
+    step: u64,
+    attempt: u16,
+    transport: &'a T,
+    fabric: &'a mut Fabric<L>,
+    deadline: Duration,
+    timing: &'a mut WorkerTiming,
+    /// the global cell a test fault writes troubled at this stage
+    injected: Option<[isize; D]>,
+    /// a test fault rejects this stage
+    forced: bool,
+    /// each held tile's tracer interface ledger length as its stage opened
+    receipt_starts: Vec<usize>,
+}
+
+impl<R, const D: usize, const DOF: usize, M, E, S, Mem, K, T, L> symbi_sim::collective_stage::StageCollective
+    for LaunchedLevelStage<'_, '_, R, D, DOF, M, E, S, Mem, K, T, L>
+where
+    R: Regime<f64, D> + Copy,
+    M: Metric<f64, D> + Copy + Send + Sync,
+    E: symbi_hydro::eos::EosFor<f64, <R as Regime<f64, D>>::Energy> + Copy + Send + Sync,
+    S: ExecutionSpace,
+    Mem: MemorySpace + Sync,
+    K: KernelSet<D, DOF, Mem, f64>,
+    T: HaloTransport,
+    L: Link,
+{
+    type Error = WorkerError;
+
+    fn tiles(&self) -> usize {
+        self.mine.len()
     }
-    let part = PlanPart { plan, fields: &lists, devices, fault: None, dst_fields: None };
-    exchange_point_plans(&[part], transport, fabric, point, step, attempt, deadline, &mut timing.exchange)
-        .map_err(|e| fail(fabric, e.into()))?;
-    for (r, &k) in refined.iter().enumerate() {
-        let l = &tiles[k].levels[level];
-        cut_trouble[r] = with_device(devices[fine_ids[r].0 as usize], || {
-            plan.trouble_regions(fine_ids[r]).iter().any(|region| l.kernels.fofc_flags_in(&l.state, region) > 0)
-        });
+
+    fn mark(&mut self, r: usize) -> Result<u64, WorkerError> {
+        let (tile, level, ii, dt, alpha) = (&mut self.tiles[self.mine[r]], self.level, self.ii, self.dt, self.alpha);
+        let mark = with_device(self.devices[self.ids[r].0 as usize], || tile.level_stage_through_mark(level, ii, dt, alpha));
+        self.receipt_starts[r] = mark.receipt_start;
+        Ok(mark.troubled)
     }
-    Ok(cut_trouble)
+
+    fn injected_trouble(&mut self, r: usize) -> u64 {
+        let Some(local) = self.injected.and_then(|cell| self.plan.local_cell(self.ids[r], cell)) else { return 0 };
+        *self.tiles[self.mine[r]].levels[self.level].state.workspace.fofc_flag.view_mut().at_mut(local) = 1.0;
+        1
+    }
+
+    fn any(&mut self, local: bool) -> Result<bool, WorkerError> {
+        let clock = Instant::now();
+        let any = self
+            .fabric
+            .collective(OpKind::Any, u64::from(local), self.deadline)
+            .map_err(|e| fail(self.fabric, e.into()))?;
+        self.timing.collectives += clock.elapsed();
+        Ok(any != 0)
+    }
+
+    fn exchange_trouble(&mut self) -> Result<Vec<bool>, WorkerError> {
+        exchange_level_flags(
+            self.tiles,
+            self.level,
+            self.mine,
+            self.plan,
+            self.ids,
+            self.devices,
+            self.point,
+            self.step,
+            self.attempt,
+            self.transport,
+            self.fabric,
+            self.deadline,
+            self.timing,
+        )
+    }
+
+    fn correct(&mut self, r: usize, cut_trouble: bool) -> Result<bool, WorkerError> {
+        let (tile, level, ii, dt, alpha, start) = (&mut self.tiles[self.mine[r]], self.level, self.ii, self.dt, self.alpha, self.receipt_starts[r]);
+        Ok(with_device(self.devices[self.ids[r].0 as usize], || tile.level_stage_from_correction(level, ii, dt, alpha, cut_trouble, start)))
+    }
+
+    fn freeze_streak(&self, r: usize) -> u32 {
+        self.tiles[self.mine[r]].levels[self.level].kernels.freeze_streak()
+    }
+
+    fn set_freeze_streak(&mut self, r: usize, streak: u32) {
+        self.tiles[self.mine[r]].levels[self.level].kernels.set_freeze_streak(streak);
+    }
+
+    fn forced_rejection(&mut self) -> bool {
+        self.forced
+    }
 }
 
 /// a register unit crossing a cut is admitted on a uniform cartesian root alone: the

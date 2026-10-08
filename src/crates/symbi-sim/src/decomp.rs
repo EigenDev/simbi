@@ -2652,6 +2652,103 @@ where
 
 /// a tile's stage hook: called with the tile's flat index, its store, the hook point and the
 /// stage's arguments at every hook point of every stage fold, the admissibility redo's included
+/// one stage of the flat in-process tiles: each tile folds on its device under the run's stage
+/// hook, the troubled flags cross the cuts by the in-process exchange, and every agreement is the
+/// tiles' own
+struct FlatStage<'a, 'h, const D: usize, const DOF: usize, M, K, T>
+where
+    M: MemorySpace,
+    K: KernelSet<D, DOF, M, f64>,
+    T: HaloTransport,
+{
+    stores: &'a [&'a FieldStore<D, DOF, M, f64>],
+    kernels: &'a [&'a K],
+    schedule: &'a Schedule<D>,
+    devices: &'a [i32],
+    transport: &'a T,
+    stage_hook: &'a mut TileStageHook<'h, D, DOF, M>,
+    args: crate::stage::StageArgs,
+    axis_rings: bool,
+}
+
+impl<const D: usize, const DOF: usize, M, K, T> crate::collective_stage::StageCollective for FlatStage<'_, '_, D, DOF, M, K, T>
+where
+    M: MemorySpace,
+    K: KernelSet<D, DOF, M, f64>,
+    T: HaloTransport,
+{
+    type Error = std::convert::Infallible;
+
+    fn tiles(&self) -> usize {
+        self.stores.len()
+    }
+
+    fn mark(&mut self, k: usize) -> Result<u64, Self::Error> {
+        let (store, kernel, args, hook) = (self.stores[k], self.kernels[k], self.args, &mut *self.stage_hook);
+        Ok(symbi_xpu::with_device(self.devices[k], || {
+            crate::stage::fold_stage_through_mark(store, kernel, args, &mut |hp| hook(k, store, hp, args))
+        }))
+    }
+
+    fn axis_rings(&self) -> bool {
+        self.axis_rings
+    }
+
+    fn mark_through_emf(&mut self, k: usize) -> Result<(), Self::Error> {
+        let (store, kernel, args, hook) = (self.stores[k], self.kernels[k], self.args, &mut *self.stage_hook);
+        symbi_xpu::with_device(self.devices[k], || {
+            crate::stage::fold_stage_through_emf(store, kernel, args, &mut |hp| hook(k, store, hp, args))
+        });
+        Ok(())
+    }
+
+    fn reconcile_rings(&mut self) -> Result<(), Self::Error> {
+        drain_devices::<M>(self.devices);
+        crate::axis_ring::reconcile_across(self.stores);
+        Ok(())
+    }
+
+    fn mark_from_curl(&mut self, k: usize) -> Result<u64, Self::Error> {
+        let (store, kernel, args, hook) = (self.stores[k], self.kernels[k], self.args, &mut *self.stage_hook);
+        Ok(symbi_xpu::with_device(self.devices[k], || {
+            crate::stage::fold_stage_curl_through_mark(store, kernel, args, &mut |hp| hook(k, store, hp, args))
+        }))
+    }
+
+    fn any(&mut self, local: bool) -> Result<bool, Self::Error> {
+        Ok(local)
+    }
+
+    fn exchange_trouble(&mut self) -> Result<Vec<bool>, Self::Error> {
+        drain_devices::<M>(self.devices);
+        let received = exchange_trouble(self.stores, self.schedule, self.devices, self.transport);
+        drain_devices::<M>(self.devices);
+        Ok((0..self.stores.len())
+            .map(|i| {
+                symbi_xpu::with_device(self.devices[i], || {
+                    received[i].iter().any(|region| self.kernels[i].fofc_flags_in(self.stores[i], region) > 0)
+                })
+            })
+            .collect())
+    }
+
+    fn correct(&mut self, k: usize, cut_trouble: bool) -> Result<bool, Self::Error> {
+        let (store, kernel, args, hook) = (self.stores[k], self.kernels[k], self.args, &mut *self.stage_hook);
+        let outcome = symbi_xpu::with_device(self.devices[k], || {
+            crate::stage::fold_stage_from_correction(store, kernel, args, cut_trouble, &mut |hp| hook(k, store, hp, args))
+        });
+        Ok(outcome == crate::stage::StageOutcome::RetryStep)
+    }
+
+    fn freeze_streak(&self, k: usize) -> u32 {
+        self.kernels[k].freeze_streak()
+    }
+
+    fn set_freeze_streak(&mut self, k: usize, streak: u32) {
+        self.kernels[k].set_freeze_streak(streak);
+    }
+}
+
 /// the attempts of one root step of the flat decomposed march: every tile captures its retry
 /// snapshot, the stages advance in lockstep with the troubled marks and the halos crossing the
 /// cuts, and a rejection restores every tile's fields, tracer ancestry, motion and clock with the
@@ -2779,60 +2876,18 @@ where
                 allow_elision: false,
                 exit_fraction: crate::driver::stage_exit_fraction(stages, stage.index),
             };
-            let mut troubled = 0u64;
-            if has_axis_rings {
-                // the edges on a coordinate axis are reconciled over the whole ring between
-                // the stage's complete EMF and its curl, across every tile holding a copy
-                for i in 0..n {
-                    symbi_xpu::with_device(devices[i], || {
-                        crate::stage::fold_stage_through_emf(sh[i], kernels[i], args, &mut |hp| stage_hook(i, sh[i], hp, args))
-                    });
-                }
-                drain_devices::<M>(devices);
-                crate::axis_ring::reconcile_across(&sh);
-                for i in 0..n {
-                    troubled += symbi_xpu::with_device(devices[i], || {
-                        crate::stage::fold_stage_curl_through_mark(sh[i], kernels[i], args, &mut |hp| stage_hook(i, sh[i], hp, args))
-                    });
-                }
-            } else {
-                for i in 0..n {
-                    troubled += symbi_xpu::with_device(devices[i], || {
-                        crate::stage::fold_stage_through_mark(sh[i], kernels[i], args, &mut |hp| stage_hook(i, sh[i], hp, args))
-                    });
-                }
-            }
-            let mut cut_trouble = vec![false; n];
-            if troubled > 0 {
-                drain_devices::<M>(devices);
-                let received = exchange_trouble(&sh, &schedule, devices, transport);
-                drain_devices::<M>(devices);
-                for i in 0..n {
-                    cut_trouble[i] = symbi_xpu::with_device(devices[i], || {
-                        received[i]
-                            .iter()
-                            .any(|region| kernels[i].fofc_flags_in(sh[i], region) > 0)
-                    });
-                }
-            }
-            // every tile holds the level's agreed freeze count between passes
-            let prior_streak = kernels[0].freeze_streak();
-            for i in 0..n {
-                let outcome = symbi_xpu::with_device(devices[i], || {
-                    crate::stage::fold_stage_from_correction(
-                        sh[i],
-                        kernels[i],
-                        args,
-                        cut_trouble[i],
-                        &mut |hp| stage_hook(i, sh[i], hp, args),
-                    )
-                });
-                retry |= outcome == crate::stage::StageOutcome::RetryStep;
-            }
-            let streak = crate::stage::agreed_freeze_streak(prior_streak, (0..n).any(|i| kernels[i].freeze_streak() > 0));
-            for i in 0..n {
-                kernels[i].set_freeze_streak(streak);
-            }
+            let mut level_stage = FlatStage {
+                stores: &sh,
+                kernels,
+                schedule,
+                devices,
+                transport,
+                stage_hook: &mut *stage_hook,
+                args,
+                axis_rings: has_axis_rings,
+            };
+            let Ok::<_, std::convert::Infallible>(agreed) = crate::collective_stage::collective_stage(&mut level_stage);
+            retry = agreed.retry;
             if retry {
                 break;
             }

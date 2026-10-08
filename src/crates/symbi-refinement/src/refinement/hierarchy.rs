@@ -125,6 +125,7 @@ use symbi_hydro::state::PrimFromSlots;
 use symbi_sim::decomp::{
     HaloTransport, Topology, drain_devices, exchange_grid, flatten, schedule_of_tiles, unflatten,
 };
+use symbi_sim::collective_stage::StageCollective;
 use symbi_sim::step_transaction::{RootAttempt, RootStep, StepHalt, take_root_step};
 use symbi_sim::driver::{
     TimestepFailure, advance_clock, advance_state_clock, agree_timestep, book_horizon_receipt, evolve_bodies,
@@ -3079,8 +3080,9 @@ where
     /// one stage of `level`, folded whole: the mark and the correction back to back, as a
     /// hierarchy that shares no cut runs them. returns true on a stage retry request.
     pub fn level_stage(&mut self, level: usize, ii: usize, dt: f64, alpha0: f64) -> bool {
-        let mark = self.level_stage_through_mark(level, ii, dt, alpha0);
-        self.level_stage_from_correction(level, ii, dt, alpha0, false, mark.receipt_start)
+        let mut level_stage = OneTileLevelStage { hier: self, level, ii, dt, alpha0, receipt_start: 0 };
+        let Ok::<_, std::convert::Infallible>(agreed) = symbi_sim::collective_stage::collective_stage(&mut level_stage);
+        agreed.retry
     }
 
     /// the stage's phases up to the conserved-to-primitive recovery and the troubled-cell mark.
@@ -5662,47 +5664,158 @@ where
     K: KernelSet<NDIM, DOF, Mem, f64>,
     T: HaloTransport,
 {
-    let marks: Vec<StageMark> = order
-        .iter()
-        .enumerate()
-        .map(|(k, &i)| {
-            symbi_xpu::with_device(devices[k], || tiles[i].level_stage_through_mark(level, ii, dt, alpha0))
-        })
-        .collect();
-    let troubled: u64 = marks.iter().map(|m| m.troubled).sum();
-    let mut cut_trouble = vec![false; order.len()];
-    if troubled > 0 {
+    let mut level_stage =
+        TiledLevelStage { tiles, level, order, counts, devices, transport, ii, dt, alpha0, receipt_starts: vec![0; order.len()] };
+    let Ok::<_, std::convert::Infallible>(agreed) = symbi_sim::collective_stage::collective_stage(&mut level_stage);
+    agreed.retry
+}
+
+/// one stage of one level across the in-process tiles holding it: each tile folds on its device
+/// through the hierarchy's own stage halves, the troubled flags cross the level's cuts by the
+/// in-process exchange, and every agreement is the tiles' own
+struct TiledLevelStage<'a, R, const NDIM: usize, const DOF: usize, M, E, S, Mem, K, T>
+where
+    R: Regime<f64, NDIM> + Copy,
+    M: Metric<f64, NDIM> + Copy + Send + Sync,
+    E: symbi_hydro::eos::EosFor<f64, <R as Regime<f64, NDIM>>::Energy> + Copy + Send + Sync,
+    S: ExecutionSpace,
+    Mem: MemorySpace + Sync,
+    K: KernelSet<NDIM, DOF, Mem, f64>,
+    T: HaloTransport,
+{
+    tiles: &'a mut [Hierarchy<R, NDIM, DOF, M, E, S, Mem, K>],
+    level: usize,
+    order: &'a [usize],
+    counts: [usize; NDIM],
+    devices: &'a [i32],
+    transport: &'a T,
+    ii: usize,
+    dt: f64,
+    alpha0: f64,
+    /// each tile's tracer interface ledger length as its stage opened
+    receipt_starts: Vec<usize>,
+}
+
+impl<R, const NDIM: usize, const DOF: usize, M, E, S, Mem, K, T> StageCollective for TiledLevelStage<'_, R, NDIM, DOF, M, E, S, Mem, K, T>
+where
+    R: Regime<f64, NDIM> + Copy,
+    M: Metric<f64, NDIM> + Copy + Send + Sync,
+    E: symbi_hydro::eos::EosFor<f64, <R as Regime<f64, NDIM>>::Energy> + Copy + Send + Sync,
+    S: ExecutionSpace,
+    Mem: MemorySpace + Sync,
+    K: KernelSet<NDIM, DOF, Mem, f64>,
+    T: HaloTransport,
+{
+    type Error = std::convert::Infallible;
+
+    fn tiles(&self) -> usize {
+        self.order.len()
+    }
+
+    fn mark(&mut self, k: usize) -> Result<u64, Self::Error> {
+        let (tile, level, ii, dt, alpha0) = (&mut self.tiles[self.order[k]], self.level, self.ii, self.dt, self.alpha0);
+        let mark = symbi_xpu::with_device(self.devices[k], || tile.level_stage_through_mark(level, ii, dt, alpha0));
+        self.receipt_starts[k] = mark.receipt_start;
+        Ok(mark.troubled)
+    }
+
+    fn any(&mut self, local: bool) -> Result<bool, Self::Error> {
+        Ok(local)
+    }
+
+    fn exchange_trouble(&mut self) -> Result<Vec<bool>, Self::Error> {
+        let (tiles, level, order, devices) = (&*self.tiles, self.level, self.order, self.devices);
         drain_devices::<Mem>(devices);
         let received = {
-            let states: Vec<&FieldStore<NDIM, DOF, Mem, f64>> = order
-                .iter()
-                .map(|&i| &*tiles[i].levels[level].state)
-                .collect();
-            let schedule = schedule_of_tiles(&states, counts, &level_topology(tiles, level, order));
-            symbi_sim::decomp::exchange_trouble(&states, &schedule, devices, transport)
+            let states: Vec<&FieldStore<NDIM, DOF, Mem, f64>> = order.iter().map(|&i| &*tiles[i].levels[level].state).collect();
+            let schedule = schedule_of_tiles(&states, self.counts, &level_topology(tiles, level, order));
+            symbi_sim::decomp::exchange_trouble(&states, &schedule, devices, self.transport)
         };
         drain_devices::<Mem>(devices);
-        for (k, &i) in order.iter().enumerate() {
-            let l = &tiles[i].levels[level];
-            cut_trouble[k] = symbi_xpu::with_device(devices[k], || {
-                received[k].iter().any(|region| l.kernels.fofc_flags_in(&l.state, region) > 0)
-            });
-        }
+        Ok(order
+            .iter()
+            .enumerate()
+            .map(|(k, &i)| {
+                let l = &tiles[i].levels[level];
+                symbi_xpu::with_device(devices[k], || received[k].iter().any(|region| l.kernels.fofc_flags_in(&l.state, region) > 0))
+            })
+            .collect())
     }
-    // every tile holding the level holds its agreed freeze count between passes
-    let prior_streak = order.first().map_or(0, |&i| tiles[i].levels[level].kernels.freeze_streak());
-    let mut retry = false;
-    for (k, &i) in order.iter().enumerate() {
-        retry |= symbi_xpu::with_device(devices[k], || {
-            tiles[i].level_stage_from_correction(level, ii, dt, alpha0, cut_trouble[k], marks[k].receipt_start)
-        });
+
+    fn correct(&mut self, k: usize, cut_trouble: bool) -> Result<bool, Self::Error> {
+        let (tile, level, ii, dt, alpha0, start) =
+            (&mut self.tiles[self.order[k]], self.level, self.ii, self.dt, self.alpha0, self.receipt_starts[k]);
+        Ok(symbi_xpu::with_device(self.devices[k], || tile.level_stage_from_correction(level, ii, dt, alpha0, cut_trouble, start)))
     }
-    let froze = order.iter().any(|&i| tiles[i].levels[level].kernels.freeze_streak() > 0);
-    let streak = symbi_sim::stage::agreed_freeze_streak(prior_streak, froze);
-    for &i in order {
-        tiles[i].levels[level].kernels.set_freeze_streak(streak);
+
+    fn freeze_streak(&self, k: usize) -> u32 {
+        self.tiles[self.order[k]].levels[self.level].kernels.freeze_streak()
     }
-    retry
+
+    fn set_freeze_streak(&mut self, k: usize, streak: u32) {
+        self.tiles[self.order[k]].levels[self.level].kernels.set_freeze_streak(streak);
+    }
+}
+
+/// one stage of one level of a single hierarchy: the one tile marks and corrects, with no cut to
+/// carry its flags and every agreement its own
+struct OneTileLevelStage<'h, R, const NDIM: usize, const DOF: usize, M, E, S, Mem, K>
+where
+    R: Regime<f64, NDIM> + Copy,
+    M: Metric<f64, NDIM> + Copy + Send + Sync,
+    E: symbi_hydro::eos::EosFor<f64, <R as Regime<f64, NDIM>>::Energy> + Copy + Send + Sync,
+    S: ExecutionSpace,
+    Mem: MemorySpace + Sync,
+    K: KernelSet<NDIM, DOF, Mem, f64>,
+{
+    hier: &'h mut Hierarchy<R, NDIM, DOF, M, E, S, Mem, K>,
+    level: usize,
+    ii: usize,
+    dt: f64,
+    alpha0: f64,
+    receipt_start: usize,
+}
+
+impl<R, const NDIM: usize, const DOF: usize, M, E, S, Mem, K> StageCollective for OneTileLevelStage<'_, R, NDIM, DOF, M, E, S, Mem, K>
+where
+    R: Regime<f64, NDIM> + Copy,
+    M: Metric<f64, NDIM> + Copy + Send + Sync,
+    E: symbi_hydro::eos::EosFor<f64, <R as Regime<f64, NDIM>>::Energy> + Copy + Send + Sync,
+    S: ExecutionSpace,
+    Mem: MemorySpace + Sync,
+    K: KernelSet<NDIM, DOF, Mem, f64>,
+{
+    type Error = std::convert::Infallible;
+
+    fn tiles(&self) -> usize {
+        1
+    }
+
+    fn mark(&mut self, _k: usize) -> Result<u64, Self::Error> {
+        let mark = self.hier.level_stage_through_mark(self.level, self.ii, self.dt, self.alpha0);
+        self.receipt_start = mark.receipt_start;
+        Ok(mark.troubled)
+    }
+
+    fn any(&mut self, local: bool) -> Result<bool, Self::Error> {
+        Ok(local)
+    }
+
+    fn exchange_trouble(&mut self) -> Result<Vec<bool>, Self::Error> {
+        Ok(vec![false])
+    }
+
+    fn correct(&mut self, _k: usize, cut_trouble: bool) -> Result<bool, Self::Error> {
+        Ok(self.hier.level_stage_from_correction(self.level, self.ii, self.dt, self.alpha0, cut_trouble, self.receipt_start))
+    }
+
+    fn freeze_streak(&self, _k: usize) -> u32 {
+        self.hier.levels[self.level].kernels.freeze_streak()
+    }
+
+    fn set_freeze_streak(&mut self, _k: usize, streak: u32) {
+        self.hier.levels[self.level].kernels.set_freeze_streak(streak);
+    }
 }
 
 /// what the first half of a level stage leaves for the second: the troubled interior cell
