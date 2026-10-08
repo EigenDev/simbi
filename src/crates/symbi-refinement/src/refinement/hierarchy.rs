@@ -1416,6 +1416,26 @@ where
                     ),
                 });
             }
+            // a fine side flush with a periodic parent face inherits the periodic boundary and
+            // wraps onto the fine level's own opposite side, which is the domain's opposite side
+            // only when the patch spans the whole axis
+            for ax in 0..NDIM {
+                let (c, p) = (&coverage.spaces[ax], &parent.geom.interior.spaces[ax]);
+                let lo = c.lo == p.lo && parent.boundaries.lo(ax) == BoundaryType::Periodic;
+                let hi = c.hi == p.hi && parent.boundaries.hi(ax) == BoundaryType::Periodic;
+                if lo != hi {
+                    return Err(symbi_xpu::XpuError {
+                        operation: "refinement region",
+                        code: 0,
+                        detail: format!(
+                            "a level-{} refinement patch reaches the periodic face of axis {ax} on one side \
+                             only: its fine level would wrap onto its own opposite side; span the whole \
+                             periodic axis or keep the patch clear of both faces",
+                            levels.len()
+                        ),
+                    });
+                }
+            }
             // a patch face lying on a root cut: the fine faces on it live on this tile and
             // the coarse cell their reflux corrects lives on the neighbor. a driver carrying
             // register contributions across cuts takes it as a contributing face; the others
