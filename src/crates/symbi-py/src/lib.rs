@@ -7120,10 +7120,10 @@ fn baked_gr_hydro(dims: usize, coords: &str, spacetime: &str) -> bool {
 }
 
 /// the baked GR-hydro combinations the launched gas workers build: the kerr-schild box in three
-/// dimensions, the radial line and the meridional plane, the arms of `charted!` in
-/// `run_worker_process`
+/// dimensions, the radial line, the spherical meridional plane and the cylindrical charts, the arms
+/// of `charted!` in `run_worker_process`
 fn launched_gr_hydro(dims: usize, coords: &str, spacetime: &str) -> bool {
-    baked_gr_hydro(dims, coords, spacetime) && matches!((dims, coords), (3, "cartesian") | (1 | 2, "spherical"))
+    baked_gr_hydro(dims, coords, spacetime) && matches!((dims, coords), (3, "cartesian") | (1 | 2, "spherical") | (2 | 3, "cylindrical"))
 }
 
 /// expand the (geometry x dims) arms for one hydro regime. cartesian / spherical
@@ -12390,6 +12390,31 @@ fn run_worker_process(
             Err(format!("the {} spacetime on the {}-dimensional spherical chart is outside the distributed first release", cfg.spacetime, $other))
         };
     }
+    // a black hole on the horizon-penetrating cylindrical chart, built as the single grid builds
+    // it: the (R, phi) plane with one momentum per axis, the (R, z) plane with the azimuthal
+    // momentum, the full three-dimensional chart, schwarzschild or spinning
+    macro_rules! kerr_schild_cylinder {
+        (2, $arm:ident, $regime:expr, $regime_ty:ty) => {
+            match (cfg.spacetime.as_str(), cfg.cyl_plane) {
+                ("schwarzschild_ks", CylPlane::RPhi) => {
+                    $arm!(SchwarzschildKSCylindrical { mass: cfg.schwarzschild_mass }, SchwarzschildKSCylindrical<f64>, $regime, $regime_ty, 2)
+                }
+                ("schwarzschild_ks", CylPlane::Rz) => {
+                    $arm!(SchwarzschildKSCylindricalRz { mass: cfg.schwarzschild_mass }, SchwarzschildKSCylindricalRz<f64>, $regime, $regime_ty, 3)
+                }
+                (spacetime, _) => Err(format!("the {spacetime} spacetime on the 2-dimensional cylindrical chart is outside the distributed first release")),
+            }
+        };
+        (3, $arm:ident, $regime:expr, $regime_ty:ty) => {
+            match cfg.spacetime.as_str() {
+                "kerr_ks" => $arm!(KerrKSCylindrical { mass: cfg.schwarzschild_mass, spin: cfg.kerr_spin }, KerrKSCylindrical<f64>, $regime, $regime_ty, 3),
+                _ => $arm!(SchwarzschildKSCylindrical { mass: cfg.schwarzschild_mass }, SchwarzschildKSCylindrical<f64>, $regime, $regime_ty, 3),
+            }
+        };
+        ($other:tt, $arm:ident, $regime:expr, $regime_ty:ty) => {
+            Err(format!("the {} spacetime on the {}-dimensional cylindrical chart is outside the distributed first release", cfg.spacetime, $other))
+        };
+    }
     macro_rules! charted {
         ($arm:ident) => {
             match cfg.coord_system.as_str() {
@@ -12425,6 +12450,7 @@ fn run_worker_process(
                     $regime_ty
                 ),
                 ("spherical", "schwarzschild_ks" | "kerr_ks", 2) => kerr_schild_plane!($d, $arm, $regime, $regime_ty),
+                ("cylindrical", "schwarzschild_ks" | "kerr_ks", _) => kerr_schild_cylinder!($d, $arm, $regime, $regime_ty),
                 (chart, "minkowski", _) => Err(format!("the {chart} chart is outside the distributed first release")),
                 (chart, spacetime, d) => Err(format!(
                     "the {spacetime} spacetime on the {d}-dimensional {chart} chart is outside the distributed first release"

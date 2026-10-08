@@ -21,8 +21,9 @@
 # declaration on one face of an axis cut into tiles is refused at admission: the one
 # tile wraps onto itself and its neighbor's seam is never filled.
 # the launch reads the tile count from its layout, so a config declaring
-# several devices launches on a cpu build; a curved-spacetime chart the worker
-# arms do not build is refused by the launch scope before any output.
+# several devices launches on a cpu build; magnetized gas on a curved spacetime,
+# which the worker arms do not build, is refused by the launch scope before any
+# output.
 #
 # run: pytest -m simulation simbi/simulation/tests/test_shared_admission.py
 # =============================================================================
@@ -239,15 +240,15 @@ def test_a_launch_reads_its_tile_count_from_the_layout(tmp_path: Path, probe: Pa
     assert list((tmp_path / "launched").glob("*final*.h5")), "the launch published no final checkpoint"
 
 
-def test_a_gr_chart_no_worker_arm_builds_is_refused_by_the_launch_scope(tmp_path: Path, probe: Path) -> None:
-    from simbi_configs.examples.grhd.gr_cylindrical_ks_bh import GrCylindricalKsBH
+def test_a_magnetized_curved_spacetime_is_refused_by_the_launch_scope(tmp_path: Path, probe: Path) -> None:
+    from simbi_configs.examples.grmhd.gr_bondi_ks_magnetized import GrBondiKsMagnetized
 
-    script = Path(GrCylindricalKsBH.__module__.replace(".", "/") + ".py")
-    layout = _layout(tmp_path / "two.toml", workers=2, shape=(2, 1))
+    script = Path(GrBondiKsMagnetized.__module__.replace(".", "/") + ".py")
+    layout = _layout(tmp_path / "two.toml", workers=2, shape=(2,))
     cmd = [sys.executable, "-m", "simbi.cli", "launch", str(script), "--layout", str(layout), "--max-steps", "1",
-           "--resolution", "16,16", "--data-directory", str(tmp_path / "out"), "--checkpoint-interval", "1e9"]
+           "--resolution", "64", "--data-directory", str(tmp_path / "out"), "--checkpoint-interval", "1e9"]
     done = subprocess.run(cmd, capture_output=True, text=True, timeout=600, env=_env({}))
-    _assert_refused(done, tmp_path / "out", "the schwarzschild_ks spacetime on the 2-dimensional cylindrical chart is outside the distributed first release", "cylindrical kerr-schild launch")
+    _assert_refused(done, tmp_path / "out", "the schwarzschild_ks spacetime with the rmhd regime is outside the distributed first release", "magnetized kerr-schild launch")
 
 
 # a dirichlet prescription of the right arity whose first node names no operation: python
