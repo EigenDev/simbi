@@ -4,8 +4,9 @@
 # relativistic magnetized gas on curved spacetimes through `simbi launch`. the
 # fixtures the host tiles are gated on: the magnetized bondi inflow and the
 # magnetized michel inflow on the radial kerr-schild line, the frame dragging
-# and the magnetized torus on the spinning (r, theta) plane, and the magnetized
-# torus in the three-dimensional kerr-schild box. each launches on two workers
+# and the magnetized torus on the spinning (r, theta) plane, the magnetized
+# torus in the three-dimensional kerr-schild box, and a field loop on the
+# cylindrical (R, z) and (R, phi) planes. each launches on two workers
 # and on three uneven workers and publishes the single grid's state bit for
 # bit, every staggered face included; the gas moves in the steps compared.
 #
@@ -32,6 +33,8 @@ CASES = {
     "magnetized-michel-line": ("simbi_configs.examples.grmhd.gr_michel_magnetized", "GrMichelMagnetized", "resolution=128", ["--resolution", "128"], [[40, 90]]),
     "kerr-dragging": ("simbi_configs.examples.grmhd.gr_kerr_dragging", "GrKerrDragging", "nr=48, npolar=32", ["--nr", "48", "--npolar", "32"], [[15, 33], []]),
     "magnetized-kerr-torus": ("simbi_configs.examples.grmhd.gr_fishbone_moncrief_mhd", "GrFishboneMoncriefMhd", "nr=48, npolar=32", ["--nr", "48", "--npolar", "32"], [[15, 33], []]),
+    "rz-field-loop": ("simbi.simulation.tests.fixtures.gr_cylindrical_rz_field_loop", "GrCylindricalRzFieldLoop", "nr=32, nz=32", ["--nr", "32", "--nz", "32"], [[10, 21], []]),
+    "disk-field-loop": ("simbi.simulation.tests.fixtures.gr_disk_field_loop", "GrDiskFieldLoop", "nr=32, nphi=32", ["--nr", "32", "--nphi", "32"], [[10, 21], []]),
     "magnetized-cartesian-torus": (
         "simbi_configs.examples.grmhd.gr_fishbone_moncrief_mhd_cartesian",
         "GrFishboneMoncriefMhdCartesian",
