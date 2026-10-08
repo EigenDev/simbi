@@ -482,3 +482,40 @@ fn ppm_root_cuts_18_14_match_after_one_root_step() {
 fn ppm_root_cuts_17_13_match_after_one_root_step() {
     assert_one_step_matches([17, 13], PPM);
 }
+
+/// a patch face on the periodic seam of a cut axis: the seam is a cut to the refinement build,
+/// and the register exchange ends the step naming the seam face it has no tile across from,
+/// which the march records as the crash of the run
+#[test]
+fn a_patch_face_on_the_periodic_seam_is_named_by_the_register_exchange() {
+    let partition = Partition::explicit([N, N], [vec![16], vec![]]).expect("one cut inside the grid");
+    let counts = partition.counts();
+    let scheme = PPM_CUT_FACE;
+    let make = kset_of(scheme);
+    // the patch's low x face is the seam at x = 0, which both tiles meet as a wrapping face
+    let whole = RefinementRegion { x_lo: [0.0, PY_LO], x_hi: [0.25, PY_HI] };
+    let mut tiles: Vec<Hier> = (0..partition.n_tiles())
+        .map(|flat| {
+            let ext = partition.tile_extents(unflatten(flat, counts));
+            let bnd = Boundaries([
+                [BoundaryType::CoarseFine, BoundaryType::CoarseFine],
+                [BoundaryType::Outflow, BoundaryType::Outflow],
+            ]);
+            let root = build_root([ext[0].1, ext[1].1], [ext[0].0, ext[1].0], bnd, scheme.ng);
+            let k = make(&root);
+            if flat == 0 {
+                Hier::with_refinement_of_contributing(root, k, &[whole], &[whole], scheme.prolong, make).expect("tile hier")
+            } else {
+                Hier::single(root, k)
+            }
+        })
+        .collect();
+    assert!(tiles[0].flux_registers[0].has_contributing(), "the seam face built no contributing register; the gate is vacuous");
+    seed_decomposed_fine_from_coarse(&tiles, counts, &vec![0; tiles.len()], &LocalCopy).expect("decomposed fine seed");
+    for h in tiles.iter_mut() {
+        h.prime();
+    }
+    run_decomposed(&mut tiles, counts, T_ONE_STEP);
+    let panic = tiles[0].crash.as_ref().and_then(|c| c.panic.clone()).expect("the run ended without a crash");
+    assert!(panic.contains("lies on the periodic seam of axis 0"), "the crash names another cause: {panic}");
+}

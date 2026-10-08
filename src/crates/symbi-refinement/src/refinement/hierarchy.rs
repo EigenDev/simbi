@@ -5897,7 +5897,16 @@ fn exchange_flux_contributions<R, const NDIM: usize, const DOF: usize, M, E, S, 
         for (idx, faces, src_region) in reg.contributing() {
             let (ax, side) = (idx / 2, idx % 2);
             let mut tc = unflatten(i, counts);
-            tc[ax] = if side == 0 { tc[ax] - 1 } else { tc[ax] + 1 };
+            tc[ax] = match side {
+                0 => tc[ax].checked_sub(1),
+                _ => Some(tc[ax] + 1).filter(|&c| c < counts[ax]),
+            }
+            .unwrap_or_else(|| {
+                panic!(
+                    "root tile {i}'s patch face {idx} lies on the periodic seam of axis {ax}: register units cross \
+                     the root cuts inside the domain alone"
+                )
+            });
             let j = flatten(tc, counts);
             let (_, units, dst_region) = tiles[j]
                 .flux_registers
