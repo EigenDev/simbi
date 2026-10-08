@@ -14,6 +14,11 @@
 #   its state bit for bit;
 # - isothermal: the bound depends on the orbital radius alone, and two and
 #   three unequal host tiles reach the single-grid state bit for bit;
+# - refined isothermal: two and three unequal refined tiles reach every level
+#   of the single hierarchy's state bit for bit, alpha changing the run;
+# - newtonian MHD, an orszag-tang vortex around a gravitating centre: alpha
+#   changes the run on one device, and two and three unequal host tiles reach
+#   the single grid's state and clock bit for bit;
 # - isothermal MHD carries no pressure for the local sound speed: alpha is
 #   refused by name before any output.
 #
@@ -42,6 +47,7 @@ from simbi.types.bodies import BondedAssembly
 from simbi.types.bodies import BodyCapability, GravitationalProperties, ImmersedBodyConfig
 from simbi_configs.examples.ibm.roche_passage import RochePassage
 from simbi_configs.examples.isothermal.imhd_orszag_tang import IsothermalOrszagTang
+from simbi_configs.examples.newtonian.nmhd_orszag_tang import NewtonianOrszagTang
 
 
 class AlphaRoche(RochePassage):
@@ -81,6 +87,33 @@ class IsothermalAlphaPrimary(AlphaRoche):
                 yield tuple(row[:-1])
 
         return rows
+
+
+class RefinedIsothermalAlphaPrimary(IsothermalAlphaPrimary):
+    refinement_enabled: Annotated[bool, ProblemParam(True, description="refined")]
+    refinement_max_levels: Annotated[int, ProblemParam(2, description="levels")]
+    refinement_regions: Annotated[list[list[float]], ProblemParam([[-2.0, 2.0, -2.0, 2.0]], description="box")]
+    refinement_ratios: Annotated[list[int], ProblemParam([2], description="ratios")]
+
+
+class AlphaNewtonianOrszagTang(NewtonianOrszagTang):
+    viscosity_alpha: Annotated[float, ProblemParam(0.0, description="alpha")]
+
+    @computed_field
+    @property
+    def immersed_bodies(self) -> list[ImmersedBodyConfig]:
+        # the central mass the alpha law reads its keplerian frequency from
+        center = tuple(0.5 * (lo + hi) for lo, hi in self.bounds[:2])
+        return [
+            ImmersedBodyConfig(
+                capability=BodyCapability.GRAVITATIONAL,
+                mass=1e-3,
+                radius=0.05,
+                position=center,
+                velocity=(0.0, 0.0),
+                gravitational=GravitationalProperties(softening_length=0.05),
+            )
+        ]
 
 
 class AlphaIsothermalOrszagTang(IsothermalOrszagTang):
@@ -203,3 +236,39 @@ def test_alpha_on_isothermal_mhd_is_refused(tmp_path: Path, variants: Path) -> N
     assert done.returncode != 0
     assert "alpha-disk viscosity on the imhd regime" in done.stderr.replace("\n", " "), done.stderr[-1500:]
     assert not list((tmp_path / "imhd").glob("*.h5")), "output was written before the refusal"
+
+
+@pytest.mark.parametrize("gpus", [2, 3], ids=["two-tiles", "three-unequal-tiles"])
+def test_refined_isothermal_tiles_carry_the_single_hierarchy_alpha(tmp_path: Path, variants: Path, gpus: int) -> None:
+    def run(out: Path, devices: int, alpha: float) -> dict[str, np.ndarray]:
+        done = _run("RefinedIsothermalAlphaPrimary", out, devices, extra=f", viscosity_alpha={alpha!r}" + REFINED_UNEQUAL.get(devices, ""))
+        assert done.returncode == 0, f"refined isothermal alpha = {alpha} on {devices} device(s) failed:\n{done.stderr[-3000:]}"
+        return _levels(out)
+
+    single, inviscid = run(tmp_path / "single", 1, 0.1), run(tmp_path / "inviscid", 1, 0.0)
+    assert "level_1/conserved/den" in single, "the single hierarchy published no fine level; the refined arm is vacuous"
+    assert any(not np.array_equal(single[k], inviscid[k]) for k in single if "conserved" in k), "the alpha left the refined run inviscid"
+    tiles = run(tmp_path / "tiles", gpus, 0.1)
+    assert tiles.keys() == single.keys(), f"datasets {sorted(tiles.keys() ^ single.keys())} differ"
+    for name, x in single.items():
+        np.testing.assert_array_equal(tiles[name], x, err_msg=f"{gpus} refined isothermal tiles: {name}")
+
+
+MHD_RESOLUTION = (32, 32, 1)
+# three unequal host tiles of the magnetized vortex: 10, 11 and 11 cells along x
+MHD_UNEQUAL = {3: ", decompose=[[10, 21], []]"}
+
+
+@pytest.mark.parametrize("gpus", [2, 3], ids=["two-tiles", "three-unequal-tiles"])
+def test_magnetized_tiles_carry_the_single_grid_alpha(tmp_path: Path, variants: Path, gpus: int) -> None:
+    def run(out: Path, devices: int, alpha: float) -> dict[str, np.ndarray]:
+        done = _run("AlphaNewtonianOrszagTang", out, devices, extra=f", viscosity_alpha={alpha!r}" + MHD_UNEQUAL.get(devices, ""), resolution=MHD_RESOLUTION)
+        assert done.returncode == 0, f"nmhd alpha = {alpha} on {devices} device(s) failed:\n{done.stderr[-3000:]}"
+        return _levels(out)
+
+    single, inviscid = run(tmp_path / "single", 1, 0.1), run(tmp_path / "inviscid", 1, 0.0)
+    assert any(not np.array_equal(single[k], inviscid[k]) for k in single if "conserved" in k), "the alpha left the magnetized run inviscid"
+    tiles = run(tmp_path / "tiles", gpus, 0.1)
+    assert tiles.keys() == single.keys(), f"datasets {sorted(tiles.keys() ^ single.keys())} differ"
+    for name, x in single.items():
+        np.testing.assert_array_equal(tiles[name], x, err_msg=f"{gpus} magnetized tiles: {name}")
