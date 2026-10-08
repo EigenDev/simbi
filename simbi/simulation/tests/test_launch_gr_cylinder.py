@@ -3,7 +3,8 @@
 #
 # a black hole on the horizon-penetrating cylindrical chart through `simbi
 # launch`: the (R, z) meridional plane, which carries the azimuthal momentum
-# on its two axes, and the full three-dimensional (R, phi, z) chart around a
+# on its two axes, the equatorial (R, phi) plane, periodic in phi with one
+# momentum per axis, and the full three-dimensional (R, phi, z) chart around a
 # schwarzschild hole and around a hole spinning at a = 0.5 M. each launches on
 # two workers and on three uneven workers cut along the radius and publishes
 # the single grid's state bit for bit; the gas moves in the steps compared and
@@ -27,16 +28,37 @@ pytestmark = pytest.mark.simulation
 
 STEPS = 6
 FIXTURES = '''
+import math
 from typing import Annotated
 
 from simbi import ProblemParam
-from simbi.types import Spacetime
+from simbi.types import BoundaryCondition, CoordSystem, Spacetime
 from simbi.simulation.tests.fixtures.gr_cylindrical_3d_ks_bh import GrCylindrical3DKsBH
 from simbi_configs.examples.grhd.gr_cylindrical_ks_bh import GrCylindricalKsBH
 
 
 class Plane(GrCylindricalKsBH):
     pass
+
+
+class Equatorial(GrCylindricalKsBH):
+    """the equatorial (R, phi) plane of the same hole, periodic in phi, one momentum per axis"""
+
+    coord_system: Annotated[CoordSystem, ProblemParam(CoordSystem.PLANAR_CYLINDRICAL, description="(R, phi)")]
+    bounds: Annotated[list[tuple[float, float]], ProblemParam([(4.0, 12.0), (0.0, 2.0 * math.pi)], description="(R, phi)")]
+    boundary_conditions: Annotated[list[str], ProblemParam([BoundaryCondition.OUTFLOW, BoundaryCondition.PERIODIC], description="R, phi")]
+
+    def initial_primitive_state(self):
+        rho, pre = self.rho_ambient, self.p_ambient
+        n_r, n_phi = self.resolution
+
+        def gas_state():
+            # gas falling inward with a small azimuthal drift, so the plane evolves off its start
+            for _ in range(n_phi):
+                for ii in range(n_r):
+                    yield (rho, -0.05, 0.01, pre)
+
+        return gas_state
 
 
 class Cylinder(GrCylindrical3DKsBH):
@@ -49,10 +71,11 @@ class SpinningCylinder(GrCylindrical3DKsBH):
 '''
 CASES = {
     "plane": ((32, 32), [[10, 21], []]),
+    "equatorial": ((32, 32), [[10, 21], []]),
     "cylinder": ((20, 12, 16), [[6, 13], [], []]),
     "spinning-cylinder": ((20, 12, 16), [[6, 13], [], []]),
 }
-CLASSES = {"plane": "Plane", "cylinder": "Cylinder", "spinning-cylinder": "SpinningCylinder"}
+CLASSES = {"plane": "Plane", "equatorial": "Equatorial", "cylinder": "Cylinder", "spinning-cylinder": "SpinningCylinder"}
 
 
 @pytest.fixture
