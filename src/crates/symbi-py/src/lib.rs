@@ -6754,10 +6754,6 @@ macro_rules! build_and_run_magnetized_decomposed_refined {
         let bufs: &[Vec<f64>] = $bufs;
         type Sim = SimDefaultGeneric<$regime_ty, $d, 3, $geom_ty, $eos_ty>;
 
-        // the single magnetized hierarchy refuses user sources: refused by name before any output
-        if !cfg.source_jsons.is_empty() {
-            return Err("user source expressions are not yet supported with mesh refinement".to_string());
-        }
         let n: [usize; $d] = std::array::from_fn(|ax| cfg.n_cells[ax]);
         let total: usize = n.iter().product();
         if prims.len() != total {
@@ -7473,12 +7469,6 @@ macro_rules! build_and_run_mhd {
             attach_configured_censuses(&mut sim, cfg)?;
             sim
         };
-        // a user source acts on the hydro slots of the single grid; the refined march carries none
-        if !cfg.source_jsons.is_empty() && cfg.refinement_enabled {
-            return Err(
-                "user source expressions are not yet supported with mesh refinement".to_string(),
-            );
-        }
         // the numerics every level carries: the base level with the excision, each fine level of
         // a refined run without it, the CT method and the driven boundaries on every level
         let settings = KernelSettings::of(cfg, <$regime_ty as Regime<f64, $d>>::SPEC);
@@ -7607,12 +7597,6 @@ macro_rules! build_and_run_imhd {
             attach_configured_censuses(&mut sim, cfg)?;
             sim
         };
-        // a user source acts on the hydro slots of the single grid; the refined march carries none
-        if !cfg.source_jsons.is_empty() && cfg.refinement_enabled {
-            return Err(
-                "user source expressions are not yet supported with mesh refinement".to_string(),
-            );
-        }
         // the numerics every level carries, the CT method and the driven boundaries included
         let settings = KernelSettings::of(cfg, <IsothermalMhd as Regime<f64, $d>>::SPEC);
         let sub = mhd_kernels(sim.substrate(), &settings, LevelRole::Root)?;
@@ -8917,6 +8901,11 @@ fn validate_declared_target(cfg: &Config, dof: usize) -> Result<(), String> {
 /// host tiles and the launched workers all call it, so a capability decision lives in one place
 fn validate_run(cfg: &Config) -> Result<(), String> {
     validate_porous_body_overlaps(&cfg.bodies)?;
+    // a user source acts on a magnetized run's hydro slots on the single grid; the refined
+    // magnetized march carries none, on any driver
+    if matches!(cfg.regime.as_str(), "nmhd" | "imhd" | "rmhd") && cfg.refinement_enabled && !cfg.source_jsons.is_empty() {
+        return Err("user source expressions are not yet supported with mesh refinement on a magnetized regime".to_string());
+    }
     // a declared periodic face wraps the grid on one device and across tiles and workers alike
     wrap_capability(cfg.boundaries.contains(&BoundaryType::Periodic), cfg.wb_reconstruction, !cfg.bodies.is_empty())?;
     validate_axis_boundaries(cfg)?;
@@ -10715,11 +10704,6 @@ fn validate_launch_scope(cfg: &Config) -> Result<(), String> {
         if cfg.wb_reconstruction {
             return refused(&format!("well-balanced reconstruction with the {} regime", cfg.regime));
         }
-    }
-    // the launched magnetized tiles install no user source; a source the single path would
-    // apply is refused rather than dropped
-    if matches!(cfg.regime.as_str(), "nmhd" | "imhd" | "rmhd") && !cfg.source_jsons.is_empty() {
-        return refused(&format!("a user source with the {} regime", cfg.regime));
     }
     if !matches!(cfg.dims, 1..=3) {
         return refused(&format!("a {}-dimensional grid", cfg.dims));

@@ -10,7 +10,8 @@
 # on x, a robin wall on y) each equal the single-grid run, fresh and with the
 # correction fired on a wall-corner cell; a gradient wall with a magnetized
 # regime is refused by name, since the magnetized kernel set carries no
-# gradient table.
+# gradient table, and so is a user source on a refined magnetized launch,
+# which the refined magnetized march carries on no driver.
 #
 # run: pytest -m simulation simbi/simulation/tests/test_launch_walls.py
 # =============================================================================
@@ -114,15 +115,22 @@ def test_a_gradient_wall_with_a_magnetized_regime_is_refused_by_name(tmp_path: P
     assert not list((tmp_path / "out").glob("*.h5")), "a refused launch published a checkpoint"
 
 
-def test_a_user_source_with_a_magnetized_regime_is_refused_by_name(tmp_path: Path) -> None:
-    # the launched magnetized tiles install no user source, so a vortex with a source is refused
-    # rather than run without it
+def test_a_user_source_on_a_refined_magnetized_launch_is_refused_by_name(tmp_path: Path) -> None:
+    # the refined magnetized march carries no user source on any driver, so a refined vortex with a
+    # source is refused at admission rather than run without it
     script = tmp_path / "sourced_vortex.py"
     script.write_text(
+        "from typing import Annotated\n"
         "import simbi.expression as expr\n"
+        "from simbi import ProblemParam\n"
         "from simbi_configs.examples.newtonian.nmhd_orszag_tang import NewtonianOrszagTang\n"
         "\n"
         "class SourcedVortex(NewtonianOrszagTang):\n"
+        "    refinement_enabled: Annotated[bool, ProblemParam(True, description='refined')]\n"
+        "    refinement_max_levels: Annotated[int, ProblemParam(2, description='levels')]\n"
+        "    refinement_regions: Annotated[list, ProblemParam([[0.25, 0.75, 0.25, 0.75]], description='boxes')]\n"
+        "    refinement_ratios: Annotated[list, ProblemParam([2], description='ratios')]\n"
+        "\n"
         "    @property\n"
         "    def source_expressions(self):\n"
         "        return [expr.force([0.0, -0.1, 0.0], dim=3)]\n"
@@ -132,5 +140,6 @@ def test_a_user_source_with_a_magnetized_regime_is_refused_by_name(tmp_path: Pat
     done = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
     assert done.returncode != 0, f"the launch succeeded:\n{done.stdout}"
     flat = " ".join(done.stderr.split())
-    assert "a user source with the nmhd regime is outside the distributed first release" in flat, done.stderr
+    assert "user source expressions are not yet supported with mesh refinement" in flat, done.stderr
+    assert not list((tmp_path / "out").glob("*.h5")), "a refused launch published a checkpoint"
 
