@@ -63,5 +63,6 @@ def test_an_rmhd_launch_resumed_onto_three_uneven_workers_matches(tmp_path: Path
         written_at = int(f["level_0"].attrs["iteration"])
     assert 0 < written_at < MHD_STEPS
     three = _layout(tmp_path / "three.toml", workers=3, cuts=RESTART)
-    resumed = _script_launch(SCRIPT, RESOLUTION, tmp_path / "three", three, MHD_STEPS - written_at, workers=3, checkpoint=partial, flags=flags)
+    # the cap is the absolute root iteration: the checkpoint's steps and the rest
+    resumed = _script_launch(SCRIPT, RESOLUTION, tmp_path / "three", three, MHD_STEPS, workers=3, checkpoint=partial, flags=flags)
     _assert_same_state(resumed, reference, f"rmhd {ct}: resumed onto three uneven workers against the uninterrupted run")

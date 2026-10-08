@@ -82,7 +82,8 @@ def test_a_spherical_launch_resumed_onto_three_uneven_workers_matches(tmp_path: 
         written_at = int(f["level_0"].attrs["iteration"])
     assert 0 < written_at < STEPS
     three = _layout(tmp_path / "three.toml", workers=3, cuts=[[10, 21], []])
-    resumed = _script_launch(PULSE_SCRIPT, resolution, tmp_path / "three", three, STEPS - written_at, workers=3, checkpoint=partial)
+    # the cap is the absolute root iteration: the checkpoint's steps and the rest
+    resumed = _script_launch(PULSE_SCRIPT, resolution, tmp_path / "three", three, STEPS, workers=3, checkpoint=partial)
     _assert_same_state(resumed, reference, "spherical shell resumed on three workers")
 
 

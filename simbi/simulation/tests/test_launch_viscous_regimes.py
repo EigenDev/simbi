@@ -68,11 +68,13 @@ def test_a_viscous_launch_resumed_onto_another_partition_matches(tmp_path: Path,
     with h5py.File(partial_one, "r") as f:
         written_at = int(f["level_0"].attrs["iteration"])
     assert 0 < written_at < STEPS
-    resumed_one = _script_launch(script, resolution, tmp_path / "resumed_one", one, STEPS - written_at, workers=1, checkpoint=partial_one)
+    # the cap is the absolute root iteration: the checkpoint's steps and the rest
+    resumed_one = _script_launch(script, resolution, tmp_path / "resumed_one", one, STEPS, workers=1, checkpoint=partial_one)
     _assert_same_state(resumed_one, reference, f"{name}: resumed on one worker against the uninterrupted run")
     four = _layout(tmp_path / "four.toml", workers=4, shape=(2, 2) if planar else (2, 2, 1))
     partial = _script_launch(script, resolution, tmp_path / "first", four, STEPS // 2, workers=4)
     # a 2.5D magnetized problem partitions its two spatial axes
     three = _layout(tmp_path / "three.toml", workers=3, cuts=[[10, 21], []])
-    resumed = _script_launch(script, resolution, tmp_path / "three", three, STEPS - written_at, workers=3, checkpoint=partial)
+    # the cap is the absolute root iteration: the checkpoint's steps and the rest
+    resumed = _script_launch(script, resolution, tmp_path / "three", three, STEPS, workers=3, checkpoint=partial)
     _assert_same_state(resumed, reference, f"{name}: resumed onto three uneven workers against the uninterrupted run")

@@ -61,10 +61,12 @@ def test_a_viscous_launch_resumed_onto_three_uneven_workers_matches(tmp_path: Pa
     with h5py.File(partial_one, "r") as f:
         written_at = int(f["level_0"].attrs["iteration"])
     assert 0 < written_at < STEPS
-    resumed_one = _script_launch(SCRIPT, RESOLUTION, tmp_path / "resumed_one", one, STEPS - written_at, workers=1, checkpoint=partial_one, flags=NU)
+    # the cap is the absolute root iteration: the checkpoint's steps and the rest
+    resumed_one = _script_launch(SCRIPT, RESOLUTION, tmp_path / "resumed_one", one, STEPS, workers=1, checkpoint=partial_one, flags=NU)
     _assert_same_state(resumed_one, reference, "viscous, resumed on one worker against the uninterrupted run")
     two = _layout(tmp_path / "two.toml", workers=2, shape=(2, 1))
     partial = _script_launch(SCRIPT, RESOLUTION, tmp_path / "first", two, STEPS // 2, workers=2, flags=NU)
     three = _layout(tmp_path / "three.toml", workers=3, cuts=[[10, 21], []])
-    resumed = _script_launch(SCRIPT, RESOLUTION, tmp_path / "three", three, STEPS - written_at, workers=3, checkpoint=partial, flags=NU)
+    # the cap is the absolute root iteration: the checkpoint's steps and the rest
+    resumed = _script_launch(SCRIPT, RESOLUTION, tmp_path / "three", three, STEPS, workers=3, checkpoint=partial, flags=NU)
     _assert_same_state(resumed, reference, "viscous, resumed on three workers against the uninterrupted run")

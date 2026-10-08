@@ -74,5 +74,6 @@ def test_a_launch_resumed_onto_three_uneven_workers_matches(tmp_path: Path, name
         written_at = int(f["level_0"].attrs["iteration"])
     assert 0 < written_at < steps
     three = _layout(tmp_path / "three.toml", workers=3, cuts=[[10, 21], []])
-    resumed = _script_launch(script, resolution, tmp_path / "three", three, steps - written_at, workers=3, checkpoint=partial)
+    # the cap is the absolute root iteration: the checkpoint's steps and the rest
+    resumed = _script_launch(script, resolution, tmp_path / "three", three, steps, workers=3, checkpoint=partial)
     _assert_same_state(resumed, reference, f"{name}: resumed on three workers")
