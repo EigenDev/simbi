@@ -6547,16 +6547,8 @@ macro_rules! build_and_run_hydro_decomposed_refined {
         let ntiles: usize = counts.iter().product();
         let prolong = prolong_order_for(&cfg.reconstruction_name);
         let regions = refinement_regions_nd::<$d>(&cfg.refinement_regions)?;
-        // immersed bodies give each tile's own finest level the full bodies; a tile holding fewer
-        // levels than the run would couple them on a level the single hierarchy leaves to proxies
-        if regions.len() > 1 && !cfg.bodies.is_empty() {
-            return Err(format!(
-                "immersed bodies with {} nested refinement levels and gpus > 1: a tile holding fewer \
-                 levels than the run would couple the bodies on a coarser level than the single \
-                 hierarchy; run on one device or keep one refinement region",
-                regions.len() + 1
-            ));
-        }
+        // immersed bodies give each tile's own deepest level the full bodies; the body couples to
+        // the run's finest level alone, so a tile holding fewer levels adds no reaction
 
         let whole = whole_grid::<$d>(cfg);
         // build N per-tile hierarchies (root slab + the clipped region, or single-level).

@@ -442,7 +442,7 @@ def _level_root_span(path: Path, level: str) -> tuple[float, float]:
         return float(dim["start"]), float(dim["end"])
 
 
-def test_workers_holding_fewer_levels_publish_the_single_hierarchy_nested_sink(tmp_path: Path, variants: Path) -> None:
+def test_tiles_and_workers_holding_fewer_levels_publish_the_single_hierarchy_nested_sink(tmp_path: Path, variants: Path) -> None:
     # every tile applies the global body delta on its own finest level, gravity-only proxies below;
     # a worker without the run's finest level publishes the bodies and history from its deepest
     # level. the grid matches the single hierarchy bit for bit: the drain acts on the finest level,
@@ -462,10 +462,19 @@ def test_workers_holding_fewer_levels_publish_the_single_hierarchy_nested_sink(t
         assert float(f["bodies/total_accreted_mass"][0]) > 0.0, "the sink accreted nothing; the gate is vacuous"
     three = _layout(tmp_path / "three.toml", workers=3, cuts=NESTED_CUTS)
     got = _launch(variants, "NestedBondi", None, tmp_path / "launched", three, STEPS)
+    _assert_nested_sink(got, tmp_path / "launched", want, tmp_path / "single", "nested sink, launched")
+    # the host tiles on the same cuts: the tiles holding level 1 without level 2 add no reaction
+    tiles = _tiles("NestedBondi", None, tmp_path / "tiles", STEPS, cuts=NESTED_CUTS)
+    _assert_nested_sink(tiles, tmp_path / "tiles", want, tmp_path / "single", "nested sink, host tiles")
+
+
+def _assert_nested_sink(got: Path, out: Path, want: Path, single_out: Path, label: str) -> None:
+    """the grid bit for bit, the body state and history within the reassociation bound of the
+    cross-tile body sums"""
     xs, ys = _all_levels(got), _all_levels(want)
     assert xs.keys() == ys.keys(), f"datasets {sorted(set(xs) ^ set(ys))} differ"
     for name, x in xs.items():
-        np.testing.assert_array_equal(x, ys[name], err_msg=f"nested sink: {name}")
+        np.testing.assert_array_equal(x, ys[name], err_msg=f"{label}: {name}")
     bx, by = _body_groups(got), _body_groups(want)
     assert bx.keys() == by.keys(), f"body datasets {sorted(set(bx) ^ set(by))} differ"
     for name in ("body_diagnostics/time", "body_diagnostics/dt"):
@@ -478,14 +487,14 @@ def test_workers_holding_fewer_levels_publish_the_single_hierarchy_nested_sink(t
         y = y.astype(float)
         scale = pull if "force" in name else pull * arm if "torque" in name else np.abs(y).max()
         worst = np.abs(bx[name].astype(float) - y).max()
-        assert worst <= cells * U * scale, f"nested sink: {name} differs by {worst:.3e} against {cells * U:.1e} of {scale:.3e}"
+        assert worst <= cells * U * scale, f"{label}: {name} differs by {worst:.3e} against {cells * U:.1e} of {scale:.3e}"
     # the published body state carries the published history: one row per step, and the accreted
     # mass is the sum of the per-step receipts (a sum of STEPS terms of one sign)
     assert bx["body_diagnostics/mass_delta"].shape[0] == STEPS, f"the history books {bx['body_diagnostics/mass_delta'].shape[0]} rows for {STEPS} steps"
     receipts = float(np.sum(bx["body_diagnostics/mass_delta"]))
     published = float(bx["bodies/total_accreted_mass"][0])
     assert abs(published - receipts) <= STEPS * U * receipts, f"the published accreted mass {published:.17e} departs from its history {receipts:.17e}"
-    rows, single_rows = _diagnostics(tmp_path / "launched"), _diagnostics(tmp_path / "single")
+    rows, single_rows = _diagnostics(out), _diagnostics(single_out)
     assert rows.shape == single_rows.shape, f"diagnostics rows {rows.shape} against {single_rows.shape}"
     np.testing.assert_array_equal(rows[:, 0], single_rows[:, 0], err_msg="diagnostics times")
     # nine printed significant digits (%.8e) on top of the reassociation bound; force and torque

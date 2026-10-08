@@ -14,8 +14,9 @@
 #   both axes through the fine box; a locally isothermal refined run on tiles is
 #   refused by name before any output.
 # a census, which the tiled drivers do not reduce across tiles, is refused by
-# name on host tiles and through `simbi launch` rather than left unrecorded, and
-# so are immersed bodies with nested levels on host tiles.
+# name on host tiles and through `simbi launch` rather than left unrecorded. a
+# gravitating body over two nested levels on two host tiles publishes every
+# level of the single hierarchy's state bit for bit.
 #
 # run: pytest -m simulation simbi/simulation/tests/test_refined_decomposed_numerics.py
 # =============================================================================
@@ -169,10 +170,10 @@ def test_a_second_nested_level_resumed_on_two_refined_tiles_matches_the_uninterr
     _assert_same(resumed, single, "two refined tiles, three levels, resumed")
 
 
-def test_immersed_bodies_with_nested_levels_on_host_tiles_are_refused_by_name(tmp_path: Path, host_tiles) -> None:
-    with pytest.raises(Exception, match="immersed bodies with 3 nested refinement levels and gpus > 1"):
-        _run(GravitatingRefinedBlast, tmp_path / "tiles", 2, **NESTED)
-    assert not list((tmp_path / "tiles").glob("*final*.h5")), "a refused run published a final checkpoint"
+def test_immersed_bodies_with_nested_levels_on_host_tiles_match_the_single_hierarchy(tmp_path: Path, host_tiles) -> None:
+    single = _run(GravitatingRefinedBlast, tmp_path / "single", 1, **NESTED)
+    _level_2_written(single)
+    _assert_same(_run(GravitatingRefinedBlast, tmp_path / "tiles", 2, **NESTED), single, "two refined tiles, three levels, a gravitating body")
 
 
 def _fresh_kh(out: Path, gpus: int, **kwargs) -> Path:
