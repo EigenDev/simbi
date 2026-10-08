@@ -119,6 +119,24 @@ class RefinedAlphaPrimary(RefinedPrimary):
     viscosity_alpha: Annotated[float, ProblemParam(0.1, description="alpha")]
 
 
+class RefinedIsothermalAlphaPrimary(RefinedAlphaPrimary):
+    """the refined alpha primary on globally isothermal gas"""
+
+    regime: Annotated[Regime, ProblemParam(Regime.ISOTHERMAL, description="isothermal")]
+    # isothermal hydro evaluates the hlle flux
+    solver: Annotated[Solver, ProblemParam(Solver.HLLE, description="hlle")]
+    sound_speed: Annotated[float, ProblemParam(0.3, description="sound speed")]
+
+    def initial_primitive_state(self):
+        adiabatic = super().initial_primitive_state()
+
+        def rows():
+            for row in adiabatic():
+                yield tuple(row[:-1])
+
+        return rows
+
+
 class RefinedBondi(Bondi):
     """the bondi sink under one fine level over the central box"""
 
@@ -317,6 +335,7 @@ def test_a_magnetized_wall_takes_its_shape(tmp_path: Path, variants: Path) -> No
 REFINED_ARMS = {
     "refined-primary": ("RefinedPrimary", (64, 64)),
     "refined-alpha": ("RefinedAlphaPrimary", (64, 64)),
+    "refined-isothermal-alpha": ("RefinedIsothermalAlphaPrimary", (64, 64)),
     "refined-sink": ("RefinedBondi", None),
 }
 
@@ -363,7 +382,7 @@ def _single(problem: str, resolution: tuple | None, out: Path, steps: int) -> Pa
     return _final(out)
 
 
-@pytest.mark.parametrize("problem", ["RefinedPrimary", "RefinedAlphaPrimary"])
+@pytest.mark.parametrize("problem", ["RefinedPrimary", "RefinedAlphaPrimary", "RefinedIsothermalAlphaPrimary"])
 def test_refined_host_tiles_publish_the_single_hierarchy_bodies(tmp_path: Path, variants: Path, problem: str) -> None:
     # a gravitating body takes no feedback, so no cross-tile sum enters its state: the refined host
     # tiles the launch is gated against publish the single hierarchy's grid, bodies and history bit
