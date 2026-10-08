@@ -514,141 +514,6 @@ pub fn decode_body_delta<const D: usize>(idx: usize, words: &[u64]) -> symbi_ib:
     delta
 }
 
-/// the per-step immersed-body bookkeeping on the held tiles, after the accepted step's post-step
-/// recipe, in the order the in-process tiles keep: the wall relaxation's Alfven stiffness takes
-/// the largest value of any tile; each tile's surface operations rescale its conserved state, its
-/// primitives and ghost band are recovered and the cut halos carry the drained gas; each tile
-/// reduces its feedback partials; every tile's partials cross the workers in one assembled
-/// vector and are summed in flat tile order, the order the in-process tiles sum them in; and the
-/// global delta is applied to every held tile's bodies alike
-#[allow(clippy::too_many_arguments)]
-fn body_step<const D: usize, const DOF: usize, M, K, T, L>(
-    exchange: &PlanExchange<'_, D>,
-    tiles: &[TileId],
-    stores: &mut [&mut FieldStore<D, DOF, M, f64>],
-    kernels: &[&K],
-    n_tiles: usize,
-    devices: &[i32],
-    transport: &T,
-    fabric: &mut Fabric<L>,
-    dt: f64,
-    step: u64,
-    attempt: u16,
-    deadline: Duration,
-    spent: &mut Duration,
-    tracer_layouts: &[crate::tracers::TransportLayout<D>],
-) -> Result<(), WorkerError>
-where
-    M: MemorySpace,
-    K: KernelSet<D, DOF, M, f64>,
-    T: HaloTransport,
-    L: Link,
-    symbi_geometry::Cartesian: symbi_geometry::Metric<f64, D>,
-{
-    let dev = |k: usize| devices[tiles[k].0 as usize];
-    // the density each tile's sinks drain from, kept for the tracers the drain carries into the
-    // sink reservoirs
-    let traced = stores.iter().any(|s| s.tracers.is_some() || s.continuous_tracers.is_some());
-    let mut accretion_density = Vec::new();
-    {
-        let sh: Vec<&FieldStore<D, DOF, M, f64>> = stores.iter().map(|s| &**s).collect();
-        // the largest Alfven stiffness of any tile (zero off MHD), on every tile
-        let local: Vec<(u64, u64)> = sh
-            .iter()
-            .enumerate()
-            .map(|(k, s)| (tiles[k].0 as u64, crate::state::local_c_a2_max(*s).to_bits()))
-            .collect();
-        let assembled = fabric.assemble_windowed(n_tiles as u64, &local, deadline)?;
-        let mut c_a2 = 0.0_f64;
-        for (tile, bits) in assembled.iter().enumerate() {
-            if *bits == symbi_fabric::ABSENT {
-                return Err(WorkerError::Numerics(format!("no worker supplied tile {tile}'s Alfven stiffness")));
-            }
-            c_a2 = c_a2.max(f64::from_bits(*bits));
-        }
-        for s in &sh {
-            if let Some(im) = s.immersed.as_ref() {
-                im.set_c_a2_override(c_a2);
-            }
-        }
-        if traced {
-            accretion_density = sh.iter().map(|s| crate::tracers::snapshot_accretion_density(*s)).collect();
-        }
-        // the bodies are the same on every tile, so every worker takes the same branch
-        let penalizes = sh.iter().any(|s| s.immersed.as_ref().is_some_and(|im| im.bodies.penalizes()));
-        for k in 0..sh.len() {
-            with_device(dev(k), || {
-                kernels[k].penalize(sh[k], dt);
-                if penalizes {
-                    kernels[k].c2p(sh[k]);
-                    kernels[k].ghost_fill(sh[k]);
-                }
-            });
-        }
-        if penalizes {
-            exchange_point(
-                exchange, tiles, &sh, n_tiles, devices, transport, fabric, ExchangePoint::PostBody, step, attempt,
-                deadline, spent,
-            )?;
-            flip_polar_bands(exchange, tiles, &sh, kernels, devices);
-            for k in 0..sh.len() {
-                with_device(dev(k), || kernels[k].ghost_fill(sh[k]));
-            }
-        }
-        for k in 0..sh.len() {
-            if sh[k].immersed.as_ref().is_some_and(|im| im.bodies.needs_feedback()) {
-                with_device(dev(k), || kernels[k].body_feedback(sh[k], dt));
-            }
-        }
-    }
-    // each tile's tracers in the drained cells cross into the sink reservoirs at the step's end
-    for (k, store) in stores.iter_mut().enumerate().filter(|_| traced) {
-        let geometry = store.geom.block_geometry(symbi_geometry::Cartesian);
-        let crossing_time = store.time + dt;
-        crate::tracers::advance_accretion_transport_store(&mut **store, &geometry, tracer_layouts[k], &accretion_density[k], crossing_time)
-            .and_then(|_| {
-                crate::tracers::advance_continuous_accretion_transport_store(
-                    &mut **store,
-                    &geometry,
-                    tracer_layouts[k],
-                    &accretion_density[k],
-                    crossing_time,
-                )
-            })
-            .map_err(|e| WorkerError::Numerics(format!("tracer accretion transport: {e}")))?;
-    }
-    // every tile's partials, in flat tile order
-    let n_bodies = stores.iter().find_map(|s| s.immersed.as_ref().map(|im| im.bodies.len())).unwrap_or(0);
-    let words = body_delta_words(D);
-    let per_tile = n_bodies * words;
-    let mut entries: Vec<(u64, u64)> = Vec::with_capacity(stores.len() * per_tile);
-    for (k, s) in stores.iter().enumerate() {
-        let Some(im) = s.immersed.as_ref() else {
-            continue;
-        };
-        let mut encoded = Vec::with_capacity(per_tile);
-        for delta in im.diagnostics.consolidate() {
-            encode_body_delta(&delta, &mut encoded);
-        }
-        let base = tiles[k].0 as u64 * per_tile as u64;
-        entries.extend(encoded.into_iter().enumerate().map(|(i, bits)| (base + i as u64, bits)));
-    }
-    let assembled = fabric.assemble_windowed((n_tiles * per_tile) as u64, &entries, deadline)?;
-    let mut tile_deltas = Vec::with_capacity(n_tiles);
-    for tile in 0..n_tiles {
-        let block = &assembled[tile * per_tile..(tile + 1) * per_tile];
-        if block.contains(&symbi_fabric::ABSENT) {
-            return Err(WorkerError::Numerics(format!(
-                "tile {tile}'s body feedback is missing from the assembled vector (or holds the absent bits)"
-            )));
-        }
-        tile_deltas.push((0..n_bodies).map(|b| decode_body_delta::<D>(b, &block[b * words..(b + 1) * words])).collect::<Vec<_>>());
-    }
-    let global = crate::decomp::merge_body_deltas(tile_deltas);
-    crate::decomp::apply_global_body_step(stores, &global, dt);
-    Ok(())
-}
-
 /// negate the odd components of every polar ghost band this worker holds, after an antipodal
 /// exchange filled it with rotated interior copies and before the physical refill reads the
 /// band's edge. a plan without a seam has no band.
@@ -1007,6 +872,208 @@ where
 
     fn blend(&mut self, ac: f64, stage: usize) {
         crate::worker_tracers::blend_discrete(self.stores, ac, stage);
+    }
+
+    fn failure(&mut self, detail: String) -> WorkerError {
+        fail(self.fabric, WorkerError::Numerics(detail))
+    }
+}
+
+/// the body step of a worker's tiles: the Alfven stiffness and the deltas assembled from every
+/// tile of every worker, the halos at the post-body exchange point
+struct WorkerBodies<'a, 's, 'p, const D: usize, const DOF: usize, M, K, T, L>
+where
+    M: MemorySpace,
+    K: KernelSet<D, DOF, M, f64>,
+    T: HaloTransport,
+    L: Link,
+{
+    stores: &'a mut [&'s mut FieldStore<D, DOF, M, f64>],
+    kernels: &'a [&'a K],
+    tiles: &'a [TileId],
+    devices: &'a [i32],
+    tile_devices: &'a [i32],
+    exchange: &'a PlanExchange<'p, D>,
+    transport: &'a T,
+    fabric: &'a mut Fabric<L>,
+    spent: &'a mut Duration,
+    layouts: &'a [crate::tracers::TransportLayout<D>],
+    deadline: Duration,
+    iter: u64,
+    attempt: u16,
+}
+
+impl<'s, const D: usize, const DOF: usize, M, K, T, L> crate::accepted_tail::FlatBodies<'s, D, DOF, M>
+    for WorkerBodies<'_, 's, '_, D, DOF, M, K, T, L>
+where
+    M: MemorySpace,
+    K: KernelSet<D, DOF, M, f64>,
+    T: HaloTransport,
+    L: Link,
+{
+    type Error = WorkerError;
+    type Kernels = K;
+
+    fn held(&mut self) -> crate::accepted_tail::HeldTiles<'_, 's, D, DOF, M, K> {
+        crate::accepted_tail::HeldTiles { stores: &mut *self.stores, kernels: self.kernels, devices: self.tile_devices }
+    }
+
+    // every tile's value at its tile id, so the maximum is over every tile of every worker
+    fn max(&mut self, per_tile: &[f64]) -> Result<f64, WorkerError> {
+        let n_tiles = self.devices.len();
+        let local: Vec<(u64, u64)> = per_tile.iter().enumerate().map(|(k, v)| (self.tiles[k].0 as u64, v.to_bits())).collect();
+        let assembled = self.fabric.assemble_windowed(n_tiles as u64, &local, self.deadline).map_err(|e| fail(self.fabric, e.into()))?;
+        let mut max = 0.0_f64;
+        for (tile, bits) in assembled.iter().enumerate() {
+            if *bits == symbi_fabric::ABSENT {
+                return Err(fail(self.fabric, WorkerError::Numerics(format!("no worker supplied tile {tile}'s Alfven stiffness"))));
+            }
+            max = max.max(f64::from_bits(*bits));
+        }
+        Ok(max)
+    }
+
+    fn refresh_halos(&mut self) -> Result<(), WorkerError> {
+        let sh: Vec<&FieldStore<D, DOF, M, f64>> = self.stores.iter().map(|s| &**s).collect();
+        exchange_point(
+            self.exchange,
+            self.tiles,
+            &sh,
+            self.devices.len(),
+            self.devices,
+            self.transport,
+            self.fabric,
+            ExchangePoint::PostBody,
+            self.iter,
+            self.attempt,
+            self.deadline,
+            self.spent,
+        )
+        .map_err(|e| fail(self.fabric, e.into()))?;
+        flip_polar_bands(self.exchange, self.tiles, &sh, self.kernels, self.devices);
+        for k in 0..sh.len() {
+            with_device(self.tile_devices[k], || self.kernels[k].ghost_fill(sh[k]));
+        }
+        Ok(())
+    }
+
+    fn layout(&self, k: usize) -> crate::tracers::TransportLayout<D> {
+        self.layouts[k]
+    }
+
+    // every tile's partials at its tile id, in flat tile order
+    fn gather_deltas(&mut self) -> Result<Vec<Vec<symbi_ib::BodyDelta<f64, D>>>, WorkerError> {
+        let n_tiles = self.devices.len();
+        let n_bodies = self.stores.iter().find_map(|s| s.immersed.as_ref().map(|im| im.bodies.len())).unwrap_or(0);
+        let words = body_delta_words(D);
+        let per_tile = n_bodies * words;
+        let mut entries: Vec<(u64, u64)> = Vec::with_capacity(self.stores.len() * per_tile);
+        for (k, s) in self.stores.iter().enumerate() {
+            let Some(im) = s.immersed.as_ref() else {
+                continue;
+            };
+            let mut encoded = Vec::with_capacity(per_tile);
+            for delta in im.diagnostics.consolidate() {
+                encode_body_delta(&delta, &mut encoded);
+            }
+            let base = self.tiles[k].0 as u64 * per_tile as u64;
+            entries.extend(encoded.into_iter().enumerate().map(|(i, bits)| (base + i as u64, bits)));
+        }
+        let assembled =
+            self.fabric.assemble_windowed((n_tiles * per_tile) as u64, &entries, self.deadline).map_err(|e| fail(self.fabric, e.into()))?;
+        let mut tile_deltas = Vec::with_capacity(n_tiles);
+        for tile in 0..n_tiles {
+            let block = &assembled[tile * per_tile..(tile + 1) * per_tile];
+            if block.contains(&symbi_fabric::ABSENT) {
+                return Err(fail(
+                    self.fabric,
+                    WorkerError::Numerics(format!(
+                        "tile {tile}'s body feedback is missing from the assembled vector (or holds the absent bits)"
+                    )),
+                ));
+            }
+            tile_deltas.push((0..n_bodies).map(|b| decode_body_delta::<D>(b, &block[b * words..(b + 1) * words])).collect::<Vec<_>>());
+        }
+        Ok(tile_deltas)
+    }
+
+    fn failure(&mut self, detail: String) -> WorkerError {
+        fail(self.fabric, WorkerError::Numerics(detail))
+    }
+}
+
+/// the continuous-tracer step of a worker's tiles: the coefficients cross at their exchange point,
+/// the leavers and the injection through the fabric
+struct WorkerContinuous<'a, 's, 'p, 'c, const D: usize, const DOF: usize, M, T, L>
+where
+    M: MemorySpace,
+    T: HaloTransport,
+    L: Link,
+{
+    stores: &'a mut [&'s mut FieldStore<D, DOF, M, f64>],
+    tiles: &'a [TileId],
+    devices: &'a [i32],
+    exchange: &'a PlanExchange<'p, D>,
+    transport: &'a T,
+    fabric: &'a mut Fabric<L>,
+    timing: &'a mut WorkerTiming,
+    report: &'a mut WorkerReport,
+    context: &'a ContinuousTracerContext<'c, D>,
+    ledgers: &'a [std::collections::BTreeMap<crate::mass_transport::ContainerId, f64>],
+    deadline: Duration,
+    iter: u64,
+    attempt: u16,
+}
+
+impl<'s, const D: usize, const DOF: usize, M, T, L> crate::accepted_tail::FlatContinuous<'s, D, DOF, M>
+    for WorkerContinuous<'_, 's, '_, '_, D, DOF, M, T, L>
+where
+    M: MemorySpace,
+    T: HaloTransport,
+    L: Link,
+{
+    type Error = WorkerError;
+
+    fn stores(&mut self) -> &mut [&'s mut FieldStore<D, DOF, M, f64>] {
+        &mut *self.stores
+    }
+
+    fn domain(&self) -> ([(f64, f64); D], crate::state::Boundaries<D>) {
+        (self.context.bounds, self.context.boundaries)
+    }
+
+    fn exchange_coefficients(&mut self) -> Result<(), WorkerError> {
+        let n_tiles = self.devices.len();
+        let mut fields: Vec<Vec<&Field<f64, D, M>>> = (0..n_tiles).map(|_| Vec::new()).collect();
+        for (k, store) in self.stores.iter().enumerate() {
+            let c = store.ito_coefficients.as_ref().expect("ito coefficients were materialized");
+            fields[self.tiles[k].0 as usize] = c.drift.iter().chain(c.variance.iter()).chain(c.third.iter()).collect();
+        }
+        exchange_point_fields(
+            self.context.coefficients,
+            &fields,
+            self.devices,
+            self.transport,
+            self.fabric,
+            ExchangePoint::TracerCoefficients,
+            self.iter,
+            self.attempt,
+            self.deadline,
+            &mut self.timing.exchange,
+        )
+        .map_err(|e| fail(self.fabric, e.into()))
+    }
+
+    fn migrate(&mut self) -> Result<(), WorkerError> {
+        let moves = crate::worker_tracers::migrate_continuous(self.stores, self.tiles, self.exchange.plan(), self.context.bounds, self.fabric, self.deadline)
+            .map_err(|e| fail(self.fabric, WorkerError::Numerics(format!("continuous tracer migration: {e}"))))?;
+        self.report.tracer_migrations.add(moves);
+        Ok(())
+    }
+
+    fn spawn(&mut self, dt: f64) -> Result<(), WorkerError> {
+        crate::worker_tracers::spawn_continuous_injection(self.stores, self.tiles, self.exchange.plan(), self.ledgers, dt, self.fabric, self.deadline)
+            .map_err(|e| fail(self.fabric, WorkerError::Numerics(format!("continuous tracer injection: {e}"))))
     }
 
     fn failure(&mut self, detail: String) -> WorkerError {
@@ -1754,63 +1821,22 @@ where
         // fills their physical ghosts, the cut ghosts cross, the tracers advance and meet the
         // domain's faces, the leavers cross to their cells' tiles, and the injection spawns
         if let Some(context) = continuous.filter(|_| has_continuous) {
-            for s in stores.iter_mut() {
-                let geometry = s.geom.block_geometry(symbi_geometry::Cartesian);
-                crate::tracers::materialize_ito_coefficients_store(&mut **s, &geometry)
-                    .map_err(|e| fail(fabric, WorkerError::Numerics(format!("ito coefficient materialization: {e}"))))?;
-                crate::tracers::fill_ito_coefficient_boundaries_host(
-                    s.ito_coefficients.as_ref().expect("ito coefficients were materialized"),
-                    &s.geom,
-                    s.boundaries,
-                )
-                .map_err(|e| fail(fabric, WorkerError::Numerics(format!("ito coefficient boundaries: {e}"))))?;
-            }
-            {
-                let sh = shared!();
-                let mut fields: Vec<Vec<&Field<f64, D, M>>> = (0..n_tiles).map(|_| Vec::new()).collect();
-                for (k, store) in sh.iter().enumerate() {
-                    let c = store.ito_coefficients.as_ref().expect("ito coefficients were materialized");
-                    fields[tiles[k].0 as usize] = c.drift.iter().chain(c.variance.iter()).chain(c.third.iter()).collect();
-                }
-                exchange_point_fields(
-                    context.coefficients,
-                    &fields,
-                    devices,
-                    transport,
-                    fabric,
-                    ExchangePoint::TracerCoefficients,
-                    iter,
-                    attempt,
-                    deadline,
-                    &mut timing.exchange,
-                )
-                .map_err(|e| fail(fabric, e.into()))?;
-            }
-            for s in stores.iter_mut() {
-                let mut tracers = s.continuous_tracers.take().expect("every tile of a traced run carries tracers");
-                let (scale_start, scale_end, offset_start, offset_end) = crate::tracers::continuous_tracer_mesh_step(&**s, dt);
-                let advanced = crate::tracers::advance_continuous_tracers(
-                    &mut tracers,
-                    s.ito_coefficients.as_ref().expect("ito coefficients were materialized"),
-                    &s.geom,
-                    scale_start,
-                    scale_end,
-                    offset_start,
-                    offset_end,
-                    dt,
-                )
-                .and_then(|_| {
-                    let bounds = crate::tracers::map_continuous_tracer_bounds(context.bounds, scale_end, offset_end);
-                    crate::tracers::apply_continuous_boundaries_host(&mut tracers, bounds, context.boundaries)
-                });
-                s.continuous_tracers = Some(tracers);
-                advanced.map_err(|e| fail(fabric, WorkerError::Numerics(format!("ito tracer advancement: {e}"))))?;
-            }
-            let moves = crate::worker_tracers::migrate_continuous(stores, tiles, exchange.plan(), context.bounds, fabric, deadline)
-                .map_err(|e| fail(fabric, WorkerError::Numerics(format!("continuous tracer migration: {e}"))))?;
-            report.tracer_migrations.add(moves);
-            crate::worker_tracers::spawn_continuous_injection(stores, tiles, exchange.plan(), &injection_ledgers, dt, fabric, deadline)
-                .map_err(|e| fail(fabric, WorkerError::Numerics(format!("continuous tracer injection: {e}"))))?;
+            let mut continuous = WorkerContinuous {
+                stores: &mut *stores,
+                tiles,
+                devices,
+                exchange,
+                transport,
+                fabric: &mut *fabric,
+                timing: &mut timing,
+                report: &mut report,
+                context,
+                ledgers: &injection_ledgers,
+                deadline,
+                iter,
+                attempt,
+            };
+            crate::accepted_tail::flat_continuous_step(&mut continuous, dt)?;
         }
         {
             // the post-step recipe on the accepted step: an operation that writes the conserved
@@ -1844,11 +1870,23 @@ where
             }
         }
         if stores.iter().any(|s| s.immersed.is_some()) {
-            body_step(
-                exchange, tiles, stores, kernels, n_tiles, devices, transport, fabric, dt, iter, attempt, deadline,
-                &mut timing.exchange, &tracer_layouts,
-            )
-            .map_err(|e| fail(fabric, e))?;
+            let tile_devices: Vec<i32> = tiles.iter().map(|t| devices[t.0 as usize]).collect();
+            let mut bodies = WorkerBodies {
+                stores: &mut *stores,
+                kernels,
+                tiles,
+                devices,
+                tile_devices: &tile_devices,
+                exchange,
+                transport,
+                fabric: &mut *fabric,
+                spent: &mut timing.exchange,
+                layouts: &tracer_layouts,
+                deadline,
+                iter,
+                attempt,
+            };
+            crate::accepted_tail::flat_body_step(&mut bodies, dt)?;
         }
         for s in stores.iter_mut() {
             advance_state_clock(&mut **s, dt);

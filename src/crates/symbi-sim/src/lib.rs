@@ -19,6 +19,7 @@
 //  use symbi_sim::substrate_seam::{KernelSet, RegimeSubstrate, Solver};
 // =============================================================================
 
+pub mod accepted_tail;
 pub mod atlas;
 pub mod axis_ring;
 pub mod projection_ledger;

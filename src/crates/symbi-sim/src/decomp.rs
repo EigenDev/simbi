@@ -1948,24 +1948,6 @@ pub fn drain_devices<M: MemorySpace>(_devices: &[i32]) {}
 /// the global dt is the min over all tiles' cfl -- identical to a monolithic run, since the
 /// union of the tile interiors is the monolithic interior. rk2 exchanges between stages so the
 /// corrector reconstructs from each neighbor's stage-updated interior.
-/// the per-step immersed-body bookkeeping for a decomposed run. each tile's `body_feedback` has
-/// already reduced its local interior force/torque/accreted-mass into its own (interior-mutable)
-/// diagnostics; this sums those partials across tiles into a global per-body delta (the true
-/// disk-on-body reaction, == the monolithic single-grid reduction since the tile interiors
-/// partition the global interior), then applies the identical global delta to every tile's bodies +
-/// advances the prescribed binary orbit identically + resets each accumulator. identical input ->
-/// identical body state, so all tiles stay in lockstep and the next step's body_source reads the
-/// same body positions everywhere. no-op for tiles without bodies.
-fn step_bodies_decomposed<const D: usize, const DOF: usize, M: MemorySpace>(
-    stores: &mut [&mut FieldStore<D, DOF, M, f64>],
-    dt: f64,
-) {
-    let global = merge_body_deltas(
-        stores.iter().filter_map(|s| s.immersed.as_ref().map(|im| im.diagnostics.consolidate())),
-    );
-    apply_global_body_step(stores, &global, dt);
-}
-
 /// the global per-body delta from each tile's consolidated partials, in flat tile order: the first
 /// tile's delta stands as given and every later tile's partial is added to it, the summation order
 /// every driver of the tiles reproduces
@@ -2749,6 +2731,145 @@ where
     }
 }
 
+/// tile `k`'s place in the whole grid for the mass-transport tracers, from the partition the tiles
+/// form and the schedule's wraps
+fn tile_transport_layout<const D: usize, const DOF: usize, M: MemorySpace>(
+    stores: &[&mut FieldStore<D, DOF, M, f64>],
+    schedule: &Schedule<D>,
+    k: usize,
+) -> crate::tracers::TransportLayout<D> {
+    if stores[k].geom.coords != symbi_geometry::Geometry::Cartesian {
+        panic!("decomposed mass-transport tracers require explicit curvilinear geometry");
+    }
+    let counts = schedule.counts();
+    let sh: Vec<&FieldStore<D, DOF, M, f64>> = stores.iter().map(|s| &**s).collect();
+    let partition = tile_partition_of(&sh, counts);
+    let ext = partition.tile_extents(unflatten(k, counts));
+    crate::tracers::TransportLayout {
+        global_cells: partition.n_cells(),
+        tile_offset: std::array::from_fn(|dd| ext[dd].0),
+        wraps: std::array::from_fn(|dd| schedule.wraps(dd)),
+        level: 0,
+    }
+}
+
+/// the body step of the flat in-process tiles: every reduction is the tiles' own, the halos move
+/// by the in-process exchange, and the deltas are every tile's in flat order
+struct FlatTileBodies<'a, 's, const D: usize, const DOF: usize, M, K, T>
+where
+    M: MemorySpace,
+    K: KernelSet<D, DOF, M, f64>,
+    T: HaloTransport,
+{
+    stores: &'a mut [&'s mut FieldStore<D, DOF, M, f64>],
+    kernels: &'a [&'a K],
+    schedule: &'a Schedule<D>,
+    devices: &'a [i32],
+    transport: &'a T,
+}
+
+impl<'s, const D: usize, const DOF: usize, M, K, T> crate::accepted_tail::FlatBodies<'s, D, DOF, M> for FlatTileBodies<'_, 's, D, DOF, M, K, T>
+where
+    M: MemorySpace,
+    K: KernelSet<D, DOF, M, f64>,
+    T: HaloTransport,
+{
+    type Error = std::convert::Infallible;
+    type Kernels = K;
+
+    fn held(&mut self) -> crate::accepted_tail::HeldTiles<'_, 's, D, DOF, M, K> {
+        crate::accepted_tail::HeldTiles { stores: &mut *self.stores, kernels: self.kernels, devices: self.devices }
+    }
+
+    fn drain(&mut self) {
+        drain_devices::<M>(self.devices);
+    }
+
+    fn max(&mut self, per_tile: &[f64]) -> Result<f64, Self::Error> {
+        Ok(per_tile.iter().copied().fold(0.0_f64, f64::max))
+    }
+
+    // the next step's reconstruction reads the drained gas across the cuts
+    fn refresh_halos(&mut self) -> Result<(), Self::Error> {
+        drain_devices::<M>(self.devices);
+        let sh: Vec<&FieldStore<D, DOF, M, f64>> = self.stores.iter().map(|s| &**s).collect();
+        exchange_grid(&sh, self.schedule, self.devices, self.transport);
+        flip_polar_bands(&sh, self.kernels, self.schedule, self.devices);
+        for i in 0..sh.len() {
+            symbi_xpu::with_device(self.devices[i], || self.kernels[i].ghost_fill(sh[i]));
+        }
+        Ok(())
+    }
+
+    fn layout(&self, k: usize) -> crate::tracers::TransportLayout<D> {
+        tile_transport_layout(self.stores, self.schedule, k)
+    }
+
+    fn gather_deltas(&mut self) -> Result<Vec<Vec<symbi_ib::BodyDelta<f64, D>>>, Self::Error> {
+        Ok(self.stores.iter().filter_map(|s| s.immersed.as_ref().map(|im| im.diagnostics.consolidate())).collect())
+    }
+
+    fn failure(&mut self, detail: String) -> Self::Error {
+        panic!("{detail}")
+    }
+}
+
+/// the continuous-tracer step of the flat in-process tiles: the coefficients cross the cuts by the
+/// in-process exchange, the leavers by the in-process migration
+struct FlatTileContinuous<'a, 's, const D: usize, const DOF: usize, M, T>
+where
+    M: MemorySpace,
+    T: HaloTransport,
+{
+    stores: &'a mut [&'s mut FieldStore<D, DOF, M, f64>],
+    schedule: &'a Schedule<D>,
+    devices: &'a [i32],
+    transport: &'a T,
+    /// the injection the accepted stages booked, spent by the spawn
+    ledgers: Option<Vec<std::collections::BTreeMap<crate::mass_transport::ContainerId, f64>>>,
+    bounds: [(f64, f64); D],
+    boundaries: crate::state::Boundaries<D>,
+}
+
+impl<'s, const D: usize, const DOF: usize, M, T> crate::accepted_tail::FlatContinuous<'s, D, DOF, M> for FlatTileContinuous<'_, 's, D, DOF, M, T>
+where
+    M: MemorySpace,
+    T: HaloTransport,
+{
+    type Error = std::convert::Infallible;
+
+    fn stores(&mut self) -> &mut [&'s mut FieldStore<D, DOF, M, f64>] {
+        &mut *self.stores
+    }
+
+    fn domain(&self) -> ([(f64, f64); D], crate::state::Boundaries<D>) {
+        (self.bounds, self.boundaries)
+    }
+
+    fn exchange_coefficients(&mut self) -> Result<(), Self::Error> {
+        let sh: Vec<&FieldStore<D, DOF, M, f64>> = self.stores.iter().map(|s| &**s).collect();
+        exchange_ito_coefficients(&sh, self.schedule, self.devices, self.transport);
+        drain_devices::<M>(self.devices);
+        Ok(())
+    }
+
+    fn migrate(&mut self) -> Result<(), Self::Error> {
+        migrate_continuous_tracers(self.stores, self.schedule).unwrap_or_else(|err| panic!("continuous tracer migration failed: {err}"));
+        Ok(())
+    }
+
+    fn spawn(&mut self, dt: f64) -> Result<(), Self::Error> {
+        let ledgers = self.ledgers.take().expect("the injection is spawned once per step");
+        spawn_decomposed_continuous_injection(self.stores, self.schedule, ledgers, dt)
+            .unwrap_or_else(|err| panic!("continuous tracer injection failed: {err}"));
+        Ok(())
+    }
+
+    fn failure(&mut self, detail: String) -> Self::Error {
+        panic!("{detail} failed")
+    }
+}
+
 /// the stage tail of the flat in-process tiles: the excision through `ScheduledStep`, the halos by
 /// the in-process exchange, the tracers' layouts from the tiles' partition, and the tracers crossing
 /// the cuts by the in-process migration
@@ -2812,20 +2933,7 @@ where
     }
 
     fn layout(&self, k: usize) -> crate::tracers::TransportLayout<D> {
-        let store = &self.stores[k];
-        if store.geom.coords != symbi_geometry::Geometry::Cartesian {
-            panic!("decomposed mass-transport tracers require explicit curvilinear geometry");
-        }
-        let counts = self.schedule.counts();
-        let sh: Vec<&FieldStore<D, DOF, M, f64>> = self.stores.iter().map(|s| &**s).collect();
-        let partition = tile_partition_of(&sh, counts);
-        let ext = partition.tile_extents(unflatten(k, counts));
-        crate::tracers::TransportLayout {
-            global_cells: partition.n_cells(),
-            tile_offset: std::array::from_fn(|dd| ext[dd].0),
-            wraps: std::array::from_fn(|dd| self.schedule.wraps(dd)),
-            level: 0,
-        }
+        tile_transport_layout(self.stores, self.schedule, k)
     }
 
     fn migrate(&mut self) -> Result<(), Self::Error> {
@@ -3260,66 +3368,18 @@ where
             s.motion.a = a_n[i];
         }
         if has_continuous_tracers {
-            for store in stores.iter_mut() {
-                let geometry = store.geom.block_geometry(symbi_geometry::Cartesian);
-                crate::tracers::materialize_ito_coefficients_store(&mut **store, &geometry)
-                    .unwrap_or_else(|err| panic!("ito coefficient materialization failed: {err}"));
-                crate::tracers::fill_ito_coefficient_boundaries_host(
-                    store
-                        .ito_coefficients
-                        .as_ref()
-                        .expect("ito coefficients were materialized"),
-                    &store.geom,
-                    store.boundaries,
-                )
-                .unwrap_or_else(|err| panic!("ito coefficient boundary fill failed: {err}"));
-            }
-            {
-                let sh = shared!();
-                exchange_ito_coefficients(&sh, &schedule, devices, transport);
-            }
-            drain_devices::<M>(devices);
-            for store in stores.iter_mut() {
-                let Some(mut tracers) = store.continuous_tracers.take() else {
-                    continue;
-                };
-                let coefficients = store
-                    .ito_coefficients
-                    .as_ref()
-                    .expect("ito coefficients were materialized");
-                let (scale_start, scale_end, offset_start, offset_end) =
-                    crate::tracers::continuous_tracer_mesh_step(&**store, dt);
-                crate::tracers::advance_continuous_tracers(
-                    &mut tracers,
-                    coefficients,
-                    &store.geom,
-                    scale_start,
-                    scale_end,
-                    offset_start,
-                    offset_end,
-                    dt,
-                )
-                .unwrap_or_else(|err| panic!("ito tracer advancement failed: {err}"));
-                let physical_bounds = crate::tracers::map_continuous_tracer_bounds(
-                    tracer_bounds,
-                    scale_end,
-                    offset_end,
-                );
-                crate::tracers::apply_continuous_boundaries_host(
-                    &mut tracers,
-                    physical_bounds,
-                    tracer_boundaries,
-                )
-                .unwrap_or_else(|err| panic!("ito tracer boundaries failed: {err}"));
-                store.continuous_tracers = Some(tracers);
-            }
-            migrate_continuous_tracers(stores, &schedule)
-                .unwrap_or_else(|err| panic!("continuous tracer migration failed: {err}"));
-            spawn_decomposed_continuous_injection(stores, &schedule, injection_ledgers, dt)
-                .unwrap_or_else(|err| panic!("continuous tracer injection failed: {err}"));
+            let mut continuous = FlatTileContinuous {
+                stores: &mut *stores,
+                schedule: &schedule,
+                devices,
+                transport,
+                ledgers: Some(injection_ledgers),
+                bounds: tracer_bounds,
+                boundaries: tracer_boundaries,
+            };
+            let Ok::<_, std::convert::Infallible>(()) = crate::accepted_tail::flat_continuous_step(&mut continuous, dt);
         }
         let mut horizon_receipt = None;
-        let mut accretion_density = Vec::new();
         {
             let sh = shared!();
             // the post-step recipe once per step after the final halo exchange, every tile
@@ -3347,112 +3407,15 @@ where
                     });
                 horizon_receipt = Some((index, mdot, edot));
             }
-            // backward immersed-body feedback (per step, after all stages): each tile reduces its
-            // local interior force/torque/accreted-mass into its own accumulator. the cross-tile sum
-            // + the prescribed-orbit advance happen in `step_bodies_decomposed` below, which needs
-            // `&mut` -- so `sh` (a shared reborrow of `stores`) must be dropped first.
-            if has_bodies {
-                // the wall relaxation's Alfven stiffness c_a2 = max|B|^2/rho is a global max over
-                // the domain; reduce the per-tile maxima and publish the global value to every tile
-                // so a magnetized wall straddling a cut relaxes at the monolithic rate (a per-tile
-                // local max would diverge from the monolithic single-grid run). inert (0) off MHD.
-                let global_c_a2 = (0..n)
-                    .map(|i| crate::state::local_c_a2_max(sh[i]))
-                    .fold(0.0_f64, f64::max);
-                for i in 0..n {
-                    if let Some(im) = sh[i].immersed.as_ref() {
-                        im.set_c_a2_override(global_c_a2);
-                    }
-                }
-                // the density the sinks drain from, for the tracers of either kind they carry in
-                if has_discrete_tracers || has_continuous_tracers {
-                    drain_devices::<M>(devices);
-                    accretion_density = sh
-                        .iter()
-                        .map(|store| crate::tracers::snapshot_accretion_density(*store))
-                        .collect();
-                }
-                // IBM surface physics once per step, after all stages (receipt == removal; see
-                // evolve.rs). a surface stack rescales the conserved state after the last stage's
-                // recovery, so every tile recovers its primitives and ghost band from the
-                // penalized state, then the cut halos are refreshed so the next step's
-                // reconstruction reads the drained gas across cuts too.
-                let penalizes = sh
-                    .iter()
-                    .any(|store| store.immersed.as_ref().is_some_and(|im| im.bodies.penalizes()));
-                for i in 0..n {
-                    symbi_xpu::with_device(devices[i], || {
-                        prof("penalize", || kernels[i].penalize(sh[i], dt));
-                        if penalizes {
-                            prof("c2p", || kernels[i].c2p(sh[i]));
-                            prof("ghost_fill", || kernels[i].ghost_fill(sh[i]));
-                        }
-                    });
-                }
-                if penalizes {
-                    drain_devices::<M>(devices);
-                    exchange_grid(&sh, &schedule, devices, transport);
-                    flip_polar_bands(&sh, kernels, &schedule, devices);
-                    for i in 0..n {
-                        symbi_xpu::with_device(devices[i], || kernels[i].ghost_fill(sh[i]));
-                    }
-                }
-                // the feedback, gated like the other drivers: only bodies whose dynamics consume
-                // the reduction (two-way or accreting) pay for it.
-                for i in 0..n {
-                    let needs_fb = sh[i]
-                        .immersed
-                        .as_ref()
-                        .is_some_and(|im| im.bodies.needs_feedback());
-                    if needs_fb {
-                        symbi_xpu::with_device(devices[i], || {
-                            prof("body_feedback", || kernels[i].body_feedback(sh[i], dt))
-                        });
-                    }
-                }
-                drain_devices::<M>(devices);
-            }
         }
         if let Some((index, mdot, edot)) = horizon_receipt {
             for store in stores.iter_mut() {
                 book_horizon_receipt(&mut **store, index, mdot, edot, dt);
             }
         }
-        if !accretion_density.is_empty() {
-            let partition = {
-                let sh: Vec<&FieldStore<D, DOF, M, f64>> = stores.iter().map(|s| &**s).collect();
-                tile_partition_of(&sh, counts)
-            };
-            for (flat, store) in stores.iter_mut().enumerate() {
-                let tile = unflatten(flat, counts);
-                let layout = crate::tracers::TransportLayout {
-                    global_cells: partition.n_cells(),
-                    tile_offset: std::array::from_fn(|dd| partition.tile_extents(tile)[dd].0),
-                    wraps: std::array::from_fn(|dd| schedule.wraps(dd)),
-                    level: 0,
-                };
-                let geometry = store.geom.block_geometry(symbi_geometry::Cartesian);
-                let crossing_time = store.time + dt;
-                crate::tracers::advance_accretion_transport_store(
-                    &mut **store,
-                    &geometry,
-                    layout,
-                    &accretion_density[flat],
-                    crossing_time,
-                )
-                .unwrap_or_else(|detail| panic!("tracer accretion transport: {detail}"));
-                crate::tracers::advance_continuous_accretion_transport_store(
-                    &mut **store,
-                    &geometry,
-                    layout,
-                    &accretion_density[flat],
-                    crossing_time,
-                )
-                .unwrap_or_else(|detail| panic!("continuous tracer accretion transport: {detail}"));
-            }
-        }
         if has_bodies {
-            step_bodies_decomposed(stores, dt);
+            let mut bodies = FlatTileBodies { stores: &mut *stores, kernels, schedule: &schedule, devices, transport };
+            let Ok::<_, std::convert::Infallible>(()) = crate::accepted_tail::flat_body_step(&mut bodies, dt);
         }
         // per-tile clocks + mesh-motion advance, in lockstep (identical law + identical dt on
         // every tile -> identical scale factors; the cuts sit at fixed comoving indices, so the
