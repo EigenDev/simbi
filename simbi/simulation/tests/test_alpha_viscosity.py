@@ -19,6 +19,9 @@
 # - newtonian MHD, an orszag-tang vortex around a gravitating centre: alpha
 #   changes the run on one device, and two and three unequal host tiles reach
 #   the single grid's state and clock bit for bit;
+# - refined newtonian MHD: the vortex under one refined box, alpha changing
+#   the run, on two refined host tiles reaches every level of the single
+#   hierarchy's state bit for bit;
 # - isothermal MHD carries no pressure for the local sound speed: alpha is
 #   refused by name before any output.
 #
@@ -114,6 +117,13 @@ class AlphaNewtonianOrszagTang(NewtonianOrszagTang):
                 gravitational=GravitationalProperties(softening_length=0.05),
             )
         ]
+
+
+class RefinedAlphaNewtonianOrszagTang(AlphaNewtonianOrszagTang):
+    refinement_enabled: Annotated[bool, ProblemParam(True, description="refined")]
+    refinement_max_levels: Annotated[int, ProblemParam(2, description="levels")]
+    refinement_regions: Annotated[list[list[float]], ProblemParam([[0.25, 0.75, 0.25, 0.75]], description="box")]
+    refinement_ratios: Annotated[list[int], ProblemParam([2], description="ratios")]
 
 
 class AlphaIsothermalOrszagTang(IsothermalOrszagTang):
@@ -272,3 +282,18 @@ def test_magnetized_tiles_carry_the_single_grid_alpha(tmp_path: Path, variants: 
     assert tiles.keys() == single.keys(), f"datasets {sorted(tiles.keys() ^ single.keys())} differ"
     for name, x in single.items():
         np.testing.assert_array_equal(tiles[name], x, err_msg=f"{gpus} magnetized tiles: {name}")
+
+
+def test_refined_magnetized_tiles_carry_the_single_hierarchy_alpha(tmp_path: Path, variants: Path) -> None:
+    def run(out: Path, devices: int, alpha: float) -> dict[str, np.ndarray]:
+        done = _run("RefinedAlphaNewtonianOrszagTang", out, devices, extra=f", viscosity_alpha={alpha!r}", resolution=MHD_RESOLUTION)
+        assert done.returncode == 0, f"refined nmhd alpha = {alpha} on {devices} device(s) failed:\n{done.stderr[-3000:]}"
+        return _levels(out)
+
+    single, inviscid = run(tmp_path / "single", 1, 0.1), run(tmp_path / "inviscid", 1, 0.0)
+    assert "level_1/conserved/den" in single, "the single hierarchy published no fine level; the refined arm is vacuous"
+    assert any(not np.array_equal(single[k], inviscid[k]) for k in single if "conserved" in k), "the alpha left the refined magnetized run inviscid"
+    tiles = run(tmp_path / "tiles", 2, 0.1)
+    assert tiles.keys() == single.keys(), f"datasets {sorted(tiles.keys() ^ single.keys())} differ"
+    for name, x in single.items():
+        np.testing.assert_array_equal(tiles[name], x, err_msg=f"two refined magnetized tiles: {name}")
