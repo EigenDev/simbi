@@ -1895,7 +1895,10 @@ where
     /// accumulator. the caller consolidates the partials across tiles and applies the
     /// identical global delta everywhere via `apply_global_body_deltas`.
     pub fn finest_body_feedback(&mut self, dt: f64) {
-        if !self.levels[0].state.has_bodies() {
+        // the body couples to the run's finest level, which the tiles holding it partition; a
+        // tile short of that level holds none of the cells the single hierarchy reduces, and its
+        // coarser gas, covered there by the finer levels, adds nothing to the reaction
+        if !self.levels[0].state.has_bodies() || self.levels.len() < self.run_levels() {
             return;
         }
         let fi = self.levels.len() - 1;

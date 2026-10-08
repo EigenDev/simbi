@@ -13,8 +13,12 @@
 // premises: level 2 lives on at least two tiles and carries structure. under
 // a viscosity, with a cut that leaves level 2 on one tile, the tile holding
 // levels 0 and 1 alone applies the viscous transport where the single
-// hierarchy does, on level 2 only. a level-2 patch face lying on a cut is
-// refused by name.
+// hierarchy does, on level 2 only. an accreting sink couples to the run's
+// finest level alone: a tile holding levels 0 and 1 of a three-level run, and a
+// tile holding the root alone of a two-level run, add no reaction, so the
+// accreted mass and the force history equal the single hierarchy's bit for bit
+// (both arms failed before: the short tile added its own gas's pull). a level-2
+// patch face lying on a cut is refused by name.
 //
 // run: cargo test -p symbi --test decomp_refine_nested
 // =============================================================================
@@ -271,4 +275,89 @@ fn a_level_2_face_on_a_cut_is_refused_by_name() {
     ];
     let err = build_tiles(&partition, &whole, kset).err().expect("a level-2 face on a cut was admitted");
     assert!(err.detail.contains("lies on a decomposition cut"), "the refusal names another reason: {}", err.detail);
+}
+
+// an accreting sink at the centre of a three-level run. the single hierarchy holds the full body on
+// level 2 and couples it there; every tile holds it on its own deepest level, so a tile short of
+// level 2 couples it on level 1. the cut at root cell 21 leaves level 2 on the first tile alone
+fn sink() -> symbi_ib::BodyCollection<f64, 2> {
+    symbi_ib::BodyCollection::new().add(symbi_ib::Body::black_hole(0, Tensor::new([0.5, 0.48]), Tensor::zeros(), 1.0, 0.03, 0.06, 10.0, 0.5, 0.06))
+}
+
+/// the body's accreted mass and its force history, read from the deepest level `h` holds
+fn body_record(h: &Hier) -> (f64, Vec<f64>) {
+    let im = h.levels.last().unwrap().state.immersed.as_ref().expect("bodies attached");
+    let mut accreted = 0.0;
+    im.bodies.visit_accretion(|b| {
+        if let symbi_ib::BodyKind::BlackHole { total_accreted_mass, .. } = &b.kind {
+            accreted += *total_accreted_mass;
+        }
+    });
+    (accreted, im.history.force().to_vec())
+}
+
+#[test]
+fn a_tile_short_of_the_finest_level_couples_a_nested_sink_as_the_single_hierarchy_does() {
+    let partition = Partition::explicit([N, N], [vec![21], vec![]]).expect("cuts inside the grid");
+    let mut single = build_single(kset).with_bodies(sink());
+    single.prime();
+    let mut tiles: Vec<Hier> = build_tiles(&partition, &regions(), kset)
+        .expect("tile hierarchies")
+        .into_iter()
+        .map(|h| {
+            let mut h = h.with_bodies(sink());
+            h.prime();
+            h
+        })
+        .collect();
+    assert_eq!((tiles[0].levels.len(), tiles[1].levels.len()), (3, 2), "premise: the second tile holds levels 0 and 1 alone");
+    single.evolve(T_FINAL).expect("single evolve");
+    evolve_tiles(&mut tiles, &partition);
+    assert_levels_match(std::slice::from_ref(&single), &tiles, "a nested sink, cut at 21");
+    let (want_mass, want_force) = body_record(&single);
+    assert!(want_mass > 1e-8, "the sink accreted nothing; the gate is vacuous");
+    for (k, tile) in tiles.iter().enumerate() {
+        let (mass, force) = body_record(tile);
+        assert_eq!(mass.to_bits(), want_mass.to_bits(), "tile {k}: accreted {mass:e} against {want_mass:e}");
+        assert_eq!(force.len(), want_force.len(), "tile {k}: force history length");
+        for (ii, (a, b)) in force.iter().zip(&want_force).enumerate() {
+            assert_eq!(a.to_bits(), b.to_bits(), "tile {k}: force entry {ii} is {a:e} against {b:e}");
+        }
+    }
+}
+
+// the same sink on a two-level run whose first tile, cut at root cell 6, holds the root alone
+#[test]
+fn an_unrefined_tile_adds_no_reaction_to_a_refined_sink() {
+    let partition = Partition::explicit([N, N], [vec![6], vec![]]).expect("cuts inside the grid");
+    let one = [regions()[0]];
+    let root = build_root([N, N], [0, 0], Boundaries::uniform(BoundaryType::Outflow));
+    let k = kset(&root);
+    let single = Hier::with_refinement(root, k, &one, ProlongOrder::Ppm, kset).expect("single hierarchy");
+    single.seed_fine_from_coarse().expect("seed fine");
+    let mut single = single.with_bodies(sink());
+    single.prime();
+    let mut tiles: Vec<Hier> = build_tiles(&partition, &one, kset)
+        .expect("tile hierarchies")
+        .into_iter()
+        .map(|h| {
+            let mut h = h.with_bodies(sink());
+            h.prime();
+            h
+        })
+        .collect();
+    assert_eq!((tiles[0].levels.len(), tiles[1].levels.len()), (1, 2), "premise: the first tile holds the root alone");
+    single.evolve(T_FINAL).expect("single evolve");
+    evolve_tiles(&mut tiles, &partition);
+    assert_levels_match(std::slice::from_ref(&single), &tiles, "a refined sink, cut at 6");
+    let (want_mass, want_force) = body_record(&single);
+    assert!(want_mass > 1e-8 && want_force.iter().any(|f| f.abs() > 1e-3), "premise: the sink accreted and felt a force");
+    for (k, tile) in tiles.iter().enumerate() {
+        let (mass, force) = body_record(tile);
+        assert_eq!(mass.to_bits(), want_mass.to_bits(), "tile {k}: accreted {mass:e} against {want_mass:e}");
+        assert_eq!(force.len(), want_force.len(), "tile {k}: force history length");
+        for (ii, (a, b)) in force.iter().zip(&want_force).enumerate() {
+            assert_eq!(a.to_bits(), b.to_bits(), "tile {k}: force entry {ii} is {a:e} against {b:e}");
+        }
+    }
 }
