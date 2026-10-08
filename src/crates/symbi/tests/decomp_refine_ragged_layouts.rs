@@ -5,7 +5,11 @@
 // center: the root tiles and the fine tiles are unequal on both axes. the
 // decomposed hierarchy must equal the single hierarchy interior cell for
 // interior cell after one root step, under a PLM root and under a PPM root
-// with quartic prolongation. both runs feed the phase probe, so a failure
+// with quartic prolongation. a patch face lying on a root cut sends its
+// register units to the tile across the cut, which holds the coarse cells
+// their reflux corrects; under a PPM root whose halo holds the prolongation
+// stencil (five cells) that layout matches too, on a low and a high face of
+// each axis. both runs feed the phase probe, so a failure
 // names the first operation (per level and ordinal), tile, cell and field
 // after which the two hierarchies differ, before the composite is compared.
 //
@@ -15,6 +19,7 @@ use std::collections::HashMap;
 
 use symbi::regimes::substrate_newton::AdiabaticSubstrateKernelSet;
 use symbi::sim::decomp::{LocalCopy, Partition, unflatten};
+use symbi::sim::refinement::launched::receiving_faces_of_tile;
 use symbi::sim::refinement::{
     Hierarchy, ProlongOrder, RefinementRegion, evolve_hierarchy_decomposed,
     seed_decomposed_fine_from_coarse,
@@ -28,6 +33,7 @@ use symbi_hydro::newtonian::Newtonian;
 use symbi_hydro::quantity::{Density, Pressure};
 use symbi_hydro::state::Prim;
 use symbi_refinement::refinement::phase_probe::{self, PhaseSample};
+use symbi_sim::atlas::TileId;
 use symbi_xpu::{CpuSpace, HostMemory};
 
 type Sim = SimState<Newtonian, 2, Cartesian, IdealGas<f64>, CpuSpace, HostMemory>;
@@ -47,6 +53,8 @@ const PX_HI: f64 = 0.625;
 const PY_LO: f64 = 0.375;
 const PY_HI: f64 = 0.625;
 const PATCH_LO_FINE: isize = 24;
+// the patch in root cells per axis
+const PATCH: [(usize, usize); 2] = [(12, 20), (12, 20)];
 
 /// the evolution reconstruction with its halo width, and the prolongation into the patch
 #[derive(Clone, Copy)]
@@ -58,6 +66,10 @@ struct Scheme {
 
 const PLM: Scheme = Scheme { recon: Recon::Plm, ng: 2, prolong: ProlongOrder::Ppm };
 const PPM: Scheme = Scheme { recon: Recon::Ppm, ng: 3, prolong: ProlongOrder::Quartic };
+// a patch face on a cut prolongs its fine ghosts from the root halo alone: the fine halo is one
+// cell deeper than the root's, and the quartic stencil of its six cells reaches
+// ceil(6 / 2) + 2 = 5 root cells
+const PPM_CUT_FACE: Scheme = Scheme { recon: Recon::Ppm, ng: 5, prolong: ProlongOrder::Quartic };
 
 fn bump(x: f64, y: f64) -> f64 {
     0.3 * (-(((x - 0.5) / 0.08).powi(2) + ((y - 0.5) / 0.08).powi(2))).exp()
@@ -110,8 +122,10 @@ fn build_mono(scheme: Scheme) -> Hier {
     h
 }
 
-/// root tiles from the partition's extents, each refining the global patch clipped to its
-/// physical range; the fine interiors are seeded after the root conserved halos are exchanged
+/// root tiles from the partition's extents, as the host tiles build them: each refines the global
+/// patch clipped to its physical range, a patch face on a cut contributing its register units, and
+/// a tile beside such a face carries the receiving register of the cells it corrects; the fine
+/// interiors are seeded after the root conserved halos are exchanged
 fn build_tiles(partition: &Partition<2>, scheme: Scheme) -> Vec<Hier> {
     let make = kset_of(scheme);
     let counts = partition.counts();
@@ -134,9 +148,12 @@ fn build_tiles(partition: &Partition<2>, scheme: Scheme) -> Vec<Hier> {
         let h = if cx[0] < cx[1] && cy[0] < cy[1] {
             let region = RefinementRegion { x_lo: [cx[0], cy[0]], x_hi: [cx[1], cy[1]] };
             let whole = RefinementRegion { x_lo: [PX_LO, PY_LO], x_hi: [PX_HI, PY_HI] };
-            Hier::with_refinement_of(root, k, &[region], &[whole], scheme.prolong, make).expect("tile hier")
+            Hier::with_refinement_of_contributing(root, k, &[region], &[whole], scheme.prolong, make).expect("tile hier")
         } else {
-            Hier::single(root, k)
+            match receiving_faces_of_tile(partition, PATCH, TileId(flat as u32)) {
+                Some((patch_local, faces)) => Hier::single(root, k).with_receiving_register(&patch_local, faces).expect("receiving register"),
+                None => Hier::single(root, k),
+            }
         };
         tiles.push(h);
     }
@@ -276,22 +293,43 @@ fn first_divergence(mono: &[PhaseSample], dec: &[PhaseSample], frames: &[TileFra
 }
 
 fn assert_one_step_matches(cuts: [usize; 2], scheme: Scheme) {
+    assert_matches_with_rejection(cuts, scheme, None);
+}
+
+/// `assert_one_step_matches` with the fine stage `(substep, stage)` of the first root step rejected
+/// once on the single hierarchy and on every refined tile: the replayed step matches too
+fn assert_matches_with_rejection(cuts: [usize; 2], scheme: Scheme, reject: Option<(u8, usize)>) {
     let partition = Partition::explicit([N, N], [vec![cuts[0]], vec![cuts[1]]])
         .expect("interior cuts are strictly increasing and inside the grid");
     let counts = partition.counts();
+    // a patch face on a cut: some tile contributes register units and some tile receives them
+    let on_cut = (0..2).any(|ax| cuts[ax] == PATCH[ax].0 || cuts[ax] == PATCH[ax].1);
     use symbi::regimes::fofc::{fofc_reset_stats, fofc_stats};
     let mut mono = build_mono(scheme);
     fofc_reset_stats();
     phase_probe::start();
+    if let Some((substep, stage)) = reject {
+        mono.reject_fine_once_at(0, substep, stage);
+    }
     mono.evolve(T_ONE_STEP).expect("mono evolve");
+    assert!(!mono.forced_fine_rejection_pending(), "the single hierarchy never reached the forced rejection");
     let mono_log = phase_probe::take();
     let mono_fofc = fofc_stats();
     assert!(!mono_log.is_empty(), "the single hierarchy fed no phase samples; the probe is vacuous");
 
     let mut dec = build_tiles(&partition, scheme);
+    let contributing = dec.iter().any(|h| h.flux_registers.first().is_some_and(|r| r.has_contributing()));
+    let receiving = dec.iter().any(|h| h.levels.len() == 1 && h.flux_registers.first().is_some_and(|r| r.has_receiving()));
+    assert_eq!((contributing, receiving), (on_cut, on_cut), "cuts {cuts:?}: the register roles miss the layout's patch faces on cuts");
     fofc_reset_stats();
     phase_probe::start();
+    if let Some((substep, stage)) = reject {
+        for h in dec.iter_mut().filter(|h| h.levels.len() > 1) {
+            h.reject_fine_once_at(0, substep, stage);
+        }
+    }
     run_decomposed(&mut dec, counts, T_ONE_STEP);
+    assert!(dec.iter().all(|h| !h.forced_fine_rejection_pending()), "a refined tile never reached the forced rejection");
     let dec_log = phase_probe::take();
     let dec_fofc = fofc_stats();
     let frames = frames(&dec, &partition);
@@ -336,9 +374,29 @@ fn ppm_root_cuts_17_17_match_after_one_root_step() {
     assert_one_step_matches([17, 17], PPM);
 }
 
-/// a patch face lying on a root cut is refused by name: the fine faces on it and the coarse
-/// cell their reflux corrects would live on different tiles, and no register contribution
-/// crosses a cut yet
+/// a patch face on the low x cut and the high y cut: the fine faces of both contribute to the
+/// tiles across the cuts, one of them the diagonal tile beside no face
+#[test]
+fn ppm_patch_faces_on_root_cuts_12_20_match_after_one_root_step() {
+    assert_one_step_matches([12, 20], PPM_CUT_FACE);
+}
+
+/// a patch face on the high x cut and the low y cut
+#[test]
+fn ppm_patch_faces_on_root_cuts_20_12_match_after_one_root_step() {
+    assert_one_step_matches([20, 12], PPM_CUT_FACE);
+}
+
+/// a fine stage rejected after the units of the first substep have folded across the cuts and
+/// while the rejected stage's own unit is pending: the replay starts from clean registers
+#[test]
+fn ppm_patch_faces_on_root_cuts_match_after_a_rejected_fine_stage() {
+    assert_matches_with_rejection([12, 20], PPM_CUT_FACE, Some((1, 1)));
+}
+
+/// the builder for a driver that carries no register unit across a cut refuses a patch face
+/// lying on a root cut by name: the fine faces on it and the coarse cell their reflux corrects
+/// live on different tiles
 #[test]
 fn a_patch_face_on_a_cut_is_refused_by_name() {
     let partition = Partition::explicit([N, N], [vec![12], vec![16]]).expect("cuts inside the grid");

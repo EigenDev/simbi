@@ -5869,6 +5869,57 @@ fn exchange_level_halos<R, const NDIM: usize, const DOF: usize, M, E, S, Mem, K,
     }
 }
 
+/// the register units of one fine stage across the root cuts: each root tile's contributing face
+/// (a patch face on a cut) lands in the inbox of the same patch face on the root tile across the
+/// cut, which holds the coarse cells its reflux corrects; every contributing face is then cleared
+/// for the next stage and every landed unit folded into its receiving face, in the order the
+/// single hierarchy's register accumulates. root tile `i` sits at flat position `i` of `counts`
+fn exchange_flux_contributions<R, const NDIM: usize, const DOF: usize, M, E, S, Mem, K, T>(
+    tiles: &[Hierarchy<R, NDIM, DOF, M, E, S, Mem, K>],
+    counts: [usize; NDIM],
+    devices: &[i32],
+    transport: &T,
+) where
+    R: Regime<f64, NDIM> + Copy,
+    M: Metric<f64, NDIM> + Copy + Send + Sync,
+    E: symbi_hydro::eos::EosFor<f64, <R as Regime<f64, NDIM>>::Energy> + Copy + Send + Sync,
+    S: ExecutionSpace,
+    Mem: MemorySpace + Sync,
+    K: KernelSet<NDIM, DOF, Mem, f64>,
+    T: HaloTransport,
+{
+    if !tiles.iter().any(Hierarchy::transports_registers) {
+        return;
+    }
+    drain_devices::<Mem>(devices);
+    for (i, src) in tiles.iter().enumerate() {
+        let Some(reg) = src.flux_registers.first() else { continue };
+        for (idx, faces, src_region) in reg.contributing() {
+            let (ax, side) = (idx / 2, idx % 2);
+            let mut tc = unflatten(i, counts);
+            tc[ax] = if side == 0 { tc[ax] - 1 } else { tc[ax] + 1 };
+            let j = flatten(tc, counts);
+            let (_, units, dst_region) = tiles[j]
+                .flux_registers
+                .first()
+                .and_then(|r| r.inboxes().into_iter().find(|(k, _, _)| *k == idx))
+                .unwrap_or_else(|| panic!("root tile {j} across the cut holds no receiving face {idx} for tile {i}'s patch face"));
+            for (face, unit) in faces.iter().zip(&units) {
+                transport.copy_region(face, src_region, unit, dst_region, devices[i], devices[j]);
+            }
+        }
+    }
+    drain_devices::<Mem>(devices);
+    for (i, tile) in tiles.iter().enumerate() {
+        if let Some(reg) = tile.flux_registers.first() {
+            symbi_xpu::with_device(devices[i], || {
+                reg.zero_contributions();
+                reg.fold_inboxes();
+            });
+        }
+    }
+}
+
 fn migrate_level_tracers<R, const NDIM: usize, const DOF: usize, M, E, S, Mem, K>(
     tiles: &mut [Hierarchy<R, NDIM, DOF, M, E, S, Mem, K>],
     level: usize,
@@ -6637,12 +6688,14 @@ where
 /// fraction, then the stages with the troubled marks and the halos crossing the cuts, the tail
 /// ahead of the finer subcycle, the subcycle of the next level with its restriction and reflux
 /// into this one, and the tail after it. `fine[k]` is the sub-grid of the tiles carrying level
-/// `k + 1`. returns whether some tile rejected the step.
+/// `k + 1`; `root` is the root tiles' grid and devices, across whose cuts each level-1 stage's
+/// register units travel. returns whether some tile rejected the step.
 #[allow(clippy::too_many_arguments)]
 fn decomposed_subcycle<R, const NDIM: usize, const DOF: usize, M, E, S, Mem, K, T>(
     tiles: &mut [Hierarchy<R, NDIM, DOF, M, E, S, Mem, K>],
     parent: usize,
     fine: &[FineSubgrid<NDIM>],
+    root: ([usize; NDIM], &[i32]),
     transport: &T,
     nstages: usize,
     dt: f64,
@@ -6684,6 +6737,9 @@ where
             }
             exchange_level_tracers(tiles, level, jj);
             exchange_level_halos(tiles, level, &fg.order, fg.counts, &fg.devices, transport);
+            if parent == 0 {
+                exchange_flux_contributions(tiles, root.0, root.1, transport);
+            }
             for &i in &fg.order {
                 phase_probe::set_tile(i);
                 phase_probe::sample(phase_probe::STAGE[jj], level, &tiles[i].levels[level].state);
@@ -6701,7 +6757,7 @@ where
             exchange_level_ito(tiles, level, &fg.order, fg.counts, &fg.devices, transport);
         }
         if let Some(finer) = fine.get(level) {
-            if decomposed_subcycle(tiles, level, fine, transport, nstages, fine_dt) {
+            if decomposed_subcycle(tiles, level, fine, root, transport, nstages, fine_dt) {
                 return true;
             }
             for (k, &i) in finer.order.iter().enumerate() {
@@ -6954,13 +7010,23 @@ where
             // restricted covered cells: the next step's prolongation snapshot and the
             // cut-adjacent stencils read them.
             if let Some(fg) = fine.first() {
-                retry |= decomposed_subcycle(tiles, 0, fine, transport, nstages, dt);
+                retry |= decomposed_subcycle(tiles, 0, fine, (counts, devices), transport, nstages, dt);
                 if !retry {
                     for (k, &i) in fg.order.iter().enumerate() {
                         phase_probe::set_tile(i);
                         symbi_xpu::with_device(fg.devices[k], || {
                             tiles[i].level_restrict_reflux(0, 0.0)
                         });
+                    }
+                    // a tile beside a neighbor's patch face on a cut applies the units it received
+                    // and recovers its cells beside the patch
+                    for i in 0..n {
+                        if tiles[i].levels.len() == 1 && tiles[i].has_flux_register(0) {
+                            symbi_xpu::with_device(devices[i], || {
+                                tiles[i].reflux_received();
+                                tiles[i].recover_beside_patch();
+                            });
+                        }
                     }
                     exchange_level_halos(tiles, 0, root_order, counts, devices, transport);
                     for &i in root_order {
@@ -7155,9 +7221,11 @@ where
 /// root halo exchange between them (rk2 corrector reads each neighbor's stage-1 update); the fine
 /// subcycle is driven here so its stages can exchange the fine halos between fine tiles when a
 /// patch spans a tile cut. for a tile-local patch the fine sub-grid is 1x1, so the fine exchange
-/// is a no-op and this reduces to the tile-local case exactly. the flux/emf reflux registers stay
-/// tile-local (a coarse cell + the fine cells at its face are co-located; any register write to a
-/// cut-adjacent ghost is overwritten by the next root exchange). global dt = min over tiles of
+/// is a no-op and this reduces to the tile-local case exactly. a patch face inside a tile refluxes
+/// on that tile (the coarse cell and the fine cells at its face are co-located; any register write
+/// to a cut-adjacent ghost is overwritten by the next root exchange); a gas patch face on a root
+/// cut sends each fine stage's register unit to the tile across the cut, which refluxes the coarse
+/// cells it holds after the subcycle. global dt = min over tiles of
 /// `root_cfl_dt()`. `decomposed == monolithic` holds for both tile-local and cut-spanning patches.
 ///
 /// every refined level subcycles across the tiles carrying it, with its own halo exchange across

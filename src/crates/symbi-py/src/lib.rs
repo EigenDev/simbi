@@ -6517,6 +6517,8 @@ macro_rules! build_and_run_hydro_decomposed_refined {
         $eos:expr, $eos_ty:ty, prim = |$row:ident| $prim:expr, kernels = |$s:ident, $role:ident| $kernels:expr
     ) => {{
         use symbi::sim::decomp::unflatten;
+        use symbi::sim::refinement::launched::receiving_faces_of_tile;
+        use symbi_sim::atlas::TileId;
         let cfg: &Config = $cfg;
         let prims: &[Vec<f64>] = $prims;
         type Sim = SimDefault<$regime_ty, $d, $geom_ty, $eos_ty>;
@@ -6547,6 +6549,8 @@ macro_rules! build_and_run_hydro_decomposed_refined {
         let ntiles: usize = counts.iter().product();
         let prolong = prolong_order_for(&cfg.reconstruction_name);
         let regions = refinement_regions_nd::<$d>(&cfg.refinement_regions)?;
+        // the level-1 patch in root cells, whose faces on cuts carry register units across them
+        let root_patch = launch_patch::<$d>(cfg)?;
         // immersed bodies give each tile's own deepest level the full bodies; the body couples to
         // the run's finest level alone, so a tile holding fewer levels adds no reaction
 
@@ -6600,11 +6604,20 @@ macro_rules! build_and_run_hydro_decomposed_refined {
                 let kernels_of = |$s: &Sim, $role: LevelRole| $kernels;
                 let sub = kernels_of(&sim, LevelRole::Root);
                 let make = |s: &Sim| kernels_of(s, LevelRole::Fine);
+                // a patch face on a root cut contributes its register units to the tile across the
+                // cut, and a tile beside such a face holds the receiving register of the cells it
+                // corrects
                 let mut h = if tile_regions.is_empty() {
-                    Hierarchy::single(sim, sub)
+                    let h = Hierarchy::single(sim, sub);
+                    match receiving_faces_of_tile(&partition, root_patch, TileId(flat as u32)) {
+                        Some((patch_local, faces)) => h
+                            .with_receiving_register(&patch_local, faces)
+                            .map_err(|e| format!("tile {flat} receiving register: {e:?}"))?,
+                        None => h,
+                    }
                 } else {
                     let (clipped, whole): (Vec<_>, Vec<_>) = tile_regions.iter().copied().unzip();
-                    Hierarchy::with_refinement_of(sim, sub, &clipped, &whole, prolong, make)
+                    Hierarchy::with_refinement_of_contributing(sim, sub, &clipped, &whole, prolong, make)
                         .map_err(|e| format!("tile {flat} refinement build: {e:?}"))?
                 };
                 // immersed bodies on every tile hierarchy at their global positions: the finest

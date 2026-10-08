@@ -112,8 +112,8 @@ def _patch_on_cut_script(path: Path, x_lo: float) -> str:
 
 
 def test_a_patch_face_on_the_device_cut_is_refused_by_name(tmp_path: Path) -> None:
-    """the fine faces on a patch face lying on a cut and the coarse cell their reflux corrects
-    would live on different devices; the run is refused with the remedy, and the same patch
+    """a patch face lying on a cut prolongs its fine ghosts from the root halo alone; under
+    plm the stencil reaches past it and the run is refused with the remedy, and the same patch
     starting two root cells past the cut (the prolongation stencil's reach inside the root
     halo) runs."""
     from simbi_configs.examples.newtonian.refined_blast import RefinedBlast
