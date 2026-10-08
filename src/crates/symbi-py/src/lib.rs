@@ -8837,7 +8837,7 @@ fn dispatch_and_run(
     bfields: &[Vec<f64>],
 ) -> Result<symbi_sim::run_diagnostics::RunDiagnostics, String> {
     validate_run(cfg)?;
-    validate_primitive_rows(cfg, prims)?;
+    validate_declared_target(cfg, validate_primitive_rows(cfg, prims)?)?;
     if cfg.n_gpus > 1 {
         validate_tiled_march(cfg)?;
         // the decomposed tile builders install the plain reconstruction; the balanced one has no
@@ -8902,6 +8902,20 @@ fn validate_primitive_rows(cfg: &Config, prims: &[Vec<f64>]) -> Result<usize, St
         return Err(format!("primitive row {ii} has {} entries where row 0 has {width}", row.len()));
     }
     primitive_row_dof(cfg, width)
+}
+
+/// a declared stationary target supplies density, one velocity per grid axis and the pressure;
+/// a swirl run (`dof` velocities on a grid of fewer axes) holds a state no declared target
+/// describes, so every driver refuses the pair before it builds anything
+fn validate_declared_target(cfg: &Config, dof: usize) -> Result<(), String> {
+    if cfg.equilibrium_json.is_some() && dof != cfg.dims {
+        return Err(format!(
+            "a declared stationary target on a swirl run ({dof} velocity components on the {}-dimensional {}) \
+             is outside every driver: the target supplies one velocity per grid axis",
+            cfg.dims, cfg.coord_system
+        ));
+    }
+    Ok(())
 }
 
 /// the semantic admission every driver applies before it builds anything: a configured setting
@@ -11847,7 +11861,7 @@ fn run_worker_process(
     use symbi_sim::atlas::{Placement, TileId};
 
     validate_run(cfg)?;
-    validate_primitive_rows(cfg, prims)?;
+    validate_declared_target(cfg, validate_primitive_rows(cfg, prims)?)?;
     validate_tiled_march(cfg)?;
     validate_launch_scope(cfg)?;
     let fault = LaunchFault::from_env(launch.worker)?;
