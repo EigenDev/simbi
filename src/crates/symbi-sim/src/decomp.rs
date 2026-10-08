@@ -2749,6 +2749,99 @@ where
     }
 }
 
+/// the stage tail of the flat in-process tiles: the excision through `ScheduledStep`, the halos by
+/// the in-process exchange, the tracers' layouts from the tiles' partition, and the tracers crossing
+/// the cuts by the in-process migration
+struct FlatTileTail<'a, 's, const D: usize, const DOF: usize, M, K, T>
+where
+    M: MemorySpace,
+    K: KernelSet<D, DOF, M, f64>,
+    T: HaloTransport,
+{
+    stores: &'a mut [&'s mut FieldStore<D, DOF, M, f64>],
+    kernels: &'a [&'a K],
+    schedule: &'a Schedule<D>,
+    devices: &'a [i32],
+    transport: &'a T,
+    ledgers: &'a mut Vec<std::collections::BTreeMap<crate::mass_transport::ContainerId, f64>>,
+    discrete: bool,
+    continuous: bool,
+}
+
+impl<const D: usize, const DOF: usize, M, K, T> crate::stage_tail::FlatStageTail<D, DOF, M> for FlatTileTail<'_, '_, D, DOF, M, K, T>
+where
+    M: MemorySpace,
+    K: KernelSet<D, DOF, M, f64>,
+    T: HaloTransport,
+{
+    type Error = std::convert::Infallible;
+
+    // every sweep and the rebuild followed by the exchange that publishes the excised state into
+    // the neighbors' halos
+    fn excise(&mut self) -> Result<(), Self::Error> {
+        drain_devices::<M>(self.devices);
+        let sh: Vec<&FieldStore<D, DOF, M, f64>> = self.stores.iter().map(|s| &**s).collect();
+        let mut step = ScheduledStep { schedule: self.schedule, devices: self.devices, transport: self.transport, kernels: self.kernels };
+        crate::stage::fold_stage_excision(&sh, self.kernels, &mut step).unwrap_or_else(|e| panic!("{e}"));
+        Ok(())
+    }
+
+    // the physical ghosts refill after the exchange: a corner where a domain boundary meets a cut
+    // reads the exchanged halo
+    fn refresh_halos(&mut self) -> Result<(), Self::Error> {
+        drain_devices::<M>(self.devices);
+        let sh: Vec<&FieldStore<D, DOF, M, f64>> = self.stores.iter().map(|s| &**s).collect();
+        exchange_grid(&sh, self.schedule, self.devices, self.transport);
+        flip_polar_bands(&sh, self.kernels, self.schedule, self.devices);
+        for i in 0..sh.len() {
+            symbi_xpu::with_device(self.devices[i], || self.kernels[i].ghost_fill(sh[i]));
+        }
+        Ok(())
+    }
+
+    fn tracers(&self) -> (bool, bool) {
+        (self.discrete, self.continuous)
+    }
+
+    fn tiles(&self) -> usize {
+        self.stores.len()
+    }
+
+    fn tile(&mut self, k: usize) -> (&mut FieldStore<D, DOF, M, f64>, &mut std::collections::BTreeMap<crate::mass_transport::ContainerId, f64>) {
+        (&mut *self.stores[k], &mut self.ledgers[k])
+    }
+
+    fn layout(&self, k: usize) -> crate::tracers::TransportLayout<D> {
+        let store = &self.stores[k];
+        if store.geom.coords != symbi_geometry::Geometry::Cartesian {
+            panic!("decomposed mass-transport tracers require explicit curvilinear geometry");
+        }
+        let counts = self.schedule.counts();
+        let sh: Vec<&FieldStore<D, DOF, M, f64>> = self.stores.iter().map(|s| &**s).collect();
+        let partition = tile_partition_of(&sh, counts);
+        let ext = partition.tile_extents(unflatten(k, counts));
+        crate::tracers::TransportLayout {
+            global_cells: partition.n_cells(),
+            tile_offset: std::array::from_fn(|dd| ext[dd].0),
+            wraps: std::array::from_fn(|dd| self.schedule.wraps(dd)),
+            level: 0,
+        }
+    }
+
+    fn migrate(&mut self) -> Result<(), Self::Error> {
+        migrate_mass_transport_tracers(self.stores, self.schedule);
+        Ok(())
+    }
+
+    fn blend(&mut self, ac: f64, stage: usize) {
+        blend_mass_transport_ancestry(self.stores, ac, stage);
+    }
+
+    fn failure(&mut self, detail: String) -> Self::Error {
+        panic!("{detail}")
+    }
+}
+
 /// the attempts of one root step of the flat decomposed march: every tile captures its retry
 /// snapshot, the stages advance in lockstep with the troubled marks and the halos crossing the
 /// cuts, and a rejection restores every tile's fields, tracer ancestry, motion and clock with the
@@ -2822,7 +2915,6 @@ where
             (self.has_axis_rings, self.has_discrete_tracers, self.has_continuous_tracers);
         let a_n = &self.a_n;
         let n = stores.len();
-        let counts = schedule.counts();
         macro_rules! shared {
             () => {{
                 let sh: Vec<&FieldStore<D, DOF, M, f64>> = stores.iter().map(|s| &**s).collect();
@@ -2891,83 +2983,18 @@ where
             if retry {
                 break;
             }
-            // the stage-end excision, every sweep and the rebuild followed by the exchange
-            // that publishes the excised state into the neighbors' halos
-            drain_devices::<M>(devices);
-            {
-                let mut step = ScheduledStep { schedule: &schedule, devices, transport, kernels };
-                crate::stage::fold_stage_excision(&sh, kernels, &mut step).unwrap_or_else(|e| panic!("{e}"));
-            }
-            // refresh the cut halos from each neighbor's stage-updated interior.
-            drain_devices::<M>(devices);
-            exchange_grid(&sh, &schedule, devices, transport);
-            flip_polar_bands(&sh, kernels, &schedule, devices);
-            // re-fill physical boundary ghosts post-exchange (cut-corner consistency, see prime).
-            for i in 0..n {
-                symbi_xpu::with_device(devices[i], || kernels[i].ghost_fill(sh[i]));
-            }
             drop(sh);
-            if has_continuous_tracers {
-                for store in stores.iter_mut() {
-                    let geometry = store.geom.block_geometry(symbi_geometry::Cartesian);
-                    crate::tracers::accumulate_ito_transport_stage_store(
-                        &mut **store,
-                        &geometry,
-                        stage.ac,
-                    )
-                    .unwrap_or_else(|err| panic!("ito transport accumulation failed: {err}"));
-                }
-            }
-            if has_discrete_tracers || has_continuous_tracers {
-                let partition = {
-                    let sh: Vec<&FieldStore<D, DOF, M, f64>> =
-                        stores.iter().map(|s| &**s).collect();
-                    tile_partition_of(&sh, counts)
-                };
-                for (flat, store) in stores.iter_mut().enumerate() {
-                    if store.geom.coords != symbi_geometry::Geometry::Cartesian {
-                        panic!(
-                            "decomposed mass-transport tracers require explicit curvilinear geometry"
-                        );
-                    }
-                    let geometry = store.geom.block_geometry(symbi_geometry::Cartesian);
-                    let tile = unflatten(flat, counts);
-                    let ext = partition.tile_extents(tile);
-                    let layout = crate::tracers::TransportLayout {
-                        global_cells: partition.n_cells(),
-                        tile_offset: std::array::from_fn(|dd| ext[dd].0),
-                        wraps: std::array::from_fn(|dd| schedule.wraps(dd)),
-                        level: 0,
-                    };
-                    let mut injections = crate::tracers::boundary_injection_transfers_store(
-                        &**store, &geometry, layout,
-                    );
-                    injections.extend(crate::tracers::source_injection_transfers_store(
-                        &**store, &geometry, layout, stage.a0, stage.ac,
-                    ));
-                    crate::tracers::fold_injection_ledger(
-                        &mut injection_ledgers[flat],
-                        injections,
-                        stage.ac,
-                    );
-                    if has_discrete_tracers {
-                        crate::tracers::advance_stage_mass_transport_tile(
-                            &mut **store,
-                            &geometry,
-                            layout,
-                            stage.a0,
-                            stage.ac,
-                            stage.index,
-                        )
-                        .unwrap_or_else(|err| panic!("tracer mass transport failed: {err}"));
-                    }
-                }
-                if has_discrete_tracers {
-                    migrate_mass_transport_tracers(stores, &schedule);
-                    blend_mass_transport_ancestry(stores, stage.ac, stage.index);
-                    migrate_mass_transport_tracers(stores, &schedule);
-                }
-            }
+            let mut tail = FlatTileTail {
+                stores: &mut *stores,
+                kernels,
+                schedule,
+                devices,
+                transport,
+                ledgers: &mut injection_ledgers,
+                discrete: has_discrete_tracers,
+                continuous: has_continuous_tracers,
+            };
+            let Ok::<_, std::convert::Infallible>(()) = crate::stage_tail::flat_stage_tail(&mut tail, &stage);
         }
         self.injection_ledgers = injection_ledgers;
         Ok(!retry)

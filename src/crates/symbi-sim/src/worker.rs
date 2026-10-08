@@ -882,6 +882,138 @@ where
     }
 }
 
+/// the stage tail of a worker's tiles: the excision through `WorkerStep` at the session-agreed
+/// sweep count, the halos at the stage's exchange point (and the audit of every shared face when
+/// asked), the tracers' layouts from the plan, and the tracers crossing to other workers' tiles
+/// through the fabric
+struct WorkerTileTail<'a, 's, 'p, const D: usize, const DOF: usize, M, K, T, L>
+where
+    M: MemorySpace,
+    K: KernelSet<D, DOF, M, f64>,
+    T: HaloTransport,
+    L: Link,
+{
+    stores: &'a mut [&'s mut FieldStore<D, DOF, M, f64>],
+    kernels: &'a [&'a K],
+    tiles: &'a [TileId],
+    devices: &'a [i32],
+    exchange: &'a PlanExchange<'p, D>,
+    transport: &'a T,
+    fabric: &'a mut Fabric<L>,
+    timing: &'a mut WorkerTiming,
+    report: &'a mut WorkerReport,
+    ledgers: &'a mut Vec<std::collections::BTreeMap<crate::mass_transport::ContainerId, f64>>,
+    layouts: &'a [crate::tracers::TransportLayout<D>],
+    discrete: bool,
+    continuous: bool,
+    audit: bool,
+    excise_passes: usize,
+    deadline: Duration,
+    iter: u64,
+    attempt: u16,
+    stage: u8,
+}
+
+impl<const D: usize, const DOF: usize, M, K, T, L> crate::stage_tail::FlatStageTail<D, DOF, M>
+    for WorkerTileTail<'_, '_, '_, D, DOF, M, K, T, L>
+where
+    M: MemorySpace,
+    K: KernelSet<D, DOF, M, f64>,
+    T: HaloTransport,
+    L: Link,
+{
+    type Error = WorkerError;
+
+    // the sweep and the rebuild refreshed at their own points, before the stage's halos move
+    fn excise(&mut self) -> Result<(), WorkerError> {
+        if self.excise_passes == 0 {
+            return Ok(());
+        }
+        let sh: Vec<&FieldStore<D, DOF, M, f64>> = self.stores.iter().map(|s| &**s).collect();
+        let mut step = WorkerStep {
+            exchange: self.exchange,
+            tiles: self.tiles,
+            n_tiles: self.devices.len(),
+            devices: self.devices,
+            transport: self.transport,
+            fabric: &mut *self.fabric,
+            kernels: self.kernels,
+            step: self.iter,
+            attempt: self.attempt,
+            deadline: self.deadline,
+            spent: &mut self.timing.exchange,
+            failure: None,
+            excise_at: self.stage,
+            excise_passes: self.excise_passes,
+        };
+        let folded = crate::stage::fold_stage_excision(&sh, self.kernels, &mut step);
+        if let Some(e) = step.failure.take() {
+            return Err(fail(self.fabric, e.into()));
+        }
+        folded.map_err(|e| fail(self.fabric, WorkerError::Numerics(e.to_string())))
+    }
+
+    fn refresh_halos(&mut self) -> Result<(), WorkerError> {
+        let sh: Vec<&FieldStore<D, DOF, M, f64>> = self.stores.iter().map(|s| &**s).collect();
+        let (tiles, devices, kernels) = (self.tiles, self.devices, self.kernels);
+        exchange_point(
+            self.exchange,
+            tiles,
+            &sh,
+            devices.len(),
+            devices,
+            self.transport,
+            self.fabric,
+            ExchangePoint::Stage(self.stage),
+            self.iter,
+            self.attempt,
+            self.deadline,
+            &mut self.timing.exchange,
+        )
+        .map_err(|e| fail(self.fabric, e.into()))?;
+        flip_polar_bands(self.exchange, tiles, &sh, kernels, devices);
+        for k in 0..sh.len() {
+            with_device(devices[tiles[k].0 as usize], || kernels[k].ghost_fill(sh[k]));
+        }
+        if self.audit {
+            audit_point(self.exchange, tiles, &sh, devices.len(), self.fabric, AuditAt::Stage(self.stage), self.iter, self.attempt, self.deadline, self.report)
+                .map_err(|e| fail(self.fabric, e))?;
+        }
+        Ok(())
+    }
+
+    fn tracers(&self) -> (bool, bool) {
+        (self.discrete, self.continuous)
+    }
+
+    fn tiles(&self) -> usize {
+        self.stores.len()
+    }
+
+    fn tile(&mut self, k: usize) -> (&mut FieldStore<D, DOF, M, f64>, &mut std::collections::BTreeMap<crate::mass_transport::ContainerId, f64>) {
+        (&mut *self.stores[k], &mut self.ledgers[k])
+    }
+
+    fn layout(&self, k: usize) -> crate::tracers::TransportLayout<D> {
+        self.layouts[k]
+    }
+
+    fn migrate(&mut self) -> Result<(), WorkerError> {
+        let moves = crate::worker_tracers::migrate_discrete(self.stores, self.tiles, self.exchange.plan(), self.fabric, self.deadline)
+            .map_err(|e| fail(self.fabric, e.into()))?;
+        self.report.tracer_migrations.add(moves);
+        Ok(())
+    }
+
+    fn blend(&mut self, ac: f64, stage: usize) {
+        crate::worker_tracers::blend_discrete(self.stores, ac, stage);
+    }
+
+    fn failure(&mut self, detail: String) -> WorkerError {
+        fail(self.fabric, WorkerError::Numerics(detail))
+    }
+}
+
 /// the attempts of one root step on a worker: every held tile captures its retry snapshot, the
 /// stages advance with the troubled marks, the freeze streak and the rejection agreed across the
 /// workers, and a rejection restores every held tile and refreshes the halos at the rollback
@@ -980,8 +1112,6 @@ where
         let report = &mut *self.report;
         let deadline = cfg.deadline;
         let n = stores.len();
-        let n_tiles = devices.len();
-        let dev = |k: usize| devices[tiles[k].0 as usize];
         macro_rules! shared {
             () => {{
                 let sh: Vec<&FieldStore<D, DOF, M, f64>> = stores.iter().map(|s| &**s).collect();
@@ -1043,93 +1173,29 @@ where
                 rejected = true;
                 break;
             }
-            // the excision of the accepted stage, its sweep and rebuild refreshed at their own
-            // points, before the stage's halos move
-            if excise_passes > 0 {
-                let mut step = WorkerStep {
-                    exchange,
-                    tiles,
-                    n_tiles,
-                    devices,
-                    transport,
-                    fabric: &mut *fabric,
-                    kernels,
-                    step: iter,
-                    attempt,
-                    deadline,
-                    spent: &mut timing.exchange,
-                    failure: None,
-                    excise_at: stage.index as u8,
-                    excise_passes,
-                };
-                let folded = crate::stage::fold_stage_excision(&sh, kernels, &mut step);
-                if let Some(e) = step.failure.take() {
-                    return Err(fail(fabric, e.into()));
-                }
-                if let Err(e) = folded {
-                    return Err(fail(fabric, WorkerError::Numerics(e.to_string())));
-                }
-            }
-            exchange_point(
-                exchange,
+            drop(sh);
+            let mut tail = WorkerTileTail {
+                stores: &mut *stores,
+                kernels,
                 tiles,
-                &sh,
-                n_tiles,
                 devices,
+                exchange,
                 transport,
-                fabric,
-                ExchangePoint::Stage(stage.index as u8),
+                fabric: &mut *fabric,
+                timing: &mut *timing,
+                report: &mut *report,
+                ledgers: &mut *injection_ledgers,
+                layouts: tracer_layouts,
+                discrete: has_tracers,
+                continuous: has_continuous,
+                audit: cfg.audit_every_point,
+                excise_passes,
+                deadline,
                 iter,
                 attempt,
-                deadline,
-        &mut timing.exchange,
-    )
-            .map_err(|e| fail(fabric, e.into()))?;
-            flip_polar_bands(exchange, tiles, &sh, kernels, devices);
-            for k in 0..n {
-                with_device(dev(k), || kernels[k].ghost_fill(sh[k]));
-            }
-            if cfg.audit_every_point {
-                let at = AuditAt::Stage(stage.index as u8);
-                audit_point(
-                    exchange, tiles, &sh, n_tiles, fabric, at, iter, attempt, deadline,
-                    &mut *report,
-                )
-                .map_err(|e| fail(fabric, e))?;
-            }
-            drop(sh);
-            // the stage's tracer transport on the exchanged state: each tile books its
-            // boundary and source injection and moves its tracers' owners, the leavers cross
-            // to their owners' tiles, the ancestry blend runs, and the reverted cross again
-            if has_tracers || has_continuous {
-                for k in 0..n {
-                    let store = &mut *stores[k];
-                    let geometry = store.geom.block_geometry(symbi_geometry::Cartesian);
-                    let layout = tracer_layouts[k];
-                    if has_continuous {
-                        crate::tracers::accumulate_ito_transport_stage_store(store, &geometry, stage.ac)
-                            .map_err(|e| fail(fabric, WorkerError::Numerics(format!("ito transport accumulation: {e}"))))?;
-                    }
-                    let mut injections = crate::tracers::boundary_injection_transfers_store(&*store, &geometry, layout);
-                    injections.extend(crate::tracers::source_injection_transfers_store(
-                        &*store, &geometry, layout, stage.a0, stage.ac,
-                    ));
-                    crate::tracers::fold_injection_ledger(&mut injection_ledgers[k], injections, stage.ac);
-                    if has_tracers {
-                        crate::tracers::advance_stage_mass_transport_tile(store, &geometry, layout, stage.a0, stage.ac, stage.index)
-                            .map_err(|e| fail(fabric, WorkerError::Numerics(format!("tracer mass transport: {e}"))))?;
-                    }
-                }
-            }
-            if has_tracers {
-                let moves = crate::worker_tracers::migrate_discrete(stores, tiles, exchange.plan(), fabric, deadline)
-                    .map_err(|e| fail(fabric, e.into()))?;
-                report.tracer_migrations.add(moves);
-                crate::worker_tracers::blend_discrete(stores, stage.ac, stage.index);
-                let moves = crate::worker_tracers::migrate_discrete(stores, tiles, exchange.plan(), fabric, deadline)
-                    .map_err(|e| fail(fabric, e.into()))?;
-                report.tracer_migrations.add(moves);
-            }
+                stage: stage.index as u8,
+            };
+            crate::stage_tail::flat_stage_tail(&mut tail, stage)?;
         }
         if rejected {
             report.rejections += 1;

@@ -37,6 +37,7 @@ pub mod placement;
 pub mod plan_exchange;
 pub mod retry_guard;
 pub mod stage;
+pub mod stage_tail;
 pub mod step_transaction;
 pub mod state;
 pub mod substrate_seam;
