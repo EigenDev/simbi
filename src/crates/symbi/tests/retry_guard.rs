@@ -263,11 +263,17 @@ fn a_late_fine_substep_rejection_counts_once_against_the_root_step() {
     assert!(failure.contains("rejection 1") && failure.contains("no freeze evidence held locally"), "{failure}");
 }
 
+/// held across this binary's in-process checkpoint files and its worker spawns: the hdf5 library
+/// opens a file without close-on-exec, so a worker spawned while a checkpoint is open inherits the
+/// descriptor and holds the file's lock for its whole life, refusing the next open of that file
+static FILES_AND_SPAWNS: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
 #[test]
 fn a_restart_carries_the_streak_and_names_a_changed_configuration() {
     if in_worker_role() {
         worker_main();
     }
+    let _files = FILES_AND_SPAWNS.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
     let dir = std::env::temp_dir().join(format!("symbi_retry_guard_{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
     let path = dir.join("five.h5");
@@ -435,6 +441,7 @@ fn run_pair(test: &str, tag: &str, schedule: &[u32], extra: &[(&str, &str)]) -> 
     std::fs::create_dir_all(&dir).unwrap();
     let coord = dir.join("rendezvous");
     let list = schedule.iter().map(|x| x.to_string()).collect::<Vec<_>>().join(",");
+    let spawning = FILES_AND_SPAWNS.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
     let mut children: Vec<Child> = (0..2)
         .map(|w| {
             Command::new(std::env::current_exe().unwrap())
@@ -451,6 +458,7 @@ fn run_pair(test: &str, tag: &str, schedule: &[u32], extra: &[(&str, &str)]) -> 
                 .unwrap()
         })
         .collect();
+    drop(spawning);
     let start = Instant::now();
     let mut exited = [None; 2];
     while exited.iter().any(Option::is_none) {
