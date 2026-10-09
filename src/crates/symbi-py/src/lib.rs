@@ -11912,8 +11912,11 @@ where
         }
         Ok(std::ops::ControlFlow::Continue(()))
     });
-    let result: Result<(u64, f64), String> = outcome.map_err(|e| e.to_string()).and_then(|report| {
-        let final_path = checkpoint_name(cfg, checkpoint_status_tag(CheckpointOutcome::Completed));
+    let result: Result<(u64, f64, Option<String>), String> = outcome.map_err(|e| e.to_string()).and_then(|report| {
+        // a march every worker agreed to halt publishes its step entry, the last accepted state,
+        // as crashed in place of the final snapshot
+        let outcome = if report.halt.is_some() { CheckpointOutcome::Crashed } else { CheckpointOutcome::Completed };
+        let final_path = checkpoint_name(cfg, checkpoint_status_tag(outcome));
         write(&tiles, &mut fabric, &final_path, cadence.index, report.steps).map_err(|e| e.to_string())?;
         if let Some(r) = reporter.as_mut() {
             r.checkpoint_written(cfg, &final_path, report.time, 0.0);
@@ -11927,10 +11930,11 @@ where
             );
             let _ = std::io::stderr().write_all(line.as_bytes());
         }
-        Ok((report.steps, report.time))
+        Ok((report.steps, report.time, report.halt))
     });
     match result {
-        Ok((iter, time)) => {
+        Ok((iter, time, Some(cause))) => halted_launch(cfg, reporter, iter, time, &cause),
+        Ok((iter, time, None)) => {
             if let Some(r) = reporter {
                 let final_path = checkpoint_name(cfg, checkpoint_status_tag(CheckpointOutcome::Completed));
                 r.finish(iter, time, &final_path);
@@ -12963,7 +12967,7 @@ where
             .unwrap_or_else(|detail| panic!("{detail}"))
     });
     let mut next_diag = diag_plan.as_ref().map_or(diag_interval, |p| p.next);
-    let outcome: Result<(u64, f64), String> = (|| {
+    let outcome: Result<(u64, f64, Option<String>), String> = (|| {
         if cfg.checkpoint_index == 0 || cfg.start_time == 0.0 {
             let sh: Vec<&symbi_sim::state::FieldStore<D, DOF, DefaultMemory, f64>> = stores.iter().map(|s| &**s).collect();
             // the builders seed the conserved state; the initial checkpoint publishes the
@@ -13080,7 +13084,10 @@ where
         )
         .map_err(|e| e.to_string())?;
         let sh: Vec<&symbi_sim::state::FieldStore<D, DOF, DefaultMemory, f64>> = stores.iter().map(|s| &**s).collect();
-        let final_path = checkpoint_name(cfg, checkpoint_status_tag(CheckpointOutcome::Completed));
+        // a march every worker agreed to halt publishes its step entry, the last accepted state,
+        // as crashed in place of the final snapshot
+        let outcome = if report.halt.is_some() { CheckpointOutcome::Crashed } else { CheckpointOutcome::Completed };
+        let final_path = checkpoint_name(cfg, checkpoint_status_tag(outcome));
         let io = write(
             &sh,
             &mut fabric,
@@ -13144,10 +13151,11 @@ where
             );
             let _ = std::io::stderr().write_all(line.as_bytes());
         }
-        Ok((report.steps, report.time))
+        Ok((report.steps, report.time, report.halt))
     })();
     match outcome {
-        Ok((iter, time)) => {
+        Ok((iter, time, Some(cause))) => halted_launch(cfg, reporter, iter, time, &cause),
+        Ok((iter, time, None)) => {
             if let Some(r) = reporter {
                 let final_path = checkpoint_name(cfg, checkpoint_status_tag(CheckpointOutcome::Completed));
                 r.finish(iter, time, &final_path);
@@ -13162,6 +13170,17 @@ where
             Err(msg)
         }
     }
+}
+
+/// the failing end of a launch every worker agreed to halt: the session finished after the
+/// crashed snapshot of the step entry, so the halt is reported and the worker exits failing
+fn halted_launch(cfg: &Config, reporter: Option<DecomposedReporter>, iter: u64, time: f64, cause: &str) -> Result<(), String> {
+    let crashed = checkpoint_name(cfg, checkpoint_status_tag(CheckpointOutcome::Crashed));
+    let summary = format!("crashed — {iter} steps, t = {time:.4} — {cause} · state {crashed}");
+    if let Some(r) = reporter {
+        r.fail(&summary);
+    }
+    Err(summary)
 }
 
 /// the canonical form of one execution-configuration value. the supported set is exactly

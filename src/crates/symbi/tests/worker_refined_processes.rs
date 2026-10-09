@@ -619,7 +619,11 @@ fn run_worker(arm: &Arm, me: WorkerId, out: PathBuf) -> Result<(), WorkerError> 
         report.grant_high_water.iter().map(|h| h.to_string()).collect::<Vec<_>>().join(","),
         report.dt_sequence.iter().map(|d| d.to_bits().to_string()).collect::<Vec<_>>().join(",")
     );
-    Ok(())
+    // a march every worker agreed to halt ends the worker failing, its state the step entry
+    match report.halt {
+        Some(cause) => Err(WorkerError::Numerics(format!("halted: {cause}"))),
+        None => Ok(()),
+    }
 }
 
 /// the single hierarchy driven with the given timesteps, dumped like a worker; a process of
@@ -1030,32 +1034,34 @@ fn a_fine_rejection_rolls_back_workers_without_fine_tiles() {
     assert_rejection_matches_capped_control(test, &arm, rejecting, 3, "the fine-rejecting run with empty fine workers");
 }
 
-/// a NaN timestep candidate on the fine level of one worker under a positive user cap ends
-/// the session on every worker: the cap applies after the candidate is judged
+/// a NaN timestep candidate on the fine level of one worker under a positive user cap halts
+/// every worker at the entry of step 3: the cap applies after the candidate is judged, the
+/// worker holding it names it and its level, every other worker the peer's, and each holds the
+/// state of a clean run capped at three steps
 #[test]
-fn an_invalid_fine_candidate_under_a_positive_cap_aborts_every_worker() {
+fn an_invalid_fine_candidate_under_a_positive_cap_halts_every_worker() {
     if in_worker_role() {
         worker_main();
     }
-    let test = "an_invalid_fine_candidate_under_a_positive_cap_aborts_every_worker";
+    let test = "an_invalid_fine_candidate_under_a_positive_cap_halts_every_worker";
     let arm = ragged_17_13();
+    let cap = ("W_MAX_DT_BITS", 0.005f64.to_bits().to_string());
     let started = Instant::now();
-    let outcomes = run_arm(
-        test,
-        "nan",
-        &arm,
-        &[
-            ("W_MAX_DT_BITS", 0.005f64.to_bits().to_string()),
-            ("W_BAD_CFL_WORKER", "1".into()),
-            ("W_BAD_CFL", "3,1".into()),
-        ],
-    );
+    let outcomes = run_arm(test, "nan", &arm, &[cap.clone(), ("W_BAD_CFL_WORKER", "1".into()), ("W_BAD_CFL", "3,1".into())]);
     assert!(started.elapsed() < TRANSFER_DEADLINE * 3, "termination took {:?}", started.elapsed());
     for (w, o) in outcomes.iter().enumerate() {
         assert_ne!(o.code, Some(0), "worker {w} exited zero: the cap hid the invalid candidate");
+        let r = o.report.as_ref().unwrap_or_else(|| panic!("worker {w} published no report:\n{}", o.stderr));
+        assert_eq!(r.steps, 3, "worker {w} halted after {} steps", r.steps);
+        let named = if w == 1 { "halted: invalid CFL candidate" } else { "halted: an invalid CFL candidate on another worker at iter 3" };
+        assert!(o.stderr.contains(named), "worker {w}:\n{}", o.stderr);
     }
-    assert!(outcomes[1].stderr.contains("invalid CFL candidate"), "{}", outcomes[1].stderr);
     assert!(outcomes[1].stderr.contains("on level 1"), "{}", outcomes[1].stderr);
+    let clean = run_arm(test, "clean", &Arm { steps: 3, ..arm.clone() }, &[cap]);
+    assert_all_ok(&clean, "the clean run capped at three steps");
+    for (w, (a, b)) in outcomes.iter().zip(&clean).enumerate() {
+        assert!(!a.records.is_empty() && a.records == b.records, "worker {w} holds other records than the clean run at the halted step entry");
+    }
 }
 
 /// a fine cell against the fine cut is flagged troubled on the worker holding it, in the

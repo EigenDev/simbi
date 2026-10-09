@@ -338,7 +338,11 @@ fn run_worker(arm: &Arm, me: WorkerId, out: PathBuf) -> Result<(), WorkerError> 
             .collect::<Vec<_>>()
             .join(",")
     );
-    Ok(())
+    // a march every worker agreed to halt ends the worker failing, its state the step entry
+    match report.halt {
+        Some(cause) => Err(WorkerError::Numerics(format!("halted: {cause}"))),
+        None => Ok(()),
+    }
 }
 
 fn worker_main() -> ! {
@@ -526,6 +530,11 @@ fn run_arm(test: &str, tag: &str, arm: &Arm, extra: &[(&str, String)]) -> Vec<Ou
 
 /// the single-process reference: every tile evolved by the decomposed loop for `STEPS`.
 fn reference(arm: &Arm) -> Vec<Vec<f64>> {
+    reference_after(arm, STEPS)
+}
+
+/// the single-process reference after `steps` accepted steps
+fn reference_after(arm: &Arm, steps: u64) -> Vec<Vec<f64>> {
     let partition = arm.partition();
     let n = partition.n_tiles();
     let mut built: Vec<(Sim, Kern)> = (0..n).map(|f| tile(arm, f)).collect();
@@ -547,7 +556,7 @@ fn reference(arm: &Arm) -> Vec<Vec<f64>> {
         1,
         &LocalCopy,
         |iter, _, _| {
-            if iter >= STEPS {
+            if iter >= steps {
                 ControlFlow::Break(())
             } else {
                 ControlFlow::Continue(())
@@ -858,14 +867,16 @@ fn trouble_on_one_side_of_a_cut_matches_the_uncut_run() {
     }
 }
 
-/// a NaN timestep candidate on one worker: it aborts, every peer learns of it, and every
-/// worker exits nonzero within the deadline.
+/// a NaN timestep candidate on one worker at the entry of step 3: every worker learns of it in the
+/// same reduction and halts there, the worker holding it naming the candidate and every other
+/// worker the peer's, each holding the state after the three accepted steps and exiting failing
+/// within the deadline
 #[test]
-fn an_invalid_candidate_aborts_every_worker() {
+fn an_invalid_candidate_halts_every_worker_at_the_step_entry() {
     if in_worker_role() {
         worker_main();
     }
-    let test = "an_invalid_candidate_aborts_every_worker";
+    let test = "an_invalid_candidate_halts_every_worker_at_the_step_entry";
     let arm = Arm {
         cuts0: vec![32],
         cuts1: vec![32],
@@ -889,36 +900,22 @@ fn an_invalid_candidate_aborts_every_worker() {
     );
     for (i, o) in outcomes.iter().enumerate() {
         assert_ne!(o.code, Some(0), "worker {i} exited zero");
+        let r = o.report.as_ref().unwrap_or_else(|| panic!("worker {i} published no report:\n{}", o.stderr));
+        assert_eq!(r.steps, 3, "worker {i} halted after {} steps", r.steps);
+        let named = if i == 2 { "halted: invalid CFL candidate" } else { "halted: an invalid CFL candidate on another worker at iter 3" };
+        assert!(o.stderr.contains(named), "worker {i}:\n{}", o.stderr);
     }
-    assert!(
-        outcomes[2].stderr.contains("invalid CFL candidate"),
-        "{}",
-        outcomes[2].stderr
-    );
-    // the coordinator reads worker 2's abort before anything else on that stream; a worker
-    // may instead read the coordinator's end of file first, which is the same termination
-    assert!(
-        outcomes[0].stderr.contains("aborted"),
-        "coordinator:\n{}",
-        outcomes[0].stderr
-    );
-    for i in [1usize, 3] {
-        let e = &outcomes[i].stderr;
-        assert!(
-            e.contains("aborted") || e.contains("disconnected"),
-            "worker {i}:\n{e}"
-        );
-    }
+    assert_tiles_match(&outcomes, &reference_after(&arm, 3), "the halted step entry");
 }
 
 /// a worker holding two tiles, one of which reports a NaN candidate while the other is
-/// finite: the bad tile is caught before the fold and every worker aborts.
+/// finite: the bad tile is caught before the fold, named, and every worker halts
 #[test]
-fn a_bad_tile_behind_a_good_one_still_aborts() {
+fn a_bad_tile_behind_a_good_one_still_halts() {
     if in_worker_role() {
         worker_main();
     }
-    let test = "a_bad_tile_behind_a_good_one_still_aborts";
+    let test = "a_bad_tile_behind_a_good_one_still_halts";
     let arm = even();
     let outcomes = run_arm(
         test,
@@ -933,20 +930,16 @@ fn a_bad_tile_behind_a_good_one_still_aborts() {
         assert_ne!(o.code, Some(0), "worker {i} exited zero");
     }
     assert!(
-        outcomes[1].stderr.contains("invalid CFL candidate"),
-        "{}",
-        outcomes[1].stderr
-    );
-    assert!(
-        outcomes[1].stderr.contains("TileId(2)"),
+        outcomes[1].stderr.contains("halted: invalid CFL candidate") && outcomes[1].stderr.contains("TileId(2)"),
         "the first held tile is named:\n{}",
         outcomes[1].stderr
     );
     assert!(
-        outcomes[0].stderr.contains("aborted"),
+        outcomes[0].stderr.contains("halted: an invalid CFL candidate on another worker"),
         "{}",
         outcomes[0].stderr
     );
+    assert_tiles_match(&outcomes, &reference_after(&arm, 3), "the halted step entry");
 }
 
 /// the viscous transport across workers: the post-step pass on every tile reads the neighbor's

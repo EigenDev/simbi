@@ -6,7 +6,8 @@
 # reduction answers a zero timestep, and the run stops. the single grid, flat
 # host tiles and refined host tiles each publish the last state as crashed, no
 # final checkpoint, a report naming the timestep, and a failing exit; the
-# launched workers end with a failing exit and no final checkpoint.
+# launched workers agree to halt at the step entry and publish it as crashed
+# together, with a failing exit and no final checkpoint.
 #
 # run: pytest -m simulation simbi/simulation/tests/test_invalid_timestep_exit.py
 # =============================================================================
@@ -88,4 +89,5 @@ def test_an_invalid_timestep_ends_a_launch_with_a_failing_exit(tmp_path: Path, f
     done = subprocess.run(cmd, capture_output=True, text=True, timeout=900, env=env)
     assert "invalid CFL candidate" in " ".join((done.stdout + done.stderr).split()), f"{cls}: the launch never reached the invalid timestep; the gate is vacuous"
     assert done.returncode != 0, f"{cls}: a launch halted on an invalid timestep exited cleanly"
+    assert list(out.glob("*crashed*.h5")), f"{cls}: the launch published no crashed snapshot of the step entry"
     assert not list(out.glob("*final*.h5")), f"{cls}: a halted launch published a final checkpoint"

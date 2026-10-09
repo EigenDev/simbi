@@ -33,7 +33,7 @@ use symbi_grid::Field;
 use symbi_hydro::regime::Regime;
 use symbi_sim::atlas::{AuditAt, ExchangePoint, FinePoint, TileId};
 use symbi_sim::decomp::{HaloTransport, plan_cons_fields, plan_fields};
-use symbi_sim::driver::{TimestepFailure, advance_clock, agree_timestep};
+use symbi_sim::driver::advance_clock;
 use symbi_sim::step_transaction::{AttemptOp, AttemptReply, RootStep, ScopedAttempt, StepHalt, take_root_step};
 use symbi_sim::hydro_ops::scan_c2p_errors;
 use symbi_sim::plan_exchange::{AuditError, PlanExchange, PlanRole, StagingFault, audit_plans};
@@ -794,25 +794,22 @@ where
             }
         }
         let max_dt = tiles[0].levels[0].state.max_dt;
-        let agreed = agree_timestep(candidates, max_dt, base.t_final - t, |local| {
-            let clock = Instant::now();
-            let global = fabric.collective(OpKind::Min, local.to_bits(), deadline);
-            timing.collectives += clock.elapsed();
-            global.map(f64::from_bits)
-        });
+        let agreed = symbi_sim::worker::agree_worker_timestep(candidates, max_dt, base.t_final - t, fabric, deadline, &mut timing.collectives)
+            .map_err(|e| fail(fabric, e))?;
         let mut dt = match agreed {
-            Ok(agreed) => agreed.dt,
-            Err(TimestepFailure::Invalid(bad)) => {
+            symbi_sim::worker::AgreedStep::Step(agreed) => agreed.dt,
+            symbi_sim::worker::AgreedStep::Halt(Some(bad)) => {
                 let (k, ll) = origin[bad.index];
-                return Err(fail(
-                    fabric,
-                    WorkerError::Numerics(format!(
-                        "invalid CFL candidate {:e} on level {ll} of tile {:?} at iter {iter} (time {t:.4e})",
-                        bad.value, held.root_ids[k]
-                    )),
+                report.halt = Some(format!(
+                    "invalid CFL candidate {:e} on level {ll} of tile {:?} at iter {iter} (time {t:.4e})",
+                    bad.value, held.root_ids[k]
                 ));
+                break;
             }
-            Err(TimestepFailure::Collective(e)) => return Err(fail(fabric, e.into())),
+            symbi_sim::worker::AgreedStep::Halt(None) => {
+                report.halt = Some(format!("an invalid CFL candidate on another worker at iter {iter} (time {t:.4e})"));
+                break;
+            }
         };
         if let Some((at, bits)) = base.injection.cap_dt_at {
             if at == iter {
@@ -1215,10 +1212,15 @@ where
         drop(scoped);
         let dt = match step {
             RootStep::Accepted { dt } => dt,
+            // the halted step left every level of every tile at its entry, on every worker alike
             RootStep::Halted(StepHalt::Guard(failure)) => {
-                return Err(symbi_sim::worker::guard_failure(fabric, failure, &base.injection, deadline));
+                report.halt = Some(symbi_sim::worker::guard_failure(fabric, failure, &base.injection, deadline)?);
+                break;
             }
-            RootStep::Halted(StepHalt::Timestep { detail, .. }) => return Err(fail(fabric, WorkerError::Numerics(detail))),
+            RootStep::Halted(StepHalt::Timestep { detail, .. }) => {
+                report.halt = Some(detail);
+                break;
+            }
         };
         // the continuous tracers onto the finest level holding them, once per accepted root step
         if continuous {

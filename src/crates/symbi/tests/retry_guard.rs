@@ -397,12 +397,16 @@ fn run_worker(me: WorkerId) -> Result<(), WorkerError> {
     };
     let mut stores: Vec<&mut Store> = vec![&mut *sim];
     let devices = vec![0i32; 2];
-    evolve_worker(&[TileId(tile as u32)], &mut stores, &[&kernels], &devices, &exchange, &LocalCopy, &mut fabric, &cfg, |accepted, _, _, _| {
+    let report = evolve_worker(&[TileId(tile as u32)], &mut stores, &[&kernels], &devices, &exchange, &LocalCopy, &mut fabric, &cfg, |accepted, _, _, _| {
         println!("PUBLISHED {accepted}");
         Ok(ControlFlow::Continue(()))
     })?;
     fabric.finish(DEADLINE)?;
-    Ok(())
+    // a march every worker agreed to halt ends the worker failing, its state the step entry
+    match report.halt {
+        Some(cause) => Err(WorkerError::Numerics(cause)),
+        None => Ok(()),
+    }
 }
 
 fn worker_main() -> ! {

@@ -11,9 +11,9 @@
 #
 # a retry guard that counts every step as severely reduced and ends the run at
 # the first one refuses the first step of a clean box, refined or flat, on
-# every driver: a failing exit naming the guard, no final checkpoint, and an
-# in-process `.crashed` snapshot of the step entry, the last accepted state at
-# t = 0.
+# every driver: a failing exit naming the guard, no final checkpoint, and a
+# `.crashed` snapshot of the step entry, the last accepted state at t = 0, the
+# launched workers writing theirs together after agreeing to halt.
 #
 # run: pytest -m simulation simbi/simulation/tests/test_crash_publication.py
 # =============================================================================
@@ -167,7 +167,7 @@ def test_a_run_the_retry_guard_ends_publishes_the_step_entry_as_crashed(tmp_path
     out = tmp_path / "out"
     label = f"{driver}, {'refined' if refined else 'flat'}"
     if driver == "launch":
-        _assert_guard_halt(_launch(probe, out, tmp_path, _refusing(1, refined)), out, label, snapshot=False)
+        _assert_guard_halt(_launch(probe, out, tmp_path, _refusing(1, refined)), out, label, snapshot=True)
     else:
         gpus = 1 if driver == "single" else 2
         _assert_guard_halt(_in_process(probe, out, gpus, _refusing(gpus, refined)), out, label, snapshot=True)
@@ -182,7 +182,7 @@ def test_a_traced_run_the_retry_guard_ends_publishes_the_step_entry(tmp_path: Pa
     out = tmp_path / "out"
     label = f"traced {driver}, {'refined' if refined else 'flat'}"
     if driver == "launch":
-        _assert_guard_halt(_launch(probe, out, tmp_path, _refusing(1, refined, tracers=200)), out, label, snapshot=False)
+        _assert_guard_halt(_launch(probe, out, tmp_path, _refusing(1, refined, tracers=200)), out, label, snapshot=True)
     else:
         gpus = 1 if driver == "single" else 2
         _assert_guard_halt(_in_process(probe, out, gpus, _refusing(gpus, refined, tracers=200)), out, label, snapshot=True)

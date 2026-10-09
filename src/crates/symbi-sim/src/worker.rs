@@ -29,7 +29,7 @@ use crate::atlas::{AuditAt, ExchangePoint, TileId};
 use crate::decomp::{HaloTransport, plan_fields};
 use crate::driver::{
     advance_clock, advance_state_clock, downstream_injection_weight, needs_step_snapshot,
-    TimestepFailure, agree_timestep, stage_schedule,
+    AgreedTimestep, InvalidCandidate, TimestepFailure, agree_timestep, stage_schedule,
 };
 use crate::plan_exchange::{AuditCost, AuditError, PlanExchange, StagingFault};
 use crate::stage::{
@@ -113,6 +113,10 @@ pub struct WorkerReport {
     pub fine_neighbor_corrections: u64,
     /// the most grants held at once from each peer over the session
     pub grant_high_water: Vec<usize>,
+    /// the cause when every worker agreed to halt the march at a step entry it cannot advance (an
+    /// invalid timestep candidate on some worker, the retry guard, a retry timestep the clock
+    /// cannot represent): the stores hold that step entry, the last accepted state
+    pub halt: Option<String>,
 }
 
 /// where a worker's wall time went. `collectives` and `exchange` include the time spent
@@ -1366,20 +1370,67 @@ where
 ///
 /// every worker enters the collective, whether or not it holds rejecting cells; it returns at the
 /// deadline or on a lost peer, and the failure stands either way
+/// the root timestep of a worker's step: a step every worker takes, or a halt every worker
+/// takes at this step entry, with the invalid candidate when this worker holds it
+pub enum AgreedStep {
+    Step(AgreedTimestep),
+    Halt(Option<InvalidCandidate>),
+}
+
+/// the timestep every worker of the session agrees on. each worker judges its own raw candidates
+/// first, since a minimum over f64 prefers the finite operand; one vote over the workers then
+/// halts the march on every worker at this step entry when any holds an invalid candidate, and
+/// otherwise the valid minimum is reduced across the workers as `agree_timestep` reduces it
+pub fn agree_worker_timestep<L: Link>(
+    candidates: Vec<f64>,
+    max_dt: f64,
+    remaining: f64,
+    fabric: &mut Fabric<L>,
+    deadline: Duration,
+    collectives: &mut Duration,
+) -> Result<AgreedStep, WorkerError> {
+    let bad = match candidates.iter().position(|v| !v.is_finite() || *v <= 0.0) {
+        Some(index) => Some(InvalidCandidate { index, value: candidates[index] }),
+        None if candidates.is_empty() => Some(InvalidCandidate { index: 0, value: f64::INFINITY }),
+        None => None,
+    };
+    let clock = Instant::now();
+    let any = fabric.collective(OpKind::Any, u64::from(bad.is_some()), deadline);
+    *collectives += clock.elapsed();
+    if any? != 0 {
+        return Ok(AgreedStep::Halt(bad));
+    }
+    let agreed = agree_timestep(candidates, max_dt, remaining, |local| {
+        let clock = Instant::now();
+        let global = fabric.collective(OpKind::Min, local.to_bits(), deadline);
+        *collectives += clock.elapsed();
+        global.map(f64::from_bits)
+    });
+    match agreed {
+        Ok(agreed) => Ok(AgreedStep::Step(agreed)),
+        Err(TimestepFailure::Invalid(bad)) => Ok(AgreedStep::Halt(Some(bad))),
+        Err(TimestepFailure::Collective(e)) => Err(e.into()),
+    }
+}
+
 pub fn guard_failure<L: Link>(
     fabric: &mut Fabric<L>,
     failure: crate::retry_guard::RetryGuardFailure,
     injection: &Injection,
     deadline: Duration,
-) -> WorkerError {
+) -> Result<String, WorkerError> {
     if let Some(hold) = injection.hold_before_guard {
         std::thread::sleep(hold);
     }
     if injection.vanish_before_guard {
         std::process::exit(3);
     }
-    let _ = fabric.collective(OpKind::Any, 1, deadline);
-    fail(fabric, WorkerError::Numerics(failure.detail))
+    // every live worker reaches the guard's decision at the same attempt; with a worker gone the
+    // session ends through the abort path, carrying the guard's reason
+    match fabric.collective(OpKind::Any, 1, deadline) {
+        Ok(_) => Ok(failure.detail),
+        Err(_) => Err(fail(fabric, WorkerError::Numerics(failure.detail))),
+    }
 }
 
 /// the retry guard state every worker of the session holds: the same consecutive severely reduced
@@ -1728,24 +1779,21 @@ where
                 .collect();
             (candidates, sh[0].max_dt)
         };
-        let agreed = agree_timestep(candidates, max_dt, cfg.t_final - t, |local| {
-            let clock = Instant::now();
-            let global = fabric.collective(OpKind::Min, local.to_bits(), deadline);
-            timing.collectives += clock.elapsed();
-            global.map(f64::from_bits)
-        });
+        let agreed = agree_worker_timestep(candidates, max_dt, cfg.t_final - t, fabric, deadline, &mut timing.collectives)
+            .map_err(|e| fail(fabric, e))?;
         let mut dt = match agreed {
-            Ok(agreed) => agreed.dt,
-            Err(TimestepFailure::Invalid(bad)) => {
-                return Err(fail(
-                    fabric,
-                    WorkerError::Numerics(format!(
-                        "invalid CFL candidate {:e} on tile {:?} at iter {iter} (time {t:.4e})",
-                        bad.value, tiles[bad.index]
-                    )),
+            AgreedStep::Step(agreed) => agreed.dt,
+            AgreedStep::Halt(Some(bad)) => {
+                report.halt = Some(format!(
+                    "invalid CFL candidate {:e} on tile {:?} at iter {iter} (time {t:.4e})",
+                    bad.value, tiles[bad.index]
                 ));
+                break;
             }
-            Err(TimestepFailure::Collective(e)) => return Err(fail(fabric, e.into())),
+            AgreedStep::Halt(None) => {
+                report.halt = Some(format!("an invalid CFL candidate on another worker at iter {iter} (time {t:.4e})"));
+                break;
+            }
         };
         if let Some((at, bits)) = cfg.injection.cap_dt_at {
             if at == iter {
@@ -1809,11 +1857,14 @@ where
         drop(root);
         let dt = match step {
             crate::step_transaction::RootStep::Accepted { dt } => dt,
+            // the halted step left every store at its entry, on every worker alike
             crate::step_transaction::RootStep::Halted(crate::step_transaction::StepHalt::Guard(failure)) => {
-                return Err(guard_failure(fabric, failure, &cfg.injection, deadline));
+                report.halt = Some(guard_failure(fabric, failure, &cfg.injection, deadline)?);
+                break;
             }
             crate::step_transaction::RootStep::Halted(crate::step_transaction::StepHalt::Timestep { detail, .. }) => {
-                return Err(fail(fabric, WorkerError::Numerics(detail)));
+                report.halt = Some(detail);
+                break;
             }
         };
         // the stage refresh moved a; the step-tail advance starts from the step-entry value, as
