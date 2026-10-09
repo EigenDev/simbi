@@ -168,7 +168,7 @@ def to_execution_dict(problem: SimbiProblem) -> dict[str, Any]:
     for field in computed_fields:
         if hasattr(problem, field):
             model_dict[field] = getattr(problem, field)
-    _resolve_alpha_alias(model_dict, type(problem).__name__)
+    _resolve_alpha_alias(model_dict, type(problem).__name__, "viscosity_alpha" in problem.model_fields_set)
 
     # the config author's own params, grouped, for the live dashboard's problem-setup panel.
     model_dict["custom_params"] = _collect_custom_params(problem)
@@ -276,15 +276,17 @@ def to_execution_dict(problem: SimbiProblem) -> dict[str, Any]:
     return model_dict
 
 
-def _resolve_alpha_alias(model_dict: dict[str, Any], name: str) -> None:
+def _resolve_alpha_alias(model_dict: dict[str, Any], name: str, canonical_set: bool) -> None:
     """the alpha viscosity's one wire name is `viscosity_alpha`; `shakura_sunyaev_alpha` is its
-    deprecated alias, read into it with a warning. zero is the inviscid default on both names, so
-    two different nonzero values conflict and are refused by name."""
+    deprecated alias, read into it with a warning. `viscosity_alpha` is set when the run passes it
+    (`canonical_set`) or its declaration holds a nonzero default; an inherited zero default leaves
+    it unset. a set `viscosity_alpha` other than the alias's value, zero included, conflicts with a
+    nonzero alias and is refused by name."""
     alias = model_dict.pop("shakura_sunyaev_alpha", None) or 0.0
     if alias == 0.0:
         return
     canonical = model_dict.get("viscosity_alpha") or 0.0
-    if canonical not in (0.0, alias):
+    if (canonical_set or canonical != 0.0) and canonical != alias:
         raise ValueError(
             f"{name} sets viscosity_alpha = {canonical!r} and its deprecated alias "
             f"shakura_sunyaev_alpha = {alias!r}; set viscosity_alpha alone"
