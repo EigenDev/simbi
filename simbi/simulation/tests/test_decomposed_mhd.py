@@ -161,6 +161,18 @@ VARIANTS_3D = {
     "imhd-contact": [INTERIOR_BOX_3D, "regime: Annotated[Regime, ProblemParam(Regime.IMHD, description='r')]", *ISOTHERMAL_STATE],
     "rmhd-uct": [INTERIOR_BOX_3D, "ct_method: Annotated[CtMethod, ProblemParam(CtMethod.UCT, description='e')]"],
 }
+# the vortex with a flow along z through the periodic seam: vz = 0.2 cos(2 pi z)
+SEAM_FLOW_3D = [
+    "def initial_primitive_state(self):",
+    "    import math",
+    "    gas, *faces = super().initial_primitive_state()",
+    "    nx, ny, nz = self.resolution",
+    "    def along_z():",
+    "        for idx, row in enumerate(gas()):",
+    "            z = (idx // (nx * ny) + 0.5) / nz",
+    "            yield row[:3] + (0.2 * math.cos(2.0 * math.pi * z),) + row[4:]",
+    "    return (along_z, *faces)",
+]
 NESTED = [
     "refinement_max_levels: Annotated[int, ProblemParam(3, description='levels')]",
     "refinement_regions: Annotated[list[list[float]], ProblemParam([[0.25, 0.75, 0.25, 0.75], [0.375, 0.625, 0.375, 0.625]], description='r')]",
@@ -203,6 +215,19 @@ def test_refined_3d_tiles_carry_the_single_hierarchy(tmp_path: Path, name: str) 
     want = _run_variant(where, tmp_path / "single", resolution, 1)
     got = _run_variant(where, tmp_path / "tiles", resolution, 8, [[11], [13], [10]])
     _assert_same(got, want, f"3d {name} on eight refined tiles")
+
+
+def test_a_magnetized_patch_spanning_the_periodic_axis_on_tiles_carries_the_single_hierarchy(tmp_path: Path) -> None:
+    # the vortex's own fine box spans the whole periodic z axis, whose fine level wraps onto
+    # itself; the tiles cut x and y, leaving z whole on every tile. the vortex is uniform in z, so
+    # a flow along z crossing the seam at z = 0 gives the wrap something to carry
+    where = _variant(tmp_path, VORTEX_3D, SEAM_FLOW_3D)
+    resolution = (24, 24, 24)
+    want = _run_variant(where, tmp_path / "single", resolution, 1)
+    fine = _all_levels(want)["level_1/conserved/den"]
+    assert np.ptp(fine.mean(axis=(1, 2))) > 0.0, "the fine density is uniform along z; the wrap carries nothing"
+    got = _run_variant(where, tmp_path / "tiles", resolution, 4, [[11], [13], []])
+    _assert_same(got, want, "3d vortex spanning z on four refined tiles")
 
 
 def test_nested_refined_tiles_carry_the_single_hierarchy(tmp_path: Path) -> None:
