@@ -3296,12 +3296,9 @@ where
         );
         table.post_error(&summary);
         table.exit_frame(ExitKind::Crash, &summary);
-        // a panic-origin crash and a halted root step end with a failing exit, so schedulers
-        // and chains read a failure signal; the invalid-cfl exit stays a reported halt.
-        if c.panic.is_some() || c.halt.is_some() {
-            return Err(summary.into());
-        }
-        return Ok(diagnostics);
+        // every crash ends with a failing exit, so schedulers and chains read a failure signal: a
+        // caught panic, a halted root step and a timestep the march could not take alike
+        return Err(summary.into());
     }
 
     let root = &hier.levels[0].state;
@@ -6174,8 +6171,8 @@ where
             crash_cause(h.dt_cfl, None, h.step.as_ref())
         );
         reporter.fail(&summary);
-        // a halted root step ends with a failing exit; the invalid-cfl exit stays a reported halt
-        return if h.step.is_some() { Err(summary) } else { Ok(diagnostics) };
+        // a halted march ends with a failing exit, a timestep it could not take included
+        return Err(summary);
     }
     // canonical final snapshot, mirroring the single-grid run; the march drained every device
     // before returning, and the drain here pins that boundary in front of the staging reads.
@@ -6523,13 +6520,14 @@ where
             c.time,
             crash_cause(c.dt_cfl, c.panic.as_deref(), c.halt.as_ref())
         );
-        let failing = c.panic.is_some() || c.halt.is_some();
+
         if let Err(msg) = write_cp(&tiles, &crashed, cadence.index) {
             reporter.fail(&msg);
             return Err(msg);
         }
         reporter.fail(&summary);
-        return if failing { Err(summary) } else { Ok(diagnostics) };
+        // every crash ends with a failing exit, a timestep the march could not take included
+        return Err(summary);
     }
     // canonical final snapshot, after every device drained.
     let final_path = checkpoint_name(cfg, checkpoint_status_tag(CheckpointOutcome::Completed));
