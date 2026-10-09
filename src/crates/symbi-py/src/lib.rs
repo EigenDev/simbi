@@ -10681,16 +10681,25 @@ fn launch_experimental_opt_in() -> bool {
 
 /// the balanced reconstruction on several tiles, host or launched: the balanced face pair and
 /// body source read the cells beside each face, which the halo exchange fills, and are gated on
-/// the 2D and 3D cartesian grid; the balanced coarse-fine transfer and the seam band rewrite start
-/// their chains from cells of the whole patch, which a tile cut separates
+/// the cartesian grids, the spherical line and (r, theta) shell and the cylindrical line; under
+/// refinement, on the 2D and 3D cartesian grids, the balanced coarse-fine transfer and the seam
+/// band rewrite start their chains from cells of the whole patch, which a cut through a seam band
+/// separates
 fn validate_tiled_balance(cfg: &Config) -> Result<(), String> {
     if !cfg.wb_reconstruction {
         return Ok(());
     }
-    if cfg.coord_system != "cartesian" || !matches!(cfg.dims, 2 | 3) {
+    let charted = match cfg.coord_system.as_str() {
+        "cartesian" => matches!(cfg.dims, 1..=3),
+        "spherical" => matches!(cfg.dims, 1 | 2),
+        "cylindrical" => cfg.dims == 1,
+        _ => false,
+    };
+    if !charted || (cfg.refinement_enabled && (cfg.coord_system != "cartesian" || cfg.dims == 1)) {
         return Err(format!(
-            "wb_reconstruction on the {} with several tiles is outside the gated tiled runs (the 2D \
-             and 3D cartesian grids); run on one device or unset it",
+            "wb_reconstruction on the {} with several tiles is outside the gated tiled runs (the \
+             cartesian grids, the spherical line and (r, theta) shell and the cylindrical line, \
+             refined on the 2D and 3D cartesian grids alone); run on one device or unset it",
             grid_name(cfg)
         ));
     }

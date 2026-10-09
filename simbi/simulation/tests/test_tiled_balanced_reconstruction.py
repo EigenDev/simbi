@@ -7,13 +7,15 @@
 # a spurious flow, so the balance changes the run. on the 2D grid two host
 # tiles cut across the stratification, four host tiles cut on both axes and a
 # two-by-two launch publish the single grid's state bit for bit; on the 3D
-# grid two and four host tiles and a four-worker launch do too. under one
+# grid two and four host tiles and a four-worker launch do too, and so do the
+# cartesian, spherical and cylindrical lines and the (r, theta) shell around a
+# central mass, each on two host-tile layouts and a launch. under one
 # refined box the coarse-fine transfer chains each fine ghost from the patch
 # cell nearest it and the restriction band rewrites the four covered cells
 # inside each seam from the uncovered cell beyond it: refined host tiles and a
 # refined launch whose cuts keep every band on one tile publish the single
-# grid's state. a grid outside that scope (the one-dimensional column), a cut
-# inside a band and nested refinement are refused by name before any output.
+# grid's state. a chart outside that scope (the (r, z) plane), a cut inside a
+# band and nested refinement are refused by name before any output.
 #
 # run: pytest -m simulation simbi/simulation/tests/test_tiled_balanced_reconstruction.py
 # =============================================================================
@@ -34,6 +36,7 @@ pytestmark = pytest.mark.simulation
 
 STEPS = 8
 FIXTURE = '''
+import math
 from pathlib import Path
 from typing import Annotated
 
@@ -148,11 +151,106 @@ class BalancedColumn(BalancedAtmosphere):
                 yield tuple(sample(x1=(ii + 0.5) / nx))
 
         return gas
+
+
+CENTRAL_GM = 10.0
+
+
+
+class SphericalAtmosphere(SimbiProblem):
+    """an isentropic atmosphere at rest around a central point mass on the radial line"""
+
+    adiabatic_index: Annotated[float, ProblemParam(5.0 / 3.0, description="gamma")]
+    resolution: Annotated[tuple[int], ProblemParam((64,), cli=True, description="grid")]
+    bounds: Annotated[list[tuple[float, float]], ProblemParam([(1.0, 2.0)], description="r")]
+    coord_system: Annotated[CoordSystem, ProblemParam(CoordSystem.SPHERICAL, description="chart")]
+    regime: Annotated[Regime, ProblemParam(Regime.NEWTONIAN, description="regime")]
+    boundary_conditions: Annotated[list[BoundaryCondition], ProblemParam([BoundaryCondition.REFLECTING], description="walls")]
+    solver: Annotated[Solver, ProblemParam(Solver.HLLC, description="solver")]
+    wb_reconstruction: Annotated[bool, ProblemParam(True, description="balanced")]
+    end_time: Annotated[float, ProblemParam(1.0, cli=True, checkpoint_safe=True, description="t")]
+    data_directory: Annotated[Path, ProblemParam(Path("data/sph_atm"), cli=True, checkpoint_safe=True, description="out")]
+
+    @property
+    def immersed_bodies(self):
+        return [ImmersedBodyConfig(capability=BodyCapability.GRAVITATIONAL, mass=CENTRAL_GM, radius=0.0, position=(0.0, 0.0, 0.0),
+                                   velocity=(0.0, 0.0, 0.0), gravitational=GravitationalProperties(softening_length=0.05))]
+
+    def initial_primitive_state(self):
+        g = self.adiabatic_index
+        k = g / (g - 1.0)
+        cst = k - CENTRAL_GM / 2.0  # rho = 1 at r = 2
+
+        def gas():
+            (nr,) = self.resolution
+            for ii in range(nr):
+                r = 1.0 + (ii + 0.5) / nr
+                rho = ((cst + CENTRAL_GM / r) / k) ** (1.0 / (g - 1.0))
+                yield (rho, 0.0, rho**g)
+
+        return gas
+
+
+class CylindricalPlaneAtmosphere(SphericalAtmosphere):
+    """the radial atmosphere on the (r, z) plane, a chart the tiled balance has no gate on"""
+
+    resolution: Annotated[tuple[int, int], ProblemParam((32, 16), cli=True, description="grid")]
+    bounds: Annotated[list[tuple[float, float]], ProblemParam([(1.0, 2.0), (0.0, 1.0)], description="(r, z)")]
+    coord_system: Annotated[CoordSystem, ProblemParam(CoordSystem.CYLINDRICAL, description="chart")]
+
+    def initial_primitive_state(self):
+        g = self.adiabatic_index
+        k = g / (g - 1.0)
+        cst = k - CENTRAL_GM / 2.0
+
+        def gas():
+            nr, nz = self.resolution
+            for _jj in range(nz):
+                for ii in range(nr):
+                    r = 1.0 + (ii + 0.5) / nr
+                    rho = ((cst + CENTRAL_GM / r) / k) ** (1.0 / (g - 1.0))
+                    yield (rho, 0.0, 0.0, rho**g)
+
+        return gas
+
+
+class CylindricalAtmosphere(SphericalAtmosphere):
+    """the same atmosphere on the cylindrical radial line, the mass on the axis"""
+
+    coord_system: Annotated[CoordSystem, ProblemParam(CoordSystem.CYLINDRICAL, description="chart")]
+
+
+class ShellAtmosphere(SphericalAtmosphere):
+    """the radial atmosphere on the (r, theta) shell, uniform in theta"""
+
+    resolution: Annotated[tuple[int, int], ProblemParam((32, 16), cli=True, description="grid")]
+    bounds: Annotated[list[tuple[float, float]], ProblemParam([(1.0, 2.0), (0.0, math.pi)], description="(r, theta)")]
+    boundary_conditions: Annotated[list[BoundaryCondition], ProblemParam(
+        [BoundaryCondition.REFLECTING, BoundaryCondition.REFLECTING, BoundaryCondition.AXIS, BoundaryCondition.AXIS], description="walls")]
+
+    def initial_primitive_state(self):
+        g = self.adiabatic_index
+        k = g / (g - 1.0)
+        cst = k - CENTRAL_GM / 2.0
+
+        def gas():
+            nr, nt = self.resolution
+            for _jj in range(nt):
+                for ii in range(nr):
+                    r = 1.0 + (ii + 0.5) / nr
+                    rho = ((cst + CENTRAL_GM / r) / k) ** (1.0 / (g - 1.0))
+                    yield (rho, 0.0, 0.0, rho**g)
+
+        return gas
 '''
 # (class, resolution, momentum dataset along the stratification, host tile cuts, launch cuts)
 GRIDS = {
     "2d": ("BalancedAtmosphere", (24, 32), "m2", [[[], [13]], [[11], [17]]], [[11], [17]]),
     "3d": ("BalancedAtmosphere3d", (16, 16, 16), "m3", [[[], [], [7]], [[9], [], [7]]], [[9], [], [7]]),
+    "cartesian-line": ("BalancedColumn", (32,), "m1", [[[16]], [[10, 21]]], [[11, 22]]),
+    "spherical-line": ("SphericalAtmosphere", (64,), "m1", [[[32]], [[20, 41]]], [[21, 43]]),
+    "cylindrical-line": ("CylindricalAtmosphere", (64,), "m1", [[[32]], [[20, 41]]], [[21, 43]]),
+    "spherical-shell": ("ShellAtmosphere", (32, 16), "m1", [[[16], []], [[10], [8]]], [[11], [8]]),
 }
 
 
@@ -240,7 +338,7 @@ BAND = "the cut at root cell 8 on axis 0 crosses the 4-cell balanced restriction
 @pytest.mark.parametrize(
     ("cls", "decompose", "reason"),
     [
-        ("BalancedColumn", None, "wb_reconstruction on the 1-dimensional cartesian grid with several tiles is outside the gated tiled runs"),
+        ("CylindricalPlaneAtmosphere", None, "wb_reconstruction on the 2-dimensional (r, z) cylindrical grid with several tiles is outside the gated tiled runs"),
         ("RefinedBalancedAtmosphere", [[8], []], BAND),
         ("NestedBalancedAtmosphere", [[12], []], "wb_reconstruction with nested refinement levels on several tiles"),
     ],
@@ -265,14 +363,14 @@ def test_a_cut_in_a_balanced_band_is_refused_on_launch(tmp_path: Path, fixture: 
     assert not (out.exists() and list(out.glob("*.h5"))), "a checkpoint was published"
 
 
-def test_the_balanced_column_is_refused_on_launch(tmp_path: Path, fixture: Path) -> None:
+def test_an_ungated_balanced_chart_is_refused_on_launch(tmp_path: Path, fixture: Path) -> None:
     env = dict(os.environ, **_launch_env(fixture))
     env.pop("SIMBI_LAUNCH_EXPERIMENTAL", None)
-    layout = _layout(tmp_path / "two.toml", workers=2, shape=(2,))
+    layout = _layout(tmp_path / "two.toml", workers=2, shape=(2, 1))
     out = tmp_path / "out"
-    cmd = [sys.executable, "-m", "simbi.cli", "launch", str(_launch_script(fixture, "BalancedColumn")), "--layout", str(layout),
+    cmd = [sys.executable, "-m", "simbi.cli", "launch", str(_launch_script(fixture, "CylindricalPlaneAtmosphere")), "--layout", str(layout),
            "--max-steps", "1", "--data-directory", str(out), "--checkpoint-interval", "1e9"]
     done = subprocess.run(cmd, capture_output=True, text=True, timeout=600, env=env)
     assert done.returncode != 0, f"the launch succeeded:\n{done.stdout}"
-    assert "wb_reconstruction on the 1-dimensional cartesian grid with several tiles is outside the gated tiled runs" in " ".join(done.stderr.split()), done.stderr
+    assert "wb_reconstruction on the 2-dimensional (r, z) cylindrical grid with several tiles is outside the gated tiled runs" in " ".join(done.stderr.split()), done.stderr
     assert not (out.exists() and list(out.glob("*.h5"))), "a checkpoint was published"
