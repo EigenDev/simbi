@@ -3,10 +3,10 @@
 #
 # the alpha viscosity's one wire name is `viscosity_alpha`. the deprecated
 # alias `shakura_sunyaev_alpha` is read into it with a deprecation warning and
-# leaves the wire. a `viscosity_alpha` the run sets (passed to the problem, or
-# declared with a nonzero default) other than the alias's value is refused by
-# name, an explicit zero included; an equal one runs as the one value, and an
-# inherited zero default leaves the alias in charge.
+# leaves the wire. the base problem declares no `viscosity_alpha`, so a
+# problem carrying it sets it, by its declaration or by passing it, and a
+# value other than the alias's is refused by name, a zero included; an equal
+# one runs as the one value.
 #
 # run: pytest simbi/simulation/tests/test_viscosity_alpha_alias.py
 # =============================================================================
@@ -70,7 +70,7 @@ def test_an_explicit_zero_viscosity_alpha_beside_the_alias_is_refused_by_name() 
         to_execution_dict(_problem(0.1, 0.0, passed=0.0))
 
 
-def test_an_inherited_zero_default_leaves_the_alias_in_charge() -> None:
-    with pytest.warns(DeprecationWarning):
-        wire = to_execution_dict(_problem(0.1, 0.0))
-    assert wire["viscosity_alpha"] == 0.1
+def test_a_declared_zero_viscosity_alpha_beside_the_alias_is_refused_by_name() -> None:
+    # the class declares viscosity_alpha = 0 and overrides the old name with 0.1
+    with pytest.raises(ValueError, match="sets viscosity_alpha = 0.0 and its deprecated alias shakura_sunyaev_alpha = 0.1"):
+        to_execution_dict(_problem(0.1, 0.0))
