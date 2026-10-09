@@ -10789,28 +10789,21 @@ mod launch_authorization_tests {
     }
 }
 
-/// the first combination of `cfg` the launched tiles install as the single path does but that no
-/// distributed gate has validated, named for the refusal; `None` when every combination in play
-/// carries a gate. the gated set is the table in the README's multi-process section
-/// the grids each regime's launch is gated on, 2D and 3D alike on the cartesian grid:
-/// - newtonian, relativistic and isothermal hydro: the 2D and 3D spherical shells, the (r, z)
-///   and (r, phi) planes, the 3D cylindrical annulus
-/// - newtonian and isothermal MHD: the (r, phi) and (r, z) planes and the 2D spherical shell
-/// - special-relativistic MHD: the 2D spherical shell
+/// whether the launch of `cfg`'s regime on its grid carries a distributed gate: every gas and
+/// magnetized regime on the cartesian grid, and on the spherical and cylindrical grids in one, two
+/// and three dimensions (lines, the (r, z) and (r, phi) planes, shells and annuli); on a curved
+/// spacetime the relativistic MHD charts are the baked GR-MHD set. a combination outside it runs
+/// only under the experimental opt-in
 fn gated_grid(cfg: &Config) -> bool {
-    let cylindrical = cfg.coord_system == "cylindrical";
-    let spherical = cfg.coord_system == "spherical";
-    let r_phi = cylindrical && cfg.dims == 2 && cfg.cyl_plane == CylPlane::RPhi;
-    let r_z = cylindrical && cfg.dims == 2 && cfg.cyl_plane == CylPlane::Rz;
-    let shell_2d = spherical && cfg.dims == 2;
+    let curvilinear = matches!(cfg.coord_system.as_str(), "spherical" | "cylindrical");
     if cfg.coord_system == "cartesian" {
         return true;
     }
     match cfg.regime.as_str() {
-        "newtonian" | "rhd" | "isothermal" => spherical || cylindrical,
-        "nmhd" | "imhd" => r_phi || r_z || shell_2d || (cfg.dims == 3 && (spherical || cylindrical)),
+        "newtonian" | "rhd" | "isothermal" | "nmhd" | "imhd" => curvilinear,
         // a curved spacetime's charts are the GR-MHD set the launch scope checks
-        "rmhd" => shell_2d || (cfg.spacetime != "minkowski" && baked_gr_mhd(cfg.dims, &cfg.coord_system, &cfg.spacetime)),
+        "rmhd" if cfg.spacetime != "minkowski" => baked_gr_mhd(cfg.dims, &cfg.coord_system, &cfg.spacetime),
+        "rmhd" => curvilinear,
         _ => false,
     }
 }

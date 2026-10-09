@@ -17,16 +17,12 @@
 # onto three unevenly owned tiles to the uninterrupted single-grid state. the
 # annulus wraps its radius: the first and last radial faces are two different
 # faces the curl gives different values, which the interface audit leaves to
-# their own tiles while it audits the interior cut. a regime on a grid outside
-# its gated set, special-relativistic MHD on the (r, phi) disk, is refused at
-# startup by name.
+# their own tiles while it audits the interior cut.
 #
 # run: pytest -m simulation simbi/simulation/tests/test_launch_grid_matrix.py
 # =============================================================================
 
 import os
-import subprocess
-import sys
 from pathlib import Path
 
 import h5py
@@ -188,33 +184,3 @@ def test_mhd_on_an_annulus_wrapped_in_radius_matches_fresh_corrected_and_resumed
     three = _layout(tmp_path / "three.toml", workers=3, cuts=case["restart"])
     resumed = _script_launch(script, resolution, tmp_path / "three", three, steps, workers=3, checkpoint=partial, env=audit, flags=flags)
     _assert_same_state(resumed, reference, f"annulus {ct}: resumed onto three uneven workers")
-
-
-RMHD_DISK = """
-import math
-from typing import Annotated
-from simbi import ProblemParam
-from simbi.types import CoordSystem
-from simbi_configs.examples.srmhd.rmhd_orszag_tang import OrszagTang
-
-class OrszagTangDisk(OrszagTang):
-    coord_system: Annotated[CoordSystem, ProblemParam(CoordSystem.CYLINDRICAL, description="coordinate system")]
-    bounds: Annotated[list[tuple[float, float]], ProblemParam([(0.1, 1.0), (0.0, 2.0 * math.pi)], description="bounds")]
-"""
-
-
-def test_rmhd_on_a_curvilinear_grid_is_refused_by_name(tmp_path: Path) -> None:
-    script = tmp_path / "orszag_tang_disk.py"
-    script.write_text(RMHD_DISK)
-    layout = _layout(tmp_path / "two.toml", workers=2, cuts=[[4], []])
-    cmd = [
-        sys.executable, "-m", "simbi.cli", "launch", str(script), "--layout", str(layout), "--max-steps", "1",
-        "--resolution", "8,8,1", "--data-directory", str(tmp_path / "refused"), "--checkpoint-interval", "1e9",
-    ]
-    env = {k: v for k, v in os.environ.items() if k != "SIMBI_LAUNCH_EXPERIMENTAL"}
-    env["PYTHONPATH"] = os.pathsep.join([str(Path.cwd()), env.get("PYTHONPATH", "")])
-    done = subprocess.run(cmd, capture_output=True, text=True, timeout=600, env=env)
-    assert done.returncode != 0, f"the launch succeeded:\n{done.stdout}"
-    flat = " ".join(done.stderr.split())
-    assert "the rmhd regime on the 2-dimensional" in flat, done.stderr
-    assert not list((tmp_path / "refused").glob("*.h5")), "a checkpoint was published"
