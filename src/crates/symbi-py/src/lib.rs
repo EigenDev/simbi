@@ -10687,14 +10687,6 @@ fn validate_tiled_balance(cfg: &Config) -> Result<(), String> {
     if !cfg.wb_reconstruction {
         return Ok(());
     }
-    if cfg.refinement_enabled {
-        return Err(
-            "wb_reconstruction with mesh refinement on several tiles: the balanced coarse-fine \
-             transfer and seam band start from cells a tile cut separates; run on one device or \
-             unset it"
-                .to_string(),
-        );
-    }
     if cfg.coord_system != "cartesian" || !matches!(cfg.dims, 2 | 3) {
         return Err(format!(
             "wb_reconstruction on the {} with several tiles is outside the gated tiled runs (the 2D \
@@ -10702,7 +10694,62 @@ fn validate_tiled_balance(cfg: &Config) -> Result<(), String> {
             grid_name(cfg)
         ));
     }
+    if cfg.refinement_enabled {
+        if cfg.refinement_regions.len() > 1 {
+            return Err(
+                "wb_reconstruction with nested refinement levels on several tiles is outside the gated \
+                 tiled runs (one refined region); run on one device or keep one refinement region"
+                    .to_string(),
+            );
+        }
+        let crossed = match cfg.dims {
+            2 => cut_in_balanced_band::<2>(cfg)?,
+            _ => cut_in_balanced_band::<3>(cfg)?,
+        };
+        if let Some((ax, cut, face, band)) = crossed {
+            return Err(format!(
+                "wb_reconstruction with mesh refinement on several tiles: the cut at root cell {cut} on \
+                 axis {ax} crosses the {band}-cell balanced restriction band inside the patch face at \
+                 {face}, which rewrites its covered cells from the uncovered cell beyond the face; keep \
+                 every cut at least {band} cells inside the face or beyond it"
+            ));
+        }
+    }
     Ok(())
+}
+
+/// the first cut of the tile partition that falls in a seam band of the refined patch: the
+/// balanced restriction rewrites the covered coarse cells within `band` cells of each seam from
+/// the uncovered cell beyond it, so the band and that cell share one tile. `band` is the
+/// reconstruction reach plus two, capped by the unrolled chain; a seam lies wherever the patch
+/// face is inside the domain. returns (axis, cut, face, band)
+fn cut_in_balanced_band<const D: usize>(cfg: &Config) -> Result<Option<(usize, usize, usize, usize)>, String> {
+    let reach = match cfg.reconstruction_name.as_str() {
+        "pcm" => 1,
+        "ppm" => 3,
+        _ => 2,
+    };
+    let band = (reach + 2).min(symbi::WB_CF_CHAIN_MAX as usize);
+    let n: [usize; D] = std::array::from_fn(|ax| cfg.n_cells[ax]);
+    let partition = tile_partition(n, cfg)?;
+    let patch = launch_patch::<D>(cfg)?;
+    for flat in 0..partition.n_tiles() {
+        let ext = partition.tile_extents(symbi::sim::decomp::unflatten(flat, partition.counts()));
+        for ax in 0..D {
+            let cut = ext[ax].0;
+            let (lo, hi) = patch[ax];
+            if cut == 0 {
+                continue;
+            }
+            if lo > 0 && (lo..lo + band).contains(&cut) {
+                return Ok(Some((ax, cut, lo, band)));
+            }
+            if hi < n[ax] && (hi.saturating_sub(band) + 1..=hi).contains(&cut) {
+                return Ok(Some((ax, cut, hi, band)));
+            }
+        }
+    }
+    Ok(None)
 }
 
 /// the launch authorization of a combination: a gated one (`ungated` is `None`) runs; an ungated
@@ -10904,9 +10951,6 @@ fn validate_refined_launch_scope(cfg: &Config) -> Result<(), String> {
     let stages = cfg.timestepping.stages().len() as u8;
     if let Err(e) = symbi_sim::phase_table::PhaseTable::nested(stages, 2, depth as u8) {
         return refused(&format!("{depth} levels, the root included ({e}),"));
-    }
-    if cfg.wb_reconstruction {
-        return refused("a well-balanced reconstruction");
     }
     // the root and seed plans carry the wrap of a periodic axis cut into tiles; the fine level and
     // its registers exchange inside the domain, so on a cut periodic axis the patch keeps clear of

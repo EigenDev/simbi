@@ -7,10 +7,13 @@
 # a spurious flow, so the balance changes the run. on the 2D grid two host
 # tiles cut across the stratification, four host tiles cut on both axes and a
 # two-by-two launch publish the single grid's state bit for bit; on the 3D
-# grid two and four host tiles and a four-worker launch do too. a grid outside
-# that scope (the one-dimensional column) and a refined run, whose balanced
-# coarse-fine transfer and seam band start from cells a cut separates, are
-# refused by name on host tiles and launch before any output.
+# grid two and four host tiles and a four-worker launch do too. under one
+# refined box the coarse-fine transfer chains each fine ghost from the patch
+# cell nearest it and the restriction band rewrites the four covered cells
+# inside each seam from the uncovered cell beyond it: refined host tiles and a
+# refined launch whose cuts keep every band on one tile publish the single
+# grid's state. a grid outside that scope (the one-dimensional column), a cut
+# inside a band and nested refinement are refused by name before any output.
 #
 # run: pytest -m simulation simbi/simulation/tests/test_tiled_balanced_reconstruction.py
 # =============================================================================
@@ -86,6 +89,12 @@ class RefinedBalancedAtmosphere(BalancedAtmosphere):
     refinement_max_levels: Annotated[int, ProblemParam(2, description="levels")]
     refinement_regions: Annotated[list[list[float]], ProblemParam([[0.25, 0.75, 0.25, 0.75]], description="box")]
     refinement_ratios: Annotated[list[int], ProblemParam([2], description="ratios")]
+
+
+class NestedBalancedAtmosphere(RefinedBalancedAtmosphere):
+    refinement_max_levels: Annotated[int, ProblemParam(3, description="levels")]
+    refinement_regions: Annotated[list[list[float]], ProblemParam([[0.25, 0.75, 0.25, 0.75], [0.375, 0.625, 0.375, 0.625]], description="boxes")]
+    refinement_ratios: Annotated[list[int], ProblemParam([2, 2], description="ratios")]
 
 
 class BalancedAtmosphere3d(BalancedAtmosphere):
@@ -207,18 +216,53 @@ def test_the_balanced_reconstruction_on_tiles_matches_the_single_grid(tmp_path: 
     _assert_same_state(got, want, f"{grid} launched on {workers} workers")
 
 
+def test_the_balanced_reconstruction_on_refined_tiles_matches_the_single_grid(tmp_path: Path, fixture: Path, monkeypatch) -> None:
+    # the patch spans root cells 6..18 along x and 8..24 along y; each seam's balanced band covers
+    # the four covered cells inside it, and the cuts keep every band on one tile
+    want = _final(_run(fixture, "RefinedBalancedAtmosphere", tmp_path / "single"), tmp_path / "single", "the refined single grid")
+    plain = _final(_run(fixture, "RefinedBalancedAtmosphere", tmp_path / "plain", extra=", wb_reconstruction=False"), tmp_path / "plain", "the plain refined run")
+    with h5py.File(want, "r") as a, h5py.File(plain, "r") as b:
+        assert not np.array_equal(a["level_1/conserved/den"][()], b["level_1/conserved/den"][()]), "the balance left the refined run unchanged; the gate is vacuous"
+    for cuts in [[[12], []], [[12], [16]]]:
+        gpus = int(np.prod([len(c) + 1 for c in cuts]))
+        out = tmp_path / f"tiles{gpus}"
+        got = _final(_run(fixture, "RefinedBalancedAtmosphere", out, gpus, f", decompose={cuts!r}"), out, f"refined host tiles cut at {cuts}")
+        _assert_same_state(got, want, f"refined host tiles cut at {cuts}")
+    monkeypatch.delenv("SIMBI_LAUNCH_EXPERIMENTAL", raising=False)
+    layout = _layout(tmp_path / "launch.toml", workers=4, cuts=[[12], [16]])
+    got = _script_launch(str(_launch_script(fixture, "RefinedBalancedAtmosphere")), (24, 32), tmp_path / "launched", layout, STEPS, workers=4, env=_launch_env(fixture))
+    _assert_same_state(got, want, "refined launch on four workers")
+
+
+BAND = "the cut at root cell 8 on axis 0 crosses the 4-cell balanced restriction band inside the patch face at 6"
+
+
 @pytest.mark.parametrize(
-    ("cls", "reason"),
+    ("cls", "decompose", "reason"),
     [
-        ("BalancedColumn", "wb_reconstruction on the 1-dimensional cartesian grid with several tiles is outside the gated tiled runs"),
-        ("RefinedBalancedAtmosphere", "wb_reconstruction with mesh refinement on several tiles"),
+        ("BalancedColumn", None, "wb_reconstruction on the 1-dimensional cartesian grid with several tiles is outside the gated tiled runs"),
+        ("RefinedBalancedAtmosphere", [[8], []], BAND),
+        ("NestedBalancedAtmosphere", [[12], []], "wb_reconstruction with nested refinement levels on several tiles"),
     ],
 )
-def test_the_balanced_reconstruction_outside_the_gated_scope_is_refused_on_host_tiles(tmp_path: Path, fixture: Path, cls: str, reason: str) -> None:
-    done = _run(fixture, cls, tmp_path / "out", 2)
+def test_the_balanced_reconstruction_outside_the_gated_scope_is_refused_on_host_tiles(tmp_path: Path, fixture: Path, cls: str, decompose, reason: str) -> None:
+    done = _run(fixture, cls, tmp_path / "out", 2, "" if decompose is None else f", decompose={decompose!r}")
     assert done.returncode != 0, f"{cls} ran on host tiles"
     assert reason in " ".join(done.stderr.split()), done.stderr[-1500:]
     assert not list((tmp_path / "out").glob("*.h5")), "output was written before the refusal"
+
+
+def test_a_cut_in_a_balanced_band_is_refused_on_launch(tmp_path: Path, fixture: Path) -> None:
+    env = dict(os.environ, **_launch_env(fixture))
+    env.pop("SIMBI_LAUNCH_EXPERIMENTAL", None)
+    layout = _layout(tmp_path / "two.toml", workers=2, cuts=[[8], []])
+    out = tmp_path / "out"
+    cmd = [sys.executable, "-m", "simbi.cli", "launch", str(_launch_script(fixture, "RefinedBalancedAtmosphere")), "--layout", str(layout),
+           "--max-steps", "1", "--resolution", "24,32", "--data-directory", str(out), "--checkpoint-interval", "1e9"]
+    done = subprocess.run(cmd, capture_output=True, text=True, timeout=600, env=env)
+    assert done.returncode != 0, f"the launch succeeded:\n{done.stdout}"
+    assert BAND in " ".join(done.stderr.split()), done.stderr
+    assert not (out.exists() and list(out.glob("*.h5"))), "a checkpoint was published"
 
 
 def test_the_balanced_column_is_refused_on_launch(tmp_path: Path, fixture: Path) -> None:
