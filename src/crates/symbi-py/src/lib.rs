@@ -4169,10 +4169,57 @@ fn append_fragments<const D: usize>(
     (coll, physics)
 }
 
+/// whether a run carries the horizon body, whose ledger books the accretion through the shell
+/// around the excised core: an excised curved spacetime on the cartesian chart
+fn builds_horizon_body(cfg: &Config) -> bool {
+    cfg.spacetime != "minkowski" && cfg.coord_system == "cartesian" && cfg.excision_radius > 0.0
+}
+
+/// the horizon ledger under mesh refinement: a refined run attaches its bodies, the horizon body
+/// among them, when it carries immersed bodies, and then books the horizon flux through the shell
+/// faces of its finest level alone, which hold part of the shell or none of it; the run is refused
+/// by name rather than publish that partial ledger
+fn refined_horizon_ledger(refinement: bool, horizon: bool, has_bodies: bool) -> Result<(), String> {
+    if refinement && horizon && has_bodies {
+        return Err("an excised run with immersed bodies and mesh refinement books the horizon \
+                    accretion through its finest level's share of the diagnostic shell alone; run \
+                    it unrefined, or without immersed bodies, whose horizon ledger it then omits"
+            .to_string());
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod refined_horizon_ledger_tests {
+    use super::refined_horizon_ledger;
+
+    #[test]
+    fn a_refined_excised_run_with_bodies_is_refused_by_name() {
+        let err = refined_horizon_ledger(true, true, true).expect_err("the partial horizon ledger was admitted");
+        assert!(err.contains("books the horizon accretion through its finest level's share"), "{err}");
+    }
+
+    #[test]
+    fn the_horizon_ledger_runs_unrefined_or_unattached() {
+        for (refinement, horizon, has_bodies) in [(false, true, true), (true, false, true), (true, true, false)] {
+            assert!(refined_horizon_ledger(refinement, horizon, has_bodies).is_ok(), "{refinement} {horizon} {has_bodies}");
+        }
+    }
+}
+
+/// the shapes parallel to `build_bodies_and_horizon`: each user body's shape, then the horizon's
+/// analytic sphere when the run carries it
+fn build_body_shapes_and_horizon(cfg: &Config) -> Vec<Option<symbi_ib::sdf::SdfExpr<f64, 3>>> {
+    let mut shapes = build_body_shapes(&cfg.bodies);
+    if builds_horizon_body(cfg) {
+        shapes.push(None);
+    }
+    shapes
+}
+
 fn build_bodies_and_horizon<const D: usize>(cfg: &Config) -> BodyCollection<f64, D> {
     let mut coll = build_bodies::<D>(&cfg.bodies, cfg.binary.as_ref());
-    if cfg.spacetime != "minkowski" && cfg.coord_system == "cartesian" && cfg.excision_radius > 0.0
-    {
+    if builds_horizon_body(cfg) {
         let diagnostic_radius = 3.0 * cfg.schwarzschild_mass; // 1.5 r_+, outside the horizon
         let idx = coll.len();
         coll = coll.add(symbi_ib::Body::horizon(
@@ -5456,7 +5503,7 @@ macro_rules! attach_bodies_and_shapes {
     ($sim:expr, $cfg:expr, $d:literal) => {{
         let cfg: &Config = $cfg;
         let mut sim = $sim.with_bodies(build_bodies_and_horizon::<$d>(cfg));
-        sim.attach_body_shapes(build_body_shapes(&cfg.bodies));
+        sim.attach_body_shapes(build_body_shapes_and_horizon(cfg));
         sim
     }};
 }
@@ -5465,7 +5512,7 @@ macro_rules! attach_bodies_and_fragments {
     ($sim:expr, $cfg:expr, $d:literal) => {{
         let cfg: &Config = $cfg;
         let mut coll = build_bodies_and_horizon::<$d>(cfg);
-        let mut shapes = build_body_shapes(&cfg.bodies);
+        let mut shapes = build_body_shapes_and_horizon(cfg);
         let physics = cfg.bonded_assembly.as_ref().map(|asm| {
             let (with_frags, physics) = append_fragments::<$d>(coll.clone(), &mut shapes, asm);
             coll = with_frags;
@@ -5630,7 +5677,7 @@ macro_rules! build_and_run_hydro {
         // sink applies once). the sink sphere must lie inside the finest level (asserted there).
         if !cfg.bodies.is_empty() && cfg.refinement_enabled {
             hier = hier.with_bodies(build_bodies_and_horizon::<$d>(cfg));
-            hier.attach_body_shapes(build_body_shapes(&cfg.bodies));
+            hier.attach_body_shapes(build_body_shapes_and_horizon(cfg));
         }
 
         // the run's stationary target, when one is declared: its discrete imbalance is measured
@@ -6628,7 +6675,7 @@ macro_rules! build_and_run_hydro_decomposed_refined {
                 // asserted each step.
                 if !cfg.bodies.is_empty() {
                     h = h.with_bodies(build_bodies_and_horizon::<$d>(cfg));
-                    h.attach_body_shapes(build_body_shapes(&cfg.bodies));
+                    h.attach_body_shapes(build_body_shapes_and_horizon(cfg));
                 }
                 // the root exchange closes a periodic axis cut into tiles across its seam; a refined
                 // patch keeps clear of the seam, whose faces are cuts to the refinement build
@@ -8417,7 +8464,7 @@ macro_rules! build_and_run_iso {
         // proxy (finest-owns-bodies, so the sink applies once).
         if !cfg.bodies.is_empty() && cfg.refinement_enabled {
             hier = hier.with_bodies(build_bodies_and_horizon::<$d>(cfg));
-            hier.attach_body_shapes(build_body_shapes(&cfg.bodies));
+            hier.attach_body_shapes(build_body_shapes_and_horizon(cfg));
         }
 
         // locally isothermal + refinement: the per-cell cs^2(x) "temperature"
@@ -8919,6 +8966,7 @@ fn validate_run(cfg: &Config) -> Result<(), String> {
         cfg.locally_isothermal,
     )?;
     validate_magnetized_drain_bodies(&cfg.bodies, &cfg.regime, cfg.dims, &cfg.coord_system)?;
+    refined_horizon_ledger(cfg.refinement_enabled, builds_horizon_body(cfg), !cfg.bodies.is_empty())?;
     // static mesh refinement is wired for hydro (incl. globally-isothermal). the two cases
     // refused below need fine-level prolongation the transfer set does not carry:
     if cfg.refinement_enabled
@@ -11036,7 +11084,7 @@ where
     // levels a gravity-only proxy, as on the in-process refined tiles
     if !cfg.bodies.is_empty() {
         h = h.try_with_bodies(build_bodies_and_horizon::<D>(cfg)).map_err(|e| format!("tile {flat}: {e}"))?;
-        h.attach_body_shapes(build_body_shapes(&cfg.bodies));
+        h.attach_body_shapes(build_body_shapes_and_horizon(cfg));
     }
     h.enable_face_stencil().map_err(|e| format!("tile {flat} face stencil: {e:?}"))?;
     h.enable_nested_face_stencils(1 + regions.len()).map_err(|e| format!("tile {flat} nested face stencils: {e:?}"))?;
