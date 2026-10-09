@@ -8828,17 +8828,7 @@ fn dispatch_and_run(
     validate_declared_target(cfg, validate_primitive_rows(cfg, prims)?)?;
     if cfg.n_gpus > 1 {
         validate_tiled_march(cfg)?;
-        // the balanced face pair and body source read the cells beside each face, which the halo
-        // exchange fills; the balanced coarse-fine transfer and the seam band rewrite start their
-        // chains from cells of the whole patch, which a tile cut separates
-        if cfg.wb_reconstruction && cfg.refinement_enabled {
-            return Err(
-                "wb_reconstruction with mesh refinement and gpus > 1: the balanced coarse-fine \
-                 transfer and seam band start from cells a tile cut separates; run on one device or \
-                 unset it"
-                    .to_string(),
-            );
-        }
+        validate_tiled_balance(cfg)?;
     }
     match cfg.regime.as_str() {
         "newtonian" => hydro_dispatch!(cfg, prims, Newtonian, Newtonian),
@@ -10643,6 +10633,69 @@ fn launch_experimental_opt_in() -> bool {
     std::env::var("SIMBI_LAUNCH_EXPERIMENTAL").is_ok_and(|v| v == "1")
 }
 
+/// the balanced reconstruction on several tiles, host or launched: the balanced face pair and
+/// body source read the cells beside each face, which the halo exchange fills, and are gated on
+/// the 2D and 3D cartesian grid; the balanced coarse-fine transfer and the seam band rewrite start
+/// their chains from cells of the whole patch, which a tile cut separates
+fn validate_tiled_balance(cfg: &Config) -> Result<(), String> {
+    if !cfg.wb_reconstruction {
+        return Ok(());
+    }
+    if cfg.refinement_enabled {
+        return Err(
+            "wb_reconstruction with mesh refinement on several tiles: the balanced coarse-fine \
+             transfer and seam band start from cells a tile cut separates; run on one device or \
+             unset it"
+                .to_string(),
+        );
+    }
+    if cfg.coord_system != "cartesian" || !matches!(cfg.dims, 2 | 3) {
+        return Err(format!(
+            "wb_reconstruction on the {} with several tiles is outside the gated tiled runs (the 2D \
+             and 3D cartesian grids); run on one device or unset it",
+            grid_name(cfg)
+        ));
+    }
+    Ok(())
+}
+
+/// the launch authorization of a combination: a gated one (`ungated` is `None`) runs; an ungated
+/// one is refused by name unless the operator opted in, and then runs as experimental, the
+/// property returned for the announcement
+fn authorize_launch(ungated: Option<String>, opt_in: bool) -> Result<Option<String>, String> {
+    match ungated {
+        None => Ok(None),
+        Some(property) if opt_in => Ok(Some(property)),
+        Some(property) => Err(format!(
+            "{property} is installed on the launched path without a distributed gate; set \
+             SIMBI_LAUNCH_EXPERIMENTAL=1 to run it as an experimental, unvalidated combination"
+        )),
+    }
+}
+
+#[cfg(test)]
+mod launch_authorization_tests {
+    use super::authorize_launch;
+
+    #[test]
+    fn a_gated_combination_runs_with_or_without_the_opt_in() {
+        assert_eq!(authorize_launch(None, false), Ok(None));
+        assert_eq!(authorize_launch(None, true), Ok(None));
+    }
+
+    #[test]
+    fn an_ungated_combination_is_refused_by_name_without_the_opt_in() {
+        let err = authorize_launch(Some("the x regime on the y grid".into()), false).expect_err("an ungated combination ran");
+        assert!(err.starts_with("the x regime on the y grid is installed on the launched path without a distributed gate"), "{err}");
+        assert!(err.contains("SIMBI_LAUNCH_EXPERIMENTAL=1"), "{err}");
+    }
+
+    #[test]
+    fn an_ungated_combination_runs_as_experimental_under_the_opt_in() {
+        assert_eq!(authorize_launch(Some("the x regime on the y grid".into()), true), Ok(Some("the x regime on the y grid".into())));
+    }
+}
+
 /// the first combination of `cfg` the launched tiles install as the single path does but that no
 /// distributed gate has validated, named for the refusal; `None` when every combination in play
 /// carries a gate. the gated set is the table in the README's multi-process section
@@ -10680,9 +10733,6 @@ fn grid_name(cfg: &Config) -> String {
 }
 
 fn ungated_launch_combination(cfg: &Config) -> Option<String> {
-    if cfg.wb_reconstruction {
-        return Some("the balanced reconstruction".to_string());
-    }
     if !gated_grid(cfg) {
         return Some(format!("the {} regime on the {}", cfg.regime, grid_name(cfg)));
     }
@@ -10770,13 +10820,8 @@ fn validate_launch_scope(cfg: &Config) -> Result<(), String> {
     // a combination the launched tiles build as the single path does but that no distributed
     // gate has validated: refused by name, or run as experimental under an explicit opt-in.
     // successful construction is no evidence of validated support
-    if let Some(property) = ungated_launch_combination(cfg) {
-        if !launch_experimental_opt_in() {
-            return Err(format!(
-                "{property} is installed on the launched path without a distributed gate; set \
-                 SIMBI_LAUNCH_EXPERIMENTAL=1 to run it as an experimental, unvalidated combination"
-            ));
-        }
+    validate_tiled_balance(cfg)?;
+    if let Some(property) = authorize_launch(ungated_launch_combination(cfg), launch_experimental_opt_in())? {
         eprintln!("SIMBI launch: experimental combination without a distributed gate: {property}");
     }
     Ok(())
