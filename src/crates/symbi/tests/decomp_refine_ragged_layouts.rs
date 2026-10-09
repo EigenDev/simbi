@@ -296,14 +296,23 @@ fn assert_one_step_matches(cuts: [usize; 2], scheme: Scheme) {
     assert_matches_with_rejection(cuts, scheme, None);
 }
 
+/// `assert_one_step_matches` over several cuts per axis
+fn assert_one_step_matches_on(cuts: [Vec<usize>; 2], scheme: Scheme) {
+    assert_layout_matches(cuts, scheme, None);
+}
+
 /// `assert_one_step_matches` with the fine stage `(substep, stage)` of the first root step rejected
 /// once on the single hierarchy and on every refined tile: the replayed step matches too
 fn assert_matches_with_rejection(cuts: [usize; 2], scheme: Scheme, reject: Option<(u8, usize)>) {
-    let partition = Partition::explicit([N, N], [vec![cuts[0]], vec![cuts[1]]])
+    assert_layout_matches([vec![cuts[0]], vec![cuts[1]]], scheme, reject);
+}
+
+fn assert_layout_matches(cuts: [Vec<usize>; 2], scheme: Scheme, reject: Option<(u8, usize)>) {
+    let partition = Partition::explicit([N, N], cuts.clone())
         .expect("interior cuts are strictly increasing and inside the grid");
     let counts = partition.counts();
     // a patch face on a cut: some tile contributes register units and some tile receives them
-    let on_cut = (0..2).any(|ax| cuts[ax] == PATCH[ax].0 || cuts[ax] == PATCH[ax].1);
+    let on_cut = (0..2).any(|ax| cuts[ax].iter().any(|&c| c == PATCH[ax].0 || c == PATCH[ax].1));
     use symbi::regimes::fofc::{fofc_reset_stats, fofc_stats};
     let mut mono = build_mono(scheme);
     fofc_reset_stats();
@@ -330,6 +339,13 @@ fn assert_matches_with_rejection(cuts: [usize; 2], scheme: Scheme, reject: Optio
     }
     run_decomposed(&mut dec, counts, T_ONE_STEP);
     assert!(dec.iter().all(|h| !h.forced_fine_rejection_pending()), "a refined tile never reached the forced rejection");
+    // the comparison below reads the samples the decomposed run fed: a march that stopped early
+    // compares fewer of them, so the run has to reach the single hierarchy's clock
+    for (i, h) in dec.iter().enumerate() {
+        assert!(h.crash.is_none(), "cuts {cuts:?}: tile {i} crashed: {:?}", h.crash);
+        let (root, single) = (&h.levels[0].state, &mono.levels[0].state);
+        assert_eq!((root.iteration, root.time), (single.iteration, single.time), "cuts {cuts:?}: tile {i} stopped short of the single hierarchy");
+    }
     let dec_log = phase_probe::take();
     let dec_fofc = fofc_stats();
     let frames = frames(&dec, &partition);
@@ -467,6 +483,36 @@ fn a_patch_face_one_cell_from_a_cut_is_refused_by_name() {
 
 /// the centered layout under both schemes: the probe's alignment itself, on a case known to
 /// hold
+/// two cuts per axis inside the patch: the center tile lies wholly under the fine level and
+/// evolves the donor shell of the patch's core on its root, as the single hierarchy does there
+#[test]
+fn a_tile_wholly_under_the_patch_matches_after_one_root_step() {
+    let cuts = [vec![14, 18], vec![14, 18]];
+    let partition = Partition::explicit([N, N], cuts.clone()).expect("cuts inside the grid");
+    let tiles = build_tiles(&partition, PLM);
+    let covered = |h: &Hier| {
+        let interior = &h.levels[0].state.geom.interior;
+        h.levels[0].coverage.as_ref().is_some_and(|c| (0..2).all(|a| c.spaces[a].lo == interior.spaces[a].lo && c.spaces[a].hi == interior.spaces[a].hi))
+    };
+    assert!(tiles.iter().any(covered), "no tile lies wholly under the patch; the gate is vacuous");
+    assert_one_step_matches_on(cuts, PLM);
+}
+
+/// the cuts at the patch core's edges (the donor shell is three root cells under plm): the center
+/// tile's root evolves no cell of its own and offers no timestep, and the leaf cells of the other
+/// tiles set the step
+#[test]
+fn a_tile_in_the_patch_core_matches_after_one_root_step() {
+    let cuts = [vec![15, 17], vec![15, 17]];
+    let partition = Partition::explicit([N, N], cuts.clone()).expect("cuts inside the grid");
+    let tiles = build_tiles(&partition, PLM);
+    assert!(
+        tiles.iter().any(|h| h.levels.len() > 1 && !h.level_evolves_cells(0)),
+        "no tile's root lies in the patch core; the gate is vacuous"
+    );
+    assert_one_step_matches_on(cuts, PLM);
+}
+
 #[test]
 fn centered_cuts_match_after_one_root_step() {
     assert_one_step_matches([16, 16], PLM);

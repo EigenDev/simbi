@@ -1397,14 +1397,20 @@ where
                 );
             }
             let coverage = region_to_domain(region, &parent.geom.x_lo, &parent.geom.dx, &parent.geom.index_offset);
-            // a region covering its parent entirely leaves the parent no leaf cell: the parent's
-            // CFL reduction then runs over nothing and the run stops on a zero timestep. such a
-            // run wants a finer root grid, so it is refused here with the reason.
+            // a region covering its whole parent level leaves the level no leaf cell; such a run
+            // wants a finer root grid, so it is refused here with the reason. a tile of the level
+            // (a side on a cut) lying wholly under the region leaves leaf cells on other tiles,
+            // and evolves none of its own
             let covers_parent = (0..NDIM).all(|ax| {
                 coverage.spaces[ax].lo <= parent.geom.interior.spaces[ax].lo
                     && coverage.spaces[ax].hi >= parent.geom.interior.spaces[ax].hi
             });
-            if covers_parent {
+            let whole_level = if levels.len() == 1 {
+                (0..NDIM).all(|ax| parent.boundaries.lo(ax) != BoundaryType::CoarseFine && parent.boundaries.hi(ax) != BoundaryType::CoarseFine)
+            } else {
+                levels.last().unwrap().cut_sides.iter().flatten().all(|&cut| !cut)
+            };
+            if covers_parent && whole_level {
                 return Err(symbi_xpu::XpuError {
                     operation: "refinement region",
                     code: 0,
@@ -2308,9 +2314,7 @@ where
     /// callers' crash heuristics see it.
     fn raw_root_cfl(&self) -> f64 {
         let mut dt = f64::INFINITY;
-        for (ll, lvl) in self.levels.iter().enumerate() {
-            let scale = RATIO.pow(ll as u32) as f64;
-            let candidate = lvl.kernels.cfl(&lvl.state) * scale;
+        for (_, candidate) in self.level_cfl_candidates() {
             if !candidate.is_finite() || candidate <= 0.0 {
                 return candidate;
             }
@@ -2319,15 +2323,24 @@ where
         dt
     }
 
-    /// the raw timestep candidate of every level in root units, in level order; a
-    /// candidate that is NaN or non-positive is returned as it is, so a caller judges it
-    /// before any clamp can hide it
-    pub fn level_cfl_candidates(&self) -> Vec<f64> {
+    /// whether level `ll` evolves some cell of its own: a tile's level lying wholly under a finer
+    /// level holds restrictions alone and sets no timestep
+    pub fn level_evolves_cells(&self, ll: usize) -> bool {
+        let state = &self.levels[ll].state;
+        !state.composite_ownership.evolution_regions(&state.geom.interior).is_empty()
+    }
+
+    /// the raw timestep candidate in root units of every level evolving some cell of its own, as
+    /// `(level, candidate)` in level order; a candidate that is NaN or non-positive is returned as
+    /// it is, so a caller judges it before any clamp can hide it
+    pub fn level_cfl_candidates(&self) -> Vec<(usize, f64)> {
         prof("cfl", || {
-            self.levels
-                .iter()
-                .enumerate()
-                .map(|(ll, lvl)| lvl.kernels.cfl(&lvl.state) * RATIO.pow(ll as u32) as f64)
+            (0..self.levels.len())
+                .filter(|&ll| self.level_evolves_cells(ll))
+                .map(|ll| {
+                    let lvl = &self.levels[ll];
+                    (ll, lvl.kernels.cfl(&lvl.state) * RATIO.pow(ll as u32) as f64)
+                })
                 .collect()
         })
     }
@@ -5399,7 +5412,9 @@ where
                 }
             });
             flux_eq[i][ll] = Some(snapshot_flux(&level.state)?);
-            probe_dt = probe_dt.min(symbi_xpu::with_device(grid.devices[k], || level.kernels.cfl(&level.state)));
+            if tiles[i].level_evolves_cells(ll) {
+                probe_dt = probe_dt.min(symbi_xpu::with_device(grid.devices[k], || level.kernels.cfl(&level.state)));
+            }
         }
         // the probe's step per level, the timestep the single hierarchy's probe takes
         eprintln!("SIMBI equilibrium probe: level={ll} dt_bits={:016x}", probe_dt.to_bits());

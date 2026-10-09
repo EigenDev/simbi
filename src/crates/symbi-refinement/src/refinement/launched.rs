@@ -787,7 +787,7 @@ where
         let mut origin: Vec<(usize, usize)> = Vec::new();
         let mut candidates: Vec<f64> = Vec::new();
         for (k, h) in tiles.iter().enumerate() {
-            for (ll, candidate) in with_device(root_dev(k), || h.level_cfl_candidates()).into_iter().enumerate() {
+            for (ll, candidate) in with_device(root_dev(k), || h.level_cfl_candidates()) {
                 let poisoned = k == 0 && (base.injection.invalid_cfl_at == Some(iter) && ll == 0 || cfg.invalid_level_cfl_at == Some((iter, ll)));
                 origin.push((k, ll));
                 candidates.push(if poisoned { f64::NAN } else { candidate });
@@ -1594,6 +1594,11 @@ where
                 }
             });
             fluxes[k][ll] = Some(snapshot_flux(&level.state).map_err(|e| fail(fabric, numerics(format!("stationary target flux: {e:?}"))))?);
+            // a tile whose level lies wholly under a finer level evolves no cell of it and offers
+            // no step
+            if !tiles[k].level_evolves_cells(ll) {
+                continue;
+            }
             let candidate = with_device(dev, || level.kernels.cfl(&level.state));
             if !(candidate.is_finite() && candidate > 0.0) {
                 return Err(fail(fabric, numerics(format!(

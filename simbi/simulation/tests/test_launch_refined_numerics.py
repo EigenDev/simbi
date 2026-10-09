@@ -198,6 +198,8 @@ def test_a_patch_spanning_an_uncut_periodic_axis_launches_as_the_single_grid_run
     for label, workers, layout in [
         ("two workers", 2, _layout(tmp_path / "two.toml", workers=2, cuts=[[], [36]])),
         ("three uneven workers", 3, _layout(tmp_path / "three.toml", workers=3, cuts=[[], [30, 60]])),
+        # the middle tile, y cells 20..41, lies wholly under the patch spanning x
+        ("a worker's tile wholly under the patch", 3, _layout(tmp_path / "under.toml", workers=3, cuts=[[], [20, 41]])),
     ]:
         launched = _script_launch(script, KH_RESOLUTION, tmp_path / label.replace(" ", "_"), layout, STEPS, workers=workers)
         _assert_same_levels(launched, reference, f"spanning kh: {label}")

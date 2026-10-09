@@ -5,6 +5,7 @@
 # carries, and reproduces it bit for bit, both levels included:
 # - ppm with the convergence-gated flattening (quartic prolongation), shown to
 #   differ from plm;
+# - nine tiles whose center tile lies wholly under the patch;
 # - a passive scalar seeded non-uniformly, shown to be carried.
 # - a second nested refinement level spanning the cut, fresh and resumed from a
 #   checkpoint written on the tiles halfway, every level included;
@@ -98,6 +99,14 @@ def test_ppm_with_flattening_on_two_refined_tiles_matches_the_single_hierarchy(t
     assert any(not np.array_equal(x, _datasets(plm)[n]) for n, x in _datasets(single).items()), "ppm left the run unchanged; the gate is vacuous"
     tiles = _run(RefinedBlast, tmp_path / "tiles", 2, **ppm)
     _assert_same(tiles, single, "two refined tiles under ppm")
+
+
+def test_a_tile_wholly_under_the_patch_matches_the_single_hierarchy(tmp_path: Path, host_tiles) -> None:
+    # the patch spans root cells 8..24 of 32; the cuts at 12 and 20 on both axes leave the center
+    # tile wholly under the fine level, its root evolving no cell of its own
+    single = _run(RefinedBlast, tmp_path / "single", 1, resolution=(32, 32, 1))
+    tiles = _run(RefinedBlast, tmp_path / "tiles", 9, resolution=(32, 32, 1), decompose=[[12, 20], [12, 20]])
+    _assert_same(tiles, single, "nine refined tiles, the center one wholly under the patch")
 
 
 def test_a_passive_scalar_on_two_refined_tiles_matches_the_single_hierarchy(tmp_path: Path, host_tiles) -> None:

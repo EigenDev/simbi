@@ -150,7 +150,8 @@ fn a_binding_fine_level_limit_sets_the_root_step_in_root_units() {
             .set(cell, 1.0 / (GAMMA - 1.0) + 0.5 * 9.0);
     }
     hier.prime();
-    let candidates = hier.level_cfl_candidates();
+    let candidates: Vec<f64> = hier.level_cfl_candidates().into_iter().map(|(_, c)| c).collect();
+    assert_eq!(candidates.len(), 2, "premise: both levels evolve cells of their own");
     assert!(
         candidates[1] < candidates[0],
         "premise: the fine limit in root units binds: {candidates:?}"
