@@ -833,7 +833,9 @@ class SimbiProblem(BaseModel):
     @computed_field
     @property
     def shakura_sunyaev_alpha(self) -> float:
-        """shakura-sunyaev alpha for accretion disks."""
+        """deprecated alias of `viscosity_alpha`, the shakura-sunyaev alpha viscosity: a nonzero
+        value is read as `viscosity_alpha` with a deprecation warning, and a different nonzero
+        `viscosity_alpha` beside it is refused."""
         return 0.0
 
     @computed_field

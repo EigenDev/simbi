@@ -16,6 +16,7 @@ import importlib
 import inspect
 import math
 import os
+import warnings
 from pathlib import Path
 from types import ModuleType
 from typing import TYPE_CHECKING, Any, Optional, Sequence
@@ -167,6 +168,7 @@ def to_execution_dict(problem: SimbiProblem) -> dict[str, Any]:
     for field in computed_fields:
         if hasattr(problem, field):
             model_dict[field] = getattr(problem, field)
+    _resolve_alpha_alias(model_dict, type(problem).__name__)
 
     # the config author's own params, grouped, for the live dashboard's problem-setup panel.
     model_dict["custom_params"] = _collect_custom_params(problem)
@@ -272,6 +274,28 @@ def to_execution_dict(problem: SimbiProblem) -> dict[str, Any]:
         model_dict["resolution"] = [resolution[0], resolution[1], 1]
 
     return model_dict
+
+
+def _resolve_alpha_alias(model_dict: dict[str, Any], name: str) -> None:
+    """the alpha viscosity's one wire name is `viscosity_alpha`; `shakura_sunyaev_alpha` is its
+    deprecated alias, read into it with a warning. zero is the inviscid default on both names, so
+    two different nonzero values conflict and are refused by name."""
+    alias = model_dict.pop("shakura_sunyaev_alpha", None) or 0.0
+    if alias == 0.0:
+        return
+    canonical = model_dict.get("viscosity_alpha") or 0.0
+    if canonical not in (0.0, alias):
+        raise ValueError(
+            f"{name} sets viscosity_alpha = {canonical!r} and its deprecated alias "
+            f"shakura_sunyaev_alpha = {alias!r}; set viscosity_alpha alone"
+        )
+    warnings.warn(
+        f"{name}: shakura_sunyaev_alpha is a deprecated alias of viscosity_alpha; the run uses "
+        f"viscosity_alpha = {alias!r}",
+        DeprecationWarning,
+        stacklevel=3,
+    )
+    model_dict["viscosity_alpha"] = alias
 
 
 def _validate_census_payloads(model_dict: dict[str, Any]) -> None:
