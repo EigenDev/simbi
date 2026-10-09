@@ -15,7 +15,9 @@
 #   both axes through the fine box; a locally isothermal refined run on tiles is
 #   refused by name before any output.
 # a census, which the tiled drivers do not reduce across tiles, is refused by
-# name on host tiles and through `simbi launch` rather than left unrecorded. a
+# name on host tiles and through `simbi launch` rather than left unrecorded;
+# immersed bodies over nested levels on magnetized host tiles are refused by
+# name. a
 # gravitating body over two nested levels on two host tiles publishes every
 # level of the single hierarchy's state bit for bit.
 #
@@ -34,6 +36,7 @@ import simbi.expression as expr
 from simbi.simulation import runner
 from simbi.simulation.tests.test_launch import _layout
 from simbi.types.bodies import BodyCapability, GravitationalProperties, ImmersedBodyConfig
+from simbi_configs.examples.ibm.magnetized_sink import MagnetizedBondiSink
 from simbi_configs.examples.newtonian.refined_blast import RefinedBlast
 
 pytestmark = pytest.mark.simulation
@@ -223,6 +226,24 @@ def test_a_periodic_refined_run_on_four_tiles_matches_the_single_hierarchy(tmp_p
         else:
             y = ys[name]
         assert x.shape == y.shape and np.array_equal(x, y), f"four refined tiles wrapping both axes: {name} differs"
+
+
+class NestedMagnetizedSink(MagnetizedBondiSink):
+    """the magnetized sink under two nested fine levels"""
+
+    def setup(self) -> None:
+        super().setup()
+        half = self.bounds[0][1]
+        self.refinement_enabled = True
+        self.refinement_max_levels = 3
+        self.refinement_ratios = [2, 2]
+        self.refinement_regions = [[-0.75 * half, 0.75 * half] * 3, [-0.4 * half, 0.4 * half] * 3]
+
+
+def test_magnetized_bodies_with_nested_levels_on_host_tiles_are_refused_by_name(tmp_path: Path, host_tiles) -> None:
+    with pytest.raises(Exception, match="immersed bodies with 3 nested refinement levels on magnetized tiles"):
+        _run(NestedMagnetizedSink, tmp_path / "out", 2, resolution=(16, 16, 16))
+    assert not list((tmp_path / "out").glob("*.h5")), "a refused run published a checkpoint"
 
 
 def test_refined_isothermal_tiles_carry_the_single_hierarchy(tmp_path: Path, host_tiles) -> None:

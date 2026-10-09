@@ -6775,9 +6775,8 @@ macro_rules! build_and_run_magnetized_decomposed_refined {
         let regions = refinement_regions_nd::<$d>(&cfg.refinement_regions)?;
         if regions.len() > 1 && !cfg.bodies.is_empty() {
             return Err(format!(
-                "immersed bodies with {} nested refinement levels and gpus > 1: a tile holding fewer \
-                 levels than the run would couple the bodies on a coarser level than the single \
-                 hierarchy; run on one device or keep one refinement region",
+                "immersed bodies with {} nested refinement levels on magnetized tiles (gpus > 1) are \
+                 outside the gated tiled runs; run on one device or keep one refinement region",
                 regions.len() + 1
             ));
         }
