@@ -8828,12 +8828,14 @@ fn dispatch_and_run(
     validate_declared_target(cfg, validate_primitive_rows(cfg, prims)?)?;
     if cfg.n_gpus > 1 {
         validate_tiled_march(cfg)?;
-        // the decomposed tile builders install the plain reconstruction; the balanced one has no
-        // decomposed equivalence gate, so the combination is refused rather than run unbalanced
-        if cfg.wb_reconstruction {
+        // the balanced face pair and body source read the cells beside each face, which the halo
+        // exchange fills; the balanced coarse-fine transfer and the seam band rewrite start their
+        // chains from cells of the whole patch, which a tile cut separates
+        if cfg.wb_reconstruction && cfg.refinement_enabled {
             return Err(
-                "wb_reconstruction with gpus > 1 awaits a decomposed equivalence gate for the \
-                 balanced reconstruction; run on one device or unset it"
+                "wb_reconstruction with mesh refinement and gpus > 1: the balanced coarse-fine \
+                 transfer and seam band start from cells a tile cut separates; run on one device or \
+                 unset it"
                     .to_string(),
             );
         }

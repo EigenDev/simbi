@@ -6,9 +6,8 @@
 # one; an excised relativistic run on two devices equals the excised
 # single-grid run bit for bit and differs from the unexcised one; the synge perfect gas
 # on two devices equals the synge single-grid run and differs from the ideal
-# gas; the balanced reconstruction on several devices is refused by name. every arm runs as a
-# fresh process through the public command, the decomposed ones as host tiles
-# on a cpu build.
+# gas. every arm runs as a fresh process through the public command, the
+# decomposed ones as host tiles on a cpu build.
 # =============================================================================
 import os
 import subprocess
@@ -25,7 +24,6 @@ pytestmark = pytest.mark.simulation
 
 VISCOUS = "simbi_configs/examples/newtonian/viscous_shear.py"
 BONDI = "simbi_configs/examples/grhd/gr_bondi_cartesian.py"
-KH = "simbi_configs/examples/newtonian/kh.py"
 SYNGE = "simbi_configs/examples/srhd/synge_blast.py"
 
 
@@ -84,15 +82,6 @@ def test_the_synge_gas_on_two_devices_is_the_synge_gas(tmp_path: Path) -> None:
     ideal_1, _ = _density(_run(SYNGE, tmp_path / "i1", 1, base + ["--eos", "ideal", "--adiabatic-index", "1.4"]))
     assert np.abs(synge_1 - ideal_1).max() > 0.0, "the closure does not act on this setup; the gate is vacuous"
     assert_same_checkpoint(_run(SYNGE, tmp_path / "s2", 2, base), one, "the synge gas on two devices")
-
-
-def test_the_balanced_reconstruction_on_several_devices_is_refused(tmp_path: Path) -> None:
-    env = dict(os.environ, SYMBI_GPU_OVERSUBSCRIBE="1")
-    cmd = _command(KH, tmp_path / "wb", 2, ["--resolution", "32,32", "--end-time", "0.001", "--wb-reconstruction"])
-    done = subprocess.run(cmd, capture_output=True, text=True, timeout=300, env=env)
-    assert done.returncode != 0
-    assert "wb_reconstruction with gpus > 1" in done.stderr.replace("\n", " "), done.stderr[-1500:]
-    assert not list((tmp_path / "wb").glob("*.h5")), "output was written before the refusal"
 
 
 def _patch_on_cut_script(path: Path, x_lo: float) -> str:
