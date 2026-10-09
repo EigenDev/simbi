@@ -217,6 +217,11 @@ where
     /// patch continues across: the halo beyond it comes from the level's own exchange, so
     /// the prolongation leaves it alone
     pub cut_sides: [[bool; 2]; NDIM],
+    /// the whole patch this level refines, in its own index space: its interior on a single
+    /// hierarchy, and past a cut the cells the neighbor tiles hold. the balanced coarse-fine
+    /// transfer anchors each chain on the patch cell nearest the ghost, as the single hierarchy
+    /// does, the cells past a cut read from the level's exchanged halo. `None` on the root
+    pub patch_interior: Option<Domain<NDIM>>,
     /// the parent faces the coarse-fine face halo prolongation reads, gathered from the tiles
     /// that own them at both time levels of the root step: a tile's own face lattice ends at
     /// its interior along each face's normal axis, which a patch face on a cut reaches past
@@ -1167,6 +1172,7 @@ where
                 bface_old: None,
                 attempt_entry: None,
                 cut_sides: [[false; 2]; NDIM],
+                patch_interior: None,
                 face_stencil: None,
                 coverage: None,
                 flux_eq: None,
@@ -1375,6 +1381,7 @@ where
             bface_old: None,
             attempt_entry: None,
             cut_sides: [[false; 2]; NDIM],
+            patch_interior: None,
             face_stencil: None,
             coverage: None,
             flux_eq: None,
@@ -1599,6 +1606,10 @@ where
                 }
                 last.bface_old = Some(bf.try_into().unwrap_or_else(|_| unreachable!()));
             }
+            let patch_interior = Domain::new(std::array::from_fn(|ax| {
+                let whole = &whole_coverages.last().unwrap().spaces[ax];
+                Space { name: axis_name(ax), lo: whole.lo * RATIO as isize, hi: whole.hi * RATIO as isize }
+            }));
             last.coverage = Some(coverage);
             let mut attempt_entry =
                 ConsFieldsGeneric::zeros_with_energy(&fine.geom.allocated, fine.fields.cons.has_energy())?;
@@ -1616,6 +1627,7 @@ where
                 bface_old: None,
                 attempt_entry: Some(attempt_entry),
                 cut_sides,
+                patch_interior: Some(patch_interior),
                 face_stencil: None,
                 coverage: None,
                 flux_eq: None,
@@ -4262,7 +4274,7 @@ where
                     prim_lerp,
                     &fine.state.fields.prim,
                     slab,
-                    &fine.state.geom.interior,
+                    fine.patch_interior.as_ref().unwrap_or(&fine.state.geom.interior),
                     self.prolong_order,
                     alpha,
                     &shifted_origin(&parent.state.geom),
