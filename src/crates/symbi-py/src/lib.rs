@@ -10815,16 +10815,18 @@ fn validate_refined_launch_scope(cfg: &Config) -> Result<(), String> {
     if cfg.wb_reconstruction {
         return refused("a well-balanced reconstruction");
     }
-    // the root and seed plans carry the wrap of a periodic axis cut into tiles; the fine level, its
-    // registers and its parent face stencils exchange inside the domain, so on a cut periodic axis,
-    // and on any periodic axis of a magnetized run, the patch keeps clear of the faces. an uncut
-    // periodic axis of a gas run wraps within each tile, and the fine level of a patch spanning it
-    // wraps with it
+    // the root and seed plans carry the wrap of a periodic axis cut into tiles; the fine level and
+    // its registers exchange inside the domain, so on a cut periodic axis the patch keeps clear of
+    // the faces. an uncut periodic axis wraps within each tile, and the fine level of a patch
+    // spanning it wraps with it; the root's parent face stencil reads the periodic image, and the
+    // nested levels' parent face stencils read inside the domain, so a magnetized nested run keeps
+    // clear of every periodic face
     let magnetized = matches!(cfg.regime.as_str(), "nmhd" | "imhd" | "rmhd");
+    let every_axis = magnetized && cfg.refinement_regions.len() > 1;
     let seam = match cfg.dims {
-        1 => patch_on_periodic_face::<1>(cfg, magnetized)?,
-        2 => patch_on_periodic_face::<2>(cfg, magnetized)?,
-        _ => patch_on_periodic_face::<3>(cfg, magnetized)?,
+        1 => patch_on_periodic_face::<1>(cfg, every_axis)?,
+        2 => patch_on_periodic_face::<2>(cfg, every_axis)?,
+        _ => patch_on_periodic_face::<3>(cfg, every_axis)?,
     };
     if let Some(ax) = seam {
         return refused(&format!("a refined patch on the periodic face of axis {ax}"));
@@ -11394,7 +11396,11 @@ where
             };
             boxes.push(tile);
         }
-        let stencil = ExchangePlan::face_stencil(partition, &open, &boxes, ng).map_err(|e| e.to_string())?;
+        // the parent face stencil of a patch spanning a periodic axis reads past the domain face,
+        // at the periodic image of the faces, on an uncut axis the tile's own
+        let whole = whole_grid::<D>(cfg);
+        let periodic = symbi::sim::decomp::Topology::wrapping(std::array::from_fn(|ax| whole.periodic(ax)));
+        let stencil = ExchangePlan::face_stencil(partition, &periodic, &boxes, ng).map_err(|e| e.to_string())?;
         digests.extend([emf.digest, faces.digest, corrected.digest, stencil.digest]);
         Some((emf, faces, corrected, stencil))
     } else {

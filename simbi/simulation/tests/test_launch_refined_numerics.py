@@ -205,6 +205,28 @@ def test_a_patch_spanning_an_uncut_periodic_axis_launches_as_the_single_grid_run
         _assert_same_levels(launched, reference, f"spanning kh: {label}")
 
 
+def test_a_magnetized_patch_spanning_an_uncut_periodic_axis_launches_as_the_single_grid_runs(tmp_path: Path, monkeypatch) -> None:
+    # the vortex box spans the whole periodic z axis with a flow along z through the seam; the
+    # workers cut x alone, so the root's parent face stencil reads past the z faces at their
+    # periodic image on each worker's own tile
+    from simbi.simulation.tests.test_decomposed_mhd import SEAM_FLOW_3D
+
+    module, cls = VORTEX_3D
+    stem = "spanning_vortex"
+    (tmp_path / f"{stem}.py").write_text(
+        f"from {module} import {cls}\n\n\nclass Spanning({cls}):\n" + "\n".join(f"    {line}" for line in SEAM_FLOW_3D) + "\n"
+    )
+    monkeypatch.setenv("PYTHONPATH", os.pathsep.join([str(tmp_path), os.getcwd(), os.environ.get("PYTHONPATH", "")]))
+    script = str(tmp_path / f"{stem}.py")
+    reference = _script_reference(stem, "Spanning", RESOLUTION_3D, tmp_path / "single", STEPS)
+    for label, workers, layout in [
+        ("two workers", 2, _layout(tmp_path / "two.toml", workers=2, shape=(2, 1, 1))),
+        ("three uneven workers", 3, _layout(tmp_path / "three.toml", workers=3, cuts=[[12, 22], [], []])),
+    ]:
+        launched = _script_launch(script, RESOLUTION_3D, tmp_path / label.replace(" ", "_"), layout, STEPS, workers=workers)
+        _assert_same_levels(launched, reference, f"spanning vortex: {label}")
+
+
 RHD = ("simbi_configs.examples.srhd.refined_synge_blast", "RefinedSyngeBlast")
 RHD_RESOLUTION = (32, 32)
 

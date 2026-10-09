@@ -584,11 +584,12 @@ REFINED_RMHD = str(Path(RefinedMhd3D.__module__.replace(".", "/") + ".py"))
     [(REFINED_RMHD, "a refined patch on the periodic face of axis 2 with mesh refinement")],
 )
 def test_out_of_scope_problems_are_refused_by_name(tmp_path: Path, script: str, reason: str) -> None:
-    # a layout with as many axes as the problem's grid, so the refusal is the scope's
+    # a layout with as many axes as the problem's grid cutting its last axis, the periodic z the
+    # fine box spans, so the refusal is the scope's
     problem_class = {REFINED_RMHD: RefinedMhd3D}[script]
     default = problem_class.model_fields["resolution"].default
     dims = max(1, sum(1 for r in default if int(r) > 1))
-    layout = _layout(tmp_path / "two.toml", workers=2, shape=(2,) + (1,) * (dims - 1))
+    layout = _layout(tmp_path / "two.toml", workers=2, shape=(1,) * (dims - 1) + (2,))
     out = tmp_path / "out"
     cmd = [sys.executable, "-m", "simbi.cli", "launch", script, "--layout", str(layout), "--max-steps", "1", "--data-directory", str(out), "--checkpoint-interval", "1e9"]
     done = subprocess.run(cmd, capture_output=True, text=True, timeout=600)

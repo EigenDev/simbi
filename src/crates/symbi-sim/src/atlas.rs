@@ -1081,8 +1081,10 @@ impl<const D: usize> ExchangePlan<D> {
     /// the plan gathering each refined tile's parent face stencil from the tiles owning those
     /// faces: `boxes[tile][component]` is the stencil box in whole-grid face indices. a tile
     /// owns the faces of component `d` from its first face to its last cell along `d` (its
-    /// closing face too where it ends the grid) and its own cells across; every box face has
-    /// exactly one owner, the tile itself included, and a face no tile owns is an error. the
+    /// closing face too where it ends the grid) and its own cells across; along a periodic axis
+    /// of `topology` a box face past the domain is owned at its periodic image, the closing face
+    /// by its unshifted copy alone. every box face has exactly one owner, the tile itself
+    /// included, and a face no tile owns is an error. the
     /// sources are the owners' face fields, the destinations the stencil fields, both in each
     /// tile's own index space; a transfer's field index names the component.
     pub fn face_stencil(
@@ -1126,6 +1128,18 @@ impl<const D: usize> ExchangePlan<D> {
             std::array::from_fn(|a| Span { lo: g[a].lo - ext[a].0 as isize + frame[a], hi: g[a].hi - ext[a].0 as isize + frame[a] })
         };
         let mut axes: Vec<AxisPhase<D>> = (0..D).map(|ax| AxisPhase { axis: ax as u8, transfers: Vec::new() }).collect();
+        // the cells per axis of the whole grid, and the periodic images of the grid a stencil box
+        // may reach: one period either way along each periodic axis of the topology
+        let grid: [isize; D] = std::array::from_fn(|a| exts.iter().map(|e| e[a].0 + e[a].1).max().unwrap_or(0) as isize);
+        let mut images: Vec<[isize; D]> = vec![[0; D]];
+        for a in 0..D {
+            if topology.is_periodic(a) {
+                images = images
+                    .iter()
+                    .flat_map(|img| [-1, 0, 1].map(|k| { let mut next = *img; next[a] = k; next }))
+                    .collect();
+            }
+        }
         for (dst, entry) in boxes.iter().enumerate() {
             let Some(entry) = entry else { continue };
             for (d, gbox) in entry.iter().enumerate() {
@@ -1138,29 +1152,38 @@ impl<const D: usize> ExchangePlan<D> {
                 let mut covered = 0usize;
                 for (src, ext) in exts.iter().enumerate() {
                     let tc = unflatten(src, counts);
-                    let own: [Span; D] = std::array::from_fn(|a| {
-                        let lo = ext[a].0 as isize;
-                        let closes = a == d && tc[a] + 1 == counts[a];
-                        Span { lo, hi: (ext[a].0 + ext[a].1) as isize + isize::from(closes) }
-                    });
-                    let piece: [Span; D] = std::array::from_fn(|a| Span { lo: gbox[a].lo.max(own[a].lo), hi: gbox[a].hi.min(own[a].hi) });
-                    if piece.iter().any(|s| s.hi <= s.lo) {
-                        continue;
+                    for image in &images {
+                        // the owned faces at this periodic image: the domain's faces 0..=N of the
+                        // component's axis belong to the unshifted copies, the closing face N to its
+                        // own, so an image shifted along that axis keeps to the faces past them
+                        let own: [Span; D] = std::array::from_fn(|a| {
+                            let lo = ext[a].0 as isize;
+                            let closes = a == d && tc[a] + 1 == counts[a] && image[a] == 0;
+                            let shift = image[a] * grid[a];
+                            let span = Span { lo: lo + shift, hi: (ext[a].0 + ext[a].1) as isize + isize::from(closes) + shift };
+                            if a == d && image[a] > 0 { Span { lo: span.lo.max(grid[a] + 1), hi: span.hi } } else { span }
+                        });
+                        let piece: [Span; D] = std::array::from_fn(|a| Span { lo: gbox[a].lo.max(own[a].lo), hi: gbox[a].hi.min(own[a].hi) });
+                        if piece.iter().any(|s| s.hi <= s.lo) {
+                            continue;
+                        }
+                        covered += volume(&piece);
+                        let unshifted: [Span; D] =
+                            std::array::from_fn(|a| Span { lo: piece[a].lo - image[a] * grid[a], hi: piece[a].hi - image[a] * grid[a] });
+                        let src_region = local(&unshifted, src);
+                        let dst_region = local(&piece, dst);
+                        axes[d].transfers.push(Transfer {
+                            id: TransferId(0),
+                            axis: d as u8,
+                            src: TileId(src as u32),
+                            dst: TileId(dst as u32),
+                            field: d as u16,
+                            len: volume(&dst_region),
+                            src_region,
+                            dst_region,
+                            audit: false,
+                        });
                     }
-                    covered += volume(&piece);
-                    let src_region = local(&piece, src);
-                    let dst_region = local(&piece, dst);
-                    axes[d].transfers.push(Transfer {
-                        id: TransferId(0),
-                        axis: d as u8,
-                        src: TileId(src as u32),
-                        dst: TileId(dst as u32),
-                        field: d as u16,
-                        len: volume(&dst_region),
-                        src_region,
-                        dst_region,
-                        audit: false,
-                    });
                 }
                 if covered != volume(gbox) {
                     return Err(PlanError::Partition(format!(
@@ -1465,6 +1488,33 @@ mod tests {
     type Mhd = SimStateGeneric<NewtonianMhd, 2, 3, Cartesian, IdealGas<f64>, CpuSpace, HostMemory>;
 
     const CELLS: [usize; 2] = [40, 24];
+
+    /// a stencil box of y faces past both periodic ends of the y axis: each face past an end is
+    /// read at its periodic image, the closing face y = 24 from its own copy alone, every face
+    /// once; under the open topology the same box has faces no tile owns
+    #[test]
+    fn a_face_stencil_past_a_periodic_face_reads_the_periodic_image() {
+        let p = ragged();
+        let mut boxes: Vec<Option<Vec<[Span; 2]>>> = vec![None; p.n_tiles()];
+        let gbox = [Span { lo: 2, hi: 6 }, Span { lo: -2, hi: 27 }];
+        boxes[0] = Some(vec![[Span { lo: 2, hi: 6 }, Span { lo: 0, hi: 24 }], gbox]);
+        let periodic = Topology::wrapping([false, true]);
+        let plan = ExchangePlan::face_stencil(&p, &periodic, &boxes, 2).expect("the periodic image owns every face past the ends");
+        // the source face of each destination y face, read off the component-1 transfers
+        let mut source_of = std::collections::BTreeMap::new();
+        for t in plan.axes[1].transfers.iter().filter(|t| t.field == 1) {
+            // the source in whole-grid face indices: the source tile's first cell offsets its region
+            let src_lo = p.tile_extents(unflatten(t.src.0 as usize, p.counts()))[1].0 as isize;
+            for (dy, sy) in (t.dst_region[1].lo..t.dst_region[1].hi).zip(t.src_region[1].lo..t.src_region[1].hi) {
+                assert!(source_of.insert(dy, sy + src_lo).is_none(), "face y = {dy} has two owners");
+            }
+        }
+        let expected: std::collections::BTreeMap<isize, isize> =
+            (-2..27).map(|y| (y, if y < 0 { y + 24 } else if y > 24 { y - 24 } else { y })).collect();
+        assert_eq!(source_of, expected, "the faces past the ends read their periodic images, the closing face its own copy");
+        let err = ExchangePlan::face_stencil(&p, &Topology::open(), &boxes, 2).err().expect("the open topology owns no face past the ends");
+        assert!(format!("{err:?}").contains("no tile owns"), "{err:?}");
+    }
 
     fn ragged() -> Partition<2> {
         Partition::explicit(CELLS, [vec![13, 29], vec![9]]).unwrap()
