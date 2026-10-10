@@ -23,7 +23,8 @@
 # relativistic and isothermal MHD (periodic, the fine box inside the domain,
 # under contact and uct, shown to differ), fresh on eight workers whose ragged cuts meet at a
 # corner inside the box and resumed onto them from two. a patch on a periodic face
-# is refused by name. nested levels:
+# of a cut axis is refused by name, as is a nested magnetized run whose first box
+# spans the uncut periodic z axis. nested levels:
 # the refined blast with a second box inside the first, every level compared,
 # fresh on two and on four ragged workers and resumed onto four from two; a
 # depth whose phase table overflows the wire byte is refused by name before any
@@ -225,6 +226,43 @@ def test_a_magnetized_patch_spanning_an_uncut_periodic_axis_launches_as_the_sing
     ]:
         launched = _script_launch(script, RESOLUTION_3D, tmp_path / label.replace(" ", "_"), layout, STEPS, workers=workers)
         _assert_same_levels(launched, reference, f"spanning vortex: {label}")
+
+
+# a second box inside the vortex box, clear of the periodic z faces
+NESTED_INSIDE_SPAN = [
+    "refinement_max_levels: Annotated[int, ProblemParam(3, description='levels')]",
+    "refinement_regions: Annotated[list[list[float]], ProblemParam([[0.25, 0.75, 0.25, 0.75, 0.0, 1.0], [0.375, 0.625, 0.375, 0.625, 0.375, 0.625]], description='r')]",
+    "refinement_ratios: Annotated[list[int], ProblemParam([2, 2], description='ratios')]",
+]
+
+
+def _spanning_variant(tmp_path: Path, monkeypatch, stem: str, lines: list[str]) -> str:
+    module, cls = VORTEX_3D
+    (tmp_path / f"{stem}.py").write_text(
+        "from typing import Annotated\nfrom simbi import ProblemParam\n"
+        f"from {module} import {cls}\n\n\nclass Spanning({cls}):\n" + "\n".join(f"    {line}" for line in lines) + "\n"
+    )
+    monkeypatch.setenv("PYTHONPATH", os.pathsep.join([str(tmp_path), os.getcwd(), os.environ.get("PYTHONPATH", "")]))
+    return str(tmp_path / f"{stem}.py")
+
+
+def test_a_nested_magnetized_run_spanning_a_periodic_axis_is_refused_on_launch(tmp_path: Path, monkeypatch) -> None:
+    # the first box spans the periodic z axis, the second sits inside it clear of the z faces; the
+    # launched nested levels depart from the single hierarchy from the first step (every cell of
+    # the second level), so the launch refuses the combination by name before any output
+    from simbi.simulation.tests.test_decomposed_mhd import SEAM_FLOW_3D
+
+    script = _spanning_variant(tmp_path, monkeypatch, "nested_spanning_vortex", [*NESTED_INSIDE_SPAN, *SEAM_FLOW_3D])
+    layout = _layout(tmp_path / "two.toml", workers=2, shape=(2, 1, 1))
+    cmd = [sys.executable, "-m", "simbi.cli", "launch", script, "--layout", str(layout), "--max-steps", "1",
+           "--resolution", ",".join(str(r) for r in RESOLUTION_3D), "--data-directory", str(tmp_path / "out"), "--checkpoint-interval", "1e9"]
+    env = dict(os.environ)
+    env.pop("SIMBI_LAUNCH_EXPERIMENTAL", None)
+    done = subprocess.run(cmd, capture_output=True, text=True, timeout=600, env=env)
+    flat = " ".join((done.stdout + done.stderr).split())
+    assert done.returncode != 0, "a nested magnetized run spanning a periodic axis launched"
+    assert "a refined patch on the periodic face of axis 2 with mesh refinement is outside the distributed first release" in flat, flat[-2000:]
+    assert not list((tmp_path / "out").glob("*.h5")), "a refused launch published a checkpoint"
 
 
 RHD = ("simbi_configs.examples.srhd.refined_synge_blast", "RefinedSyngeBlast")
