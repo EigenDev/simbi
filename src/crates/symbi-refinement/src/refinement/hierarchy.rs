@@ -1320,7 +1320,16 @@ where
         if !self.emf_registers.first().and_then(Option::as_ref).is_some_and(|r| r.has_receiving()) {
             self.reconcile_shell();
         }
-        let l = &self.levels[0];
+        self.recover_level(0);
+    }
+
+    /// the recovery that closes a level's restriction on the single hierarchy, on a tile holding
+    /// that level and none finer: the primitives from the conserved state over the whole level,
+    /// then the physical ghosts. a post-step operator writing primitives directly (the excision
+    /// floor) publishes their recovered values, as every tile holding part of the finer patch does
+    pub fn recover_level(&self, level: usize) {
+        assert_eq!(self.levels.len(), level + 1, "a tile holding a finer level recovers through its restriction");
+        let l = &self.levels[level];
         prof("c2p", || l.kernels.c2p(&l.state));
         prof("ghost_fill", || l.kernels.ghost_fill(&l.state));
     }
@@ -6820,6 +6829,13 @@ where
                 phase_probe::set_tile(i);
                 symbi_xpu::with_device(finer.devices[k], || tiles[i].level_restrict_reflux(level, alpha));
             }
+            // a tile holding this level and none finer recovers it as the restriction recovers the
+            // single hierarchy's
+            for (k, &i) in fg.order.iter().enumerate() {
+                if tiles[i].levels.len() == level + 1 {
+                    symbi_xpu::with_device(fg.devices[k], || tiles[i].recover_level(level));
+                }
+            }
             exchange_level_halos(tiles, level, &fg.order, fg.counts, &fg.devices, transport);
             for &i in &finer.order {
                 phase_probe::set_tile(i);
@@ -7075,12 +7091,17 @@ where
                         });
                     }
                     // a tile beside a neighbor's patch face on a cut applies the units it received
-                    // and recovers its cells beside the patch
+                    // and recovers its cells beside the patch; every other tile holding no fine
+                    // level recovers its root as the restriction recovers the single hierarchy's
                     for i in 0..n {
-                        if tiles[i].levels.len() == 1 && tiles[i].has_flux_register(0) {
+                        if tiles[i].levels.len() == 1 {
                             symbi_xpu::with_device(devices[i], || {
-                                tiles[i].reflux_received();
-                                tiles[i].recover_beside_patch();
+                                if tiles[i].has_flux_register(0) {
+                                    tiles[i].reflux_received();
+                                    tiles[i].recover_beside_patch();
+                                } else {
+                                    tiles[i].recover_level(0);
+                                }
                             });
                         }
                     }

@@ -6,7 +6,9 @@
 # every level dataset matches the single grid bit for bit. the fixtures cover
 # the baked GR charts: the radial schwarzschild kerr-schild line (with and
 # without excision), the (R, z) meridional plane, the 3d kerr-schild box (with
-# and without excision), the 2d spherical kerr torus, and the magnetized
+# and without excision, and excised under a refined slab clear of the core whose
+# uneven layout leaves the tiles around the core without a fine level), the 2d
+# spherical kerr torus, and the magnetized
 # radial line, kerr frame dragging, spherical torus and cartesian torus. each
 # reference run moves its density off the initial state, so the comparison
 # exercises the evolution.
@@ -36,6 +38,9 @@ CASES = {
     "meridional-plane": ("simbi_configs.examples.grhd.gr_cylindrical_ks_bh", "GrCylindricalKsBH", "resolution=(32, 32)", [[10, 21], []]),
     "box": ("simbi_configs.examples.grhd.gr_bondi_cartesian", "GrBondiCartesian", "resolution=(24, 24, 24), domain_radius=0.12, excision_radius=0.0", [[11], [13], []]),
     "box-excised": ("simbi_configs.examples.grhd.gr_bondi_cartesian", "GrBondiCartesian", "resolution=(24, 24, 24), domain_radius=0.12, excision_radius=1.6", [[11], [13], []]),
+    # a refined slab y >= 1.8 clear of the excised core, spanning the x cut; the uneven layout leaves
+    # the tiles around the core without a fine level
+    "box-excised-refined": ("simbi_configs.examples.grhd.gr_bondi_cartesian", "GrBondiCartesian", "resolution=(24, 24, 24), domain_radius=0.24, excision_radius=1.6, refinement_enabled=True, refinement_max_levels=2, refinement_ratios=[2], refinement_regions=[[-3.6, 3.6, 1.8, 3.6, -3.6, 3.6]]", [[11], [13], []]),
     "kerr-torus": ("simbi_configs.examples.grhd.gr_fishbone_moncrief", "GrFishboneMoncrief", "nr=48, npolar=32", [[15, 33], []]),
     "magnetized-ks-line": ("simbi_configs.examples.grmhd.gr_bondi_ks_magnetized", "GrBondiKsMagnetized", "resolution=128", [[40, 90]]),
     "magnetized-michel-line": ("simbi_configs.examples.grmhd.gr_michel_magnetized", "GrMichelMagnetized", "resolution=128", [[40, 90]]),
