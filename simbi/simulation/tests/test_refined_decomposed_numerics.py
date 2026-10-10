@@ -15,11 +15,16 @@
 #   both axes through the fine box; a locally isothermal refined run on tiles is
 #   refused by name before any output.
 # a census, which the tiled drivers do not reduce across tiles, is refused by
-# name on host tiles and through `simbi launch` rather than left unrecorded;
-# immersed bodies over nested levels on magnetized host tiles are refused by
-# name. a
-# gravitating body over two nested levels on two host tiles publishes every
+# name on host tiles and through `simbi launch` rather than left unrecorded.
+# a gravitating body over two nested levels on two host tiles publishes every
 # level of the single hierarchy's state bit for bit.
+# a gravitating draining sink under two nested levels of a 2.5D newtonian MHD
+# run on two host tiles, cut short of the finest level with a pressure pulse
+# on the cut, publishes every level, every staggered face, the body state and
+# the body history of the single hierarchy bit for bit, on two host tiles and on
+# two launched workers; the field evolves and changes the gas against a
+# zero-field run. immersed bodies over nested levels on magnetized host tiles
+# and launched workers outside that scope are refused by name.
 #
 # run: pytest -m simulation simbi/simulation/tests/test_refined_decomposed_numerics.py
 # =============================================================================
@@ -28,6 +33,11 @@ import subprocess
 import sys
 from pathlib import Path
 
+import math
+from dataclasses import replace
+from functools import partial
+from typing import Annotated, Any
+
 import h5py
 import numpy as np
 import pytest
@@ -35,7 +45,9 @@ import pytest
 import simbi.expression as expr
 from simbi.simulation import runner
 from simbi.simulation.tests.test_launch import _layout
-from simbi.types.bodies import BodyCapability, GravitationalProperties, ImmersedBodyConfig
+from simbi import ProblemParam, SimbiProblem
+from simbi.types import BoundaryCondition, CoordSystem, Regime, Solver
+from simbi.types.bodies import AccretionProperties, BodyCapability, GravitationalProperties, ImmersedBodyConfig, MagneticProperties
 from simbi_configs.examples.ibm.magnetized_sink import MagnetizedBondiSink
 from simbi_configs.examples.newtonian.refined_blast import RefinedBlast
 
@@ -243,6 +255,180 @@ class NestedMagnetizedSink(MagnetizedBondiSink):
 def test_magnetized_bodies_with_nested_levels_on_host_tiles_are_refused_by_name(tmp_path: Path, host_tiles) -> None:
     with pytest.raises(Exception, match="immersed bodies with 3 nested refinement levels on magnetized tiles"):
         _run(NestedMagnetizedSink, tmp_path / "out", 2, resolution=(16, 16, 16))
+    assert not list((tmp_path / "out").glob("*.h5")), "a refused run published a checkpoint"
+
+
+SINK_N = 64
+# the root cell the cut between the two tiles lies on: the first tile holds levels 0 and 1 alone
+SINK_CUT = 14
+# beta ~ 1e5 outside the sink: the drain keeps the finest density near 1e-4. at field_scale 0.01 the
+# drained interior reaches vacuum (rho ~ 3e-8) by t = 0.037 and the single hierarchy halts
+SINK_FIELD = 0.003
+
+
+class NestedSink2p5d(SimbiProblem):
+    """a gravitating draining sink under two nested levels of a sheared 2.5D field"""
+
+    field_scale: Annotated[float, ProblemParam(SINK_FIELD, description="field strength")]
+    magnetic_resistivity: Annotated[float | None, ProblemParam(None, description="the sink's ohmic resistivity")]
+    resolution: Annotated[tuple[int, ...], ProblemParam((SINK_N, SINK_N, 1), description="grid")]
+    bounds: Annotated[list[tuple[float, float]], ProblemParam([(0.0, 1.0), (0.0, 1.0), (0.0, 1.0)], description="box")]
+    coord_system: Annotated[CoordSystem, ProblemParam(CoordSystem.CARTESIAN, description="chart")]
+    regime: Annotated[Regime, ProblemParam(Regime.NMHD, description="regime")]
+    adiabatic_index: Annotated[float, ProblemParam(5.0 / 3.0, description="gamma")]
+    boundary_conditions: Annotated[list[Any], ProblemParam([BoundaryCondition("outflow")], description="walls")]
+    end_time: Annotated[float, ProblemParam(0.05, checkpoint_safe=True, description="t")]
+    checkpoint_interval: Annotated[float, ProblemParam(1.0e9, checkpoint_safe=True, description="dt out")]
+    refinement_enabled: Annotated[bool, ProblemParam(True, description="refined")]
+    refinement_max_levels: Annotated[int, ProblemParam(3, description="levels")]
+    refinement_regions: Annotated[list[list[float]], ProblemParam([[0.0625, 0.9375, 0.0625, 0.9375], [0.3125, 0.6875, 0.3125, 0.6875]], description="boxes")]
+    refinement_ratios: Annotated[list[int], ProblemParam([2, 2], description="ratios")]
+
+    @property
+    def immersed_bodies(self) -> list[ImmersedBodyConfig]:
+        sink = ImmersedBodyConfig(capability=BodyCapability.ACCRETION | BodyCapability.GRAVITATIONAL, mass=0.01, radius=0.08,
+                                  position=(0.5, 0.5), velocity=(0.0, 0.0),
+                                  gravitational=GravitationalProperties(softening_length=0.05),
+                                  accretion=AccretionProperties(accretion_radius=0.08))
+        if self.magnetic_resistivity is None:
+            return [sink]
+        return [replace(sink, magnetic=MagneticProperties(resistivity=self.magnetic_resistivity))]
+
+    # face-normal components each independent of their own axis: discretely divergence-free
+    def _bx(self, y: float) -> float:
+        return self.field_scale * (0.4 + 0.2 * math.sin(2.0 * math.pi * y + 0.3))
+
+    def _by(self, x: float) -> float:
+        return self.field_scale * (0.2 + 0.2 * math.cos(2.0 * math.pi * x + 0.7))
+
+    def initial_primitive_state(self):
+        dx = 1.0 / SINK_N
+
+        def gas():
+            for jj in range(SINK_N):
+                y = (jj + 0.5) * dx
+                for ii in range(SINK_N):
+                    x = (ii + 0.5) * dx
+                    bump = 0.3 * math.exp(-(((x - 0.5) / 0.07) ** 2 + ((y - 0.48) / 0.09) ** 2))
+                    # a pressure pulse centered on the cut, whose waves cross it on the first refined level
+                    pulse = 0.5 * math.exp(-(((x - SINK_CUT * dx) / 0.04) ** 2 + ((y - 0.5) / 0.1) ** 2))
+                    yield (1.0 + bump, 0.0, 0.0, 0.0, 1.0 + bump + pulse)
+
+        def faces(k):
+            for _kk in range(1 + (k == 2)):
+                for jj in range(SINK_N + (k == 1)):
+                    for ii in range(SINK_N + (k == 0)):
+                        if k == 0:
+                            yield self._bx((jj + 0.5) * dx)
+                        elif k == 1:
+                            yield self._by((ii + 0.5) * dx)
+                        else:
+                            yield 0.1 * self.field_scale
+
+        return gas, partial(faces, 0), partial(faces, 1), partial(faces, 2)
+
+
+def _run_sink(out: Path, gpus: int, **kwargs) -> Path:
+    # the run reaches its end time in ~170 root steps; the step cap stays clear of it
+    decompose = dict(decompose=[[SINK_CUT], []]) if gpus > 1 else {}
+    return _run(NestedSink2p5d, out, gpus, steps=1000, resolution=(SINK_N, SINK_N, 1), **decompose, **kwargs)
+
+
+def _body_groups(path: Path) -> dict[str, np.ndarray]:
+    out: dict[str, np.ndarray] = {}
+    with h5py.File(path, "r") as f:
+        for group in ("bodies", "body_diagnostics"):
+            f[group].visit(lambda n, g=group: out.__setitem__(f"{g}/{n}", f[g][n][()]) if isinstance(f[g][n], h5py.Dataset) else None)
+    return out
+
+
+def _interior(path: Path, name: str) -> np.ndarray:
+    with h5py.File(path, "r") as f:
+        level = name.split("/")[0]
+        h = int(f[level]["mesh"].attrs["halo_width"])
+        return f[name][()][h:-h, h:-h]
+
+
+def test_a_magnetized_nested_sink_on_two_host_tiles_matches_the_single_hierarchy(tmp_path: Path, host_tiles) -> None:
+    single = _run_sink(tmp_path / "single", 1)
+    _level_2_written(single)
+    with h5py.File(single, "r") as f:
+        assert float(f["bodies/total_accreted_mass"][0]) > 1.0e-2, "the sink drained too little; the gate is vacuous"
+        # gas crosses the cut on level 1: the x-momentum in the two level-1 columns beside it
+        # (measured 4.5e-3)
+        h = int(f["level_1"]["mesh"].attrs["halo_width"])
+        # level 1 starts at root cell 4; the cut lies between its cells beside - 1 and beside
+        beside = 2 * (SINK_CUT - 4)
+        crossing = np.abs(f["level_1/conserved/m1"][()][h:-h, beside - 1 + h:beside + 1 + h]).max()
+    assert crossing > 1.0e-3, f"the level-1 momentum beside the cut peaks at {crossing:e}; the cut couples nothing"
+    # the field acts: the finest field grows about eightfold from its initial peak 0.6 field_scale,
+    # and the run without a field differs in the finest density by up to 63%
+    finest_b = np.abs(_interior(single, "level_2/conserved/b1")).max()
+    assert finest_b > 4.0 * 0.6 * SINK_FIELD, f"the finest field peaks at {finest_b:e}; it is passive"
+    unmagnetized = _run_sink(tmp_path / "unmagnetized", 1, field_scale=0.0)
+    rho, rho_0 = _interior(single, "level_2/conserved/den"), _interior(unmagnetized, "level_2/conserved/den")
+    change = np.max(np.abs(rho - rho_0) / rho_0)
+    assert change > 0.25, f"the field changes the finest density by at most {change:e} relative; it couples nothing"
+
+    tiles = _run_sink(tmp_path / "tiles", 2)
+    _assert_same(tiles, single, "a magnetized nested sink on two refined tiles")
+    want, got = _body_groups(single), _body_groups(tiles)
+    assert want.keys() == got.keys(), f"body datasets differ: {sorted(want.keys() ^ got.keys())}"
+    for name, x in want.items():
+        assert x.shape == got[name].shape and np.array_equal(x, got[name]), f"a magnetized nested sink on two refined tiles: {name} differs"
+
+
+# one class attribute per variant, set in the launched script's subclass
+SINK_VARIANTS = {
+    "hlld": ("from simbi.types import Solver", "solver: Annotated[Solver, ProblemParam(Solver.HLLD, description='solver')]"),
+    "resistive_sink": ("", "magnetic_resistivity: Annotated[float | None, ProblemParam(1.0e-2, description='eta')]"),
+}
+
+
+def _launch_sink(tmp_path: Path, out: Path, variant: str | None = None) -> subprocess.CompletedProcess:
+    """the sink through `simbi launch` on two workers cut at root cell 14, without the experimental opt-in"""
+    imports, attribute = SINK_VARIANTS[variant] if variant else ("", "pass")
+    script = tmp_path / f"launched_sink_{variant or 'gated'}.py"
+    script.write_text(
+        "from typing import Annotated\n\nfrom simbi import ProblemParam\n"
+        "from simbi.simulation.tests.test_refined_decomposed_numerics import NestedSink2p5d\n"
+        f"{imports}\n\n\nclass LaunchedSink(NestedSink2p5d):\n    {attribute}\n"
+    )
+    layout = _layout(tmp_path / f"layout_{variant or 'gated'}.toml", 2, cuts=[[SINK_CUT], []])
+    cmd = [sys.executable, "-m", "simbi.cli", "launch", str(script), "--layout", str(layout), "--max-steps", "1000",
+           "--data-directory", str(out), "--checkpoint-interval", "1e9"]
+    env = dict(os.environ)
+    env.pop("SIMBI_LAUNCH_EXPERIMENTAL", None)
+    return subprocess.run(cmd, capture_output=True, text=True, timeout=900, env=env)
+
+
+def test_a_magnetized_nested_sink_through_launch_matches_the_single_hierarchy(tmp_path: Path) -> None:
+    single = _run_sink(tmp_path / "single", 1)
+    done = _launch_sink(tmp_path, tmp_path / "launched")
+    assert done.returncode == 0, f"launch failed:\n{done.stderr[-3000:]}"
+    (launched,) = sorted((tmp_path / "launched").glob("*final*.h5"))
+    _level_2_written(launched)
+    _assert_same(launched, single, "a magnetized nested sink on two launched workers")
+    want, got = _body_groups(single), _body_groups(launched)
+    assert want.keys() == got.keys(), f"body datasets differ: {sorted(want.keys() ^ got.keys())}"
+    for name, x in want.items():
+        assert x.shape == got[name].shape and np.array_equal(x, got[name]), f"a magnetized nested sink on two launched workers: {name} differs"
+
+
+@pytest.mark.parametrize("variant", sorted(SINK_VARIANTS))
+def test_magnetized_nested_bodies_outside_the_gated_scope_are_refused_by_name_through_launch(tmp_path: Path, variant: str) -> None:
+    out = tmp_path / "out"
+    done = _launch_sink(tmp_path, out, variant)
+    flat = " ".join((done.stdout + done.stderr).split())
+    assert done.returncode != 0, f"{variant}: an ungated magnetized nested sink ran on launched workers"
+    assert "immersed bodies with 3 nested refinement levels on magnetized launched workers" in flat, f"{variant}: refusal not named:\n{flat[-2000:]}"
+    assert not list(out.glob("*.h5")), f"{variant}: a refused launch published a checkpoint"
+
+
+@pytest.mark.parametrize("variant", [dict(solver=Solver.HLLD), dict(magnetic_resistivity=1.0e-2)], ids=["hlld", "resistive_sink"])
+def test_magnetized_nested_bodies_outside_the_gated_scope_are_refused_by_name(tmp_path: Path, host_tiles, variant) -> None:
+    with pytest.raises(Exception, match="immersed bodies with 3 nested refinement levels on magnetized tiles"):
+        _run_sink(tmp_path / "out", 2, **variant)
     assert not list((tmp_path / "out").glob("*.h5")), "a refused run published a checkpoint"
 
 

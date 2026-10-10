@@ -6818,10 +6818,13 @@ macro_rules! build_and_run_magnetized_decomposed_refined {
         let ntiles: usize = counts.iter().product();
         let prolong = prolong_order_for(&cfg.reconstruction_name);
         let regions = refinement_regions_nd::<$d>(&cfg.refinement_regions)?;
-        if regions.len() > 1 && !cfg.bodies.is_empty() {
+        if regions.len() > 1 && !cfg.bodies.is_empty() && !gated_nested_magnetized_bodies(cfg, $d, regions.len()) {
             return Err(format!(
                 "immersed bodies with {} nested refinement levels on magnetized tiles (gpus > 1) are \
-                 outside the gated tiled runs; run on one device or keep one refinement region",
+                 gated for one draining sink on a 2.5D cartesian newtonian MHD run alone (PLM, RK2, \
+                 HLLE, contact EMF, linear spacing, outflow walls, three levels, no resistive, \
+                 viscous, excised, driven or user-source term); run on one device or keep one \
+                 refinement region",
                 regions.len() + 1
             ));
         }
@@ -10764,6 +10767,48 @@ fn cut_in_balanced_band<const D: usize>(cfg: &Config) -> Result<Option<(usize, u
 /// the launch authorization of a combination: a gated one (`ungated` is `None`) runs; an ungated
 /// one is refused by name unless the operator opted in, and then runs as experimental, the
 /// property returned for the announcement
+/// whether immersed bodies over `nested` refined regions on magnetized tiles lie in the gated
+/// scope: one gravitating draining sink with no magnetic coupling of its own on a 2.5D cartesian
+/// newtonian MHD run with PLM, RK2, HLLE and the contact EMF, linear spacing, outflow walls and
+/// three levels, carrying no resistive, viscous, excised, driven, balanced or user-source term
+fn gated_nested_magnetized_bodies(cfg: &Config, ndim: usize, nested: usize) -> bool {
+    const ACCRETION: u64 = 2;
+    const RIGID: u64 = 1 << 4;
+    let sink = |body: &BodyParams| {
+        body.capability & ACCRETION != 0
+            && body.capability & RIGID == 0
+            && body.porosity.is_none()
+            && body.torque_free_xi.is_none()
+            && body.shape_json.is_none()
+            && body.magnetic_resistivity.is_none()
+            && body.magnetic_slip.is_none()
+    };
+    ndim == 2
+        && nested == 2
+        && cfg.regime == "nmhd"
+        && cfg.coord_system == "cartesian"
+        && cfg.reconstruction_name == "plm"
+        && matches!(cfg.timestepping, Timestepping::Rk2)
+        && cfg.solver_name == "hlle"
+        && matches!(cfg.ct_method, CtMethod::Contact)
+        && [&cfg.x1_spacing, &cfg.x2_spacing].iter().all(|spacing| spacing.as_str() == "linear")
+        && cfg.boundaries.iter().all(|bc| *bc == BoundaryType::Outflow)
+        && cfg.resistivity == 0.0
+        && cfg.viscosity == 0.0
+        && cfg.alpha == 0.0
+        && cfg.excision_radius == 0.0
+        && !cfg.wb_reconstruction
+        && !cfg.mesh_motion
+        && cfg.driven_exprs.is_empty()
+        && cfg.gradient_bcs.is_empty()
+        && cfg.source_jsons.is_empty()
+        && cfg.binary.is_none()
+        && cfg.bonded_assembly.is_none()
+        && cfg.n_tracers == 0
+        && cfg.bodies.len() == 1
+        && sink(&cfg.bodies[0])
+}
+
 fn authorize_launch(ungated: Option<String>, opt_in: bool) -> Result<Option<String>, String> {
     match ungated {
         None => Ok(None),
@@ -10961,7 +11006,17 @@ fn validate_refined_launch_scope(cfg: &Config) -> Result<(), String> {
     // nested levels' parent face stencils read inside the domain, so a magnetized nested run keeps
     // clear of every periodic face
     let magnetized = matches!(cfg.regime.as_str(), "nmhd" | "imhd" | "rmhd");
-    let every_axis = magnetized && cfg.refinement_regions.len() > 1;
+    let nested = cfg.refinement_regions.len();
+    if magnetized && nested > 1 && !cfg.bodies.is_empty() && !gated_nested_magnetized_bodies(cfg, cfg.dims, nested) {
+        return Err(format!(
+            "immersed bodies with {} nested refinement levels on magnetized launched workers are \
+             gated for one draining sink on a 2.5D cartesian newtonian MHD run alone (PLM, RK2, \
+             HLLE, contact EMF, linear spacing, outflow walls, three levels, no resistive, viscous, \
+             excised, driven or user-source term); run on one device or keep one refinement region",
+            nested + 1
+        ));
+    }
+    let every_axis = magnetized && nested > 1;
     let seam = match cfg.dims {
         1 => patch_on_periodic_face::<1>(cfg, every_axis)?,
         2 => patch_on_periodic_face::<2>(cfg, every_axis)?,
