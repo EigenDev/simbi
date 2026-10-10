@@ -625,10 +625,11 @@ def run_case(driver: Driver, case: Case) -> dict:
     arms["half"] = half
     checks["half"] = ok(half, case.workers(case.cuts))
     if checks["half"] is None:
-        # a resumed launch counts its steps from the checkpoint
+        # the step cap is an absolute root iteration: the resumed launch runs from written_at to the
+        # uninterrupted run's cap
         with h5py.File(final_of(half.data), "r") as f:
             written_at = int(f["level_0"].attrs["iteration"])
-        arms["restart"] = driver.launch(case, "restart", where / "restart", case.restart_cuts, case.steps - written_at,
+        arms["restart"] = driver.launch(case, "restart", where / "restart", case.restart_cuts, case.steps,
                                         checkpoint=final_of(half.data))
         checks["restart"] = ok(arms["restart"], case.workers(case.restart_cuts))
         record["restart_written_at"] = written_at
