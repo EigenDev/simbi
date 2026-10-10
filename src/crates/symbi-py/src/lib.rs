@@ -7184,6 +7184,12 @@ fn baked_gr_mhd(dims: usize, coords: &str, spacetime: &str) -> bool {
     )
 }
 
+/// the curved spacetimes the launched refined workers build: the relativistic gas on the
+/// three-dimensional kerr-schild box, its root excised or not
+fn launched_refined_gr(cfg: &Config) -> bool {
+    cfg.regime == "rhd" && cfg.dims == 3 && cfg.coord_system == "cartesian" && matches!(cfg.spacetime.as_str(), "schwarzschild_ks" | "kerr_ks")
+}
+
 /// the baked GR-hydro combinations the launched gas workers build: the kerr-schild box in three
 /// dimensions, the radial line, the spherical meridional plane and the cylindrical charts, the arms
 /// of `charted!` in `run_worker_process`
@@ -10927,7 +10933,7 @@ fn validate_launch_scope(cfg: &Config) -> Result<(), String> {
         if !built {
             return refused(&format!("the {} spacetime on the {}-dimensional {} chart", cfg.spacetime, cfg.dims, cfg.coord_system));
         }
-        if cfg.refinement_enabled {
+        if cfg.refinement_enabled && !launched_refined_gr(cfg) {
             return refused(&format!("the {} spacetime with mesh refinement", cfg.spacetime));
         }
         if !cfg.bodies.is_empty() || cfg.bonded_assembly.is_some() {
@@ -11029,7 +11035,7 @@ fn validate_refined_launch_scope(cfg: &Config) -> Result<(), String> {
     if cfg.locally_isothermal {
         return refused("a locally isothermal closure");
     }
-    if cfg.excision_radius > 0.0 {
+    if cfg.excision_radius > 0.0 && !launched_refined_gr(cfg) {
         return refused("excision");
     }
     Ok(())
@@ -11103,15 +11109,15 @@ fn refined_layout<const D: usize>(cfg: &Config, launch: &WorkerLaunch, cells: us
 /// a refined worker's share of the discrete population: the population seeds once from the whole
 /// seeded hierarchy, built from `whole` with the levels' kernels, as the single hierarchy seeds its
 /// own, and the held tiles keep the records their cells own
-fn seed_refined_worker_tracers<R, const D: usize, const DOF: usize, E, K>(
+fn seed_refined_worker_tracers<R, const D: usize, const DOF: usize, M, E, K>(
     cfg: &Config,
-    tiles: &mut [Hierarchy<R, D, DOF, Cartesian, E, DefaultSpace, DefaultMemory, K>],
-    whole: impl FnOnce() -> Result<SimDefaultGeneric<R, D, DOF, Cartesian, E>, String>,
-    kernels_of: impl Fn(&SimDefaultGeneric<R, D, DOF, Cartesian, E>) -> K,
+    tiles: &mut [Hierarchy<R, D, DOF, M, E, DefaultSpace, DefaultMemory, K>],
+    whole: impl FnOnce() -> Result<SimDefaultGeneric<R, D, DOF, M, E>, String>,
+    kernels_of: impl Fn(&SimDefaultGeneric<R, D, DOF, M, E>) -> K,
 ) -> Result<(), String>
 where
     R: Regime<f64, D> + Copy,
-    Cartesian: Metric<f64, D>,
+    M: Metric<f64, D> + Copy + Send + Sync,
     E: symbi_hydro::eos::EosFor<f64, <R as Regime<f64, D>>::Energy> + Copy + Send + Sync,
     K: KernelSet<D, DOF, DefaultMemory, f64>,
 {
@@ -11140,18 +11146,18 @@ where
     Ok(())
 }
 
-fn refined_tile<R, const D: usize, const DOF: usize, E, K>(
+fn refined_tile<R, const D: usize, const DOF: usize, M, E, K>(
     cfg: &Config,
     layout: &RefinedLayout<D>,
     flat: usize,
     grid: &WholeGrid<D>,
     tile: &PlacedTile<D>,
-    sim: SimDefaultGeneric<R, D, DOF, Cartesian, E>,
-    kernels_of: impl Fn(&SimDefaultGeneric<R, D, DOF, Cartesian, E>) -> K,
-) -> Result<Hierarchy<R, D, DOF, Cartesian, E, DefaultSpace, DefaultMemory, K>, String>
+    sim: SimDefaultGeneric<R, D, DOF, M, E>,
+    kernels_of: impl Fn(&SimDefaultGeneric<R, D, DOF, M, E>, LevelRole) -> K,
+) -> Result<Hierarchy<R, D, DOF, M, E, DefaultSpace, DefaultMemory, K>, String>
 where
     R: Regime<f64, D> + Copy,
-    Cartesian: Metric<f64, D>,
+    M: Metric<f64, D> + Copy + Send + Sync,
     E: symbi_hydro::eos::EosFor<f64, <R as Regime<f64, D>>::Energy> + Copy + Send + Sync,
     K: KernelSet<D, DOF, DefaultMemory, f64>,
 {
@@ -11163,7 +11169,8 @@ where
     // timestep clamp the hierarchy applies
     let mut sim = sim;
     seed_run_state(&mut sim, cfg)?;
-    let sub = kernels_of(&sim);
+    // the root carries the excision; every fine level is built as the single hierarchy builds it
+    let sub = kernels_of(&sim, LevelRole::Root);
     let clipped = clip_regions_to_tile::<D>(&regions, grid, tile);
     let mut h = if clipped.is_empty() {
         let h = Hierarchy::single(sim, sub);
@@ -11176,7 +11183,7 @@ where
     } else {
         let (clip, whole): (Vec<_>, Vec<_>) = clipped.into_iter().unzip();
         let prolong = prolong_order_for(&cfg.reconstruction_name);
-        Hierarchy::with_refinement_of_contributing(sim, sub, &clip, &whole, prolong, kernels_of)
+        Hierarchy::with_refinement_of_contributing(sim, sub, &clip, &whole, prolong, |s| kernels_of(s, LevelRole::Fine))
             .map_err(|e| format!("tile {flat} refinement build: {e:?}"))?
     };
     // immersed bodies at their global positions: the finest level owns the full bodies, coarser
@@ -11219,18 +11226,17 @@ fn run_refined_worker_process(
             // the refined tiles of a gas regime (newtonian or relativistic hydro): each level installs
             // the numerics the single hierarchy installs
             macro_rules! refined_gas {
-                ($regime:ident) => {{
-                    type Sim = SimDefault<$regime, $d, Cartesian, EosSelect<f64>>;
+                ($regime:ident, $geom:expr, $geom_ty:ty) => {{
+                    type Sim = SimDefault<$regime, $d, $geom_ty, EosSelect<f64>>;
                     // the numerics, sources, driven boundaries and gradient walls the single hierarchy
-                    // installs, on every level a worker holds; a launched refined run carries no
-                    // excision, so its root is built as every other level
+                    // installs, on every level a worker holds; the root alone carries the excision
                     let settings = KernelSettings::of(cfg, <$regime as Regime<f64, $d>>::SPEC);
-                    let kernels_of = |s: &Sim| gas_kernels(s.substrate(), &settings, LevelRole::Fine).expect("refined kernel set");
+                    let kernels_of = |s: &Sim, role: LevelRole| gas_kernels(s.substrate(), &settings, role).expect("refined kernel set");
                     let mut tiles = Vec::with_capacity(layout.mine.len());
                     for &flat in &layout.mine {
                         let tile = place(flat);
                         let tile_lo = tile.offset;
-                        let sim = Sim::build($regime, host_eos(cfg), Cartesian)
+                        let sim = Sim::build($regime, host_eos(cfg), $geom)
                             .placed(&whole, &tile)
                             .ghosts(ghost_width(cfg))
                             .cfl(cfg.cfl)
@@ -11247,7 +11253,7 @@ fn run_refined_worker_process(
                         tiles.push(refined_tile(cfg, &layout, flat, &whole, &tile, sim, kernels_of)?);
                     }
                     seed_refined_worker_tracers(cfg, &mut tiles, || {
-                        Ok(Sim::build($regime, host_eos(cfg), Cartesian)
+                        Ok(Sim::build($regime, host_eos(cfg), $geom)
                             .placed(&whole, &whole.single())
                             .ghosts(ghost_width(cfg))
                             .cfl(cfg.cfl)
@@ -11259,12 +11265,12 @@ fn run_refined_worker_process(
                                 Prim::adiabatic(Density(row[0]), Tensor::new(std::array::from_fn(|k| row[1 + k])), Pressure(row[1 + $d]))
                             })
                             .build())
-                    }, kernels_of)?;
+                    }, |s: &Sim| kernels_of(s, LevelRole::Fine))?;
                     // the declared stationary target, seeded on every held level for the probe the
                     // session runs once the levels are seeded; a fresh run seeded from it starts there
                     let has_energy = tiles[0].levels[0].state.fields.cons.has_energy();
                     let expression = declared_equilibrium!(cfg, $d, has_energy);
-                    let mut seed = |h: &Hierarchy<$regime, $d, $d, Cartesian, EosSelect<f64>, DefaultSpace, DefaultMemory, _>| -> Result<(), String> {
+                    let mut seed = |h: &Hierarchy<$regime, $d, $d, $geom_ty, EosSelect<f64>, DefaultSpace, DefaultMemory, _>| -> Result<(), String> {
                         let Some(expression) = expression.as_ref() else { return Ok(()) };
                         h.seed_declared_target(&|x: [f64; $d]| {
                             let at = |aa: usize| x.get(aa).copied().unwrap_or(0.0);
@@ -11297,7 +11303,7 @@ fn run_refined_worker_process(
                     // installs, on every level a worker holds; a launched refined run carries no
                     // excision, so its root is built as every other level
                     let settings = KernelSettings::of(cfg, <$regime as Regime<f64, $d>>::SPEC);
-                    let kernels_of = |s: &Sim| mhd_kernels(s.substrate(), &settings, LevelRole::Fine).expect("refined kernel set");
+                    let kernels_of = |s: &Sim, role: LevelRole| mhd_kernels(s.substrate(), &settings, role).expect("refined kernel set");
                     let mut tiles = Vec::with_capacity(layout.mine.len());
                     for &flat in &layout.mine {
                         let tile = place(flat);
@@ -11340,13 +11346,24 @@ fn run_refined_worker_process(
                             })
                             .seed_faces_indexed(&bufs[0..$d])
                             .build())
-                    }, kernels_of)?;
+                    }, |s: &Sim| kernels_of(s, LevelRole::Fine))?;
                     refined_session(cfg, launch, fault, drained, build_clock, &layout, tiles, None, |_| Ok(()))
                 }};
             }
             match cfg.regime.as_str() {
-                "newtonian" => refined_gas!(Newtonian),
-                "rhd" => refined_gas!(Rhd),
+                "newtonian" => refined_gas!(Newtonian, Cartesian, Cartesian),
+                // the relativistic gas on the horizon-penetrating kerr-schild box
+                "rhd" if cfg.spacetime == "schwarzschild_ks" => refined_gas!(
+                    Rhd,
+                    SchwarzschildKSCartesian { mass: cfg.schwarzschild_mass },
+                    SchwarzschildKSCartesian<f64>
+                ),
+                "rhd" if cfg.spacetime == "kerr_ks" => refined_gas!(
+                    Rhd,
+                    KerrKSCartesian { mass: cfg.schwarzschild_mass, spin: cfg.kerr_spin },
+                    KerrKSCartesian<f64>
+                ),
+                "rhd" => refined_gas!(Rhd, Cartesian, Cartesian),
                 "nmhd" => refined_mhd!(NewtonianMhd),
                 "rmhd" => refined_mhd!(Rmhd),
                 "isothermal" => {
@@ -11355,7 +11372,7 @@ fn run_refined_worker_process(
                     // installs, on every level a worker holds; a launched refined run carries no
                     // excision, so its root is built as every other level
                     let settings = KernelSettings::of(cfg, <IsoNewtonian as Regime<f64, $d>>::SPEC);
-                    let kernels_of = |s: &Sim| iso_kernels(s.substrate(), &settings).expect("refined kernel set");
+                    let kernels_of = |s: &Sim, _role: LevelRole| iso_kernels(s.substrate(), &settings).expect("refined kernel set");
                     let mut tiles = Vec::with_capacity(layout.mine.len());
                     for &flat in &layout.mine {
                         let tile = place(flat);
@@ -11389,7 +11406,7 @@ fn run_refined_worker_process(
                                 PrimG::<f64, $d, IsoModel>::isothermal(Density(row[0]), Tensor::new(std::array::from_fn(|k| row[1 + k])))
                             })
                             .build())
-                    }, kernels_of)?;
+                    }, |s: &Sim| kernels_of(s, LevelRole::Fine))?;
                     let expression = declared_equilibrium!(cfg, $d, false);
                     let mut seed = |h: &Hierarchy<IsoNewtonian, $d, $d, Cartesian, Isothermal<f64>, DefaultSpace, DefaultMemory, _>| -> Result<(), String> {
                         let Some(expression) = expression.as_ref() else { return Ok(()) };
@@ -11419,7 +11436,7 @@ fn run_refined_worker_process(
                     // installs, on every level a worker holds; a launched refined run carries no
                     // excision, so its root is built as every other level
                     let settings = KernelSettings::of(cfg, <IsothermalMhd as Regime<f64, $d>>::SPEC);
-                    let kernels_of = |s: &Sim| mhd_kernels(s.substrate(), &settings, LevelRole::Fine).expect("refined kernel set");
+                    let kernels_of = |s: &Sim, role: LevelRole| mhd_kernels(s.substrate(), &settings, role).expect("refined kernel set");
                     let mut tiles = Vec::with_capacity(layout.mine.len());
                     for &flat in &layout.mine {
                         let tile = place(flat);
@@ -11462,7 +11479,7 @@ fn run_refined_worker_process(
                             })
                             .seed_faces_indexed(&bufs[0..$d])
                             .build())
-                    }, kernels_of)?;
+                    }, |s: &Sim| kernels_of(s, LevelRole::Fine))?;
                     refined_session(cfg, launch, fault, drained, build_clock, &layout, tiles, None, |_| Ok(()))
                 }
                 other => Err(format!("the {other} regime with mesh refinement is outside the distributed first release")),
@@ -11483,20 +11500,20 @@ fn run_refined_worker_process(
 /// two temporal levels of the parent face stencil; the refined transaction with the checkpoints
 /// of both levels at the linear cadence, a final checkpoint, and a restart onto any partition
 #[allow(clippy::too_many_arguments)]
-fn refined_session<R, const D: usize, const DOF: usize, E, K>(
+fn refined_session<R, const D: usize, const DOF: usize, M, E, K>(
     cfg: &Config,
     launch: &WorkerLaunch,
     fault: LaunchFault,
     drained: std::time::Duration,
     build_clock: std::time::Instant,
     layout: &RefinedLayout<D>,
-    mut tiles: Vec<Hierarchy<R, D, DOF, Cartesian, E, DefaultSpace, DefaultMemory, K>>,
-    seed_target: Option<&mut dyn FnMut(&Hierarchy<R, D, DOF, Cartesian, E, DefaultSpace, DefaultMemory, K>) -> Result<(), String>>,
-    on_seeded: impl FnMut(&mut Hierarchy<R, D, DOF, Cartesian, E, DefaultSpace, DefaultMemory, K>) -> Result<(), String>,
+    mut tiles: Vec<Hierarchy<R, D, DOF, M, E, DefaultSpace, DefaultMemory, K>>,
+    seed_target: Option<&mut dyn FnMut(&Hierarchy<R, D, DOF, M, E, DefaultSpace, DefaultMemory, K>) -> Result<(), String>>,
+    on_seeded: impl FnMut(&mut Hierarchy<R, D, DOF, M, E, DefaultSpace, DefaultMemory, K>) -> Result<(), String>,
 ) -> Result<(), String>
 where
     R: Regime<f64, D> + Copy,
-    Cartesian: Metric<f64, D>,
+    M: Metric<f64, D> + Copy + Send + Sync,
     E: symbi_hydro::eos::EosFor<f64, <R as Regime<f64, D>>::Energy> + Copy + Send + Sync,
     K: KernelSet<D, DOF, DefaultMemory, f64>,
 {
@@ -11925,7 +11942,7 @@ where
     // the last accepted step whose state an audit certified: the final checkpoint after a cadence
     // write of the same step reuses that certification, its audit epoch being spent
     let certified = std::cell::Cell::new(None::<u64>);
-    let write = |tiles: &[Hierarchy<R, D, DOF, Cartesian, E, DefaultSpace, DefaultMemory, K>], fabric: &mut symbi_fabric::Fabric<_>, path: &str, cp_index: u64, accepted: u64| -> Result<(), WorkerError> {
+    let write = |tiles: &[Hierarchy<R, D, DOF, M, E, DefaultSpace, DefaultMemory, K>], fabric: &mut symbi_fabric::Fabric<_>, path: &str, cp_index: u64, accepted: u64| -> Result<(), WorkerError> {
         let audit = certified.get() != Some(accepted);
         certified.set(Some(accepted));
         let extras = checkpoint_metadata(cfg, cp_index);

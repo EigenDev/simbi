@@ -12,7 +12,11 @@
 # output. the box on a hole spinning at a = 0.5 M (kerr-schild, excised)
 # launches, resumes and matches the single grid; the spin and the excision
 # change the run. the z = 0 plane of the box (2d cartesian kerr-schild) has no
-# baked kernel on the single grid and is refused on launch by name.
+# baked kernel on the single grid and is refused on launch by name. the excised
+# box under a refined slab clear of the core, on a static and a spinning hole,
+# launches on two workers and on four uneven workers that leave the workers
+# around the core without the slab, and resumes onto them, publishing every
+# level of the single hierarchy bit for bit; the excision changes the run.
 #
 # run: pytest -m simulation simbi/simulation/tests/test_launch_gr_excision.py
 # =============================================================================
@@ -184,6 +188,23 @@ class KerrBondiBox(GrBondiCartesian):
     kerr_spin: Annotated[float, ProblemParam(0.5, description="spin")]
 
 
+class RefinedBondiBox(GrBondiCartesian):
+    \"\"\"the bondi box at domain_radius 0.24 (L = 3.6 M) under a refined slab y >= 2.1 M, outside the
+    horizon of either hole; a cut at x cell 11 crosses the slab\"\"\"
+
+    refinement_enabled: Annotated[bool, ProblemParam(True, description="refined")]
+    refinement_max_levels: Annotated[int, ProblemParam(2, description="levels")]
+    refinement_regions: Annotated[list[list[float]], ProblemParam([[-3.6, 3.6, 2.1, 3.6, -3.6, 3.6]], description="slab")]
+    refinement_ratios: Annotated[list[int], ProblemParam([2], description="ratios")]
+
+
+class RefinedKerrBondiBox(RefinedBondiBox):
+    \"\"\"the refined box on a hole spinning at a = 0.5 M about +z\"\"\"
+
+    spacetime: Annotated[Spacetime, ProblemParam(Spacetime.KERR_KS, description="spinning")]
+    kerr_spin: Annotated[float, ProblemParam(0.5, description="spin")]
+
+
 class BondiPlane(GrBondiCartesian):
     \"\"\"the z = 0 plane of the bondi box, unexcised, its faces held at the ambient gas at rest\"\"\"
 
@@ -277,3 +298,29 @@ def test_the_plane_of_the_box_is_refused_on_launch_as_on_the_single_grid(tmp_pat
     flat = " ".join((done.stdout + done.stderr).split())
     assert "the schwarzschild_ks spacetime on the 2-dimensional cartesian chart is outside the distributed first release" in flat, flat[-2000:]
     assert not list((tmp_path / "out").glob("*.h5")), "a checkpoint was published"
+
+
+REFINED_FIELDS = {"domain_radius": "0.24", "excision_radius": "1.6"}
+
+
+@pytest.mark.parametrize("cls", ["RefinedBondiBox", "RefinedKerrBondiBox"])
+def test_a_refined_excised_box_launches_as_the_single_hierarchy(tmp_path: Path, gr_variants: Path, cls: str) -> None:
+    script = tmp_path / f"launched_{cls.lower()}.py"
+    script.write_text(f"from gr_variants import {cls} as Base\n\n\nclass Launched{cls}(Base):\n    pass\n")
+    want = _script_reference("gr_variants", cls, BOX_RESOLUTION, tmp_path / "single", STEPS, fields=_kwargs(REFINED_FIELDS))
+    levels = _all_levels(want)
+    assert "level_1/conserved/den" in levels, f"{cls}: the single hierarchy published no fine level; the refined arm is vacuous"
+    bare = _script_reference("gr_variants", cls, BOX_RESOLUTION, tmp_path / "bare", STEPS, fields=_kwargs({**REFINED_FIELDS, "excision_radius": "0.0"}))
+    assert not np.array_equal(levels["level_0/conserved/den"], _all_levels(bare)["level_0/conserved/den"]), f"{cls}: the excision left the run unchanged"
+    two = _layout(tmp_path / "two.toml", workers=2, shape=(2, 1, 1))
+    _assert_same(_script_launch(str(script), BOX_RESOLUTION, tmp_path / "two", two, STEPS, workers=2, flags=_flags(REFINED_FIELDS)), want, f"{cls}: two workers")
+    # the y cut at 13 leaves the workers around the excised core without the fine slab
+    many = _layout(tmp_path / "uneven.toml", workers=4, cuts=[[11], [13], []])
+    _assert_same(
+        _script_launch(str(script), BOX_RESOLUTION, tmp_path / "uneven", many, STEPS, workers=4, flags=_flags(REFINED_FIELDS)), want, f"{cls}: four uneven workers"
+    )
+    first = _script_launch(str(script), BOX_RESOLUTION, tmp_path / "first", two, STEPS // 2, workers=2, flags=_flags(REFINED_FIELDS))
+    written_at = _iteration(first)
+    assert 0 < written_at < STEPS
+    resumed = _script_launch(str(script), BOX_RESOLUTION, tmp_path / "resumed", many, STEPS, workers=4, checkpoint=first, flags=_flags(REFINED_FIELDS))
+    _assert_same(resumed, want, f"{cls}: resumed onto four uneven workers")

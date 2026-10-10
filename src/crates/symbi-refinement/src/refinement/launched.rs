@@ -299,10 +299,12 @@ where
     {
         let root_stores: Vec<&FieldStore<D, DOF, Mem, f64>> = tiles.iter().map(|h| &*h.levels[0].state).collect();
         let root_kernels: Vec<&K> = tiles.iter().map(|h| &h.levels[0].kernels).collect();
-        refuse(&root_stores, &root_kernels, false).map_err(|e| fail(fabric, e))?;
+        // the relativistic gas carries a curved spacetime on the refined workers
+        let curved = <R as Regime<f64, D>>::SPEC.name == "rhd";
+        refuse(&root_stores, &root_kernels, curved).map_err(|e| fail(fabric, e))?;
         let fine_stores: Vec<&FieldStore<D, DOF, Mem, f64>> = refined.iter().map(|&k| &*tiles[k].levels[1].state).collect();
         let fine_kernels: Vec<&K> = refined.iter().map(|&k| &tiles[k].levels[1].kernels).collect();
-        refuse(&fine_stores, &fine_kernels, false).map_err(|e| fail(fabric, e))?;
+        refuse(&fine_stores, &fine_kernels, curved).map_err(|e| fail(fabric, e))?;
         if plans.root.plan().seam.is_some() {
             return Err(fail(fabric, WorkerError::Refused("a polar seam with refinement is outside the launched refinement".into())));
         }
@@ -1107,6 +1109,11 @@ where
                         for &k in &beside {
                             with_device(root_dev(k), || tiles[k].recover_beside_patch());
                         }
+                        // every other tile holding no fine level recovers its root as the
+                        // restriction recovers the single hierarchy's
+                        for k in (0..n).filter(|&k| tiles[k].levels.len() == 1 && !tiles[k].has_flux_register(0)) {
+                            with_device(root_dev(k), || tiles[k].recover_level(0));
+                        }
                         root_point!(ExchangePoint::Restrict, iter, attempt);
                         if base.audit_every_point {
                             audit!(plans.root, root_fields!(), ExchangePoint::Audit(AuditAt::Restrict), iter, attempt);
@@ -1465,9 +1472,13 @@ where
             if nested_subcycle(tiles, cx, fabric, timing, report, level + 1, path, level_dt)? {
                 return Ok(true);
             }
+            // a tile holding this level and none finer recovers it as the restriction recovers the
+            // single hierarchy's
             for (r, &k) in mine.iter().enumerate() {
                 if tiles[k].levels.len() > level + 1 {
                     with_device(dev(r), || tiles[k].level_restrict_reflux(level, alpha));
+                } else {
+                    with_device(dev(r), || tiles[k].recover_level(level));
                 }
             }
             exchange(tiles, fabric, timing, ExchangePoint::NestedRestrict { level: level as u8, path })?;
