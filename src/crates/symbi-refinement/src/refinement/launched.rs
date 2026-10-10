@@ -682,19 +682,25 @@ where
                 with_device(fine_dev(k), || tiles[k].seed_level_from_parent(1))
                     .map_err(|e| fail(fabric, WorkerError::Numerics(format!("fine seed: {e:?}"))))?;
             }
-            // each nested level seeds from its parent once the parent's conserved halos crossed
-            // the parent's cuts
+            // each nested level seeds from its parent once the parent's state (the primitives,
+            // the cell field and the staggered faces) and its conserved halos crossed the parent's
+            // cuts, as the root's cross before the fine level seeds: the prolongation of a
+            // patch's faces beside a cut reads the parent's faces and cell field past it
             for level in 2..depth {
+                let parent_state = level_fields!(level - 1, plan_fields);
                 let parent = level_fields!(level - 1, plan_cons_fields);
-                let part = PlanPart {
-                    plan: &plans.nested[level - 2].seed,
-                    fields: &parent,
-                    devices: held.level_devices(level - 1),
-                    fault: None,
-                    dst_fields: None,
-                };
-                exchange_point_plans(&[part], transport, fabric, ExchangePoint::Seed { level: level as u8 }, 0, 0, deadline, &mut timing.exchange)
+                let state_plan = if level == 2 { &plans.fine } else { &plans.nested[level - 3].state };
+                let parts = [
+                    PlanPart { plan: state_plan, fields: &parent_state, devices: held.level_devices(level - 1), fault: None, dst_fields: None },
+                    PlanPart { plan: &plans.nested[level - 2].seed, fields: &parent, devices: held.level_devices(level - 1), fault: None, dst_fields: None },
+                ];
+                exchange_point_plans(&parts, transport, fabric, ExchangePoint::Seed { level: level as u8 }, 0, 0, deadline, &mut timing.exchange)
                     .map_err(|e| fail(fabric, e.into()))?;
+                for (k, h) in tiles.iter().enumerate() {
+                    if let Some(id) = held.level_ids(level - 1)[k] {
+                        with_device(held.level_devices(level - 1)[id.0 as usize], || h.levels[level - 1].kernels.ghost_fill(&h.levels[level - 1].state));
+                    }
+                }
                 for (k, h) in tiles.iter().enumerate() {
                     if let Some(id) = held.level_ids(level)[k] {
                         with_device(held.level_devices(level)[id.0 as usize], || h.seed_level_from_parent(level))

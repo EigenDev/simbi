@@ -144,8 +144,9 @@ impl<'p, const D: usize> PlanExchange<'p, D> {
                 }
                 ExchangePoint::Rollback => self.plan.moves_at(t, ExchangePoint::Rollback),
                 ExchangePoint::EquilibriumLevel { level: 1, .. } => self.plan.moves_at(t, point),
-                // the primed fine state, and the fine state after a nested level restricted into it
-                ExchangePoint::Primed | ExchangePoint::NestedRestrict { level: 1, .. } => {
+                // the primed fine state, the fine state after a nested level restricted into it,
+                // and the fine state the second level's seed prolongs from
+                ExchangePoint::Primed | ExchangePoint::NestedRestrict { level: 1, .. } | ExchangePoint::Seed { level: 2 } => {
                     self.plan.moves_at(t, ExchangePoint::Stage(0))
                 }
                 // the fine level's shared faces are audited with the root's after the prime and
@@ -166,6 +167,8 @@ impl<'p, const D: usize> PlanExchange<'p, D> {
                     self.plan.moves_at(t, as_root)
                 }
                 ExchangePoint::NestedRestrict { level: l, .. } if l == level => self.plan.moves_at(t, ExchangePoint::Stage(0)),
+                // the level's state the next level's seed prolongs from
+                ExchangePoint::Seed { level: l } if l == level + 1 => self.plan.moves_at(t, ExchangePoint::Stage(0)),
                 ExchangePoint::EquilibriumLevel { level: l, .. } if l == level => self.plan.moves_at(t, point),
                 ExchangePoint::Primed => self.plan.moves_at(t, ExchangePoint::Stage(0)),
                 ExchangePoint::Rollback => self.plan.moves_at(t, ExchangePoint::Rollback),

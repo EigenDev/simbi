@@ -26,8 +26,9 @@
 # of a cut axis is refused by name, as is a nested magnetized run whose first box
 # spans the uncut periodic z axis. a nested orszag-tang vortex, whose field
 # changes sign across the second box's faces, launches on two and four workers
-# cut clear of the second box as the single hierarchy runs; a cut through a
-# nested magnetized box is refused by name. nested levels:
+# cut clear of the second box and cut through it, fresh and resumed, and the 3D
+# vortex under two nested boxes on two workers cut through both, as the single
+# hierarchy runs. nested levels:
 # the refined blast with a second box inside the first, every level compared,
 # fresh on two and on four ragged workers and resumed onto four from two; a
 # depth whose phase table overflows the wire byte is refused by name before any
@@ -528,19 +529,12 @@ NESTED_ARMS = {
 }
 
 
-# the second box spans root cells 12..20 on each axis inside the first (8..24): the hydro arm cuts
-# through both boxes; a magnetized nested launch keeps its cuts clear of the second box (a cut
-# through it is refused) and crosses the first
-NESTED_LAYOUTS = {
-    "hydro": ({"shape": (2, 1)}, {"cuts": [[15], [17]]}),
-    "mhd": ({"cuts": [[10], []]}, {"cuts": [[10], [22]]}),
-}
-
-
 @pytest.mark.parametrize("arm", list(NESTED_ARMS))
 def test_nested_levels_on_a_refined_launch_match_fresh_and_resumed(tmp_path: Path, monkeypatch, arm: str) -> None:
     base, extra = NESTED_ARMS[arm]
-    two_cuts, four_cuts = NESTED_LAYOUTS["hydro" if arm == "hydro" else "mhd"]
+    # the second box spans root cells 12..20 on each axis inside the first (8..24); every layout
+    # cuts through both boxes
+    two_cuts, four_cuts = {"shape": (2, 1)}, {"cuts": [[15], [17]]}
     module, cls, script = _nested_module(tmp_path, monkeypatch, base=base, extra=extra)
     reference = _script_reference(module, cls, RESOLUTION, tmp_path / "single", STEPS)
     if arm == "mhd-uct":
@@ -591,12 +585,40 @@ def test_a_nested_vortex_launches_as_the_single_hierarchy_runs_with_cuts_clear_o
         _assert_same_all_levels(launched, reference, f"nested vortex on {workers} workers")
 
 
-def test_a_cut_through_a_nested_magnetized_patch_is_refused_on_launch(tmp_path: Path, monkeypatch) -> None:
-    # launched workers cut through the second box depart from the single hierarchy on every level
-    # (the vortex, two workers cut at root cell 16), while refined host tiles and one launched
-    # worker reproduce it
+def test_a_nested_vortex_cut_through_the_second_box_launches_as_the_single_hierarchy_runs(tmp_path: Path, monkeypatch) -> None:
+    # the second box's faces beside a cut prolong from the first level's faces and cell field
+    # past the cut, which cross with the first level's conserved halos before the seed; a seed
+    # from the conserved halos alone left the tangential field beside the cut on its stale
+    # values (4.4e-3 on the second level's B_y after one step of the vortex field at rest)
     script = _ot_nested(tmp_path, monkeypatch)
-    _refused_launch(tmp_path, script, "a cut along axis 0 through the refined patch of magnetized level 2 with mesh refinement is outside the distributed first release")
+    reference = _script_reference("ot_nested", "OtNested", RESOLUTION, tmp_path / "single", STEPS)
+    for tag, workers, kwargs in [("two", 2, {"shape": (2, 1)}), ("four", 4, {"cuts": [[15], [17]]})]:
+        layout = _layout(tmp_path / f"{tag}.toml", workers=workers, **kwargs)
+        launched = _script_launch(script, RESOLUTION, tmp_path / tag, layout, STEPS, workers=workers)
+        _assert_same_all_levels(launched, reference, f"nested vortex cut through the second box on {workers} workers")
+    two = _layout(tmp_path / "two_first.toml", workers=2, shape=(2, 1))
+    first = _script_launch(script, RESOLUTION, tmp_path / "first", two, STEPS // 2, workers=2)
+    four = _layout(tmp_path / "four_resumed.toml", workers=4, cuts=[[15], [17]])
+    resumed = _script_launch(script, RESOLUTION, tmp_path / "resumed", four, STEPS, workers=4, checkpoint=first)
+    _assert_same_all_levels(resumed, reference, "nested vortex resumed onto four workers cut through the second box")
+
+
+def test_a_3d_nested_vortex_cut_through_the_second_box_launches_as_the_single_hierarchy_runs(tmp_path: Path, monkeypatch) -> None:
+    # the extruded vortex under a box over the central half and a second box inside it; the x cut
+    # at root cell 12 passes through both
+    module, cls = VORTEX_3D
+    (tmp_path / "nested3d.py").write_text(
+        "from typing import Annotated\nfrom simbi import ProblemParam\n"
+        f"from {module} import {cls}\n\n\nclass Nested3d({cls}):\n"
+        "    refinement_max_levels: Annotated[int, ProblemParam(3, description='levels')]\n"
+        "    refinement_regions: Annotated[list[list[float]], ProblemParam([[0.25, 0.75, 0.25, 0.75, 0.25, 0.75], [0.375, 0.625, 0.375, 0.625, 0.375, 0.625]], description='r')]\n"
+        "    refinement_ratios: Annotated[list[int], ProblemParam([2, 2], description='ratios')]\n"
+    )
+    monkeypatch.setenv("PYTHONPATH", os.pathsep.join([str(tmp_path), os.getcwd(), os.environ.get("PYTHONPATH", "")]))
+    reference = _script_reference("nested3d", "Nested3d", RESOLUTION_3D, tmp_path / "single", STEPS)
+    layout = _layout(tmp_path / "two.toml", workers=2, shape=(2, 1, 1))
+    launched = _script_launch(str(tmp_path / "nested3d.py"), RESOLUTION_3D, tmp_path / "two", layout, STEPS, workers=2)
+    _assert_same_all_levels(launched, reference, "3d nested vortex cut through the second box on two workers")
 
 
 def _refused_launch(tmp_path: Path, script: str, reason: str) -> None:
