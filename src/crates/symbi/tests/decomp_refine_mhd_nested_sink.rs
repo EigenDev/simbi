@@ -10,10 +10,12 @@
 // level. the body couples to the run's finest level on every tile, so the
 // tiles equal the single hierarchy in every conserved component and every cell
 // field component of every level, in the accreted mass and in the force
-// history, bit for bit. a pressure pulse centered on the cut drives gas across
-// it on the first refined level. the gate asserts its premises: the single
-// hierarchy completes, the sink drains, the first refined level spans the cut,
-// and gas moves across the cut on that level.
+// history, bit for bit, and in every staggered face. a pressure pulse centered
+// on the cut drives gas across it on the first refined level. the gate asserts
+// its premises: the single hierarchy completes, the sink drains, the first
+// refined level spans the cut, gas moves across the cut on that level, the
+// field evolves on the finest level, and the same run without a field leaves a
+// measurably different gas.
 //
 // run: cargo test -p symbi --test decomp_refine_mhd_nested_sink
 // =============================================================================
@@ -56,12 +58,12 @@ fn regions() -> [RefinementRegion<2>; 2] {
 }
 
 // face-normal components each independent of their own axis: discretely divergence-free
-fn bx(y: f64) -> f64 {
-    B_SCALE * (0.4 + 0.2 * (2.0 * std::f64::consts::PI * y + 0.3).sin())
+fn bx(scale: f64, y: f64) -> f64 {
+    scale * (0.4 + 0.2 * (2.0 * std::f64::consts::PI * y + 0.3).sin())
 }
 
-fn by(x: f64) -> f64 {
-    B_SCALE * (0.2 + 0.2 * (2.0 * std::f64::consts::PI * x + 0.7).cos())
+fn by(scale: f64, x: f64) -> f64 {
+    scale * (0.2 + 0.2 * (2.0 * std::f64::consts::PI * x + 0.7).cos())
 }
 
 fn bump(x: f64, y: f64) -> f64 {
@@ -78,7 +80,7 @@ fn kset(sim: &Sim) -> Kern {
 }
 
 /// a root tile placed as production places it, seeding the faces of its own lattice
-fn build_root(cells: [usize; 2], offset: [usize; 2], bnd: Boundaries<2>) -> Sim {
+fn build_root(cells: [usize; 2], offset: [usize; 2], bnd: Boundaries<2>, scale: f64) -> Sim {
     Sim::build(NewtonianMhd, IdealGas { gamma: GAMMA }, Cartesian)
         .cells(cells)
         .spacing([DX; 2])
@@ -93,7 +95,7 @@ fn build_root(cells: [usize; 2], offset: [usize; 2], bnd: Boundaries<2>) -> Sim 
             let b = bump(x[0], x[1]);
             MhdPrim::new(
                 Prim::adiabatic(Density(1.0 + b), Tensor::new([0.0, 0.0, 0.0]), Pressure(1.0 + b + pulse(x[0], x[1]))),
-                Tensor::new([bx(x[1]), by(x[0]), 0.1 * B_SCALE]),
+                Tensor::new([bx(scale, x[1]), by(scale, x[0]), 0.1 * scale]),
             )
         })
         .seed_faces(|d, x| {
@@ -104,8 +106,8 @@ fn build_root(cells: [usize; 2], offset: [usize; 2], bnd: Boundaries<2>) -> Sim 
             });
             match (inside, d) {
                 (false, _) => 0.0,
-                (true, 0) => bx(x[1]),
-                (true, _) => by(x[0]),
+                (true, 0) => bx(scale, x[1]),
+                (true, _) => by(scale, x[0]),
             }
         })
         .build()
@@ -113,14 +115,14 @@ fn build_root(cells: [usize; 2], offset: [usize; 2], bnd: Boundaries<2>) -> Sim 
 
 fn sink() -> BodyCollection<f64, 2> {
     BodyCollection::new().add(
-        Body::black_hole(0, Tensor::new([0.5, 0.5]), Tensor::zeros(), 0.01, 0.08, 0.05, 1.0, 1.0, 0.08)
+        Body::black_hole(0, Tensor::new([0.5, 0.5]), Tensor::zeros(), 0.01, 0.08, 0.05, 0.0, 1.0, 0.08)
             .with_surface(SurfaceSpec::Drain)
             .with_magnetic(MagneticSpec::None),
     )
 }
 
-fn build_single() -> Hier {
-    let root = build_root([N, N], [0, 0], Boundaries::uniform(BoundaryType::Outflow));
+fn build_single(scale: f64) -> Hier {
+    let root = build_root([N, N], [0, 0], Boundaries::uniform(BoundaryType::Outflow), scale);
     let k = kset(&root);
     let h = Hier::with_refinement(root, k, &regions(), ProlongOrder::Ppm, kset).expect("single hierarchy");
     h.seed_fine_from_coarse().expect("seed fine");
@@ -144,7 +146,7 @@ fn build_tiles(partition: &Partition<2>) -> Vec<Hier> {
             let face = |edge: bool| if edge { BoundaryType::Outflow } else { BoundaryType::CoarseFine };
             [face(tc[a] == 0), face(tc[a] == counts[a] - 1)]
         }));
-        let root = build_root(m, offset, bnd);
+        let root = build_root(m, offset, bnd, B_SCALE);
         let clipped: Vec<RefinementRegion<2>> = whole
             .iter()
             .map(|r| RefinementRegion { x_lo: std::array::from_fn(|a| r.x_lo[a].max(lo[a])), x_hi: std::array::from_fn(|a| r.x_hi[a].min(hi[a])) })
@@ -201,6 +203,40 @@ fn interior_state(tiles: &[Hier]) -> HashMap<(&'static str, usize, [i64; 2]), u6
     out
 }
 
+/// (axis, level, face position on twice that level's lattice) -> bits, over every face bounding an
+/// interior cell of every tile; a face two tiles hold carries the same bits on both
+fn face_state(tiles: &[Hier]) -> HashMap<(usize, usize, [i64; 2]), u64> {
+    let mut out = HashMap::new();
+    for h in tiles {
+        for (ll, level) in h.levels.iter().enumerate() {
+            let s = &level.state;
+            let mhd = s.fields.mhd.as_ref().unwrap();
+            let scale = (N << ll) as f64;
+            for c in s.geom.interior.iter() {
+                for d in 0..2 {
+                    let mut hi = [c[0], c[1]];
+                    hi[d] += 1;
+                    for f in [[c[0], c[1]], hi] {
+                        let x = s.geom.face_coord(f, d);
+                        let at: [i64; 2] = std::array::from_fn(|a| (x[a] * scale * 2.0).round() as i64);
+                        let bits = mhd.bface[d].view().at(f).to_bits();
+                        if let Some(previous) = out.insert((d, ll, at), bits) {
+                            assert_eq!(previous, bits, "face {d} on level {ll} at {at:?} differs between the tiles holding it");
+                        }
+                    }
+                }
+            }
+        }
+    }
+    out
+}
+
+/// the largest magnitude of `pick` over the finest level's interior
+fn finest_max(h: &Hier, pick: impl Fn(&Store, [isize; 2]) -> f64) -> f64 {
+    let s = &h.levels.last().unwrap().state;
+    s.geom.interior.iter().map(|c| pick(s, [c[0], c[1]]).abs()).fold(0.0, f64::max)
+}
+
 fn body_record(h: &Hier) -> (f64, Vec<f64>) {
     let im = h.levels.last().unwrap().state.immersed.as_ref().expect("bodies attached");
     let mut accreted = 0.0;
@@ -215,7 +251,7 @@ fn body_record(h: &Hier) -> (f64, Vec<f64>) {
 #[test]
 fn a_tile_short_of_the_finest_level_couples_a_magnetized_nested_sink_as_the_single_hierarchy_does() {
     let partition = Partition::explicit([N, N], [vec![CUT], vec![]]).expect("cuts inside the grid");
-    let mut single = build_single();
+    let mut single = build_single(B_SCALE);
     let mut tiles = build_tiles(&partition);
     assert_eq!((tiles[0].levels.len(), tiles[1].levels.len()), (2, 3), "premise: the first tile holds levels 0 and 1 alone");
     single.evolve(T_FINAL).expect("single evolve");
@@ -240,11 +276,34 @@ fn a_tile_short_of_the_finest_level_couples_a_magnetized_nested_sink_as_the_sing
         assert!(tile.crash.is_none(), "tile {k} crashed: {:?}", tile.crash);
         assert_eq!(tile.levels[0].state.iteration, single.levels[0].state.iteration, "tile {k} stopped short");
     }
+    // the field acts: it evolves on the finest level, and the same run without a field leaves a
+    // measurably different gas. measured: the finest x-face field moves by 0.027 of a 0.030 peak,
+    // and the finest density without the field differs by up to 96% inside the sink
+    let initial = build_single(B_SCALE);
+    let field_change = finest_max(&single, |s, c| {
+        let b = s.fields.mhd.as_ref().unwrap().bface[0].view();
+        let b0 = initial.levels.last().unwrap().state.fields.mhd.as_ref().unwrap().bface[0].view();
+        *b.at(c) - *b0.at(c)
+    });
+    let field = finest_max(&single, |s, c| *s.fields.mhd.as_ref().unwrap().bface[0].view().at(c));
+    assert!(field_change > 0.25 * field, "the finest x-face field moved by {field_change:e} out of {field:e}; the field is static");
+    let mut unmagnetized = build_single(0.0);
+    unmagnetized.evolve(T_FINAL).expect("unmagnetized evolve");
+    assert!(unmagnetized.crash.is_none(), "the zero-field control crashed");
+    let gas_change = finest_max(&single, |s, c| {
+        let other = &unmagnetized.levels.last().unwrap().state;
+        (*s.fields.cons.den.view().at(c) - *other.fields.cons.den.view().at(c)) / *other.fields.cons.den.view().at(c)
+    });
+    assert!(gas_change > 0.25, "the field changes the finest density by at most {gas_change:e} relative; it couples nothing");
     let want = interior_state(std::slice::from_ref(&single));
     let got = interior_state(&tiles);
     assert_eq!(got.len(), want.len(), "the tiles hold a different set of level cells than the single hierarchy");
     let differing: Vec<_> = want.iter().filter(|(k, v)| got.get(k) != Some(v)).map(|(k, _)| k).collect();
     assert!(differing.is_empty(), "{} values differ, first {:?}", differing.len(), differing.first());
+    let (want_faces, got_faces) = (face_state(std::slice::from_ref(&single)), face_state(&tiles));
+    assert_eq!(got_faces.len(), want_faces.len(), "the tiles hold a different set of faces than the single hierarchy");
+    let differing_faces: Vec<_> = want_faces.iter().filter(|(k, v)| got_faces.get(k) != Some(v)).map(|(k, _)| k).collect();
+    assert!(differing_faces.is_empty(), "{} face values differ, first {:?}", differing_faces.len(), differing_faces.first());
     let (want_mass, want_force) = body_record(&single);
     assert!(want_mass > 1.0e-4, "the sink accreted {want_mass:e}; the drain is idle and the gate is vacuous");
     for (k, tile) in tiles.iter().enumerate() {
