@@ -20,8 +20,9 @@
 #   changes the run on one device, and two and three unequal host tiles reach
 #   the single grid's state and clock bit for bit;
 # - refined newtonian MHD: the vortex under one refined box, alpha changing
-#   the run, on two refined host tiles reaches every level of the single
-#   hierarchy's state bit for bit;
+#   the run, on two refined host tiles and on two launched refined workers cut
+#   through the box reaches every level of the single hierarchy's state bit for
+#   bit;
 # - isothermal MHD carries no pressure for the local sound speed: alpha is
 #   refused by name before any output.
 #
@@ -297,3 +298,32 @@ def test_refined_magnetized_tiles_carry_the_single_hierarchy_alpha(tmp_path: Pat
     assert tiles.keys() == single.keys(), f"datasets {sorted(tiles.keys() ^ single.keys())} differ"
     for name, x in single.items():
         np.testing.assert_array_equal(tiles[name], x, err_msg=f"two refined magnetized tiles: {name}")
+
+
+def test_refined_magnetized_launched_workers_carry_the_single_hierarchy_alpha(tmp_path: Path, variants: Path) -> None:
+    from simbi.simulation.tests.test_launch import _layout
+
+    done = _run("RefinedAlphaNewtonianOrszagTang", tmp_path / "single", 1, extra=", viscosity_alpha=0.1", resolution=MHD_RESOLUTION)
+    assert done.returncode == 0, f"the refined nmhd alpha reference failed:\n{done.stderr[-3000:]}"
+    single = _levels(tmp_path / "single")
+    assert "level_1/conserved/den" in single, "the single hierarchy published no fine level; the refined arm is vacuous"
+    script = variants.parent / "launched_refined_alpha.py"
+    script.write_text(
+        "from typing import Annotated\n\nfrom simbi import ProblemParam\n"
+        "from variants import RefinedAlphaNewtonianOrszagTang as Base\n\n\n"
+        "class LaunchedRefinedAlpha(Base):\n"
+        "    viscosity_alpha: Annotated[float, ProblemParam(0.1, description='alpha')]\n"
+    )
+    # the refined box spans root cells 8..24 of 32 on each axis; the cut at 13 crosses it
+    layout = _layout(tmp_path / "layout.toml", 2, cuts=[[13], []])
+    cmd = [sys.executable, "-m", "simbi.cli", "launch", str(script), "--layout", str(layout), "--max-steps", str(STEPS),
+           "--resolution", ",".join(str(r) for r in MHD_RESOLUTION), "--data-directory", str(tmp_path / "launched"),
+           "--checkpoint-interval", "1e9"]
+    env = dict(os.environ, PYTHONPATH=os.pathsep.join([str(variants.parent), os.environ.get("PYTHONPATH", "")]))
+    env.pop("SIMBI_LAUNCH_EXPERIMENTAL", None)
+    done = subprocess.run(cmd, capture_output=True, text=True, timeout=900, env=env)
+    assert done.returncode == 0, f"the refined nmhd alpha launch failed:\n{done.stderr[-3000:]}"
+    launched = _levels(tmp_path / "launched")
+    assert launched.keys() == single.keys(), f"datasets {sorted(launched.keys() ^ single.keys())} differ"
+    for name, x in single.items():
+        np.testing.assert_array_equal(launched[name], x, err_msg=f"two launched refined magnetized workers: {name}")
