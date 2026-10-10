@@ -23,8 +23,10 @@
 # relativistic and isothermal MHD (periodic, the fine box inside the domain,
 # under contact and uct, shown to differ), fresh on eight workers whose ragged cuts meet at a
 # corner inside the box and resumed onto them from two. a patch on a periodic face
-# of a cut axis is refused by name, as is a nested magnetized run whose first box
-# spans the uncut periodic z axis. a nested orszag-tang vortex, whose field
+# of a cut axis is refused by name. a nested magnetized run whose first box spans
+# the uncut periodic z axis, its second box inside, launches on two and four
+# uneven workers cut through both boxes as the single hierarchy runs; a nested
+# magnetized box on a periodic face is refused by name. a nested orszag-tang vortex, whose field
 # changes sign across the second box's faces, launches on two and four workers
 # cut clear of the second box and cut through it, fresh and resumed, and the 3D
 # vortex under two nested boxes on two workers cut through both, as the single
@@ -250,22 +252,41 @@ def _spanning_variant(tmp_path: Path, monkeypatch, stem: str, lines: list[str]) 
     return str(tmp_path / f"{stem}.py")
 
 
-def test_a_nested_magnetized_run_spanning_a_periodic_axis_is_refused_on_launch(tmp_path: Path, monkeypatch) -> None:
-    # the first box spans the periodic z axis, the second sits inside it clear of the z faces; the
-    # launch refuses a nested magnetized box spanning a periodic axis by name before any output
+def test_a_nested_magnetized_run_spanning_an_uncut_periodic_axis_launches_as_the_single_hierarchy_runs(tmp_path: Path, monkeypatch) -> None:
+    # the first box spans the whole periodic z axis with a flow along z through the seam, the second
+    # sits inside it clear of the z faces; the workers cut x (two) and x and y (four), through both
+    # boxes, leaving z whole on every worker
     from simbi.simulation.tests.test_decomposed_mhd import SEAM_FLOW_3D
 
-    script = _spanning_variant(tmp_path, monkeypatch, "nested_spanning_vortex", [*NESTED_INSIDE_SPAN, *SEAM_FLOW_3D])
-    # the cut at root cell 7 crosses the first box (6..18 in x) and clears the second (9..15)
-    layout = _layout(tmp_path / "two.toml", workers=2, cuts=[[7], [], []])
+    stem = "nested_spanning_vortex"
+    script = _spanning_variant(tmp_path, monkeypatch, stem, [*NESTED_INSIDE_SPAN, *SEAM_FLOW_3D])
+    reference = _script_reference(stem, "Spanning", RESOLUTION_3D, tmp_path / "single", STEPS)
+    with h5py.File(reference, "r") as f:
+        assert "level_2" in f, "the single hierarchy published no second refined level"
+        h = int(f["level_1"]["mesh"].attrs["halo_width"])
+        fine = f["level_1/conserved/den"][()][h:-h, h:-h, h:-h]
+    assert np.ptp(fine.mean(axis=(1, 2))) > 0.0, "the first fine level is uniform along z; its wrap carries nothing"
+    for label, workers, layout in [
+        ("two workers", 2, _layout(tmp_path / "two.toml", workers=2, shape=(2, 1, 1))),
+        ("four uneven workers", 4, _layout(tmp_path / "four.toml", workers=4, cuts=[[11], [13], []])),
+    ]:
+        launched = _script_launch(script, RESOLUTION_3D, tmp_path / label.replace(" ", "_"), layout, STEPS, workers=workers)
+        _assert_same_levels(launched, reference, f"nested spanning vortex: {label}")
+
+
+def test_a_nested_magnetized_patch_on_a_periodic_face_is_refused_on_launch(tmp_path: Path, monkeypatch) -> None:
+    # the second box reaches the periodic z face of the domain
+    lines = [NESTED_INSIDE_SPAN[0], "refinement_regions: Annotated[list[list[float]], ProblemParam([[0.25, 0.75, 0.25, 0.75, 0.0, 1.0], [0.375, 0.625, 0.375, 0.625, 0.0, 0.5]], description='r')]", NESTED_INSIDE_SPAN[2]]
+    script = _spanning_variant(tmp_path, monkeypatch, "nested_on_face", lines)
+    layout = _layout(tmp_path / "two.toml", workers=2, shape=(2, 1, 1))
     cmd = [sys.executable, "-m", "simbi.cli", "launch", script, "--layout", str(layout), "--max-steps", "1",
            "--resolution", ",".join(str(r) for r in RESOLUTION_3D), "--data-directory", str(tmp_path / "out"), "--checkpoint-interval", "1e9"]
     env = dict(os.environ)
     env.pop("SIMBI_LAUNCH_EXPERIMENTAL", None)
     done = subprocess.run(cmd, capture_output=True, text=True, timeout=600, env=env)
     flat = " ".join((done.stdout + done.stderr).split())
-    assert done.returncode != 0, "a nested magnetized run spanning a periodic axis launched"
-    assert "a refined patch on the periodic face of axis 2 with mesh refinement is outside the distributed first release" in flat, flat[-2000:]
+    assert done.returncode != 0, "a nested magnetized patch on a periodic face launched"
+    assert "a nested magnetized patch on the periodic face of axis 2 with mesh refinement is outside the distributed first release" in flat, flat[-2000:]
     assert not list((tmp_path / "out").glob("*.h5")), "a refused launch published a checkpoint"
 
 

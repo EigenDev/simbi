@@ -11022,14 +11022,26 @@ fn validate_refined_launch_scope(cfg: &Config) -> Result<(), String> {
             nested + 1
         ));
     }
-    let every_axis = magnetized && nested > 1;
     let seam = match cfg.dims {
-        1 => patch_on_periodic_face::<1>(cfg, every_axis)?,
-        2 => patch_on_periodic_face::<2>(cfg, every_axis)?,
-        _ => patch_on_periodic_face::<3>(cfg, every_axis)?,
+        1 => patch_on_periodic_face::<1>(cfg)?,
+        2 => patch_on_periodic_face::<2>(cfg)?,
+        _ => patch_on_periodic_face::<3>(cfg)?,
     };
     if let Some(ax) = seam {
         return refused(&format!("a refined patch on the periodic face of axis {ax}"));
+    }
+    // a magnetized nested level reads its parent's faces through stencils compiled on the parent's
+    // open partition, so a nested patch keeps clear of every periodic face; the first patch may
+    // span an uncut periodic axis, whose levels wrap within each tile
+    if magnetized && nested > 1 {
+        let nested_seam = match cfg.dims {
+            1 => nested_patch_on_periodic_face::<1>(cfg)?,
+            2 => nested_patch_on_periodic_face::<2>(cfg)?,
+            _ => nested_patch_on_periodic_face::<3>(cfg)?,
+        };
+        if let Some(ax) = nested_seam {
+            return refused(&format!("a nested magnetized patch on the periodic face of axis {ax}"));
+        }
     }
     // the refined worker hierarchy seeds no per-cell closure field on its levels
     if cfg.locally_isothermal {
@@ -11041,16 +11053,31 @@ fn validate_refined_launch_scope(cfg: &Config) -> Result<(), String> {
     Ok(())
 }
 
-/// the first periodic axis whose domain face the launch's refined patch reaches, among the axes
-/// cut into tiles, or among every axis when `every_axis`
-fn patch_on_periodic_face<const D: usize>(cfg: &Config, every_axis: bool) -> Result<Option<usize>, String> {
+/// the first periodic axis cut into tiles whose domain face the launch's refined patch reaches
+fn patch_on_periodic_face<const D: usize>(cfg: &Config) -> Result<Option<usize>, String> {
     let whole = whole_grid::<D>(cfg);
     let patch = launch_patch::<D>(cfg)?;
     let n: [usize; D] = std::array::from_fn(|ax| cfg.n_cells[ax]);
     let counts = tile_partition(n, cfg)?.counts();
     Ok((0..D).find(|&ax| {
-        whole.periodic(ax) && (every_axis || counts[ax] > 1) && (patch[ax].0 == 0 || patch[ax].1 >= cfg.n_cells[ax])
+        whole.periodic(ax) && counts[ax] > 1 && (patch[ax].0 == 0 || patch[ax].1 >= cfg.n_cells[ax])
     }))
+}
+
+/// the first periodic axis a nested refinement region (every region past the first) reaches the
+/// domain face of
+fn nested_patch_on_periodic_face<const D: usize>(cfg: &Config) -> Result<Option<usize>, String> {
+    let whole = whole_grid::<D>(cfg);
+    let regions = refinement_regions_nd::<D>(&cfg.refinement_regions)?;
+    let cell = |x: f64, ax: usize| ((x - cfg.x_lo[ax]) / cfg.dx[ax]).round() as usize;
+    for region in regions.iter().skip(1) {
+        for ax in 0..D {
+            if whole.periodic(ax) && (cell(region.x_lo[ax], ax) == 0 || cell(region.x_hi[ax], ax) >= cfg.n_cells[ax]) {
+                return Ok(Some(ax));
+            }
+        }
+    }
+    Ok(None)
 }
 
 /// the refined root patch of the launch's one region in root cells per axis, snapped as the
