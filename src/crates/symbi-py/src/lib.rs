@@ -11022,6 +11022,19 @@ fn validate_refined_launch_scope(cfg: &Config) -> Result<(), String> {
             nested + 1
         ));
     }
+    // a root cut through a nested magnetized patch leaves the nested level's coarse-fine
+    // corrections at the edges the cut shares with the patch's faces unreconciled across the
+    // workers, and the launched nested levels depart from the single hierarchy there
+    if magnetized && nested > 1 {
+        let crossed = match cfg.dims {
+            1 => nested_patch_crossed_by_cut::<1>(cfg)?,
+            2 => nested_patch_crossed_by_cut::<2>(cfg)?,
+            _ => nested_patch_crossed_by_cut::<3>(cfg)?,
+        };
+        if let Some((level, ax)) = crossed {
+            return refused(&format!("a cut along axis {ax} through the refined patch of magnetized level {level}"));
+        }
+    }
     let every_axis = magnetized && nested > 1;
     let seam = match cfg.dims {
         1 => patch_on_periodic_face::<1>(cfg, every_axis)?,
@@ -11051,6 +11064,30 @@ fn patch_on_periodic_face<const D: usize>(cfg: &Config, every_axis: bool) -> Res
     Ok((0..D).find(|&ax| {
         whole.periodic(ax) && (every_axis || counts[ax] > 1) && (patch[ax].0 == 0 || patch[ax].1 >= cfg.n_cells[ax])
     }))
+}
+
+/// the first nested refinement region (every region past the first) a root cut passes through,
+/// as its level and the cut's axis
+fn nested_patch_crossed_by_cut<const D: usize>(cfg: &Config) -> Result<Option<(usize, usize)>, String> {
+    let n: [usize; D] = std::array::from_fn(|ax| cfg.n_cells[ax]);
+    let partition = tile_partition(n, cfg)?;
+    let counts = partition.counts();
+    let regions = refinement_regions_nd::<D>(&cfg.refinement_regions)?;
+    for (k, region) in regions.iter().enumerate().skip(1) {
+        for ax in 0..D {
+            let lo = (region.x_lo[ax] - cfg.x_lo[ax]) / cfg.dx[ax];
+            let hi = (region.x_hi[ax] - cfg.x_lo[ax]) / cfg.dx[ax];
+            for t in 1..counts[ax] {
+                let mut tc = [0usize; D];
+                tc[ax] = t;
+                let cut = partition.tile_extents(tc)[ax].0 as f64;
+                if lo < cut && cut < hi {
+                    return Ok(Some((k + 1, ax)));
+                }
+            }
+        }
+    }
+    Ok(None)
 }
 
 /// the refined root patch of the launch's one region in root cells per axis, snapped as the

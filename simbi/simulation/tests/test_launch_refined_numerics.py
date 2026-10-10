@@ -24,7 +24,10 @@
 # under contact and uct, shown to differ), fresh on eight workers whose ragged cuts meet at a
 # corner inside the box and resumed onto them from two. a patch on a periodic face
 # of a cut axis is refused by name, as is a nested magnetized run whose first box
-# spans the uncut periodic z axis. nested levels:
+# spans the uncut periodic z axis. a nested orszag-tang vortex, whose field
+# changes sign across the second box's faces, launches on two and four workers
+# cut clear of the second box as the single hierarchy runs; a cut through a
+# nested magnetized box is refused by name. nested levels:
 # the refined blast with a second box inside the first, every level compared,
 # fresh on two and on four ragged workers and resumed onto four from two; a
 # depth whose phase table overflows the wire byte is refused by name before any
@@ -248,12 +251,12 @@ def _spanning_variant(tmp_path: Path, monkeypatch, stem: str, lines: list[str]) 
 
 def test_a_nested_magnetized_run_spanning_a_periodic_axis_is_refused_on_launch(tmp_path: Path, monkeypatch) -> None:
     # the first box spans the periodic z axis, the second sits inside it clear of the z faces; the
-    # launched nested levels depart from the single hierarchy from the first step (every cell of
-    # the second level), so the launch refuses the combination by name before any output
+    # launch refuses a nested magnetized box spanning a periodic axis by name before any output
     from simbi.simulation.tests.test_decomposed_mhd import SEAM_FLOW_3D
 
     script = _spanning_variant(tmp_path, monkeypatch, "nested_spanning_vortex", [*NESTED_INSIDE_SPAN, *SEAM_FLOW_3D])
-    layout = _layout(tmp_path / "two.toml", workers=2, shape=(2, 1, 1))
+    # the cut at root cell 7 crosses the first box (6..18 in x) and clears the second (9..15)
+    layout = _layout(tmp_path / "two.toml", workers=2, cuts=[[7], [], []])
     cmd = [sys.executable, "-m", "simbi.cli", "launch", script, "--layout", str(layout), "--max-steps", "1",
            "--resolution", ",".join(str(r) for r in RESOLUTION_3D), "--data-directory", str(tmp_path / "out"), "--checkpoint-interval", "1e9"]
     env = dict(os.environ)
@@ -525,27 +528,75 @@ NESTED_ARMS = {
 }
 
 
+# the second box spans root cells 12..20 on each axis inside the first (8..24): the hydro arm cuts
+# through both boxes; a magnetized nested launch keeps its cuts clear of the second box (a cut
+# through it is refused) and crosses the first
+NESTED_LAYOUTS = {
+    "hydro": ({"shape": (2, 1)}, {"cuts": [[15], [17]]}),
+    "mhd": ({"cuts": [[10], []]}, {"cuts": [[10], [22]]}),
+}
+
+
 @pytest.mark.parametrize("arm", list(NESTED_ARMS))
 def test_nested_levels_on_a_refined_launch_match_fresh_and_resumed(tmp_path: Path, monkeypatch, arm: str) -> None:
     base, extra = NESTED_ARMS[arm]
+    two_cuts, four_cuts = NESTED_LAYOUTS["hydro" if arm == "hydro" else "mhd"]
     module, cls, script = _nested_module(tmp_path, monkeypatch, base=base, extra=extra)
     reference = _script_reference(module, cls, RESOLUTION, tmp_path / "single", STEPS)
     if arm == "mhd-uct":
         contact = _script_reference(module, cls, RESOLUTION, tmp_path / "contact", STEPS, fields="ct_method='contact'")
         assert _differs(reference, contact), "the edge EMF left the nested run unchanged; the gate is vacuous"
-    for tag, workers, kwargs in [("two", 2, {"shape": (2, 1)}), ("four", 4, {"cuts": [[15], [17]]})]:
+    for tag, workers, kwargs in [("two", 2, two_cuts), ("four", 4, four_cuts)]:
         layout = _layout(tmp_path / f"{tag}.toml", workers=workers, **kwargs)
         launched = _script_launch(script, RESOLUTION, tmp_path / tag, layout, STEPS, workers=workers)
         _assert_same_all_levels(launched, reference, f"three levels on {workers} workers")
-    two = _layout(tmp_path / "two_first.toml", workers=2, shape=(2, 1))
+    two = _layout(tmp_path / "two_first.toml", workers=2, **two_cuts)
     first = _script_launch(script, RESOLUTION, tmp_path / "first", two, STEPS // 2, workers=2)
     with h5py.File(first, "r") as f:
         written_at = int(f["level_0"].attrs["iteration"])
         assert "level_2" in f, "the half-run checkpoint carries no second refined level"
     assert 0 < written_at < STEPS
-    four = _layout(tmp_path / "four_resumed.toml", workers=4, cuts=[[15], [17]])
+    four = _layout(tmp_path / "four_resumed.toml", workers=4, **four_cuts)
     resumed = _script_launch(script, RESOLUTION, tmp_path / "resumed", four, STEPS, workers=4, checkpoint=first)
     _assert_same_all_levels(resumed, reference, "three levels resumed onto four workers")
+
+
+# the orszag-tang vortex under two nested boxes: its field changes sign across the second box's
+# faces, so the nested coarse-fine corrections there carry a current a uniform field would not
+OT_NESTED = [
+    "refinement_enabled: Annotated[bool, ProblemParam(True, description='refined')]",
+    "refinement_max_levels: Annotated[int, ProblemParam(3, description='levels')]",
+    "refinement_regions: Annotated[list[list[float]], ProblemParam([[0.25, 0.75, 0.25, 0.75], [0.375, 0.625, 0.375, 0.625]], description='r')]",
+    "refinement_ratios: Annotated[list[int], ProblemParam([2, 2], description='ratios')]",
+]
+OT = ("simbi_configs.examples.newtonian.nmhd_orszag_tang", "NewtonianOrszagTang")
+
+
+def _ot_nested(tmp_path: Path, monkeypatch) -> str:
+    module, cls = OT
+    (tmp_path / "ot_nested.py").write_text(
+        "from typing import Annotated\nfrom simbi import ProblemParam\n"
+        f"from {module} import {cls}\n\n\nclass OtNested({cls}):\n" + "\n".join(f"    {line}" for line in OT_NESTED) + "\n"
+    )
+    monkeypatch.setenv("PYTHONPATH", os.pathsep.join([str(tmp_path), os.getcwd(), os.environ.get("PYTHONPATH", "")]))
+    return str(tmp_path / "ot_nested.py")
+
+
+def test_a_nested_vortex_launches_as_the_single_hierarchy_runs_with_cuts_clear_of_the_second_box(tmp_path: Path, monkeypatch) -> None:
+    script = _ot_nested(tmp_path, monkeypatch)
+    reference = _script_reference("ot_nested", "OtNested", RESOLUTION, tmp_path / "single", STEPS)
+    for tag, workers, kwargs in [("two", 2, {"cuts": [[10], []]}), ("four", 4, {"cuts": [[10], [22]]})]:
+        layout = _layout(tmp_path / f"{tag}.toml", workers=workers, **kwargs)
+        launched = _script_launch(script, RESOLUTION, tmp_path / tag, layout, STEPS, workers=workers)
+        _assert_same_all_levels(launched, reference, f"nested vortex on {workers} workers")
+
+
+def test_a_cut_through_a_nested_magnetized_patch_is_refused_on_launch(tmp_path: Path, monkeypatch) -> None:
+    # launched workers cut through the second box depart from the single hierarchy on every level
+    # (the vortex, two workers cut at root cell 16), while refined host tiles and one launched
+    # worker reproduce it
+    script = _ot_nested(tmp_path, monkeypatch)
+    _refused_launch(tmp_path, script, "a cut along axis 0 through the refined patch of magnetized level 2 with mesh refinement is outside the distributed first release")
 
 
 def _refused_launch(tmp_path: Path, script: str, reason: str) -> None:
