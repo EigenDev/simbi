@@ -277,6 +277,9 @@ pub enum HookPoint {
     /// after chi_update, before ghost_fill: the hierarchy re-prolongs the
     /// coarse-fine ghost band at the time of the state entering the next stage.
     BeforeGhostFill,
+    /// after ghost_fill: the hierarchy completes the ghost cells a refined level's physical fill
+    /// leaves to its coarse-fine sides, where a periodic axis meets one.
+    AfterGhostFill,
     /// after every source, before the conserved-to-primitive recovery: the last point at which
     /// the stage-final conserved state can still be adjusted and have the primitives, the
     /// admissibility redo, and the ghost band all follow from it. a well-balanced hierarchy
@@ -498,7 +501,7 @@ where
             }
             poisoned(&sim.fields.cons)
         }
-        HookPoint::BeforeGhostFill => return,
+        HookPoint::BeforeGhostFill | HookPoint::AfterGhostFill => return,
     };
     *field.view_mut().at_mut(cell) = Sc::from_f64(UNRECOVERABLE_POISON);
 }
@@ -709,6 +712,7 @@ where
                 };
                 sim.carry_state_clock(t_out);
                 prof("ghost_fill", || kernels.ghost_fill(sim));
+                hook(HookPoint::AfterGhostFill);
             }
         }
         if crate::state::positivity_trace_enabled() {

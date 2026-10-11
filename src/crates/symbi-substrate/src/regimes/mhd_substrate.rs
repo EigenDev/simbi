@@ -197,6 +197,52 @@ where
     field_reduce(scratch, interior, ReductionOp::Max)
 }
 
+/// fill the ghost cells where a periodic axis of a refined level meets a coarse-fine side of
+/// another axis: the periodic pass of the physical ghost fill wraps the interior rows alone and the
+/// coarse-fine side is skipped there, its ghost rows taken from the parent before the fill. each
+/// primitive component and each cell magnetic field component copies from the coarse-fine ghost
+/// row across the seam, the periodic image a stencil reaching the corner reads. a level without a
+/// periodic axis beside a coarse-fine side is left as it is
+pub fn wrap_periodic_corner_ghosts<const D: usize, const DOF: usize, Mem, Sc>(sim: &FieldStore<D, DOF, Mem, Sc>)
+where
+    Mem: MemorySpace + Sync,
+    Sc: Scalar + OrderedNumeric,
+{
+    use symbi_sim::state::BoundaryType;
+    let b = &sim.boundaries;
+    let periodic = |ax: usize| b.lo(ax) == BoundaryType::Periodic && b.hi(ax) == BoundaryType::Periodic;
+    let coarse_fine = |ax: usize| b.lo(ax) == BoundaryType::CoarseFine || b.hi(ax) == BoundaryType::CoarseFine;
+    if !(0..D).any(|ax| periodic(ax) && (0..D).any(|other| other != ax && coarse_fine(other))) {
+        return;
+    }
+    let (allocated, interior) = (&sim.geom.allocated, &sim.geom.interior);
+    let rows = symbi_algebra::Domain::new(std::array::from_fn(|ax| {
+        let side = |s: BoundaryType, ghost: isize, inner: isize| if s == BoundaryType::CoarseFine { ghost } else { inner };
+        symbi_algebra::Space {
+            name: interior.spaces[ax].name,
+            lo: side(b.lo(ax), allocated.spaces[ax].lo, interior.spaces[ax].lo),
+            hi: side(b.hi(ax), allocated.spaces[ax].hi, interior.spaces[ax].hi),
+        }
+    }));
+    let bc: [[BcType; 2]; D] = std::array::from_fn(|ax| if periodic(ax) { [BcType::Periodic; 2] } else { [BcType::Skip; 2] });
+    let prim = &sim.fields.prim;
+    scalar_ghost_fill_over(sim, &prim.rho, bc, &rows);
+    for k in 0..DOF {
+        scalar_ghost_fill_over(sim, &prim.vel[k], bc, &rows);
+    }
+    if let Some(pre) = prim.pre_field() {
+        scalar_ghost_fill_over(sim, pre, bc, &rows);
+    }
+    if let Some(chi) = prim.chi_field() {
+        scalar_ghost_fill_over(sim, chi, bc, &rows);
+    }
+    if let Some(mhd) = sim.fields.mhd.as_ref() {
+        for k in 0..DOF {
+            scalar_ghost_fill_over(sim, &mhd.bcell[k], bc, &rows);
+        }
+    }
+}
+
 /// carry the conserved cells across the seam of every periodic axis of `sim` into its ghost
 /// band, component by component, through the scalar lattice pullback: a periodic face identifies
 /// the ghost cell with the interior cell across the seam, so each conserved component copies
@@ -243,9 +289,23 @@ pub(crate) fn flag_ghost_fill<const D: usize, const DOF: usize, Mem, Sc>(
     Mem: MemorySpace + Sync,
     Sc: Scalar + OrderedNumeric,
 {
+    scalar_ghost_fill_over(sim, flag, bc, &sim.geom.interior);
+}
+
+/// `flag_ghost_fill` with the sweep's transverse extent set by `interior`: each axis pass fills
+/// the ghosts of its own axis over `interior` on the axes after it
+fn scalar_ghost_fill_over<const D: usize, const DOF: usize, Mem, Sc>(
+    sim: &FieldStore<D, DOF, Mem, Sc>,
+    flag: &Field<Sc, D, Mem>,
+    bc: [[BcType; 2]; D],
+    interior: &symbi_algebra::Domain<D>,
+) where
+    Mem: MemorySpace + Sync,
+    Sc: Scalar + OrderedNumeric,
+{
     let name = format!("scalar_ghost_fill_{D}d");
     let (flo, fext, fvol) = field_layout(flag);
-    GhostFillDriver::<D>::new(&sim.geom.allocated, &sim.geom.interior, bc)
+    GhostFillDriver::<D>::new(&sim.geom.allocated, interior, bc)
             .with_polar_turn(crate::kernels::support::polar_turn_for(sim.geom.coords, &sim.geom.interior))
             .drive_sweep(
         |region, p| {

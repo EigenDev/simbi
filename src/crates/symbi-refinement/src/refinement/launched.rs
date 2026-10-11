@@ -450,7 +450,7 @@ where
                 .map_err(|e| fail(fabric, e.into()))?;
             for &k in &refined {
                 let h = &tiles[k];
-                with_device(fine_dev(k), || h.levels[1].kernels.ghost_fill(&h.levels[1].state));
+                with_device(fine_dev(k), || h.fill_physical_ghosts(1));
             }
         }};
     }
@@ -537,7 +537,7 @@ where
                 .map_err(|e| fail(fabric, e.into()))?;
             for &k in &refined {
                 let h = &tiles[k];
-                with_device(fine_dev(k), || h.levels[1].kernels.ghost_fill(&h.levels[1].state));
+                with_device(fine_dev(k), || h.fill_physical_ghosts(1));
             }
             if plans.emf.is_some() {
                 for (k, h) in tiles.iter().enumerate() {
@@ -581,7 +581,7 @@ where
                 .map_err(|e| fail(fabric, e.into()))?;
             for &k in &refined {
                 let h = &tiles[k];
-                with_device(fine_dev(k), || h.levels[1].kernels.ghost_fill(&h.levels[1].state));
+                with_device(fine_dev(k), || h.fill_physical_ghosts(1));
             }
             if nested_stencil.is_some() {
                 for h in tiles.iter() {
@@ -684,7 +684,7 @@ where
             // the loaded fine level stands: its interior, its cut halos from the neighbors'
             // interiors and its coarse-fine ghosts come from the file; the physical ghosts fill
             for &k in &refined {
-                with_device(fine_dev(k), || tiles[k].levels[1].kernels.ghost_fill(&tiles[k].levels[1].state));
+                with_device(fine_dev(k), || tiles[k].fill_physical_ghosts(1));
             }
         } else {
             for &k in &refined {
@@ -718,7 +718,7 @@ where
                     .map_err(|e| fail(fabric, e.into()))?;
                 for (k, h) in tiles.iter().enumerate() {
                     if let Some(id) = held.level_ids(level - 1)[k] {
-                        with_device(held.level_devices(level - 1)[id.0 as usize], || h.levels[level - 1].kernels.ghost_fill(&h.levels[level - 1].state));
+                        with_device(held.level_devices(level - 1)[id.0 as usize], || h.fill_physical_ghosts(level - 1));
                     }
                 }
                 for (k, h) in tiles.iter().enumerate() {
@@ -987,7 +987,7 @@ where
                             for &k in &refined {
                                 with_device(fine_dev(k), || {
                                     tiles[k].prolong_cf(1, alpha);
-                                    tiles[k].levels[1].kernels.ghost_fill(&tiles[k].levels[1].state);
+                                    tiles[k].fill_physical_ghosts(1);
                                 });
                             }
                             fine_point!(ExchangePoint::Fine { substep: sub as u8, point: FinePoint::Prolong }, iter, attempt);
@@ -1078,7 +1078,7 @@ where
                                         .map_err(|e| fail(fabric, e.into()))?;
                                 }
                                 for &k in &refined {
-                                    with_device(fine_dev(k), || tiles[k].levels[1].kernels.ghost_fill(&tiles[k].levels[1].state));
+                                    with_device(fine_dev(k), || tiles[k].fill_physical_ghosts(1));
                                 }
                                 if continuous {
                                     continuous_tail(tiles, held, atlas.as_ref().unwrap(), 1, fine_dt, fabric, deadline)?;
@@ -1371,8 +1371,7 @@ where
         exchange_point_plans(&[part], cx.transport, fabric, point, step, attempt, deadline, &mut timing.exchange)
             .map_err(|e| fail(fabric, e.into()))?;
         for (r, &k) in mine.iter().enumerate() {
-            let l = &tiles[k].levels[level];
-            with_device(dev(r), || l.kernels.ghost_fill(&l.state));
+            with_device(dev(r), || tiles[k].fill_physical_ghosts(level));
         }
         Ok::<(), WorkerError>(())
     };
@@ -1401,7 +1400,7 @@ where
         for (r, &k) in mine.iter().enumerate() {
             with_device(dev(r), || {
                 tiles[k].prolong_cf(level, alpha);
-                tiles[k].levels[level].kernels.ghost_fill(&tiles[k].levels[level].state);
+                tiles[k].fill_physical_ghosts(level);
             });
         }
         exchange(tiles, fabric, timing, at(FinePoint::Prolong))?;
@@ -1477,7 +1476,7 @@ where
                 for (r, &k) in mine.iter().enumerate() {
                     let h = &tiles[k];
                     with_device(dev(r), || {
-                        h.levels[level].kernels.ghost_fill(&h.levels[level].state);
+                        h.fill_physical_ghosts(level);
                         h.mark_face_stencil_filled_of(level + 1);
                     });
                 }

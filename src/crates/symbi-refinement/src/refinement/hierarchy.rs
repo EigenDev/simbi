@@ -439,8 +439,7 @@ where
         if ll > 0 {
             self.prolong_cf(ll, 1.0);
         }
-        let level = &self.levels[ll];
-        level.kernels.ghost_fill(&level.state);
+        self.fill_physical_ghosts(ll);
         self.priming = false;
     }
 
@@ -1419,7 +1418,7 @@ where
         assert_eq!(self.levels.len(), level + 1, "a tile holding a finer level recovers through its restriction");
         let l = &self.levels[level];
         prof("c2p", || l.kernels.c2p(&l.state));
-        prof("ghost_fill", || l.kernels.ghost_fill(&l.state));
+        prof("ghost_fill", || self.fill_physical_ghosts(level));
     }
 
     /// discard every pending register unit of a rejected attempt: the contributing faces and
@@ -2169,8 +2168,8 @@ where
         interval: u64,
         callback: impl FnMut(&Self) -> std::ops::ControlFlow<()>,
     ) -> symbi_xpu::Result<symbi_sim::run_diagnostics::RunDiagnostics> {
-        for level in &self.levels {
-            level.kernels.ghost_fill(&level.state);
+        for ll in 0..self.levels.len() {
+            self.fill_physical_ghosts(ll);
         }
         self.evolve_with_callback_impl(t_final, interval, false, callback)
     }
@@ -2281,8 +2280,7 @@ where
             if ll > 0 {
                 self.prolong_cf(ll, 1.0);
             }
-            let lvl = &self.levels[ll];
-            lvl.kernels.ghost_fill(&lvl.state);
+            self.fill_physical_ghosts(ll);
             // the error scan reads c2p_error from the host mid-queue.
             symbi_substrate::regimes::substrate_gpu::device_sync::<Mem>();
             let err = scan_c2p_errors(&lvl.state);
@@ -2686,11 +2684,11 @@ where
                 stencil.filled.set(false);
             }
         }
-        for level in self.levels.iter().skip(1) {
+        for (ll, level) in self.levels.iter().enumerate().skip(1) {
             if let Some(entry) = level.attempt_entry.as_ref() {
                 restore_cons_region(entry, &level.state.fields.cons, &level.state.geom.allocated);
                 level.kernels.c2p(&level.state);
-                level.kernels.ghost_fill(&level.state);
+                self.fill_physical_ghosts(ll);
             }
         }
     }
@@ -3163,7 +3161,7 @@ where
     fn slip_rebuild(&self, level: usize) {
         let l = &self.levels[level];
         l.kernels.c2p(&l.state);
-        l.kernels.ghost_fill(&l.state);
+        self.fill_physical_ghosts(level);
     }
 
     /// one material-drain operation D(dt) at `level`: penalize followed by the primitive/ghost
@@ -3647,6 +3645,11 @@ where
                     this.prolong_cf(level, alpha0 + stage_time[ii] / RATIO as f64);
                 }
             }
+            HookPoint::AfterGhostFill => {
+                if has_coarser {
+                    symbi_substrate::regimes::mhd_substrate::wrap_periodic_corner_ghosts(&l.state);
+                }
+            }
         }
     }
 
@@ -3769,7 +3772,7 @@ where
             // reconstruction and a checkpoint at the step boundary read the drained gas.
             if l.state.immersed.as_ref().is_some_and(|im| im.bodies.penalizes()) {
                 prof("c2p", || l.kernels.c2p(&l.state));
-                prof("ghost_fill", || l.kernels.ghost_fill(&l.state));
+                prof("ghost_fill", || self.fill_physical_ghosts(level));
             }
             if symbi_sim::state::positivity_trace_enabled() {
                 symbi_substrate::regimes::substrate_gpu::device_sync::<Mem>();
@@ -4097,7 +4100,7 @@ where
             let alpha = sub as f64 / RATIO as f64;
             self.prolong_cf(level + 1, alpha);
             let f = &self.levels[level + 1];
-            prof("ghost_fill", || f.kernels.ghost_fill(&f.state));
+            prof("ghost_fill", || self.fill_physical_ghosts(level + 1));
             phase_probe::sample("prolong", level + 1, &f.state);
             if self.advance_level(level + 1, fine_dt, alpha) {
                 return true;
@@ -4147,7 +4150,7 @@ where
             bcell_from_bface_region(cmhd, coarse.state.fields.cons.nrg_field(), &shell);
         }
         coarse.kernels.c2p(&coarse.state);
-        coarse.kernels.ghost_fill(&coarse.state);
+        self.fill_physical_ghosts(level);
     }
 
     /// synchronize every covered parent region from the finest level down to the root.
@@ -4227,8 +4230,7 @@ where
         if has_coarser {
             self.prolong_cf(level, alpha0 + 1.0 / RATIO as f64);
         }
-        let l = &self.levels[level];
-        prof("ghost_fill", || l.kernels.ghost_fill(&l.state));
+        prof("ghost_fill", || self.fill_physical_ghosts(level));
     }
 
     /// the balanced restriction of level `level`'s seam bands from level `level + 1`:
@@ -4324,6 +4326,17 @@ where
             .as_ref()
             .is_some_and(|im| (0..im.bodies.len()).any(|b| im.bodies.get(b).has_gravity()));
         has_gravity && fine.state.fields.prim.pre_field().is_some()
+    }
+
+    /// the physical ghost fill of level `ll`. a refined level also takes the cells where a periodic
+    /// axis meets a coarse-fine side, which the fill's periodic pass leaves to the side it skips:
+    /// they copy from the prolonged coarse-fine ghost rows across the seam
+    pub fn fill_physical_ghosts(&self, ll: usize) {
+        let l = &self.levels[ll];
+        l.kernels.ghost_fill(&l.state);
+        if ll > 0 {
+            symbi_substrate::regimes::mhd_substrate::wrap_periodic_corner_ghosts(&l.state);
+        }
     }
 
     /// fill level `level`'s coarse-fine prim ghosts from its parent's
@@ -5567,8 +5580,7 @@ where
         }
         for (k, &i) in grid.order.iter().enumerate() {
             symbi_xpu::with_device(grid.devices[k], || {
-                let level = &tiles[i].levels[ll];
-                level.kernels.ghost_fill(&level.state);
+                tiles[i].fill_physical_ghosts(ll);
             });
             let err = scan_c2p_errors(&tiles[i].levels[ll].state);
             if err.is_err() {
@@ -6081,9 +6093,7 @@ fn exchange_level_halos<R, const NDIM: usize, const DOF: usize, M, E, S, Mem, K,
     }
     for (k, &i) in order.iter().enumerate() {
         symbi_xpu::with_device(devices[k], || {
-            tiles[i].levels[level]
-                .kernels
-                .ghost_fill(&tiles[i].levels[level].state)
+            tiles[i].fill_physical_ghosts(level)
         });
     }
 }
@@ -6945,7 +6955,7 @@ where
         for (k, &i) in fg.order.iter().enumerate() {
             symbi_xpu::with_device(fg.devices[k], || {
                 tiles[i].prolong_cf(level, alpha);
-                tiles[i].levels[level].kernels.ghost_fill(&tiles[i].levels[level].state);
+                tiles[i].fill_physical_ghosts(level);
             });
         }
         // the cut halos filled before the flux reads them

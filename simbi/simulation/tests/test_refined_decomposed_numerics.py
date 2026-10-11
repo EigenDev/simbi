@@ -261,17 +261,6 @@ def test_a_patch_spanning_a_cut_periodic_axis_on_host_tiles_matches_the_single_h
             if field.startswith("conserved/"):
                 h = ng[level]
                 x, y = x[h:-h, h:-h], y[h:-h, h:-h]
-            elif level != "level_0" and x.ndim == 2:
-                # the fine level's halo corners, where the seam's ghost columns meet a coarse-fine
-                # face's ghost rows, hold no value on the single hierarchy (its periodic fill keeps
-                # to the interior rows) and no stencil of this scheme reads them; the tiles' x legs
-                # carry them. every other cell, the halo's edges included, is compared
-                h = ng[level]
-                corner = np.zeros(x.shape, dtype=bool)
-                rows, cols = np.r_[:h, x.shape[0] - h:x.shape[0]], np.r_[:h, x.shape[1] - h:x.shape[1]]
-                corner[np.ix_(rows, cols)] = True
-                assert x.shape == y.shape and np.array_equal(x[~corner], y[~corner]), f"{gpus} refined tiles cut across the periodic axis: {name} differs"
-                continue
             assert x.shape == y.shape and np.array_equal(x, y), f"{gpus} refined tiles cut across the periodic axis: {name} differs"
 
 
