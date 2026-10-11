@@ -6990,6 +6990,12 @@ where
             phase_probe::set_tile(i);
             symbi_xpu::with_device(fg.devices[k], || tiles[i].level_tail_pre(level, fine_dt));
         }
+        // the viscous transport on the run's finest level writes the interior momentum and energy
+        // and recovers the primitives: the cut halos carry its output to the readers after the
+        // tail and to the checkpoint, as the single hierarchy's fill carries it across a seam
+        if fine.get(level).is_none() && fg.order.iter().any(|&i| tiles[i].levels[level].kernels.is_viscous()) {
+            exchange_level_halos(tiles, level, &fg.order, fg.counts, &fg.devices, transport);
+        }
         // the level's accepted ito coefficients across its cuts, before a finer level prolongs them
         // and the level's tracers interpolate them
         let continuous = fg.order.iter().any(|&i| tiles[i].levels[level].state.continuous_tracers.is_some());
