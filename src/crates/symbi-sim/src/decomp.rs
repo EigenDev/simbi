@@ -1854,6 +1854,29 @@ pub fn exchange_grid_cons<const D: usize, const DOF: usize, M: MemorySpace, T: H
     exchange_grid_set(tiles, schedule, devices, transport, ExchangeSet::Cons)
 }
 
+/// carry one cell field of every tile into its neighbors' cut ghosts: `fields[k]` is tile k's
+/// field over its cell lattice, the field a cut-adjacent stencil on the neighbor reads
+pub fn exchange_cell_field<const D: usize, const DOF: usize, M: MemorySpace, T: HaloTransport>(
+    tiles: &[&FieldStore<D, DOF, M>],
+    fields: &[&Field<f64, D, M>],
+    schedule: &Schedule<D>,
+    devices: &[i32],
+    transport: &T,
+) {
+    for leg in schedule.legs() {
+        let (lo, hi) = (tiles[leg.lo], tiles[leg.hi]);
+        let LegRegions { lo_ghost, hi_src, hi_ghost, lo_src } = leg_regions(
+            &FieldLayout::cell_of_geometry(&lo.geom),
+            &FieldLayout::cell_of_geometry(&hi.geom),
+            leg,
+            schedule.reach(),
+        );
+        let (fl, fr) = (fields[leg.lo], fields[leg.hi]);
+        transport.copy_region(fr, &hi_src, fl, &lo_ghost, devices[leg.hi], devices[leg.lo]);
+        transport.copy_region(fl, &lo_src, fr, &hi_ghost, devices[leg.lo], devices[leg.hi]);
+    }
+}
+
 /// carry every tile's materialized ito coefficients into its neighbors' cut ghosts, so a tracer
 /// interpolating beside a cut reads the neighbor's accepted coefficients
 pub fn exchange_ito_coefficients<const D: usize, const DOF: usize, M: MemorySpace, T: HaloTransport>(

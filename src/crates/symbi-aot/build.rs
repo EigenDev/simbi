@@ -466,6 +466,19 @@ fn gen_refine_transfer(out_dir: &str, ndim: u8) {
             &program,
         );
     }
+    for axis in 0..nd {
+        let program = symbi_discretize::wb_band_encode_anchored_gv(nd, MAX_SOURCE_BODIES, axis);
+        emit_gv(
+            out_dir,
+            KernelId::WbBandEncodeAnchored {
+                ndim,
+                axis: axis as u8,
+            }
+            .name(),
+            ndim,
+            &program,
+        );
+    }
     let program = symbi_discretize::band_energy_gv(nd);
     emit_gv(
         out_dir,

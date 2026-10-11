@@ -321,9 +321,12 @@ def test_the_balanced_reconstruction_on_refined_tiles_matches_the_single_grid(tm
     plain = _final(_run(fixture, "RefinedBalancedAtmosphere", tmp_path / "plain", extra=", wb_reconstruction=False"), tmp_path / "plain", "the plain refined run")
     with h5py.File(want, "r") as a, h5py.File(plain, "r") as b:
         assert not np.array_equal(a["level_1/conserved/den"][()], b["level_1/conserved/den"][()]), "the balance left the refined run unchanged; the gate is vacuous"
-    for cuts in [[[12], []], [[12], [16]]]:
+    # the patch spans root cells 6..18 in x and 8..24 in y, its bands 6..10, 14..18 and 8..12,
+    # 20..24: x = 8 and x = 16 cut inside an x band, and with y = 10 the bands intersect at a
+    # corner cut on both axes
+    for cuts in [[[12], []], [[12], [16]], [[8], []], [[16], []], [[8], [10]]]:
         gpus = int(np.prod([len(c) + 1 for c in cuts]))
-        out = tmp_path / f"tiles{gpus}"
+        out = tmp_path / f"tiles{gpus}_{cuts[0]}_{cuts[1]}"
         got = _final(_run(fixture, "RefinedBalancedAtmosphere", out, gpus, f", decompose={cuts!r}"), out, f"refined host tiles cut at {cuts}")
         _assert_same_state(got, want, f"refined host tiles cut at {cuts}")
     monkeypatch.delenv("SIMBI_LAUNCH_EXPERIMENTAL", raising=False)
@@ -340,9 +343,10 @@ def test_the_balanced_reconstruction_on_nested_refined_tiles_matches_the_single_
     plain = _final(_run(fixture, "NestedBalancedAtmosphere", tmp_path / "plain", extra=", wb_reconstruction=False"), tmp_path / "plain", "the plain nested run")
     with h5py.File(want, "r") as a, h5py.File(plain, "r") as b:
         assert not np.array_equal(a["level_2/conserved/den"][()], b["level_2/conserved/den"][()]), "the balance left level 2 unchanged; the gate is vacuous"
-    for cuts in [[[12], []], [[12], [16]]]:
+    # root cut x = 10 falls on level-1 cell 20, inside level 2's band 18..22
+    for cuts in [[[12], []], [[12], [16]], [[10], []]]:
         gpus = int(np.prod([len(c) + 1 for c in cuts]))
-        out = tmp_path / f"tiles{gpus}"
+        out = tmp_path / f"tiles{gpus}_{cuts[0]}_{cuts[1]}"
         got = _final(_run(fixture, "NestedBalancedAtmosphere", out, gpus, f", decompose={cuts!r}"), out, f"nested host tiles cut at {cuts}")
         _assert_same_state(got, want, f"nested host tiles cut at {cuts}")
     monkeypatch.delenv("SIMBI_LAUNCH_EXPERIMENTAL", raising=False)
@@ -352,20 +356,20 @@ def test_the_balanced_reconstruction_on_nested_refined_tiles_matches_the_single_
 
 
 BAND = "the cut at root cell 8 on axis 0 crosses the 4-cell balanced restriction band inside the patch face at 6"
-# level 2 spans root cells 9..15 along x, level-1 cells 18..30: a root cut at 10 falls on level-1 cell 20
-NESTED_BAND = "the cut at root cell 10 on axis 0 crosses the 4-cell balanced restriction band inside the level-2 patch face at level-1 cell 18"
+# two cuts inside the x band 6..10: the band's chains resume across one cut alone
+TWO_CUTS = "two cuts on axis 0 cross the 4-cell balanced restriction band inside the patch face at 6"
 
 
 @pytest.mark.parametrize(
     ("cls", "decompose", "reason"),
     [
         ("CylindricalPlaneAtmosphere", None, "wb_reconstruction on the 2-dimensional (r, z) cylindrical grid with several tiles is outside the gated tiled runs"),
-        ("RefinedBalancedAtmosphere", [[8], []], BAND),
-        ("NestedBalancedAtmosphere", [[10], []], NESTED_BAND),
+        ("RefinedBalancedAtmosphere", [[7, 9], []], TWO_CUTS),
     ],
 )
 def test_the_balanced_reconstruction_outside_the_gated_scope_is_refused_on_host_tiles(tmp_path: Path, fixture: Path, cls: str, decompose, reason: str) -> None:
-    done = _run(fixture, cls, tmp_path / "out", 2, "" if decompose is None else f", decompose={decompose!r}")
+    gpus = 2 if decompose is None else int(np.prod([len(c) + 1 for c in decompose]))
+    done = _run(fixture, cls, tmp_path / "out", gpus, "" if decompose is None else f", decompose={decompose!r}")
     assert done.returncode != 0, f"{cls} ran on host tiles"
     assert reason in " ".join(done.stderr.split()), done.stderr[-1500:]
     assert not list((tmp_path / "out").glob("*.h5")), "output was written before the refusal"

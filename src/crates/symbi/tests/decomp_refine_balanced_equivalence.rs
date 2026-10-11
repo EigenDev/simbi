@@ -165,3 +165,25 @@ fn balanced_refined_tiles_match_the_single_hierarchy_with_every_seam_band_on_one
         assert_tiles_match(cuts, &want);
     }
 }
+
+/// a cut strictly inside a seam band: the band continues past the cut, its far part on a tile
+/// without the uncovered cell. the near tile's chains reach the cell beside the cut and the far
+/// tile resumes them there, the same steps in the same order, so the tiles equal the single
+/// hierarchy bit for bit. the corner layouts cut both axes inside the intersecting bands, whose
+/// corner cells take the x band's rewrite before the y band's on every tile
+#[test]
+fn balanced_refined_tiles_match_the_single_hierarchy_with_a_cut_inside_a_seam_band() {
+    let want = { let mut h = mono(true); h.evolve(T_FINAL).unwrap(); h };
+    // the patch spans root cells 8..24 on both axes, the bands 8..12 and 20..24
+    for cuts in [
+        [vec![9], vec![]],
+        [vec![11], vec![]],
+        [vec![21], vec![]],
+        [vec![23], vec![]],
+        [vec![10], vec![22]],
+        [vec![10], vec![10]],
+        [vec![22], vec![9]],
+    ] {
+        assert_tiles_match(cuts, &want);
+    }
+}

@@ -875,6 +875,86 @@ fn census_decoded_pressure<const D: usize, Mem: MemorySpace>(
     }
 }
 
+/// where a tile stands toward a seam band it holds cells of
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum BandSide {
+    /// the tile holds the uncovered cell beyond the seam: every chain starts there
+    Near,
+    /// the band continues past a cut across the normal: the tile holds band cells beyond it and
+    /// its chains resume at the coarse row `row` and the fine row `fine_row` beside the cut, in its
+    /// halo, from the equilibrium the near side reached there
+    Far { row: isize, fine_row: isize },
+}
+
+/// one seam band of a refined level as a tile holds it: the band on the coarse level within the
+/// tile's coverage, the fine cells under it, and the whole patch's seam it belongs to
+#[derive(Clone, Debug)]
+pub struct BandSeam<const D: usize> {
+    pub axis: usize,
+    pub high: bool,
+    /// the uncovered coarse cell beyond the seam, on the normal axis
+    pub uncovered: isize,
+    /// the whole patch's fine edge cell and seam face on the normal axis
+    pub edge: isize,
+    pub face_index: isize,
+    pub band: Domain<D>,
+    pub fine_band: Domain<D>,
+    pub side: BandSide,
+}
+
+/// the band of the seam on `axis` (low or `high` side) of the whole patch `whole` the tile with
+/// coverage `coverage` holds cells of, `None` when it holds none. the band spans `band` coarse
+/// cells inward from the seam and the whole coverage across it; the tile holds the uncovered cell
+/// when it lies in the tile's coarse interior. on a single hierarchy the coverage is the whole
+/// patch, and a band whose uncovered cell lies outside the interior meets a domain boundary
+pub fn band_seam<const D: usize>(
+    coverage: &Domain<D>,
+    whole: &Domain<D>,
+    coarse_interior: &Domain<D>,
+    band: usize,
+    axis: usize,
+    high: bool,
+) -> Option<BandSeam<D>> {
+    assert!(
+        band as i64 <= symbi_discretize::WB_CF_CHAIN_MAX && (2 * band - 1) as i64 <= symbi_discretize::WB_BAND_CHAIN_MAX,
+        "the balanced restriction band of {band} cells reaches past the unrolled chain bounds"
+    );
+    let band = band as isize;
+    let (w_lo, w_hi) = (whole.spaces[axis].lo, whole.spaces[axis].hi);
+    let uncovered = if high { w_hi } else { w_lo - 1 };
+    let (b_lo, b_hi) = if high { ((w_hi - band).max(w_lo), w_hi) } else { (w_lo, (w_lo + band).min(w_hi)) };
+    let (lo, hi) = (b_lo.max(coverage.spaces[axis].lo), b_hi.min(coverage.spaces[axis].hi));
+    if lo >= hi {
+        return None;
+    }
+    let mut band_dom = coverage.clone();
+    band_dom.spaces[axis].lo = lo;
+    band_dom.spaces[axis].hi = hi;
+    let mut fine_band = Domain::new(std::array::from_fn(|a| Space {
+        name: coverage.spaces[a].name,
+        lo: 2 * coverage.spaces[a].lo,
+        hi: 2 * coverage.spaces[a].hi,
+    }));
+    fine_band.spaces[axis].lo = 2 * lo;
+    fine_band.spaces[axis].hi = 2 * hi;
+    let near = uncovered >= coarse_interior.spaces[axis].lo && uncovered < coarse_interior.spaces[axis].hi;
+    let side = match (near, high) {
+        (true, _) => BandSide::Near,
+        (false, true) => BandSide::Far { row: hi, fine_row: 2 * hi },
+        (false, false) => BandSide::Far { row: lo - 1, fine_row: 2 * lo - 1 },
+    };
+    Some(BandSeam {
+        axis,
+        high,
+        uncovered,
+        edge: if high { 2 * w_hi - 1 } else { 2 * w_lo },
+        face_index: if high { 2 * w_hi } else { 2 * w_lo },
+        band: band_dom,
+        fine_band,
+        side,
+    })
+}
+
 /// the balanced restriction of a coarse seam band: after the conservative
 /// restriction and the coarse c2p, rewrite the pressure of the covered coarse
 /// cells within `band` cells of each coarse-fine seam so that they sit on the
@@ -901,17 +981,24 @@ fn census_decoded_pressure<const D: usize, Mem: MemorySpace>(
 /// O(h^2) gap. the departures are measured against the uncovered cell continued
 /// across the seam, so a column balanced across the seam encodes to zero and a
 /// wave standing at the seam encodes to its full amplitude.
+///
+/// a tile holds a seam band whole or in part: the near side's chains start at the
+/// uncovered cell, and its encode and decode leave the chained equilibrium in `fine_anchor` and
+/// `coarse_anchor`. the far side's chains resume from those anchors at the rows beside its cut,
+/// carried into its halo, and take the same steps in the same order as the uncut chains.
 #[allow(clippy::too_many_arguments)]
-pub fn restrict_band_balanced<const D: usize, const DOF: usize, Mem: MemorySpace>(
+pub fn rewrite_band_seam<const D: usize, const DOF: usize, Mem: MemorySpace>(
+    seam: &BandSeam<D>,
     fine: &PrimFieldsGeneric<D, DOF, Mem>,
     fine_interior: &Domain<D>,
     departure: &symbi_grid::Field<f64, D, Mem>,
+    fine_anchor: &symbi_grid::Field<f64, D, Mem>,
     coarse_departure: &symbi_grid::Field<f64, D, Mem>,
     coarse_prim: &PrimFieldsGeneric<D, DOF, Mem>,
     coarse_nrg: &symbi_grid::Field<f64, D, Mem>,
     coarse_interior: &Domain<D>,
-    coverage: &Domain<D>,
-    band: usize,
+    coarse_anchor: &symbi_grid::Field<f64, D, Mem>,
+    coarse_reference: &symbi_grid::Field<f64, D, Mem>,
     gamma: f64,
     fine_x_lo: &[f64; D],
     fine_dx: &[f64; D],
@@ -926,12 +1013,8 @@ pub fn restrict_band_balanced<const D: usize, const DOF: usize, Mem: MemorySpace
     let pre = "the balanced restriction requires an energy-carrying prim set";
     let fine_pre = fine.pre_field().expect(pre);
     let coarse_pre = coarse_prim.pre_field().expect(pre);
-    let band = band as isize;
-    assert!(
-        band as i64 <= symbi_discretize::WB_CF_CHAIN_MAX
-            && (2 * band - 1) as i64 <= symbi_discretize::WB_BAND_CHAIN_MAX,
-        "the balanced restriction band of {band} cells reaches past the unrolled chain bounds"
-    );
+    let ax = seam.axis;
+    let (band_dom, fine_band) = (&seam.band, &seam.fine_band);
 
     let mut body_scalars = Vec::new();
     push_body_slot_scalars(bodies, &mut body_scalars);
@@ -945,78 +1028,50 @@ pub fn restrict_band_balanced<const D: usize, const DOF: usize, Mem: MemorySpace
     let coarse_hi: Vec<i32> = (0..D)
         .map(|a| coarse_interior.spaces[a].hi as i32 - 1)
         .collect();
+    let reference = match seam.side {
+        BandSide::Near => seam.uncovered,
+        BandSide::Far { row, .. } => row,
+    };
+    // the regions a dispatch covers must lie inside the lattices they index,
+    // and the chain's reference must lie outside the region the decode writes:
+    // every band cell runs concurrently on a device, so a reference inside the
+    // written set would read pressures its neighbours are overwriting.
+    for a in 0..D {
+        assert!(
+            band_dom.spaces[a].lo >= coarse_interior.spaces[a].lo
+                && band_dom.spaces[a].hi <= coarse_interior.spaces[a].hi,
+            "band {:?} leaves the coarse interior {:?} on axis {a}",
+            band_dom.spaces,
+            coarse_interior.spaces
+        );
+        assert!(
+            fine_band.spaces[a].lo >= fine_interior.spaces[a].lo
+                && fine_band.spaces[a].hi <= fine_interior.spaces[a].hi,
+            "fine band {:?} leaves the fine interior {:?} on axis {a}",
+            fine_band.spaces,
+            fine_interior.spaces
+        );
+    }
+    assert!(
+        reference < band_dom.spaces[ax].lo || reference >= band_dom.spaces[ax].hi,
+        "the decode's reference cell {reference} lies inside the band it writes, \
+         {:?}: concurrent threads would read pressures being overwritten",
+        band_dom.spaces[ax]
+    );
 
-    // one band per coarse-fine seam face: the coverage edge on axis `ax`, low or
-    // high side, where an uncovered coarse cell lies beyond it inside the coarse
-    // interior. a coverage edge flush with the coarse interior is a physical
-    // boundary of the whole hierarchy and carries no seam.
-    for ax in 0..D {
-        for high in [false, true] {
-            let (c_lo, c_hi) = (coverage.spaces[ax].lo, coverage.spaces[ax].hi);
-            let uncovered = if high { c_hi } else { c_lo - 1 };
-            if uncovered < coarse_interior.spaces[ax].lo
-                || uncovered >= coarse_interior.spaces[ax].hi
-            {
-                continue;
-            }
-            // the coarse band along `ax`, full coverage extent elsewhere, and the
-            // fine cells under it.
-            let (b_lo, b_hi) = if high {
-                ((c_hi - band).max(c_lo), c_hi)
-            } else {
-                (c_lo, (c_lo + band).min(c_hi))
-            };
-            let mut band_dom = coverage.clone();
-            band_dom.spaces[ax].lo = b_lo;
-            band_dom.spaces[ax].hi = b_hi;
-            let mut fine_band = Domain::new(std::array::from_fn(|a| Space {
-                name: coverage.spaces[a].name,
-                lo: 2 * coverage.spaces[a].lo,
-                hi: 2 * coverage.spaces[a].hi,
-            }));
-            fine_band.spaces[ax].lo = 2 * b_lo;
-            fine_band.spaces[ax].hi = 2 * b_hi;
-            // the regions a dispatch covers must lie inside the lattices they index,
-            // and the chain's reference must lie outside the region the decode writes:
-            // every band cell runs concurrently on a device, so a reference inside the
-            // written set would read pressures its neighbours are overwriting.
-            for a in 0..D {
-                assert!(
-                    band_dom.spaces[a].lo >= coarse_interior.spaces[a].lo
-                        && band_dom.spaces[a].hi <= coarse_interior.spaces[a].hi,
-                    "band {:?} leaves the coarse interior {:?} on axis {a}",
-                    band_dom.spaces,
-                    coarse_interior.spaces
-                );
-                assert!(
-                    fine_band.spaces[a].lo >= fine_interior.spaces[a].lo
-                        && fine_band.spaces[a].hi <= fine_interior.spaces[a].hi,
-                    "fine band {:?} leaves the fine interior {:?} on axis {a}",
-                    fine_band.spaces,
-                    fine_interior.spaces
-                );
-            }
-            assert!(
-                uncovered < band_dom.spaces[ax].lo || uncovered >= band_dom.spaces[ax].hi,
-                "the decode's reference cell {uncovered} lies inside the band it writes, \
-                 {:?}: concurrent threads would read pressures being overwritten",
-                band_dom.spaces[ax]
-            );
-
-            // the fine edge cell and the seam face along `ax`.
-            let edge = if high { 2 * c_hi - 1 } else { 2 * c_lo };
-            let face =
-                fine_x_lo[ax] + (if high { 2 * c_hi } else { 2 * c_lo }) as f64 * fine_dx[ax];
-
-            // encode: fine departures from the uncovered cell continued across the seam.
+    // encode: fine departures from the uncovered cell continued across the seam, or from the
+    // near side's equilibrium at the fine row beside the cut.
+    match seam.side {
+        BandSide::Near => {
+            let face = fine_x_lo[ax] + seam.face_index as f64 * fine_dx[ax];
             let mut ints: Vec<i32> = Vec::new();
             let mut lo = fine_lo.clone();
             let mut hi = fine_hi.clone();
-            lo[ax] = edge as i32;
-            hi[ax] = edge as i32;
+            lo[ax] = seam.edge as i32;
+            hi[ax] = seam.edge as i32;
             ints.extend(lo.iter());
             ints.extend(hi.iter());
-            ints.push(uncovered as i32);
+            ints.push(seam.uncovered as i32);
             let mut scalars = vec![face];
             scalars.extend_from_slice(fine_x_lo);
             scalars.extend_from_slice(fine_dx);
@@ -1030,68 +1085,104 @@ pub fn restrict_band_balanced<const D: usize, const DOF: usize, Mem: MemorySpace
                         axis: ax as u8,
                     }
                     .name(),
-                    &fine_band,
+                    fine_band,
                     &[&fine.rho, fine_pre, &coarse_prim.rho, coarse_pre],
+                    &[departure, fine_anchor],
+                    &ints,
+                    &scalars,
+                );
+            });
+        }
+        BandSide::Far { fine_row, .. } => {
+            let mut lo = fine_lo.clone();
+            let mut hi = fine_hi.clone();
+            lo[ax] = fine_row as i32;
+            hi[ax] = fine_row as i32;
+            let ints: Vec<i32> = lo.iter().chain(hi.iter()).copied().collect();
+            let mut scalars = Vec::new();
+            scalars.extend_from_slice(fine_x_lo);
+            scalars.extend_from_slice(fine_dx);
+            scalars.extend_from_slice(&body_scalars);
+            prof("wb_band_encode", || {
+                dispatch_fields_each::<f64, Mem, D>(
+                    KernelId::WbBandEncodeAnchored {
+                        ndim: D as u8,
+                        axis: ax as u8,
+                    }
+                    .name(),
+                    fine_band,
+                    &[&fine.rho, fine_pre, fine_anchor],
                     &[departure],
                     &ints,
                     &scalars,
                 );
             });
-
-            // restrict the departures into the coarse-side scratch; the pressure
-            // field keeps the conservative restriction, which the decode reads
-            // per cell as its abstention value.
-            prof("wb_band_restrict", || {
-                restrict_cell_field(departure, coarse_departure, &band_dom)
-            });
-
-            // decode: the coarse chain from the uncovered cell through the band.
-            let mut lo = coarse_lo.clone();
-            let mut hi = coarse_hi.clone();
-            lo[ax] = uncovered as i32;
-            hi[ax] = uncovered as i32;
-            let ints: Vec<i32> = lo.iter().chain(hi.iter()).copied().collect();
-            let mut scalars = Vec::new();
-            scalars.extend_from_slice(coarse_x_lo);
-            scalars.extend_from_slice(coarse_dx);
-            scalars.extend_from_slice(&body_scalars);
-            let cons_before = census_snapshot(coarse_pre, &band_dom);
-            prof("wb_band_decode", || {
-                dispatch_fields_each::<f64, Mem, D>(
-                    KernelId::WbBandDecode { ndim: D as u8 }.name(),
-                    &band_dom,
-                    &[&coarse_prim.rho, coarse_departure],
-                    &[coarse_pre],
-                    &ints,
-                    &scalars,
-                );
-            });
-            census_band_decode(
-                "band decode",
-                cons_before,
-                coarse_departure,
-                coarse_pre,
-                &band_dom,
-            );
-
-            // the band's conserved energy follows its rewritten pressure.
-            let mut inputs: Vec<&symbi_grid::Field<f64, D, Mem>> = vec![&coarse_prim.rho];
-            for k in 0..D {
-                inputs.push(&coarse_prim.vel[k]);
-            }
-            inputs.push(coarse_pre);
-            prof("wb_band_energy", || {
-                dispatch_fields_each::<f64, Mem, D>(
-                    KernelId::BandEnergy { ndim: D as u8 }.name(),
-                    &band_dom,
-                    &inputs,
-                    &[coarse_nrg],
-                    &[],
-                    &[gamma],
-                );
-            });
         }
     }
+
+    // restrict the departures into the coarse-side scratch; the pressure
+    // field keeps the conservative restriction, which the decode reads
+    // per cell as its abstention value.
+    prof("wb_band_restrict", || {
+        restrict_cell_field(departure, coarse_departure, band_dom)
+    });
+
+    // decode: the coarse chain from the uncovered cell, or from the near side's equilibrium at
+    // the row beside the cut, through the band.
+    let mut lo = coarse_lo.clone();
+    let mut hi = coarse_hi.clone();
+    lo[ax] = reference as i32;
+    hi[ax] = reference as i32;
+    let ints: Vec<i32> = lo.iter().chain(hi.iter()).copied().collect();
+    let mut scalars = Vec::new();
+    scalars.extend_from_slice(coarse_x_lo);
+    scalars.extend_from_slice(coarse_dx);
+    scalars.extend_from_slice(&body_scalars);
+    // the chain's start at the reference row, in its own buffer: the decode writes the pressure
+    // and the equilibrium in place
+    let mut reference_row = band_dom.clone();
+    reference_row.spaces[ax].lo = reference;
+    reference_row.spaces[ax].hi = reference + 1;
+    let start = match seam.side {
+        BandSide::Near => coarse_pre,
+        BandSide::Far { .. } => coarse_anchor,
+    };
+    copy_field_region(start, coarse_reference, &reference_row);
+    let cons_before = census_snapshot(coarse_pre, band_dom);
+    prof("wb_band_decode", || {
+        dispatch_fields_each::<f64, Mem, D>(
+            KernelId::WbBandDecode { ndim: D as u8 }.name(),
+            band_dom,
+            &[&coarse_prim.rho, coarse_departure, coarse_reference],
+            &[coarse_pre, coarse_anchor],
+            &ints,
+            &scalars,
+        );
+    });
+    census_band_decode(
+        "band decode",
+        cons_before,
+        coarse_departure,
+        coarse_pre,
+        band_dom,
+    );
+
+    // the band's conserved energy follows its rewritten pressure.
+    let mut inputs: Vec<&symbi_grid::Field<f64, D, Mem>> = vec![&coarse_prim.rho];
+    for k in 0..D {
+        inputs.push(&coarse_prim.vel[k]);
+    }
+    inputs.push(coarse_pre);
+    prof("wb_band_energy", || {
+        dispatch_fields_each::<f64, Mem, D>(
+            KernelId::BandEnergy { ndim: D as u8 }.name(),
+            band_dom,
+            &inputs,
+            &[coarse_nrg],
+            &[],
+            &[gamma],
+        );
+    });
 }
 
 /// pack the balance-aware transfer's per-slot body scalars in the kernels'

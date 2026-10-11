@@ -193,3 +193,16 @@ fn balanced_nested_tiles_match_the_single_hierarchy_with_every_band_on_one_tile(
         assert_tiles_match(cuts, &want, steps);
     }
 }
+
+/// root cuts inside level 2's bands, level-1 cells 24..28 and 36..40: root 13 falls on level-1
+/// cell 26 and root 19 on 38. the far tile resumes each chain from the near tile's equilibrium
+/// at the cell beside the cut
+#[test]
+fn balanced_nested_tiles_match_the_single_hierarchy_with_a_cut_inside_a_level_2_band() {
+    let reference = { let mut h = single(balanced); h.evolve(T_FINAL).unwrap(); h };
+    let steps = reference.levels[0].state.iteration;
+    let want = densities(std::slice::from_ref(&reference));
+    for cuts in [[vec![13], vec![]], [vec![19], vec![]], [vec![13], vec![19]], [vec![16], vec![13]]] {
+        assert_tiles_match(cuts, &want, steps);
+    }
+}

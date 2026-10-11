@@ -115,7 +115,7 @@ use super::transfer::{face_stencil_boxes,
     ProlongOrder, ProlongSweepScratch, bcell_from_bface_region, bface_cf_halo_slabs,
     cf_ghost_slabs, clip_to_prolongable, copy_field, copy_field_region, prolong_face_field,
     prolong_field,
-    prolong_prims_balanced, prolong_prims_swept, prolong_prims_targeted, restrict_band_balanced,
+    prolong_prims_balanced, prolong_prims_swept, prolong_prims_targeted, BandSeam, BandSide, band_seam, rewrite_band_seam,
     restrict_bface, restrict_cell_field, restrict_cons,
 };
 use std::ops::ControlFlow;
@@ -238,6 +238,13 @@ where
     /// balanced restriction, reused on every call. unused on the root and on
     /// plain hierarchies.
     pub band_departure: std::sync::OnceLock<Field<f64, NDIM, Mem>>,
+    /// the chained equilibrium the balanced restriction's encode (as a fine level) and decode (as
+    /// a coarse level) reach at each band cell: past a cut inside a band, the far side's chains
+    /// resume from it at the row beside the cut. lazily allocated like `band_departure`
+    pub band_anchor: std::sync::OnceLock<Field<f64, NDIM, Mem>>,
+    /// the start of a coarse band chain at its reference row, copied apart from the pressure and
+    /// the anchor the decode writes in place
+    pub band_reference: std::sync::OnceLock<Field<f64, NDIM, Mem>>,
     /// the region of this level covered by the next finer level, in absolute
     /// indices of this level. None on the finest. single-coverage cap: one
     /// refined box per level (a single `Domain`,
@@ -1224,6 +1231,8 @@ where
                 prim_lerp: None,
                 prolong_sweep: std::sync::OnceLock::new(),
                 band_departure: std::sync::OnceLock::new(),
+                band_anchor: std::sync::OnceLock::new(),
+                band_reference: std::sync::OnceLock::new(),
                 bcell_old: None,
                 bface_old: None,
                 attempt_entry: None,
@@ -1477,6 +1486,8 @@ where
             prim_lerp: None,
             prolong_sweep: std::sync::OnceLock::new(),
             band_departure: std::sync::OnceLock::new(),
+            band_anchor: std::sync::OnceLock::new(),
+            band_reference: std::sync::OnceLock::new(),
             bcell_old: None,
             bface_old: None,
             attempt_entry: None,
@@ -1735,6 +1746,8 @@ where
                 prim_lerp: None,
                 prolong_sweep: std::sync::OnceLock::new(),
                 band_departure: std::sync::OnceLock::new(),
+                band_anchor: std::sync::OnceLock::new(),
+                band_reference: std::sync::OnceLock::new(),
                 bcell_old: None,
                 bface_old: None,
                 attempt_entry: Some(attempt_entry),
@@ -4167,8 +4180,9 @@ where
     /// the finer-level subcycle. the flux/emf registers are tile-local (a coarse cell + the fine
     /// cells at its face are co-located), so the decomposed driver calls this per tile unchanged.
     /// a pure extraction.
-    pub fn level_restrict_reflux(&mut self, level: usize, alpha0: f64) {
-        let has_coarser = level > 0;
+    /// the restriction of level `level + 1` into level `level`, its reflux and the recovery of
+    /// level `level`'s primitives
+    pub fn level_restrict_cells(&mut self, level: usize) {
         let has_finer = level + 1 < self.levels.len();
         let is_mhd = self.levels[level].state.fields.mhd.is_some();
         if has_finer {
@@ -4217,22 +4231,70 @@ where
         }
         let l = &self.levels[level];
         prof("c2p", || l.kernels.c2p(&l.state));
-        if has_finer && self.levels[level].cons_eq.is_none() && self.cf_transfer_balanced(level + 1) {
-            // SYMBI_WB_BAND=0 withholds the band rewrite so the seam carries the
-            // conservative restriction alone; the identical binary then runs the
-            // counterfactual arm of the seam admissibility census, attributing
-            // decode abstentions between the band's anchor rewrite and the
-            // turbulent density contrast.
-            if wb_band_enabled() {
-                prof("refine_restrict_balanced", || {
-                    self.restrict_band_balanced(level)
-                });
+    }
+
+    /// the restriction of level `level + 1` into level `level` with its reflux, the seam bands
+    /// rewritten, and level `level`'s coarse-fine ghosts and physical fill. a tile holding a seam
+    /// band without its uncovered cell leaves it to the driver, which carries the near side's
+    /// chains across the cut
+    pub fn level_restrict_reflux(&mut self, level: usize, alpha0: f64) {
+        self.level_restrict_cells(level);
+        if self.rewrites_bands(level) {
+            for axis in 0..NDIM {
+                for high in [false, true] {
+                    if let Some(seam) = self.band_seam(level, axis, high).filter(|s| s.side == BandSide::Near) {
+                        self.rewrite_band_seam(level, &seam);
+                    }
+                }
             }
         }
-        if has_coarser {
+        self.level_restrict_finish(level, alpha0);
+    }
+
+    /// level `level`'s coarse-fine ghosts from its parent at the end of its substep and its
+    /// physical fill, after the restriction into it
+    pub fn level_restrict_finish(&mut self, level: usize, alpha0: f64) {
+        if level > 0 {
             self.prolong_cf(level, alpha0 + 1.0 / RATIO as f64);
         }
         prof("ghost_fill", || self.fill_physical_ghosts(level));
+    }
+
+    /// whether level `level` rewrites the seam bands of its finer level after the restriction:
+    /// a balanced transfer without a declared target. SYMBI_WB_BAND=0 withholds the band rewrite
+    /// so the seam carries the conservative restriction alone; the identical binary then runs the
+    /// counterfactual arm of the seam admissibility census, attributing decode abstentions
+    /// between the band's anchor rewrite and the turbulent density contrast.
+    pub fn rewrites_bands(&self, level: usize) -> bool {
+        level + 1 < self.levels.len()
+            && self.levels[level].cons_eq.is_none()
+            && self.cf_transfer_balanced(level + 1)
+            && wb_band_enabled()
+    }
+
+    /// the band of the seam on `axis` (low or `high` side) of level `level + 1`'s whole patch
+    /// that this tile holds cells of on level `level`
+    pub fn band_seam(&self, level: usize, axis: usize, high: bool) -> Option<BandSeam<NDIM>> {
+        let coarse = &self.levels[level];
+        let fine = &self.levels[level + 1];
+        let coverage = coarse.coverage.as_ref().unwrap();
+        let whole = fine.patch_interior.as_ref().map_or_else(
+            || coverage.clone(),
+            |p| {
+                Domain::new(std::array::from_fn(|a| Space {
+                    name: p.spaces[a].name,
+                    lo: p.spaces[a].lo.div_euclid(RATIO as isize),
+                    hi: p.spaces[a].hi.div_euclid(RATIO as isize),
+                }))
+            },
+        );
+        // the uncovered cell's update over one step depends on cells within `reach` per stage;
+        // the band holds the cells its own stencils read and two more, each of which removes a
+        // limiter-slope hop from the path the conservatively restricted interior's class offset
+        // takes to reach it (measured ~10x attenuation per cell on the sealed class column).
+        // capped by the decode's unrolled chain.
+        let band = (coarse.kernels.reconstruction_reach() as usize + 2).min(symbi_discretize::WB_CF_CHAIN_MAX as usize);
+        band_seam(coverage, &whole, &coarse.state.geom.interior, band, axis, high)
     }
 
     /// the balanced restriction of level `level`'s seam bands from level `level + 1`:
@@ -4241,7 +4303,10 @@ where
     /// the seam, carrying the fine departure. runs after the conservative restriction
     /// and the coarse c2p, and rebuilds the band's conserved energy, which requires
     /// the gamma-law closure the kernel set reports.
-    fn restrict_band_balanced(&self, level: usize) {
+    /// the balanced restriction of one seam band of level `level + 1` this tile holds, on level
+    /// `level`: the near side's chains start at the uncovered cell, the far side's resume from the
+    /// anchors the driver carried into its halo
+    pub fn rewrite_band_seam(&self, level: usize, seam: &BandSeam<NDIM>) {
         let coarse = &self.levels[level];
         let fine = &self.levels[level + 1];
         let gamma = coarse.kernels.gamma_law().unwrap_or_else(|| {
@@ -4259,35 +4324,41 @@ where
         let coarse_departure = coarse.band_departure.get_or_init(|| {
             Field::zeros(&coarse.state.geom.allocated).expect("band departure scratch")
         });
-        restrict_band_balanced(
-            &fine.state.fields.prim,
-            &fine.state.geom.interior,
-            departure,
-            coarse_departure,
-            &coarse.state.fields.prim,
-            coarse
-                .state
-                .fields
-                .cons
-                .nrg_field()
-                .expect("the balanced restriction needs cons.nrg"),
-            &coarse.state.geom.interior,
-            coarse.coverage.as_ref().unwrap(),
-            // the uncovered cell's update over one step depends on cells within
-            // `reach` per stage; the band holds the cells its own stencils read
-            // and two more, each of which removes a limiter-slope hop from the
-            // path the conservatively restricted interior's class offset takes
-            // to reach it (measured ~10x attenuation per cell on the sealed
-            // class column). capped by the decode's unrolled chain.
-            (coarse.kernels.reconstruction_reach() as usize + 2)
-                .min(symbi_discretize::WB_CF_CHAIN_MAX as usize),
-            gamma,
-            &shifted_origin(&fine.state.geom),
-            &fine.state.geom.dx,
-            &shifted_origin(&coarse.state.geom),
-            &coarse.state.geom.dx,
-            &coarse.state.immersed.as_ref().unwrap().bodies,
-        );
+        let fine_anchor = fine.band_anchor.get_or_init(|| {
+            Field::zeros(&fine.state.geom.allocated).expect("band anchor scratch")
+        });
+        let coarse_anchor = coarse.band_anchor.get_or_init(|| {
+            Field::zeros(&coarse.state.geom.allocated).expect("band anchor scratch")
+        });
+        let coarse_reference = coarse.band_reference.get_or_init(|| {
+            Field::zeros(&coarse.state.geom.allocated).expect("band reference scratch")
+        });
+        prof("refine_restrict_balanced", || {
+            rewrite_band_seam(
+                seam,
+                &fine.state.fields.prim,
+                &fine.state.geom.interior,
+                departure,
+                fine_anchor,
+                coarse_departure,
+                &coarse.state.fields.prim,
+                coarse
+                    .state
+                    .fields
+                    .cons
+                    .nrg_field()
+                    .expect("the balanced restriction needs cons.nrg"),
+                &coarse.state.geom.interior,
+                coarse_anchor,
+                coarse_reference,
+                gamma,
+                &shifted_origin(&fine.state.geom),
+                &fine.state.geom.dx,
+                &shifted_origin(&coarse.state.geom),
+                &coarse.state.geom.dx,
+                &coarse.state.immersed.as_ref().unwrap().bodies,
+            )
+        });
     }
 
     /// advance this level's clock (fine levels only; the root clock is the driver's). pure extraction.
@@ -6466,6 +6537,94 @@ where
 
 /// level `level`'s materialized ito coefficients across its cuts, after each tile filled its
 /// physical and coarse-fine ghosts
+/// carry every tile's band anchors on level `level` into its neighbors' cut ghosts
+fn exchange_level_band_anchor<R, const NDIM: usize, const DOF: usize, M, E, S, Mem, K, T>(
+    tiles: &[Hierarchy<R, NDIM, DOF, M, E, S, Mem, K>],
+    level: usize,
+    order: &[usize],
+    counts: [usize; NDIM],
+    devices: &[i32],
+    transport: &T,
+) where
+    R: Regime<f64, NDIM> + Copy,
+    M: Metric<f64, NDIM> + Copy + Send + Sync,
+    E: symbi_hydro::eos::EosFor<f64, <R as Regime<f64, NDIM>>::Energy> + Copy + Send + Sync,
+    S: ExecutionSpace,
+    Mem: MemorySpace + Sync,
+    K: KernelSet<NDIM, DOF, Mem, f64>,
+    T: HaloTransport,
+{
+    drain_devices::<Mem>(devices);
+    let states: Vec<&FieldStore<NDIM, DOF, Mem, f64>> = order.iter().map(|&i| &*tiles[i].levels[level].state).collect();
+    let anchors: Vec<&Field<f64, NDIM, Mem>> = order
+        .iter()
+        .map(|&i| {
+            let l = &tiles[i].levels[level];
+            l.band_anchor.get_or_init(|| Field::zeros(&l.state.geom.allocated).expect("band anchor scratch"))
+        })
+        .collect();
+    let schedule = schedule_of_tiles(&states, counts, &level_topology(tiles, level, order));
+    symbi_sim::decomp::exchange_cell_field(&states, &anchors, &schedule, devices, transport);
+    drain_devices::<Mem>(devices);
+}
+
+/// the seam bands of level `level + 1`'s patch rewritten on level `level` across the tiles, seam
+/// by seam in the single hierarchy's order: the tiles holding a band's uncovered cell rewrite
+/// their part, and where the band continues past a cut the restricted coarse cells, the fine
+/// cells and the chained equilibria beside the cut cross it before the far tiles rewrite theirs.
+/// a corner cell under two bands takes their rewrites in the same order on every layout. `coarse`
+/// holds level `level` and `fine` level `level + 1`
+fn decomposed_bands<R, const NDIM: usize, const DOF: usize, M, E, S, Mem, K, T>(
+    tiles: &[Hierarchy<R, NDIM, DOF, M, E, S, Mem, K>],
+    level: usize,
+    coarse: (&[usize], [usize; NDIM], &[i32]),
+    fine: &FineSubgrid<NDIM>,
+    transport: &T,
+) where
+    R: Regime<f64, NDIM> + Copy,
+    M: Metric<f64, NDIM> + Copy + Send + Sync,
+    E: symbi_hydro::eos::EosFor<f64, <R as Regime<f64, NDIM>>::Energy> + Copy + Send + Sync,
+    S: ExecutionSpace,
+    Mem: MemorySpace + Sync,
+    K: KernelSet<NDIM, DOF, Mem, f64>,
+    T: HaloTransport,
+{
+    let holders: Vec<(usize, i32)> = fine
+        .order
+        .iter()
+        .zip(&fine.devices)
+        .filter(|(i, _)| tiles[**i].rewrites_bands(level))
+        .map(|(i, d)| (*i, *d))
+        .collect();
+    if holders.is_empty() {
+        return;
+    }
+    for axis in 0..NDIM {
+        for high in [false, true] {
+            let seams: Vec<(usize, i32, BandSeam<NDIM>)> = holders
+                .iter()
+                .filter_map(|&(i, d)| tiles[i].band_seam(level, axis, high).map(|s| (i, d, s)))
+                .collect();
+            // a band whose uncovered cell no tile holds meets the domain's boundary
+            if !seams.iter().any(|(_, _, s)| s.side == BandSide::Near) {
+                continue;
+            }
+            for (i, d, seam) in seams.iter().filter(|(_, _, s)| s.side == BandSide::Near) {
+                symbi_xpu::with_device(*d, || tiles[*i].rewrite_band_seam(level, seam));
+            }
+            if seams.iter().any(|(_, _, s)| s.side != BandSide::Near) {
+                exchange_level_halos(tiles, level, coarse.0, coarse.1, coarse.2, transport);
+                exchange_level_halos(tiles, level + 1, &fine.order, fine.counts, &fine.devices, transport);
+                exchange_level_band_anchor(tiles, level, coarse.0, coarse.1, coarse.2, transport);
+                exchange_level_band_anchor(tiles, level + 1, &fine.order, fine.counts, &fine.devices, transport);
+                for (i, d, seam) in seams.iter().filter(|(_, _, s)| s.side != BandSide::Near) {
+                    symbi_xpu::with_device(*d, || tiles[*i].rewrite_band_seam(level, seam));
+                }
+            }
+        }
+    }
+}
+
 fn exchange_level_ito<R, const NDIM: usize, const DOF: usize, M, E, S, Mem, K, T>(
     tiles: &[Hierarchy<R, NDIM, DOF, M, E, S, Mem, K>],
     level: usize,
@@ -7008,7 +7167,11 @@ where
             }
             for (k, &i) in finer.order.iter().enumerate() {
                 phase_probe::set_tile(i);
-                symbi_xpu::with_device(finer.devices[k], || tiles[i].level_restrict_reflux(level, alpha));
+                symbi_xpu::with_device(finer.devices[k], || tiles[i].level_restrict_cells(level));
+            }
+            decomposed_bands(tiles, level, (&fg.order, fg.counts, &fg.devices), finer, transport);
+            for (k, &i) in finer.order.iter().enumerate() {
+                symbi_xpu::with_device(finer.devices[k], || tiles[i].level_restrict_finish(level, alpha));
             }
             // a tile holding this level and none finer recovers it as the restriction recovers the
             // single hierarchy's
@@ -7267,9 +7430,11 @@ where
                 if !retry {
                     for (k, &i) in fg.order.iter().enumerate() {
                         phase_probe::set_tile(i);
-                        symbi_xpu::with_device(fg.devices[k], || {
-                            tiles[i].level_restrict_reflux(0, 0.0)
-                        });
+                        symbi_xpu::with_device(fg.devices[k], || tiles[i].level_restrict_cells(0));
+                    }
+                    decomposed_bands(tiles, 0, (root_order, counts, devices), fg, transport);
+                    for (k, &i) in fg.order.iter().enumerate() {
+                        symbi_xpu::with_device(fg.devices[k], || tiles[i].level_restrict_finish(0, 0.0));
                     }
                     // a tile beside a neighbor's patch face on a cut applies the units it received
                     // and recovers its cells beside the patch; every other tile holding no fine

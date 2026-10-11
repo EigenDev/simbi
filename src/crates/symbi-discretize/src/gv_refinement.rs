@@ -1280,9 +1280,10 @@ pub fn wb_target_decode_gv(ndim: usize, ncomp: usize) -> KernelProgram {
 /// its own cell, so the in-place write is race-free.
 ///
 /// buffers: dst_rho (the restricted coarse density, input), band_dep (the
-/// restricted departures, input), dst_pre (conservative pressure in, decoded
-/// pressure out). ints: lo_{ax}, hi_{ax} (the uncovered reference row,
-/// inclusive). scalars: x_lo_{ax}, dx_{ax} (the coarse lattice), then the body
+/// restricted departures, input), ref_pre (the chain's start at the reference
+/// row: the coarse pressure, or past a cut the near side's equilibrium, input),
+/// dst_pre (conservative pressure in, decoded pressure out), eq (the chained
+/// equilibrium, output). ints: lo_{ax}, hi_{ax} (the reference row, inclusive). scalars: x_lo_{ax}, dx_{ax} (the coarse lattice), then the body
 /// slots.
 pub fn wb_band_decode_gv(ndim: usize, n_bodies: usize) -> KernelProgram {
     assert!(
@@ -1297,17 +1298,20 @@ pub fn wb_band_decode_gv(ndim: usize, n_bodies: usize) -> KernelProgram {
         let dx: Vec<Gv> = (0..ndim).map(|ax| cx.scalar(&format!("dx_{ax}"))).collect();
         let slots = declare_body_slots(cx, ndim, n_bodies);
 
-        // registration order pins the buffer order: density, departures, pressure.
+        // registration order pins the buffer order: density, departures, the reference
+        // pressure, pressure.
         let rho_at = |idx: &[NodeId]| gv_load_at(cx, "dst_rho", "dst_rho", idx);
         let coords: Vec<NodeId> =
             cx.with_trace(|t| (0..ndim).map(|ax| t.coord(ax as u8)).collect());
         let _ = rho_at(&coords);
         let departure = cx.field("band_dep", "band_dep");
-        let p_cons = cx.field("dst_pre", "dst_pre");
         let ref_idx: Vec<NodeId> = (0..ndim)
             .map(|ax| int_clamp(cx, coords[ax], lo[ax], hi[ax]))
             .collect();
-        let p_ref = gv_load_at(cx, "dst_pre", "dst_pre", &ref_idx);
+        // the chain's start: the uncovered cell's pressure, or past a cut inside the band the
+        // equilibrium the near side's decode reached at the cell beside the cut
+        let p_ref = gv_load_at(cx, "ref_pre", "ref_pre", &ref_idx);
+        let p_cons = cx.field("dst_pre", "dst_pre");
         let all = vec![true; ndim];
         let p_eq = chained_pressure(
             cx,
@@ -1325,7 +1329,12 @@ pub fn wb_band_decode_gv(ndim: usize, n_bodies: usize) -> KernelProgram {
         let zero = Gv::from_f64(0.0);
         let decoded = departure + p_eq;
         let pre_g = Gv::select(decoded.cmp_gt(zero), decoded, p_cons);
-        let writes = vec![KernelWrite::new("dst_pre", "dst_pre", pre_g.node())];
+        // the chained equilibrium itself: a tile across a cut inside the band continues the
+        // chain from it
+        let writes = vec![
+            KernelWrite::new("dst_pre", "dst_pre", pre_g.node()),
+            KernelWrite::new("eq", "eq", p_eq.node()),
+        ];
         writes
     })
 }
@@ -1344,7 +1353,8 @@ pub fn wb_band_decode_gv(ndim: usize, n_bodies: usize) -> KernelProgram {
 /// encodes to its full amplitude, so the coarse side sees it.
 ///
 /// buffers: src_rho, src_pre (the fine primitives, inputs), crs_rho, crs_pre
-/// (the coarse primitives, inputs) then dst (the fine departure, output). ints:
+/// (the coarse primitives, inputs) then dst (the fine departure, output) and eq
+/// (the chained equilibrium, output). ints:
 /// lo_{ax}, hi_{ax} (the fine reference clamp: the fine interior edge on the
 /// seam's normal axis, the interior elsewhere), a (the uncovered coarse index on
 /// the normal axis). the normal itself is a bake-time axis, so the chain carries
@@ -1413,6 +1423,68 @@ pub fn wb_band_encode_gv(ndim: usize, n_bodies: usize, normal: usize) -> KernelP
         let p_ref = pre_a + rho_a * (phi_a - phi_f) + rho_e * (phi_f - phi_e);
         // the band spans the coverage transversely and the reference is its own edge
         // cell, so a thread leaves the reference on the seam normal alone.
+        let mut vary = vec![false; ndim];
+        vary[normal] = true;
+        let p_eq = chained_pressure(
+            cx,
+            ndim,
+            &ref_idx,
+            p_ref,
+            &rho_at,
+            &x_lo,
+            &dx,
+            &slots,
+            WB_BAND_CHAIN_MAX,
+            &vary,
+        );
+        let departure = pre_cell - p_eq;
+        // the chained equilibrium itself: a tile across a cut inside the band continues the
+        // chain from it
+        let writes = vec![
+            KernelWrite::new("dst", "dst", departure.node()),
+            KernelWrite::new("eq", "eq", p_eq.node()),
+        ];
+        writes
+    })
+}
+
+/// trace the balanced restriction's fine encode on the far side of a cut inside a band: the
+/// chain resumes from the equilibrium the near side's encode reached at the cell beside the cut
+/// (`anchor` at the reference row) and continues through the fine cells' own densities, the same
+/// steps in the same order as the uncut encode. a cell's departure is its pressure less the chain.
+///
+/// buffers: src_rho, src_pre (the fine primitives, inputs), anchor (the near side's equilibrium,
+/// read at the reference row) then dst (the fine departure, output). ints: lo_{ax}, hi_{ax} (the
+/// reference clamp: the row beside the cut on the seam's normal axis, the interior elsewhere).
+/// scalars: x_lo_{ax}, dx_{ax} (fine), then the body slots.
+pub fn wb_band_encode_anchored_gv(ndim: usize, n_bodies: usize, normal: usize) -> KernelProgram {
+    assert!(
+        (1..=3).contains(&ndim),
+        "wb_band_encode_anchored_gv: ndim must be 1..=3"
+    );
+    assert!(
+        normal < ndim,
+        "wb_band_encode_anchored_gv: the seam normal must be a grid axis"
+    );
+    trace_kernel(|cx| {
+        let (lo, hi) = declare_interior_bounds(cx, ndim);
+        let x_lo: Vec<Gv> = (0..ndim)
+            .map(|ax| cx.scalar(&format!("x_lo_{ax}")))
+            .collect();
+        let dx: Vec<Gv> = (0..ndim).map(|ax| cx.scalar(&format!("dx_{ax}"))).collect();
+        let slots = declare_body_slots(cx, ndim, n_bodies);
+
+        // registration order pins the buffer order: fine rho, fine pre, the anchor, then the
+        // departure output.
+        let coords: Vec<NodeId> =
+            cx.with_trace(|t| (0..ndim).map(|ax| t.coord(ax as u8)).collect());
+        let rho_at = |idx: &[NodeId]| gv_load_at(cx, "src_rho", "src_rho", idx);
+        let _ = rho_at(&coords);
+        let pre_cell = cx.field("src_pre", "src_pre");
+        let ref_idx: Vec<NodeId> = (0..ndim)
+            .map(|ax| int_clamp(cx, coords[ax], lo[ax], hi[ax]))
+            .collect();
+        let p_ref = gv_load_at(cx, "anchor", "anchor", &ref_idx);
         let mut vary = vec![false; ndim];
         vary[normal] = true;
         let p_eq = chained_pressure(

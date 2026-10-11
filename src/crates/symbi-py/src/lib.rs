@@ -8887,7 +8887,7 @@ fn dispatch_and_run(
     validate_declared_target(cfg, validate_primitive_rows(cfg, prims)?)?;
     if cfg.n_gpus > 1 {
         validate_tiled_march(cfg)?;
-        validate_tiled_balance(cfg)?;
+        validate_tiled_balance(cfg, false)?;
     }
     match cfg.regime.as_str() {
         "newtonian" => hydro_dispatch!(cfg, prims, Newtonian, Newtonian),
@@ -10708,9 +10708,9 @@ fn launch_experimental_opt_in() -> bool {
 /// body source read the cells beside each face, which the halo exchange fills, and are gated on
 /// the cartesian grids, the spherical line and (r, theta) shell and the cylindrical line; under
 /// refinement, on the 2D and 3D cartesian grids, the balanced coarse-fine transfer and the seam
-/// band rewrite start their chains from cells of the whole patch, which a cut through a seam band
-/// separates
-fn validate_tiled_balance(cfg: &Config) -> Result<(), String> {
+/// band rewrite start their chains from cells of the whole patch: the host tiles carry a band's
+/// chains across one cut inside it, and the launched workers keep every band on one tile
+fn validate_tiled_balance(cfg: &Config, launched: bool) -> Result<(), String> {
     if !cfg.wb_reconstruction {
         return Ok(());
     }
@@ -10729,16 +10729,32 @@ fn validate_tiled_balance(cfg: &Config) -> Result<(), String> {
         ));
     }
     if cfg.refinement_enabled {
-        let crossed = match cfg.dims {
-            2 => cut_in_balanced_band::<2>(cfg)?,
-            _ => cut_in_balanced_band::<3>(cfg)?,
+        let crossings = match cfg.dims {
+            2 => cuts_in_balanced_bands::<2>(cfg)?,
+            _ => cuts_in_balanced_bands::<3>(cfg)?,
         };
-        if let Some((level, ax, cut, face, band)) = crossed {
+        // the host tiles carry a band's chains across one cut inside it; the launched workers
+        // carry no band anchors, and a cut on the patch face or two cuts inside one band leave the
+        // chains no tile to resume on
+        let refused = crossings.iter().find(|c| {
+            launched
+                || c.on_face
+                || crossings.iter().filter(|o| (o.level, o.axis, o.face) == (c.level, c.axis, c.face)).count() > 1
+        });
+        if let Some(c) = refused {
+            let (level, ax, cut, face, band) = (c.level, c.axis, c.cut, c.face, c.band);
             let at = if level == 0 {
                 format!("the patch face at {face}")
             } else {
                 format!("the level-{} patch face at level-{level} cell {face}", level + 1)
             };
+            if !launched && !c.on_face {
+                return Err(format!(
+                    "wb_reconstruction with mesh refinement on several tiles: two cuts on axis {ax} \
+                     cross the {band}-cell balanced restriction band inside {at}; the band's chains \
+                     resume across one cut, so keep at most one cut inside it"
+                ));
+            }
             return Err(format!(
                 "wb_reconstruction with mesh refinement on several tiles: the cut at root cell {cut} on \
                  axis {ax} crosses the {band}-cell balanced restriction band inside {at}, which rewrites \
@@ -10750,14 +10766,26 @@ fn validate_tiled_balance(cfg: &Config) -> Result<(), String> {
     Ok(())
 }
 
-/// the first cut of the tile partition that falls in a seam band of a refined patch: the
-/// balanced restriction rewrites the parent cells within `band` cells of each seam from the
-/// uncovered parent cell beyond it, so the band and that cell share one tile. `band` is the
-/// reconstruction reach plus two parent cells, capped by the unrolled chain; a seam lies wherever
-/// the patch face is inside the domain. region `ii` refines level `ii`, whose cells are the root
-/// cells split by 2^ii, so a root cut at `c` falls on level-`ii` cell `c * 2^ii`. returns
-/// (parent level, axis, root cut, face in parent cells, band)
-fn cut_in_balanced_band<const D: usize>(cfg: &Config) -> Result<Option<(usize, usize, usize, usize, usize)>, String> {
+/// a cut of the tile partition inside or on the face of a seam band of a refined patch
+struct BandCrossing {
+    /// the parent level of the band, the axis of the cut, the root cut, the patch face in parent
+    /// cells and the band's width
+    level: usize,
+    axis: usize,
+    cut: usize,
+    face: usize,
+    band: usize,
+    /// the cut lies on the patch face itself
+    on_face: bool,
+}
+
+/// every cut of the tile partition that falls in a seam band of a refined patch: the balanced
+/// restriction rewrites the parent cells within `band` cells of each seam from the uncovered
+/// parent cell beyond it. `band` is the reconstruction reach plus two parent cells, capped by the
+/// unrolled chain; a seam lies wherever the patch face is inside the domain. region `ii` refines
+/// level `ii`, whose cells are the root cells split by 2^ii, so a root cut at `c` falls on
+/// level-`ii` cell `c * 2^ii`
+fn cuts_in_balanced_bands<const D: usize>(cfg: &Config) -> Result<Vec<BandCrossing>, String> {
     let reach = match cfg.reconstruction_name.as_str() {
         "pcm" => 1,
         "ppm" => 3,
@@ -10766,29 +10794,29 @@ fn cut_in_balanced_band<const D: usize>(cfg: &Config) -> Result<Option<(usize, u
     let band = (reach + 2).min(symbi::WB_CF_CHAIN_MAX as usize);
     let n: [usize; D] = std::array::from_fn(|ax| cfg.n_cells[ax]);
     let partition = tile_partition(n, cfg)?;
+    let counts = partition.counts();
     let regions = refinement_regions_nd::<D>(&cfg.refinement_regions)?;
+    let mut crossings = Vec::new();
     for (level, region) in regions.iter().enumerate() {
         let scale = 1usize << level;
         let cell = |x: f64, ax: usize| ((x - cfg.x_lo[ax]) / cfg.dx[ax] * scale as f64).round() as usize;
-        for flat in 0..partition.n_tiles() {
-            let ext = partition.tile_extents(symbi::sim::decomp::unflatten(flat, partition.counts()));
-            for ax in 0..D {
-                let cut = ext[ax].0;
-                if cut == 0 {
-                    continue;
-                }
+        for ax in 0..D {
+            let (lo, hi) = (cell(region.x_lo[ax], ax), cell(region.x_hi[ax], ax));
+            for k in 1..counts[ax] {
+                let mut tc = [0usize; D];
+                tc[ax] = k;
+                let cut = partition.tile_extents(tc)[ax].0;
                 let at = cut * scale;
-                let (lo, hi) = (cell(region.x_lo[ax], ax), cell(region.x_hi[ax], ax));
                 if lo > 0 && (lo..lo + band).contains(&at) {
-                    return Ok(Some((level, ax, cut, lo, band)));
+                    crossings.push(BandCrossing { level, axis: ax, cut, face: lo, band, on_face: at == lo });
                 }
                 if hi < n[ax] * scale && (hi.saturating_sub(band) + 1..=hi).contains(&at) {
-                    return Ok(Some((level, ax, cut, hi, band)));
+                    crossings.push(BandCrossing { level, axis: ax, cut, face: hi, band, on_face: at == hi });
                 }
             }
         }
     }
-    Ok(None)
+    Ok(crossings)
 }
 
 /// the launch authorization of a combination: a gated one (`ungated` is `None`) runs; an ungated
@@ -10987,7 +11015,7 @@ fn validate_launch_scope(cfg: &Config) -> Result<(), String> {
     // a combination the launched tiles build as the single path does but that no distributed
     // gate has validated: refused by name, or run as experimental under an explicit opt-in.
     // successful construction is no evidence of validated support
-    validate_tiled_balance(cfg)?;
+    validate_tiled_balance(cfg, true)?;
     if let Some(property) = authorize_launch(ungated_launch_combination(cfg), launch_experimental_opt_in())? {
         eprintln!("SIMBI launch: experimental combination without a distributed gate: {property}");
     }

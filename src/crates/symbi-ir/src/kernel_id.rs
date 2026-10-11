@@ -105,6 +105,10 @@ pub enum KernelId {
         ndim: u8,
         axis: u8,
     },
+    WbBandEncodeAnchored {
+        ndim: u8,
+        axis: u8,
+    },
     WbBandDecode {
         ndim: u8,
     },
@@ -371,6 +375,23 @@ impl KernelId {
                     "wb_band_encode_2_1d",
                     "wb_band_encode_2_2d",
                     "wb_band_encode_2_3d",
+                ],
+            ][axis as usize][dim_ix(ndim)],
+            KernelId::WbBandEncodeAnchored { ndim, axis } => [
+                [
+                    "wb_band_encode_anchored_0_1d",
+                    "wb_band_encode_anchored_0_2d",
+                    "wb_band_encode_anchored_0_3d",
+                ],
+                [
+                    "wb_band_encode_anchored_1_1d",
+                    "wb_band_encode_anchored_1_2d",
+                    "wb_band_encode_anchored_1_3d",
+                ],
+                [
+                    "wb_band_encode_anchored_2_1d",
+                    "wb_band_encode_anchored_2_2d",
+                    "wb_band_encode_anchored_2_3d",
                 ],
             ][axis as usize][dim_ix(ndim)],
             KernelId::WbBandDecode { ndim } => [

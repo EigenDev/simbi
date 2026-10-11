@@ -303,11 +303,22 @@ fn an_inadmissible_band_decode_keeps_the_conservative_pressure() {
             scalars.extend_from_slice(&[0.0, 0.0, 0.0, 0.0, 1.0, 0.0]);
         }
     }
+    // the chain's start, the uncovered row's pressure, in its own buffer, and the chained
+    // equilibrium the decode writes beside the pressure
+    let reference = symbi_grid::Field::<f64, 3, symbi_xpu::HostMemory>::zeros(&st.geom.allocated).expect("reference");
+    let equilibrium = symbi_grid::Field::<f64, 3, symbi_xpu::HostMemory>::zeros(&st.geom.allocated).expect("equilibrium");
+    {
+        let pre_v = st.fields.prim.pre.as_ref().expect("adiabatic").view();
+        let mut ref_v = reference.view_mut();
+        for c in st.geom.allocated.iter().filter(|c| c[0] == uncovered) {
+            *ref_v.at_mut(c) = *pre_v.at(c);
+        }
+    }
     symbi::regimes::substrate_kernels::dispatch_fields_each::<f64, symbi_xpu::HostMemory, 3>(
         symbi_ir::KernelId::WbBandDecode { ndim: 3 }.name(),
         &band_c,
-        &[&st.fields.prim.rho, &scratch],
-        &[st.fields.prim.pre.as_ref().expect("adiabatic")],
+        &[&st.fields.prim.rho, &scratch, &reference],
+        &[st.fields.prim.pre.as_ref().expect("adiabatic"), &equilibrium],
         &ints,
         &scalars,
     );
