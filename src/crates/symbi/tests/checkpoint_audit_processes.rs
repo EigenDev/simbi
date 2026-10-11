@@ -217,7 +217,8 @@ fn run_worker(me: WorkerId, ckpt: &Path) -> Result<(), String> {
     result
 }
 
-fn worker_main() -> ! {
+fn worker_main(test: &str) -> ! {
+    std::fs::write(std::env::var("W_RAN").unwrap(), test).unwrap();
     let me = WorkerId(env_u64("W_ME").unwrap() as u32);
     let ckpt = PathBuf::from(std::env::var("W_CKPT").unwrap());
     match run_worker(me, &ckpt) {
@@ -227,6 +228,36 @@ fn worker_main() -> ! {
             std::process::exit(2);
         }
     }
+}
+
+/// the name libtest gives the test function `func`: its module path below the test crate's
+/// root, then the function. the root module is the crate itself, so a test file built as its
+/// own target names `func` bare and the same file built as a module of a larger target
+/// prefixes the module path.
+fn exact_name(func: &str) -> String {
+    match module_path!().split_once("::") {
+        Some((_, below_root)) => format!("{below_root}::{func}"),
+        None => func.to_string(),
+    }
+}
+
+/// the record a worker child writes on entering its test: a sibling of the scratch directory,
+/// so the directory holds only what the protocol publishes.
+fn ran_record(dir: &Path, me: u32) -> PathBuf {
+    PathBuf::from(format!("{}.ran{me}", dir.display()))
+}
+
+/// the child ran the test function `test`: its record names it. a child whose filter matched
+/// no test exits zero without a record.
+fn assert_ran(record: &Path, test: &str, me: u32) {
+    let ran = std::fs::read_to_string(record).unwrap_or_default();
+    let _ = std::fs::remove_file(record);
+    assert_eq!(
+        ran, test,
+        "worker {me} was launched for {test} but ran {ran:?}; its test filter {} selects a \
+         different test or none",
+        exact_name(test)
+    );
 }
 
 fn in_worker_role() -> bool {
@@ -244,9 +275,11 @@ fn run_arm(test: &str, dir: &Path, extra: &[(&str, String)]) -> Vec<Outcome> {
     let ckpt = dir.join("ckpt.h5");
     let mut children: Vec<Child> = (0..WORKERS)
         .map(|w| {
+            let _ = std::fs::remove_file(ran_record(dir, w));
             let mut cmd = Command::new(std::env::current_exe().unwrap());
-            cmd.args([test, "--exact", "--nocapture", "--test-threads=1"])
+            cmd.args([exact_name(test).as_str(), "--exact", "--nocapture", "--test-threads=1"])
                 .env(ROLE, "worker")
+                .env("W_RAN", ran_record(dir, w))
                 .env("W_ME", w.to_string())
                 .env("W_COORD", &coord)
                 .env("W_CKPT", &ckpt)
@@ -270,8 +303,10 @@ fn run_arm(test: &str, dir: &Path, extra: &[(&str, String)]) -> Vec<Outcome> {
     }
     children
         .iter_mut()
-        .map(|c| {
+        .enumerate()
+        .map(|(w, c)| {
             let status = c.wait().unwrap();
+            assert_ran(&ran_record(dir, w as u32), test, w as u32);
             let (mut stdout, mut stderr) = (String::new(), String::new());
             c.stdout.take().unwrap().read_to_string(&mut stdout).unwrap();
             c.stderr.take().unwrap().read_to_string(&mut stderr).unwrap();
@@ -316,7 +351,7 @@ fn published(dir: &Path) -> Vec<String> {
 #[test]
 fn equal_copies_pass_the_audit_and_the_checkpoint_is_published() {
     if in_worker_role() {
-        worker_main();
+        worker_main("equal_copies_pass_the_audit_and_the_checkpoint_is_published");
     }
     let dir = scratch("clean");
     let outcomes = run_arm("equal_copies_pass_the_audit_and_the_checkpoint_is_published", &dir, &[]);
@@ -338,7 +373,7 @@ fn equal_copies_pass_the_audit_and_the_checkpoint_is_published() {
 #[test]
 fn a_one_bit_face_disagreement_aborts_every_worker_and_publishes_nothing() {
     if in_worker_role() {
-        worker_main();
+        worker_main("a_one_bit_face_disagreement_aborts_every_worker_and_publishes_nothing");
     }
     let dir = scratch("perturbed");
     let outcomes = run_arm(

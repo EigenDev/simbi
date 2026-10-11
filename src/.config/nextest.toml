@@ -1,0 +1,15 @@
+# =============================================================================
+# nextest.toml
+#
+# nextest runs every test in its own process, several processes at once.
+# tests whose assertions measure wall-clock time reserve every test slot, so
+# they run with no other test process competing for the cores.
+#
+# usage:
+#  cargo nextest run -p symbi --test <target>
+# =============================================================================
+
+# the census cost test compares the wall time of one accumulator against eight
+[[profile.default.overrides]]
+filter = 'test(=the_census_cost_tracks_the_graph_not_the_accumulator_count) | test(=census_cost::the_census_cost_tracks_the_graph_not_the_accumulator_count)'
+threads-required = "num-test-threads"

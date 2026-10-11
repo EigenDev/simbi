@@ -340,7 +340,8 @@ fn run_worker(arm: &Arm, me: WorkerId, out: PathBuf) -> Result<(), WorkerError> 
     Ok(())
 }
 
-fn worker_main() -> ! {
+fn worker_main(test: &str) -> ! {
+    std::fs::write(std::env::var("W_RAN").unwrap(), test).unwrap();
     let arm = Arm::from_env();
     let me = WorkerId(env_u64("W_ME").unwrap() as u32);
     let out = PathBuf::from(std::env::var("W_OUT").unwrap());
@@ -353,6 +354,36 @@ fn worker_main() -> ! {
     }
 }
 
+/// the name libtest gives the test function `func`: its module path below the test crate's
+/// root, then the function. the root module is the crate itself, so a test file built as its
+/// own target names `func` bare and the same file built as a module of a larger target
+/// prefixes the module path.
+fn exact_name(func: &str) -> String {
+    match module_path!().split_once("::") {
+        Some((_, below_root)) => format!("{below_root}::{func}"),
+        None => func.to_string(),
+    }
+}
+
+/// the record a worker child writes on entering its test: a sibling of the scratch directory,
+/// so the directory holds only what the protocol publishes.
+fn ran_record(dir: &Path, me: u32) -> PathBuf {
+    PathBuf::from(format!("{}.ran{me}", dir.display()))
+}
+
+/// the child ran the test function `test`: its record names it. a child whose filter matched
+/// no test exits zero without a record.
+fn assert_ran(record: &Path, test: &str, me: u32) {
+    let ran = std::fs::read_to_string(record).unwrap_or_default();
+    let _ = std::fs::remove_file(record);
+    assert_eq!(
+        ran, test,
+        "worker {me} was launched for {test} but ran {ran:?}; its test filter {} selects a \
+         different test or none",
+        exact_name(test)
+    );
+}
+
 fn in_worker_role() -> bool {
     std::env::var(ROLE).is_ok()
 }
@@ -362,6 +393,9 @@ struct Spawned {
     stderr: std::process::ChildStderr,
     stdout: BufReader<std::process::ChildStdout>,
     out: PathBuf,
+    me: u32,
+    test: String,
+    ran: PathBuf,
 }
 
 fn spawn(
@@ -373,9 +407,12 @@ fn spawn(
     extra: &[(&str, String)],
 ) -> Spawned {
     let out = dir.join(format!("worker_{me}.f64"));
+    let ran = ran_record(dir, me);
+    let _ = std::fs::remove_file(&ran);
     let mut cmd = Command::new(std::env::current_exe().unwrap());
-    cmd.args([test, "--exact", "--nocapture", "--test-threads=1"])
+    cmd.args([exact_name(test).as_str(), "--exact", "--nocapture", "--test-threads=1"])
         .env(ROLE, "worker")
+        .env("W_RAN", &ran)
         .env("W_ME", me.to_string())
         .env("W_COORD", coord)
         .env("W_OUT", &out)
@@ -395,6 +432,9 @@ fn spawn(
         stderr,
         stdout,
         out,
+        me,
+        test: test.to_string(),
+        ran,
     }
 }
 
@@ -425,6 +465,7 @@ fn collect(mut spawned: Vec<Spawned>) -> Vec<Outcome> {
         .iter_mut()
         .map(|s| {
             let status = s.child.wait().unwrap();
+            assert_ran(&s.ran, &s.test, s.me);
             let mut stderr = String::new();
             s.stderr.read_to_string(&mut stderr).unwrap();
             let mut rest = String::new();
@@ -606,7 +647,7 @@ fn ckpt_env(dir: &Path) -> Vec<(&'static str, String)> {
 #[test]
 fn two_workers_write_the_reference_checkpoint() {
     if in_worker_role() {
-        worker_main();
+        worker_main("two_workers_write_the_reference_checkpoint");
     }
     let test = "two_workers_write_the_reference_checkpoint";
     let dir = scratch(test, "write");
@@ -649,7 +690,7 @@ fn two_workers_write_the_reference_checkpoint() {
 #[test]
 fn restart_onto_a_new_partition_continues_bitwise() {
     if in_worker_role() {
-        worker_main();
+        worker_main("restart_onto_a_new_partition_continues_bitwise");
     }
     let test = "restart_onto_a_new_partition_continues_bitwise";
     let dir = scratch(test, "restart");
@@ -673,7 +714,7 @@ fn restart_onto_a_new_partition_continues_bitwise() {
 #[test]
 fn a_missing_block_leaves_no_file() {
     if in_worker_role() {
-        worker_main();
+        worker_main("a_missing_block_leaves_no_file");
     }
     let test = "a_missing_block_leaves_no_file";
     let dir = scratch(test, "drop");
@@ -696,7 +737,7 @@ fn a_missing_block_leaves_no_file() {
 #[test]
 fn an_overlapping_block_is_a_protocol_error() {
     if in_worker_role() {
-        worker_main();
+        worker_main("an_overlapping_block_is_a_protocol_error");
     }
     let test = "an_overlapping_block_is_a_protocol_error";
     let dir = scratch(test, "dup");
@@ -720,7 +761,7 @@ fn an_overlapping_block_is_a_protocol_error() {
 #[test]
 fn a_worker_killed_during_the_write_publishes_nothing() {
     if in_worker_role() {
-        worker_main();
+        worker_main("a_worker_killed_during_the_write_publishes_nothing");
     }
     let test = "a_worker_killed_during_the_write_publishes_nothing";
     let dir = scratch(test, "kill");
@@ -756,7 +797,7 @@ fn a_worker_killed_during_the_write_publishes_nothing() {
 #[test]
 fn a_negative_close_vote_after_complete_data_publishes_nothing() {
     if in_worker_role() {
-        worker_main();
+        worker_main("a_negative_close_vote_after_complete_data_publishes_nothing");
     }
     let test = "a_negative_close_vote_after_complete_data_publishes_nothing";
     let dir = scratch(test, "vote");
