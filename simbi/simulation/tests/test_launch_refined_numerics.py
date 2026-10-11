@@ -187,8 +187,9 @@ def test_a_periodic_refined_launch_matches_fresh_and_resumed(tmp_path: Path) -> 
 
 
 def test_a_patch_spanning_an_uncut_periodic_axis_launches_as_the_single_grid_runs(tmp_path: Path, monkeypatch) -> None:
-    # the kh fine box widened over the whole periodic x axis, whose fine level wraps onto itself;
-    # the workers cut y alone, so every tile holds the whole x axis and its wrap
+    # the kh fine box widened over the whole periodic x axis: with the workers cutting y alone every
+    # tile holds the whole x axis and its wrap; with cuts across x the fine level wraps across the
+    # workers at the seam
     stem = "spanning_kh"
     (tmp_path / f"{stem}.py").write_text(
         "from typing import Annotated\n"
@@ -207,6 +208,10 @@ def test_a_patch_spanning_an_uncut_periodic_axis_launches_as_the_single_grid_run
         ("three uneven workers", 3, _layout(tmp_path / "three.toml", workers=3, cuts=[[], [30, 60]])),
         # the middle tile, y cells 20..41, lies wholly under the patch spanning x
         ("a worker's tile wholly under the patch", 3, _layout(tmp_path / "under.toml", workers=3, cuts=[[], [20, 41]])),
+        # cuts across the periodic x axis itself: the patch has no face along x, and its level
+        # wraps across the workers at the seam as the root does
+        ("two workers cut across the periodic axis", 2, _layout(tmp_path / "across.toml", workers=2, cuts=[[26], []])),
+        ("four uneven workers cut along both axes", 4, _layout(tmp_path / "both.toml", workers=4, cuts=[[20], [36]])),
     ]:
         launched = _script_launch(script, KH_RESOLUTION, tmp_path / label.replace(" ", "_"), layout, STEPS, workers=workers)
         _assert_same_levels(launched, reference, f"spanning kh: {label}")

@@ -10,7 +10,9 @@
 # - a second nested refinement level spanning the cut, fresh and resumed from a
 #   checkpoint written on the tiles halfway, every level included;
 # - periodic kelvin-helmholtz layers on four tiles whose ragged cuts wrap both
-#   axes, the root closed across its seams, shown to differ from outflow walls.
+#   axes, the root closed across its seams, shown to differ from outflow walls;
+#   the fine box widened over the whole periodic x axis on two and four tiles
+#   cut across x, its level wrapping across the tiles at the seam.
 # - the refined isothermal blob on two, three uneven and six tiles cut along
 #   both axes through the fine box; a locally isothermal refined run on tiles is
 #   refused by name before any output.
@@ -238,6 +240,64 @@ def test_a_periodic_refined_run_on_four_tiles_matches_the_single_hierarchy(tmp_p
         else:
             y = ys[name]
         assert x.shape == y.shape and np.array_equal(x, y), f"four refined tiles wrapping both axes: {name} differs"
+
+
+def test_a_patch_spanning_a_cut_periodic_axis_on_host_tiles_matches_the_single_hierarchy(tmp_path: Path, host_tiles) -> None:
+    # the kh fine box widened over the whole periodic x axis, the tiles cut across x: the patch has
+    # no face along x, and its level wraps across the tiles at the seam as the root does
+    spanning = dict(refinement_regions=[[-0.5, 0.5, -0.375, 0.375]])
+    single = _fresh_kh(tmp_path / "single", 1, **spanning)
+    walled = _fresh_kh(tmp_path / "walled", 1, boundary_conditions="outflow", **spanning)
+    assert any(not np.array_equal(x, _datasets(walled)[n]) for n, x in _datasets(single).items()), "the seam left the spanning run unchanged"
+    for gpus, cuts in ((2, [[26], []]), (4, [[20], [36]])):
+        tiles = _fresh_kh(tmp_path / f"tiles{gpus}", gpus, decompose=cuts, **spanning)
+        xs, ys = _datasets(tiles), _datasets(single)
+        assert xs.keys() == ys.keys(), f"dataset sets differ: {sorted(xs.keys() ^ ys.keys())}"
+        with h5py.File(single, "r") as f:
+            ng = {lv: int(f[lv]["mesh"].attrs["halo_width"]) for lv in f if lv.startswith("level_")}
+        for name, x in xs.items():
+            level, _, field = name.partition("/")
+            y = ys[name]
+            if field.startswith("conserved/"):
+                h = ng[level]
+                x, y = x[h:-h, h:-h], y[h:-h, h:-h]
+            elif level != "level_0" and x.ndim == 2:
+                # the fine level's halo corners, where the seam's ghost columns meet a coarse-fine
+                # face's ghost rows, hold no value on the single hierarchy (its periodic fill keeps
+                # to the interior rows) and no stencil of this scheme reads them; the tiles' x legs
+                # carry them. every other cell, the halo's edges included, is compared
+                h = ng[level]
+                corner = np.zeros(x.shape, dtype=bool)
+                rows, cols = np.r_[:h, x.shape[0] - h:x.shape[0]], np.r_[:h, x.shape[1] - h:x.shape[1]]
+                corner[np.ix_(rows, cols)] = True
+                assert x.shape == y.shape and np.array_equal(x[~corner], y[~corner]), f"{gpus} refined tiles cut across the periodic axis: {name} differs"
+                continue
+            assert x.shape == y.shape and np.array_equal(x, y), f"{gpus} refined tiles cut across the periodic axis: {name} differs"
+
+
+def test_a_viscous_patch_spanning_a_cut_periodic_axis_is_refused_on_host_tiles(tmp_path: Path, host_tiles) -> None:
+    (tmp_path / "viscous_kh.py").write_text(
+        "from pydantic import computed_field\n"
+        "from simbi_configs.examples.newtonian.refined_kh import RefinedKelvinHelmholtz\n\n\n"
+        "class ViscousKh(RefinedKelvinHelmholtz):\n"
+        "    @computed_field\n"
+        "    @property\n"
+        "    def viscosity(self) -> float:\n"
+        "        return 0.001\n"
+    )
+    snippet = (
+        "import sys\n"
+        "from simbi.simulation import runner\n"
+        "from viscous_kh import ViscousKh\n"
+        "runner.run(ViscousKh(resolution=(64, 64), gpus=2, decompose=[[26], []], "
+        "refinement_regions=[[-0.5, 0.5, -0.375, 0.375]], data_directory=sys.argv[1]), compute_mode='cpu', max_steps=1)\n"
+    )
+    env = dict(os.environ, SYMBI_GPU_OVERSUBSCRIBE="1", PYTHONPATH=os.pathsep.join([str(tmp_path), os.getcwd(), os.environ.get("PYTHONPATH", "")]))
+    done = subprocess.run([sys.executable, "-c", snippet, str(tmp_path / "out")], capture_output=True, text=True, timeout=600, env=env)
+    assert done.returncode != 0, "a viscous run spanning a cut periodic axis ran on host tiles"
+    flat = " ".join(done.stderr.split())
+    assert "a viscous run whose refined patch spans the periodic axis 0 cut into tiles is outside the gated tiled runs" in flat, flat[-2000:]
+    assert not list((tmp_path / "out").glob("*.h5")), "a refused run published a checkpoint"
 
 
 class NestedMagnetizedSink(MagnetizedBondiSink):

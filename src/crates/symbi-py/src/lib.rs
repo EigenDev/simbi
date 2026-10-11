@@ -6661,8 +6661,11 @@ macro_rules! build_and_run_hydro_decomposed_refined {
                         None => h,
                     }
                 } else {
-                    let (clipped, whole): (Vec<_>, Vec<_>) = tile_regions.iter().copied().unzip();
-                    Hierarchy::with_refinement_of_contributing(sim, sub, &clipped, &whole, prolong, make)
+                    // a patch spanning a periodic axis cut into tiles has no face along it and its
+                    // level wraps across the tiles, as the root does
+                    let (clipped, whole_patch): (Vec<_>, Vec<_>) = tile_regions.iter().copied().unzip();
+                    let ring = whole.topology(counts);
+                    Hierarchy::with_refinement_placed(sim, sub, &clipped, &whole_patch, prolong, make, n, std::array::from_fn(|ax| ring.is_periodic(ax)))
                         .map_err(|e| format!("tile {flat} refinement build: {e:?}"))?
                 };
                 // immersed bodies on every tile hierarchy at their global positions: the finest
@@ -9238,7 +9241,42 @@ fn validate_run(cfg: &Config) -> Result<(), String> {
 
 /// the admission of every tiled march, in-process host tiles and launched workers alike: the
 /// operators the single grid applies that no tiled driver carries yet are refused by name
+/// the first periodic axis cut into tiles that the run's first refined patch spans whole: the
+/// patch's level wraps across the tiles at the seam
+fn patch_spans_cut_periodic_axis(cfg: &Config) -> Result<Option<usize>, String> {
+    fn of<const D: usize>(cfg: &Config) -> Result<Option<usize>, String> {
+        let whole = whole_grid::<D>(cfg);
+        let patch = launch_patch::<D>(cfg)?;
+        let n: [usize; D] = std::array::from_fn(|ax| cfg.n_cells[ax]);
+        let counts = tile_partition(n, cfg)?.counts();
+        Ok((0..D).find(|&ax| whole.periodic(ax) && counts[ax] > 1 && patch[ax].0 == 0 && patch[ax].1 >= n[ax]))
+    }
+    if !cfg.refinement_enabled || cfg.refinement_regions.is_empty() {
+        return Ok(None);
+    }
+    match cfg.dims {
+        1 => of::<1>(cfg),
+        2 => of::<2>(cfg),
+        _ => of::<3>(cfg),
+    }
+}
+
+/// a viscous run reads the halo corners where a seam meets a coarse-fine face, which a patch
+/// spanning a cut periodic axis leaves without a single-hierarchy reference
+fn validate_spanning_periodic_patch(cfg: &Config) -> Result<(), String> {
+    if cfg.viscosity > 0.0 || cfg.alpha > 0.0 {
+        if let Some(ax) = patch_spans_cut_periodic_axis(cfg)? {
+            return Err(format!(
+                "a viscous run whose refined patch spans the periodic axis {ax} cut into tiles is outside \
+                 the gated tiled runs; run it on one device, or cut the other axes alone"
+            ));
+        }
+    }
+    Ok(())
+}
+
 fn validate_tiled_march(cfg: &Config) -> Result<(), String> {
+    validate_spanning_periodic_patch(cfg)?;
     // the gas and isothermal tiles, flat and refined, read a stationary target's residual off the
     // tiled pipeline and lay a declared perturbation over it; the magnetized tiles carry none
     if cfg.equilibrium_json.is_some() && !matches!(cfg.regime.as_str(), "newtonian" | "rhd" | "isothermal") {
@@ -10981,6 +11019,7 @@ fn validate_launch_scope(cfg: &Config) -> Result<(), String> {
 /// where the outer scope admits them for the regime. every other refined combination is named and
 /// refused.
 fn validate_refined_launch_scope(cfg: &Config) -> Result<(), String> {
+    validate_spanning_periodic_patch(cfg)?;
     let refused = |what: &str| Err(format!("{what} with mesh refinement is outside the distributed first release"));
     if !matches!(cfg.regime.as_str(), "newtonian" | "rhd" | "isothermal" | "nmhd" | "imhd" | "rmhd") {
         return refused(&format!("the {} regime", cfg.regime));
@@ -11053,14 +11092,18 @@ fn validate_refined_launch_scope(cfg: &Config) -> Result<(), String> {
     Ok(())
 }
 
-/// the first periodic axis cut into tiles whose domain face the launch's refined patch reaches
+/// the first periodic axis cut into tiles whose domain face the launch's refined patch reaches,
+/// short of a gas patch spanning the whole axis: that patch has no face along it and its level
+/// wraps across the tiles as the root does
 fn patch_on_periodic_face<const D: usize>(cfg: &Config) -> Result<Option<usize>, String> {
     let whole = whole_grid::<D>(cfg);
     let patch = launch_patch::<D>(cfg)?;
     let n: [usize; D] = std::array::from_fn(|ax| cfg.n_cells[ax]);
     let counts = tile_partition(n, cfg)?.counts();
     Ok((0..D).find(|&ax| {
-        whole.periodic(ax) && counts[ax] > 1 && (patch[ax].0 == 0 || patch[ax].1 >= cfg.n_cells[ax])
+        let spans = patch[ax].0 == 0 && patch[ax].1 >= cfg.n_cells[ax];
+        let magnetized = matches!(cfg.regime.as_str(), "nmhd" | "imhd" | "rmhd");
+        whole.periodic(ax) && counts[ax] > 1 && (patch[ax].0 == 0 || patch[ax].1 >= cfg.n_cells[ax]) && (magnetized || !spans)
     }))
 }
 
@@ -11212,7 +11255,8 @@ where
     } else {
         let (clip, whole): (Vec<_>, Vec<_>) = clipped.into_iter().unzip();
         let prolong = prolong_order_for(&cfg.reconstruction_name);
-        Hierarchy::with_refinement_of_contributing(sim, sub, &clip, &whole, prolong, |s| kernels_of(s, LevelRole::Fine))
+        let ring = grid.topology(layout.partition.counts());
+        Hierarchy::with_refinement_placed(sim, sub, &clip, &whole, prolong, |s| kernels_of(s, LevelRole::Fine), layout.n, std::array::from_fn(|ax| ring.is_periodic(ax)))
             .map_err(|e| format!("tile {flat} refinement build: {e:?}"))?
     };
     // immersed bodies at their global positions: the finest level owns the full bodies, coarser
@@ -11608,8 +11652,11 @@ where
         let root_ext = partition.tile_extents(fine_partition.root_tile_of(tc));
         std::array::from_fn(|a| (2 * patch[a].0.saturating_sub(root_ext[a].0)) as isize)
     };
-    let fine_plan =
-        ExchangePlan::compile_shifted(&fine_partition.partition, &open, &schema, ng + 1, &fine_lo).map_err(|e| e.to_string())?;
+    // the fine level wraps an axis the root wraps where its patch spans the whole axis
+    let fine_wraps: [bool; D] = std::array::from_fn(|ax| wrap.is_periodic(ax) && patch[ax] == (0, n[ax]));
+    let fine_topology = symbi::sim::decomp::Topology::wrapping(fine_wraps);
+    let fine_plan = ExchangePlan::compile_shifted(&fine_partition.partition, &fine_topology, &schema, ng + 1, &fine_lo)
+        .map_err(|e| e.to_string())?;
     // the register components: the conserved gas fields and, on a magnetized plane, the
     // out-of-plane cell field
     let n_comp = cons_schema.len() + if magnetized { DOF - D } else { 0 };
@@ -11716,7 +11763,7 @@ where
         let coefficient_schema = (0..3 * D).fold(symbi_sim::atlas::FieldSchema::new(), |schema, ii| schema.cell(&format!("ito_coefficient_{ii}")));
         let mut plans = vec![
             ExchangePlan::compile(partition, &wrap, &coefficient_schema, ng).map_err(|e| e.to_string())?,
-            ExchangePlan::compile_shifted(&fine_partition.partition, &open, &coefficient_schema, ng + 1, &fine_lo).map_err(|e| e.to_string())?,
+            ExchangePlan::compile_shifted(&fine_partition.partition, &fine_topology, &coefficient_schema, ng + 1, &fine_lo).map_err(|e| e.to_string())?,
         ];
         for i in 0..nested_parts.len() {
             let frames = &nested_frames[i];

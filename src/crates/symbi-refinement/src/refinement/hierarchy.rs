@@ -356,6 +356,10 @@ where
     /// the axes whose tile grid closes into a ring: the root halo exchange carries the leg across
     /// the seam, and every level's tracer layout sends mass leaving the grid to the far end.
     root_wraps: [bool; NDIM],
+    /// the axes the first refined level wraps across its tiles: the root wraps them and the whole
+    /// first patch spans the domain along them, so the patch has no face there and its level's
+    /// halo exchange carries the leg across the seam
+    fine_wraps: [bool; NDIM],
     /// set by `step_root` when the cfl dt is fatal (NaN / non-positive). `Some` halts the march at
     /// the last computed state; the driver writes a
     /// `.crashed` checkpoint and reports it, halting before advancing past t_final on garbage.
@@ -1246,6 +1250,7 @@ where
             tracer_root_global_cells,
             tracer_root_offset: [0; NDIM],
             root_wraps: [false; NDIM],
+            fine_wraps: [false; NDIM],
             crash: None,
             equilibrium_mask_radius: None,
             prev_dt_cfl: 0.0,
@@ -1290,7 +1295,7 @@ where
         prolong_order: ProlongOrder,
         make_kernels: impl Fn(&SimStateGeneric<R, NDIM, DOF, M, E, S, Mem>) -> K,
     ) -> symbi_xpu::Result<Self> {
-        Self::refine_levels(coarse, coarse_kernels, regions, whole, prolong_order, make_kernels, CutFaces::Refuse)
+        Self::refine_levels(coarse, coarse_kernels, regions, whole, prolong_order, make_kernels, CutFaces::Refuse, None)
     }
 
     /// `with_refinement_of` for a driver that carries register contributions across cuts: a
@@ -1307,7 +1312,37 @@ where
         prolong_order: ProlongOrder,
         make_kernels: impl Fn(&SimStateGeneric<R, NDIM, DOF, M, E, S, Mem>) -> K,
     ) -> symbi_xpu::Result<Self> {
-        Self::refine_levels(coarse, coarse_kernels, regions, whole, prolong_order, make_kernels, CutFaces::Contribute)
+        Self::refine_levels(coarse, coarse_kernels, regions, whole, prolong_order, make_kernels, CutFaces::Contribute, None)
+    }
+
+    /// `with_refinement_of_contributing` for a tile placed on the whole root grid of
+    /// `global_cells`, closed into a ring along the axes `wraps` names: a whole first patch
+    /// spanning such an axis has no face on it, keeps its core across the seam, and its level
+    /// wraps across the tiles. the tile's root layout is set as `set_root_layout` sets it
+    #[allow(clippy::too_many_arguments)]
+    pub fn with_refinement_placed(
+        coarse: SimStateGeneric<R, NDIM, DOF, M, E, S, Mem>,
+        coarse_kernels: K,
+        regions: &[RefinementRegion<NDIM>],
+        whole: &[RefinementRegion<NDIM>],
+        prolong_order: ProlongOrder,
+        make_kernels: impl Fn(&SimStateGeneric<R, NDIM, DOF, M, E, S, Mem>) -> K,
+        global_cells: [usize; NDIM],
+        wraps: [bool; NDIM],
+    ) -> symbi_xpu::Result<Self> {
+        let offset: [usize; NDIM] = std::array::from_fn(|ax| coarse.geom.index_offset[ax].max(0) as usize);
+        let mut h = Self::refine_levels(
+            coarse,
+            coarse_kernels,
+            regions,
+            whole,
+            prolong_order,
+            make_kernels,
+            CutFaces::Contribute,
+            Some((global_cells, wraps)),
+        )?;
+        h.set_root_layout(global_cells, offset, wraps);
+        Ok(h)
     }
 
     /// a single level with receiving register faces: this tile holds the coarse cells a
@@ -1426,8 +1461,12 @@ where
         prolong_order: ProlongOrder,
         make_kernels: impl Fn(&SimStateGeneric<R, NDIM, DOF, M, E, S, Mem>) -> K,
         cut_faces: CutFaces,
+        layout: Option<([usize; NDIM], [bool; NDIM])>,
     ) -> symbi_xpu::Result<Self> {
         assert_eq!(regions.len(), whole.len(), "one whole patch per clipped region");
+        // the axes along which the whole first patch spans a root that wraps: the patch has no
+        // face there, on any tile
+        let mut spans_wrap = [false; NDIM];
         // the root patch's real faces lying on a cut: contributing register faces
         let mut contributing = [[false; 2]; NDIM];
         let mut whole_coverages: Vec<Domain<NDIM>> = Vec::with_capacity(regions.len());
@@ -1518,7 +1557,17 @@ where
             // hierarchy's root has physical boundaries alone).
             let mut real_on_cut = [[false; 2]; NDIM];
             if levels.len() == 1 {
+                if let Some((global_cells, wraps)) = layout {
+                    let whole_face = &whole_coverages.last().unwrap().spaces;
+                    spans_wrap = std::array::from_fn(|ax| {
+                        let off = parent.geom.index_offset[ax];
+                        wraps[ax] && whole_face[ax].lo + off == 0 && whole_face[ax].hi + off == global_cells[ax] as isize
+                    });
+                }
                 for ax in 0..NDIM {
+                    if spans_wrap[ax] {
+                        continue;
+                    }
                     let whole_face = &whole_coverages.last().unwrap().spaces[ax];
                     real_on_cut[ax][0] = coverage.spaces[ax].lo == parent.geom.interior.spaces[ax].lo
                         && whole_face.lo == coverage.spaces[ax].lo
@@ -1708,7 +1757,12 @@ where
             let donor_width = (level.kernels.reconstruction_reach() as usize)
                 .max(prolong_order.ghost_width())
                 + 1;
+            // a side along which the root's first patch spans the wrapping domain continues across
+            // the seam, as an interior side does
             let cut: [[bool; 2]; NDIM] = std::array::from_fn(|ax| {
+                if ll == 0 && spans_wrap[ax] {
+                    return [false; 2];
+                }
                 [
                     level.state.boundaries.lo(ax) == BoundaryType::CoarseFine,
                     level.state.boundaries.hi(ax) == BoundaryType::CoarseFine,
@@ -1772,6 +1826,7 @@ where
             tracer_root_global_cells: root_cells,
             tracer_root_offset: [0; NDIM],
             root_wraps: [false; NDIM],
+            fine_wraps: spans_wrap,
             crash: None,
             equilibrium_mask_radius: None,
             prev_dt_cfl: 0.0,
@@ -5327,6 +5382,7 @@ where
 {
     match (level, order.first()) {
         (0, Some(&i)) => Topology::wrapping(tiles[i].root_wraps),
+        (1, Some(&i)) => Topology::wrapping(tiles[i].fine_wraps),
         _ => Topology::open(),
     }
 }
