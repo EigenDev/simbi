@@ -8989,6 +8989,17 @@ fn validate_run(cfg: &Config) -> Result<(), String> {
                     reflux assumes 1/dx curl coefficients)"
             .to_string());
     }
+    // the face-field restriction, prolongation and EMF reflux transfer the flat face flux B; the GR
+    // curl conserves the densitized flux sqrt(gamma) B, so on a curved spacetime each restriction
+    // leaves a densitized divergence the constrained transport carries forward
+    if cfg.refinement_enabled && cfg.regime.contains("mhd") && cfg.spacetime != "minkowski" {
+        return Err(format!(
+            "magnetized mesh refinement on the {} spacetime: the refined face-field transfers carry the \
+             flat face flux while the GR curl conserves the densitized flux sqrt(gamma) B, so each \
+             restriction leaves a densitized divergence; run it unrefined",
+            cfg.spacetime
+        ));
+    }
     validate_mesh_motion(cfg)?;
     // immersed bodies + refinement: the finest-owns-bodies AMR sync (`hier.with_bodies` — full
     // bodies on the finest level, gravity-only proxy on coarser) is wired for every hydro regime

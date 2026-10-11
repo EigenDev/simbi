@@ -332,3 +332,22 @@ def test_ct_contact_upwinding_is_ill_posed_on_a_flow_symmetry_plane() -> None:
         "upwind selector is well posed where the normal mass flux vanishes, so this test and "
         "the UCT pin in the mirror-exactness test are both obsolete"
     )
+
+
+class _RefinedCartesianKsMhd3D(_CartesianKsMhd3D):
+    resolution: Annotated[tuple[int, int, int], ProblemParam((16, 16, 16))]
+    refinement_enabled: Annotated[bool, ProblemParam(True)]
+    refinement_max_levels: Annotated[int, ProblemParam(2)]
+    refinement_regions: Annotated[list[list[float]], ProblemParam([[-1.25, 1.25, -1.25, 1.25, -1.25, 1.25]])]
+    refinement_ratios: Annotated[list[int], ProblemParam([2])]
+
+
+@needs_backend
+def test_magnetized_refinement_on_a_curved_spacetime_is_refused(tmp_path: Path) -> None:
+    # the face-field restriction, prolongation and EMF reflux sum flat face fluxes, while the GR curl
+    # conserves the densitized flux sqrt(gamma) B: one restriction on this chart leaves a coarse
+    # densitized divergence of ~1e-6 that the constrained transport carries forward
+    p = _RefinedCartesianKsMhd3D(data_directory=tmp_path)
+    with pytest.raises(Exception, match="magnetized mesh refinement on the schwarzschild_ks spacetime"):
+        runner.run(p, compute_mode="cpu", max_steps=1)
+    assert not list(tmp_path.glob("*.h5")), "output was written before the refusal"
