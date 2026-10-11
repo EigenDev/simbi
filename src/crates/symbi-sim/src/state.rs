@@ -2937,6 +2937,31 @@ where
         )
     }
 
+    /// gather the regime's primitive at a cell from the stored primitive fields — density, the
+    /// velocity components, the pressure where the gas carries energy, and for MHD the cell
+    /// magnetic field — the state a ghost fill leaves in a ghost cell
+    pub fn prim_at(&self, coord: [isize; D]) -> <R as Regime<Sc, DOF>>::Prim
+    where
+        <R as Regime<Sc, DOF>>::Prim: symbi_hydro::state::PrimFromSlots<Sc, DOF>,
+    {
+        use symbi_hydro::state::PrimFromSlots;
+        let prim = &self.fields.prim;
+        let mut slots: Vec<Sc> = Vec::with_capacity(2 + 2 * DOF);
+        slots.push(*prim.rho.view().at(coord));
+        for k in 0..DOF {
+            slots.push(*prim.vel[k].view().at(coord));
+        }
+        if let Some(pre) = prim.pre_field() {
+            slots.push(*pre.view().at(coord));
+        }
+        if let Some(mhd) = self.fields.mhd.as_ref() {
+            for k in 0..DOF {
+                slots.push(*mhd.bcell[k].view().at(coord));
+            }
+        }
+        <R as Regime<Sc, DOF>>::Prim::from_slots(&slots)
+    }
+
     /// the panicking probe over `recover_at`, named for what it does: a cell whose recovery is
     /// rejected panics with its issue set. for tests and diagnostics that assert the cell is
     /// physical by reading it.
@@ -2944,6 +2969,52 @@ where
         self.recover_at(coord)
             .unwrap_or_else(|failure| panic!("expect_prim_at({coord:?}): {failure}"))
             .into_inner()
+    }
+}
+
+impl<R, const D: usize, const DOF: usize, M, E, S, Mem> SimStateGeneric<R, D, DOF, M, E, S, Mem, f64>
+where
+    R: Regime<f64, D> + Regime<f64, DOF>,
+    M: Metric<f64, D> + Metric<f64, DOF>,
+    E: symbi_hydro::eos::EosFor<f64, <R as Regime<f64, DOF>>::Energy>,
+    S: ExecutionSpace,
+    Mem: MemorySpace,
+    <R as Regime<f64, DOF>>::Cons: symbi_hydro::state::SeedableCons<f64, DOF>,
+{
+    /// the conserved state of the ghost cells beside every physical face but a periodic one
+    /// (outflow, reflecting, polar, driven and gradient walls), before a finer level's seed
+    /// prolongs across them: each ghost cell converts the primitive its ghost fill wrote there,
+    /// the conserved dye following as density times concentration. coarse-fine faces keep what
+    /// their exchange or prolongation supplies, and a periodic seam carries its conserved cells
+    /// across separately. the caller recovers the interior primitives and runs the ghost fill
+    /// first
+    pub fn fill_conserved_ghosts(&self)
+    where
+        <R as Regime<f64, DOF>>::Prim: symbi_hydro::state::PrimFromSlots<f64, DOF>,
+    {
+        let interior = &self.geom.interior;
+        let allocated = &self.geom.allocated;
+        let face_of = |ax: usize, side: usize| if side == 0 { self.boundaries.lo(ax) } else { self.boundaries.hi(ax) };
+        for ax in 0..D {
+            for side in 0..2 {
+                let bc = face_of(ax, side);
+                if matches!(bc, BoundaryType::Periodic | BoundaryType::CoarseFine) {
+                    continue;
+                }
+                let (lo, hi) = if side == 0 {
+                    (allocated.spaces[ax].lo, interior.spaces[ax].lo)
+                } else {
+                    (interior.spaces[ax].hi, allocated.spaces[ax].hi)
+                };
+                for c in allocated.slab(ax, (lo, hi)).iter() {
+                    self.seed_cell(c, &self.prim_at(c));
+                    if let (Some(cons_chi), Some(prim_chi)) = (self.fields.cons.chi_field(), self.fields.prim.chi.as_ref()) {
+                        let den = *self.fields.cons.den.view().at(c);
+                        cons_chi.view_mut().set(c, den * *prim_chi.view().at(c));
+                    }
+                }
+            }
+        }
     }
 }
 

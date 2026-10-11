@@ -25,7 +25,7 @@
 // =============================================================================
 
 use crate::energy::{Adiabatic, EnergyModel, IsoModel};
-use crate::state::{ConsG, PrimG};
+use crate::state::{ConsG, PrimFromSlots, PrimG};
 use std::ops::{Add, Deref, DerefMut, Mul, Neg, Sub};
 use symbi_algebra::{FieldElement, Tensor};
 use symbi_carrier::Scalar;
@@ -143,6 +143,22 @@ pub type IsoMhdPrim<S, const D: usize> = MhdPrimG<S, D, IsoModel>;
 pub type IsoMhdCons<S, const D: usize> = MhdConsG<S, D, IsoModel>;
 
 // ---- deref: transparent access to hydro fields ----
+
+/// the magnetized primitive from its slots laid out as the gas primitive's slots (density, the
+/// velocity components, and the pressure where the gas carries energy) followed by the cell
+/// magnetic field components
+impl<S: Scalar, const D: usize, E: EnergyModel> PrimFromSlots<S, D> for MhdPrimG<S, D, E> {
+    #[inline]
+    fn from_slots(slots: &[S]) -> Self {
+        let gas = 1 + D + usize::from(E::HAS_ENERGY);
+        assert!(
+            slots.len() >= gas + D,
+            "a {D}-dimensional magnetized primitive needs {gas} gas slot(s) and {D} field components, got {}",
+            slots.len()
+        );
+        Self { hydro: PrimG::from_slots(&slots[..gas]), mag: Tensor::new(std::array::from_fn(|k| slots[gas + k])) }
+    }
+}
 
 impl<S: Scalar, const D: usize, E: EnergyModel> Deref for MhdPrimG<S, D, E> {
     type Target = PrimG<S, D, E>;

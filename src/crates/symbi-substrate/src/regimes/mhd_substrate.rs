@@ -197,6 +197,34 @@ where
     field_reduce(scratch, interior, ReductionOp::Max)
 }
 
+/// carry the conserved cells across the seam of every periodic axis of `sim` into its ghost
+/// band, component by component, through the scalar lattice pullback: a periodic face identifies
+/// the ghost cell with the interior cell across the seam, so each conserved component copies
+/// unchanged on every chart. the other faces are left as they are
+pub fn wrap_periodic_conserved_ghosts<const D: usize, const DOF: usize, Mem, Sc>(sim: &FieldStore<D, DOF, Mem, Sc>)
+where
+    Mem: MemorySpace + Sync,
+    Sc: Scalar + OrderedNumeric,
+{
+    use symbi_sim::state::BoundaryType;
+    let periodic = |ax: usize| sim.boundaries.lo(ax) == BoundaryType::Periodic && sim.boundaries.hi(ax) == BoundaryType::Periodic;
+    if !(0..D).any(periodic) {
+        return;
+    }
+    let bc: [[BcType; 2]; D] = std::array::from_fn(|ax| if periodic(ax) { [BcType::Periodic; 2] } else { [BcType::Skip; 2] });
+    let cons = &sim.fields.cons;
+    flag_ghost_fill(sim, &cons.den, bc);
+    for k in 0..DOF {
+        flag_ghost_fill(sim, &cons.mom[k], bc);
+    }
+    if let Some(nrg) = cons.nrg_field() {
+        flag_ghost_fill(sim, nrg, bc);
+    }
+    if let Some(chi) = cons.chi_field() {
+        flag_ghost_fill(sim, chi, bc);
+    }
+}
+
 /// fill the ghost band of a single scalar field via the lattice pullback
 /// (`scalar_ghost_fill_{D}d`) with reflect sign +1 (a true scalar copies on a reflect wall):
 /// periodic wraps to the opposite interior, reflect/outflow copy the nearest interior. drives over

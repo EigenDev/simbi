@@ -1017,7 +1017,13 @@ where
     /// the seeded state is hydro-complete plus the mhd cell-centered B. the staggered
     /// fine `bface` comes from the mhd refinement path, which supplies the face
     /// prolongation a face field requires.
-    pub fn seed_fine_from_coarse(&self) -> symbi_xpu::Result<usize> {
+    pub fn seed_fine_from_coarse(&self) -> symbi_xpu::Result<usize>
+    where
+        R: Regime<f64, NDIM, Energy = <R as Regime<f64, DOF>>::Energy> + Regime<f64, DOF>,
+        M: Metric<f64, DOF>,
+        <R as Regime<f64, DOF>>::Cons: symbi_hydro::state::SeedableCons<f64, DOF>,
+        <R as Regime<f64, DOF>>::Prim: symbi_hydro::state::PrimFromSlots<f64, DOF>,
+    {
         let mut reseeded = 0usize;
         for ll in 1..self.levels.len() {
             reseeded += self.seed_level_from_parent(ll)?;
@@ -1026,8 +1032,55 @@ where
     }
 
     /// seed level `ll` from level `ll - 1` and audit it, as [`Self::seed_fine_from_coarse`] does
-    /// for every level in turn; returns the count of cells re-seeded by parent injection.
-    pub fn seed_level_from_parent(&self, ll: usize) -> symbi_xpu::Result<usize> {
+    /// for every level in turn, the parent's ghosts filled for the seed and restored after it;
+    /// returns the count of cells re-seeded by parent injection.
+    pub fn seed_level_from_parent(&self, ll: usize) -> symbi_xpu::Result<usize>
+    where
+        R: Regime<f64, NDIM, Energy = <R as Regime<f64, DOF>>::Energy> + Regime<f64, DOF>,
+        M: Metric<f64, DOF>,
+        <R as Regime<f64, DOF>>::Cons: symbi_hydro::state::SeedableCons<f64, DOF>,
+        <R as Regime<f64, DOF>>::Prim: symbi_hydro::state::PrimFromSlots<f64, DOF>,
+    {
+        let saved = self.fill_seed_ghosts(ll - 1);
+        let reseeded = self.seed_level_from_filled_parent(ll)?;
+        self.restore_seed_ghosts(ll - 1, saved);
+        Ok(reseeded)
+    }
+
+    /// fill level `level`'s ghost cells with the state its boundary prescribes, for the seed of
+    /// the level above it: the primitives recovered, the ghost fill run, the conserved ghosts
+    /// converted from the filled primitives beside a physical face and carried across the seam of
+    /// a periodic axis. a decomposed driver fills before it exchanges the level's cut halos, so
+    /// the exchange carries the cells where a face's ghosts meet a cut. returns the conserved
+    /// ghosts the level held, which `restore_seed_ghosts` writes back after the seed
+    pub fn fill_seed_ghosts(&self, level: usize) -> SeedGhosts
+    where
+        R: Regime<f64, NDIM, Energy = <R as Regime<f64, DOF>>::Energy> + Regime<f64, DOF>,
+        M: Metric<f64, DOF>,
+        <R as Regime<f64, DOF>>::Cons: symbi_hydro::state::SeedableCons<f64, DOF>,
+        <R as Regime<f64, DOF>>::Prim: symbi_hydro::state::PrimFromSlots<f64, DOF>,
+    {
+        let parent = &self.levels[level];
+        symbi_substrate::regimes::substrate_gpu::device_sync::<Mem>();
+        let saved = conserved_ghosts(&parent.state);
+        parent.kernels.c2p(&parent.state);
+        parent.kernels.ghost_fill(&parent.state);
+        symbi_substrate::regimes::substrate_gpu::device_sync::<Mem>();
+        parent.state.fill_conserved_ghosts();
+        symbi_substrate::regimes::mhd_substrate::wrap_periodic_conserved_ghosts(&parent.state);
+        SeedGhosts(saved)
+    }
+
+    /// write back the conserved ghosts `fill_seed_ghosts` saved, so a seed changes no stored state
+    /// of the parent level
+    pub fn restore_seed_ghosts(&self, level: usize, saved: SeedGhosts) {
+        symbi_substrate::regimes::substrate_gpu::device_sync::<Mem>();
+        restore_conserved_ghosts(&self.levels[level].state, &saved.0);
+    }
+
+    /// seed level `ll` by prolongation from level `ll - 1`, whose ghosts `fill_seed_ghosts` filled
+    /// and whose cut halos the driver exchanged, and audit it
+    pub fn seed_level_from_filled_parent(&self, ll: usize) -> symbi_xpu::Result<usize> {
         let mut reseeded = 0usize;
         {
             let (lo, hi) = self.levels.split_at(ll);
@@ -5278,6 +5331,47 @@ where
     }
 }
 
+/// the conserved ghost cells of a level saved for the seed of the level above it
+pub struct SeedGhosts(Vec<Vec<f64>>);
+
+/// the conserved fields of a store, the dye included
+fn conserved_fields<const NDIM: usize, const DOF: usize, Mem: MemorySpace>(
+    store: &FieldStore<NDIM, DOF, Mem, f64>,
+) -> Vec<&Field<f64, NDIM, Mem>> {
+    let cons = &store.fields.cons;
+    let mut fields: Vec<&Field<f64, NDIM, Mem>> = vec![&cons.den];
+    fields.extend(cons.mom.iter());
+    fields.extend(cons.nrg_field());
+    fields.extend(cons.chi_field());
+    fields
+}
+
+/// the values of every conserved ghost cell of a store, field by field in allocation order
+fn conserved_ghosts<const NDIM: usize, const DOF: usize, Mem: MemorySpace>(store: &FieldStore<NDIM, DOF, Mem, f64>) -> Vec<Vec<f64>> {
+    let interior = &store.geom.interior;
+    conserved_fields(store)
+        .into_iter()
+        .map(|f| {
+            let view = f.view();
+            store.geom.allocated.iter().filter(|c| !interior.contains(*c)).map(|c| *view.at(c)).collect()
+        })
+        .collect()
+}
+
+/// write back the conserved ghost cells `conserved_ghosts` read
+fn restore_conserved_ghosts<const NDIM: usize, const DOF: usize, Mem: MemorySpace>(
+    store: &FieldStore<NDIM, DOF, Mem, f64>,
+    saved: &[Vec<f64>],
+) {
+    let interior = &store.geom.interior;
+    for (f, values) in conserved_fields(store).into_iter().zip(saved) {
+        let view = f.view_mut();
+        for (c, v) in store.geom.allocated.iter().filter(|c| !interior.contains(*c)).zip(values) {
+            view.set(c, *v);
+        }
+    }
+}
+
 /// the sub-grid of tiles that carry one refined level. with one refined box per level the
 /// refined tiles form a contiguous rectangle; `order[k]` is the tile index at fine-flatten position
 /// `k`, and `devices[k]`/`counts` give that sub-grid's device map + shape for `exchange_grid`. when
@@ -5319,13 +5413,15 @@ pub fn seed_decomposed_fine_from_coarse<
     transport: &T,
 ) -> symbi_xpu::Result<usize>
 where
-    R: Regime<f64, NDIM> + Copy,
-    M: Metric<f64, NDIM> + Copy + Send + Sync,
+    R: Regime<f64, NDIM, Energy = <R as Regime<f64, DOF>>::Energy> + Regime<f64, DOF> + Copy,
+    M: Metric<f64, NDIM> + Metric<f64, DOF> + Copy + Send + Sync,
     E: symbi_hydro::eos::EosFor<f64, <R as Regime<f64, NDIM>>::Energy> + Copy + Send + Sync,
     S: ExecutionSpace,
     Mem: MemorySpace + Sync,
     K: KernelSet<NDIM, DOF, Mem, f64>,
     T: HaloTransport,
+    <R as Regime<f64, DOF>>::Cons: symbi_hydro::state::SeedableCons<f64, DOF>,
+    <R as Regime<f64, DOF>>::Prim: symbi_hydro::state::PrimFromSlots<f64, DOF>,
 {
     let depth = tiles.iter().map(|t| t.levels.len()).max().unwrap_or(1);
     let mut reseeded = 0usize;
@@ -5336,6 +5432,14 @@ where
         let parents: Vec<usize> = (0..tiles.len()).filter(|&i| tiles[i].levels.len() >= level).collect();
         let Some(grid) = fine_subgrid_of_level(tiles, counts, devices, level - 1) else { break };
         debug_assert_eq!(grid.order.len(), parents.len());
+        // the parent's ghosts filled before its cut halos cross, so the exchange carries the cells
+        // where a face's ghosts meet a cut
+        let saved: Vec<(usize, SeedGhosts)> = grid
+            .order
+            .iter()
+            .enumerate()
+            .map(|(k, &i)| (i, symbi_xpu::with_device(grid.devices[k], || tiles[i].fill_seed_ghosts(level - 1))))
+            .collect();
         drain_devices::<Mem>(&grid.devices);
         {
             let states: Vec<&FieldStore<NDIM, DOF, Mem, f64>> =
@@ -5346,8 +5450,11 @@ where
         }
         for (k, &i) in grid.order.iter().enumerate() {
             if tiles[i].levels.len() > level {
-                reseeded += symbi_xpu::with_device(grid.devices[k], || tiles[i].seed_level_from_parent(level))?;
+                reseeded += symbi_xpu::with_device(grid.devices[k], || tiles[i].seed_level_from_filled_parent(level))?;
             }
+        }
+        for (k, (i, ghosts)) in saved.into_iter().enumerate() {
+            symbi_xpu::with_device(grid.devices[k], || tiles[i].restore_seed_ghosts(level - 1, ghosts));
         }
     }
     Ok(reseeded)

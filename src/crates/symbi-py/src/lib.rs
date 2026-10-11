@@ -11143,10 +11143,12 @@ fn seed_refined_worker_tracers<R, const D: usize, const DOF: usize, M, E, K>(
     kernels_of: impl Fn(&SimDefaultGeneric<R, D, DOF, M, E>) -> K,
 ) -> Result<(), String>
 where
-    R: Regime<f64, D> + Copy,
-    M: Metric<f64, D> + Copy + Send + Sync,
+    R: Regime<f64, D, Energy = <R as Regime<f64, DOF>>::Energy> + Regime<f64, DOF> + Copy,
+    M: Metric<f64, D> + Metric<f64, DOF> + Copy + Send + Sync,
     E: symbi_hydro::eos::EosFor<f64, <R as Regime<f64, D>>::Energy> + Copy + Send + Sync,
     K: KernelSet<D, DOF, DefaultMemory, f64>,
+    <R as Regime<f64, DOF>>::Cons: symbi_hydro::state::SeedableCons<f64, DOF>,
+    <R as Regime<f64, DOF>>::Prim: symbi_hydro::state::PrimFromSlots<f64, DOF>,
 {
     if cfg.n_tracers == 0 {
         return Ok(());
@@ -11539,10 +11541,12 @@ fn refined_session<R, const D: usize, const DOF: usize, M, E, K>(
     on_seeded: impl FnMut(&mut Hierarchy<R, D, DOF, M, E, DefaultSpace, DefaultMemory, K>) -> Result<(), String>,
 ) -> Result<(), String>
 where
-    R: Regime<f64, D> + Copy,
-    M: Metric<f64, D> + Copy + Send + Sync,
+    R: Regime<f64, D, Energy = <R as Regime<f64, DOF>>::Energy> + Regime<f64, DOF> + Copy,
+    M: Metric<f64, D> + Metric<f64, DOF> + Copy + Send + Sync,
     E: symbi_hydro::eos::EosFor<f64, <R as Regime<f64, D>>::Energy> + Copy + Send + Sync,
     K: KernelSet<D, DOF, DefaultMemory, f64>,
+    <R as Regime<f64, DOF>>::Cons: symbi_hydro::state::SeedableCons<f64, DOF>,
+    <R as Regime<f64, DOF>>::Prim: symbi_hydro::state::PrimFromSlots<f64, DOF>,
 {
     use symbi::sim::decomp::{FinePartition, LocalCopy, flatten, plan_cons_schema, plan_schema, unflatten};
     use symbi::sim::refinement::launched::{

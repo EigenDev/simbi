@@ -46,7 +46,7 @@ use symbi_sim::worker::{
 use symbi_xpu::{ExecutionSpace, MemorySpace, with_device};
 use symbi_geometry::Metric;
 
-use super::hierarchy::{Hierarchy, RATIO};
+use super::hierarchy::{Hierarchy, RATIO, SeedGhosts};
 use super::launched_tracers::{
     LevelAtlas, exchange_level_coefficients, exchange_level_tracers, migrate_level_continuous, relocate_continuous_to_finest,
     spawn_level_continuous, spawn_level_injection,
@@ -212,8 +212,8 @@ pub fn evolve_refined_worker<R, const D: usize, const DOF: usize, M, E, S, Mem, 
     mut on_step: F,
 ) -> Result<WorkerReport, WorkerError>
 where
-    R: Regime<f64, D> + Copy,
-    M: Metric<f64, D> + Copy + Send + Sync,
+    R: Regime<f64, D, Energy = <R as Regime<f64, DOF>>::Energy> + Regime<f64, DOF> + Copy,
+    M: Metric<f64, D> + Metric<f64, DOF> + Copy + Send + Sync,
     E: symbi_hydro::eos::EosFor<f64, <R as Regime<f64, D>>::Energy> + Copy + Send + Sync,
     S: ExecutionSpace,
     Mem: MemorySpace + Sync,
@@ -222,6 +222,8 @@ where
     L: Link,
     F: FnMut(u64, f64, &[Hierarchy<R, D, DOF, M, E, S, Mem, K>], &mut Fabric<L>) -> Result<ControlFlow<()>, WorkerError>,
     G: FnMut(&mut Hierarchy<R, D, DOF, M, E, S, Mem, K>) -> Result<(), String>,
+    <R as Regime<f64, DOF>>::Cons: symbi_hydro::state::SeedableCons<f64, DOF>,
+    <R as Regime<f64, DOF>>::Prim: symbi_hydro::state::PrimFromSlots<f64, DOF>,
 {
     let n = tiles.len();
     assert_eq!(n, held.root_ids.len(), "tiles/root ids length mismatch");
@@ -649,6 +651,13 @@ where
                 h.levels[0].kernels.ghost_fill(&h.levels[0].state);
             });
         }
+        // a fresh start fills the root's ghosts for the fine seed before its cut halos cross, so
+        // the exchange carries the cells where a face's ghosts meet a cut
+        let root_ghosts: Vec<SeedGhosts> = if cfg.restart {
+            Vec::new()
+        } else {
+            tiles.iter().enumerate().map(|(k, h)| with_device(root_dev(k), || h.fill_seed_ghosts(0))).collect()
+        };
         {
             let prims = root_fields!();
             let cons = seed_fields!();
@@ -679,14 +688,25 @@ where
             }
         } else {
             for &k in &refined {
-                with_device(fine_dev(k), || tiles[k].seed_level_from_parent(1))
+                with_device(fine_dev(k), || tiles[k].seed_level_from_filled_parent(1))
                     .map_err(|e| fail(fabric, WorkerError::Numerics(format!("fine seed: {e:?}"))))?;
+            }
+            for (k, (h, ghosts)) in tiles.iter().zip(root_ghosts).enumerate() {
+                with_device(root_dev(k), || h.restore_seed_ghosts(0, ghosts));
             }
             // each nested level seeds from its parent once the parent's state (the primitives,
             // the cell field and the staggered faces) and its conserved halos crossed the parent's
             // cuts, as the root's cross before the fine level seeds: the prolongation of a
             // patch's faces beside a cut reads the parent's faces and cell field past it
             for level in 2..depth {
+                // the parent's ghosts filled for the seed before its cut halos cross
+                let parent_ghosts: Vec<(usize, SeedGhosts)> = tiles
+                    .iter()
+                    .enumerate()
+                    .filter_map(|(k, h)| {
+                        held.level_ids(level - 1)[k].map(|id| (k, with_device(held.level_devices(level - 1)[id.0 as usize], || h.fill_seed_ghosts(level - 1))))
+                    })
+                    .collect();
                 let parent_state = level_fields!(level - 1, plan_fields);
                 let parent = level_fields!(level - 1, plan_cons_fields);
                 let state_plan = if level == 2 { &plans.fine } else { &plans.nested[level - 3].state };
@@ -703,9 +723,13 @@ where
                 }
                 for (k, h) in tiles.iter().enumerate() {
                     if let Some(id) = held.level_ids(level)[k] {
-                        with_device(held.level_devices(level)[id.0 as usize], || h.seed_level_from_parent(level))
+                        with_device(held.level_devices(level)[id.0 as usize], || h.seed_level_from_filled_parent(level))
                             .map_err(|e| fail(fabric, WorkerError::Numerics(format!("level {level} seed: {e:?}"))))?;
                     }
+                }
+                for (k, ghosts) in parent_ghosts {
+                    let id = held.level_ids(level - 1)[k].expect("a tile of the parent level");
+                    with_device(held.level_devices(level - 1)[id.0 as usize], || tiles[k].restore_seed_ghosts(level - 1, ghosts));
                 }
             }
         }
