@@ -10755,35 +10755,35 @@ fn validate_tiled_balance(cfg: &Config) -> Result<(), String> {
         ));
     }
     if cfg.refinement_enabled {
-        if cfg.refinement_regions.len() > 1 {
-            return Err(
-                "wb_reconstruction with nested refinement levels on several tiles is outside the gated \
-                 tiled runs (one refined region); run on one device or keep one refinement region"
-                    .to_string(),
-            );
-        }
         let crossed = match cfg.dims {
             2 => cut_in_balanced_band::<2>(cfg)?,
             _ => cut_in_balanced_band::<3>(cfg)?,
         };
-        if let Some((ax, cut, face, band)) = crossed {
+        if let Some((level, ax, cut, face, band)) = crossed {
+            let at = if level == 0 {
+                format!("the patch face at {face}")
+            } else {
+                format!("the level-{} patch face at level-{level} cell {face}", level + 1)
+            };
             return Err(format!(
                 "wb_reconstruction with mesh refinement on several tiles: the cut at root cell {cut} on \
-                 axis {ax} crosses the {band}-cell balanced restriction band inside the patch face at \
-                 {face}, which rewrites its covered cells from the uncovered cell beyond the face; keep \
-                 every cut at least {band} cells inside the face or beyond it"
+                 axis {ax} crosses the {band}-cell balanced restriction band inside {at}, which rewrites \
+                 its covered cells from the uncovered cell beyond the face; keep every cut at least \
+                 {band} cells of that level inside the face or beyond it"
             ));
         }
     }
     Ok(())
 }
 
-/// the first cut of the tile partition that falls in a seam band of the refined patch: the
-/// balanced restriction rewrites the covered coarse cells within `band` cells of each seam from
-/// the uncovered cell beyond it, so the band and that cell share one tile. `band` is the
-/// reconstruction reach plus two, capped by the unrolled chain; a seam lies wherever the patch
-/// face is inside the domain. returns (axis, cut, face, band)
-fn cut_in_balanced_band<const D: usize>(cfg: &Config) -> Result<Option<(usize, usize, usize, usize)>, String> {
+/// the first cut of the tile partition that falls in a seam band of a refined patch: the
+/// balanced restriction rewrites the parent cells within `band` cells of each seam from the
+/// uncovered parent cell beyond it, so the band and that cell share one tile. `band` is the
+/// reconstruction reach plus two parent cells, capped by the unrolled chain; a seam lies wherever
+/// the patch face is inside the domain. region `ii` refines level `ii`, whose cells are the root
+/// cells split by 2^ii, so a root cut at `c` falls on level-`ii` cell `c * 2^ii`. returns
+/// (parent level, axis, root cut, face in parent cells, band)
+fn cut_in_balanced_band<const D: usize>(cfg: &Config) -> Result<Option<(usize, usize, usize, usize, usize)>, String> {
     let reach = match cfg.reconstruction_name.as_str() {
         "pcm" => 1,
         "ppm" => 3,
@@ -10792,20 +10792,25 @@ fn cut_in_balanced_band<const D: usize>(cfg: &Config) -> Result<Option<(usize, u
     let band = (reach + 2).min(symbi::WB_CF_CHAIN_MAX as usize);
     let n: [usize; D] = std::array::from_fn(|ax| cfg.n_cells[ax]);
     let partition = tile_partition(n, cfg)?;
-    let patch = launch_patch::<D>(cfg)?;
-    for flat in 0..partition.n_tiles() {
-        let ext = partition.tile_extents(symbi::sim::decomp::unflatten(flat, partition.counts()));
-        for ax in 0..D {
-            let cut = ext[ax].0;
-            let (lo, hi) = patch[ax];
-            if cut == 0 {
-                continue;
-            }
-            if lo > 0 && (lo..lo + band).contains(&cut) {
-                return Ok(Some((ax, cut, lo, band)));
-            }
-            if hi < n[ax] && (hi.saturating_sub(band) + 1..=hi).contains(&cut) {
-                return Ok(Some((ax, cut, hi, band)));
+    let regions = refinement_regions_nd::<D>(&cfg.refinement_regions)?;
+    for (level, region) in regions.iter().enumerate() {
+        let scale = 1usize << level;
+        let cell = |x: f64, ax: usize| ((x - cfg.x_lo[ax]) / cfg.dx[ax] * scale as f64).round() as usize;
+        for flat in 0..partition.n_tiles() {
+            let ext = partition.tile_extents(symbi::sim::decomp::unflatten(flat, partition.counts()));
+            for ax in 0..D {
+                let cut = ext[ax].0;
+                if cut == 0 {
+                    continue;
+                }
+                let at = cut * scale;
+                let (lo, hi) = (cell(region.x_lo[ax], ax), cell(region.x_hi[ax], ax));
+                if lo > 0 && (lo..lo + band).contains(&at) {
+                    return Ok(Some((level, ax, cut, lo, band)));
+                }
+                if hi < n[ax] * scale && (hi.saturating_sub(band) + 1..=hi).contains(&at) {
+                    return Ok(Some((level, ax, cut, hi, band)));
+                }
             }
         }
     }

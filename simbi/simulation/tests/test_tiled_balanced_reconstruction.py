@@ -332,7 +332,28 @@ def test_the_balanced_reconstruction_on_refined_tiles_matches_the_single_grid(tm
     _assert_same_state(got, want, "refined launch on four workers")
 
 
+def test_the_balanced_reconstruction_on_nested_refined_tiles_matches_the_single_grid(tmp_path: Path, fixture: Path, monkeypatch) -> None:
+    # level 1 spans root cells 6..18 x 8..24 and level 2 root cells 9..15 x 12..20; each level's
+    # bands keep cuts 4 parent cells clear of its faces, so the root cuts x = 12 and y = 16 cross
+    # both boxes with every band on one tile
+    want = _final(_run(fixture, "NestedBalancedAtmosphere", tmp_path / "single"), tmp_path / "single", "the nested single grid")
+    plain = _final(_run(fixture, "NestedBalancedAtmosphere", tmp_path / "plain", extra=", wb_reconstruction=False"), tmp_path / "plain", "the plain nested run")
+    with h5py.File(want, "r") as a, h5py.File(plain, "r") as b:
+        assert not np.array_equal(a["level_2/conserved/den"][()], b["level_2/conserved/den"][()]), "the balance left level 2 unchanged; the gate is vacuous"
+    for cuts in [[[12], []], [[12], [16]]]:
+        gpus = int(np.prod([len(c) + 1 for c in cuts]))
+        out = tmp_path / f"tiles{gpus}"
+        got = _final(_run(fixture, "NestedBalancedAtmosphere", out, gpus, f", decompose={cuts!r}"), out, f"nested host tiles cut at {cuts}")
+        _assert_same_state(got, want, f"nested host tiles cut at {cuts}")
+    monkeypatch.delenv("SIMBI_LAUNCH_EXPERIMENTAL", raising=False)
+    layout = _layout(tmp_path / "launch.toml", workers=4, cuts=[[12], [16]])
+    got = _script_launch(str(_launch_script(fixture, "NestedBalancedAtmosphere")), (24, 32), tmp_path / "launched", layout, STEPS, workers=4, env=_launch_env(fixture))
+    _assert_same_state(got, want, "nested launch on four workers")
+
+
 BAND = "the cut at root cell 8 on axis 0 crosses the 4-cell balanced restriction band inside the patch face at 6"
+# level 2 spans root cells 9..15 along x, level-1 cells 18..30: a root cut at 10 falls on level-1 cell 20
+NESTED_BAND = "the cut at root cell 10 on axis 0 crosses the 4-cell balanced restriction band inside the level-2 patch face at level-1 cell 18"
 
 
 @pytest.mark.parametrize(
@@ -340,7 +361,7 @@ BAND = "the cut at root cell 8 on axis 0 crosses the 4-cell balanced restriction
     [
         ("CylindricalPlaneAtmosphere", None, "wb_reconstruction on the 2-dimensional (r, z) cylindrical grid with several tiles is outside the gated tiled runs"),
         ("RefinedBalancedAtmosphere", [[8], []], BAND),
-        ("NestedBalancedAtmosphere", [[12], []], "wb_reconstruction with nested refinement levels on several tiles"),
+        ("NestedBalancedAtmosphere", [[10], []], NESTED_BAND),
     ],
 )
 def test_the_balanced_reconstruction_outside_the_gated_scope_is_refused_on_host_tiles(tmp_path: Path, fixture: Path, cls: str, decompose, reason: str) -> None:
