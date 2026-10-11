@@ -9261,13 +9261,17 @@ fn patch_spans_cut_periodic_axis(cfg: &Config) -> Result<Option<usize>, String> 
     }
 }
 
-/// a viscous run reads the halo corners where a seam meets a coarse-fine face, which a patch
-/// spanning a cut periodic axis leaves without a single-hierarchy reference
+/// the halo corners where a seam meets a coarse-fine face, which a patch spanning a cut periodic
+/// axis leaves without a single-hierarchy reference, are read by a viscous run's cross
+/// derivatives and by the continuous tracers' cell-centered interpolation of their coefficients
 fn validate_spanning_periodic_patch(cfg: &Config) -> Result<(), String> {
-    if cfg.viscosity > 0.0 || cfg.alpha > 0.0 {
+    let viscous = cfg.viscosity > 0.0 || cfg.alpha > 0.0;
+    let continuous = cfg.n_tracers > 0 && matches!(cfg.tracer_scheme.as_str(), "ito2" | "ito3");
+    if viscous || continuous {
         if let Some(ax) = patch_spans_cut_periodic_axis(cfg)? {
+            let what = if viscous { "a viscous run" } else { "a continuous tracer population" };
             return Err(format!(
-                "a viscous run whose refined patch spans the periodic axis {ax} cut into tiles is outside \
+                "{what} whose refined patch spans the periodic axis {ax} cut into tiles is outside \
                  the gated tiled runs; run it on one device, or cut the other axes alone"
             ));
         }

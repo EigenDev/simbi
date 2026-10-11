@@ -300,6 +300,38 @@ def test_a_viscous_patch_spanning_a_cut_periodic_axis_is_refused_on_host_tiles(t
     assert not list((tmp_path / "out").glob("*.h5")), "a refused run published a checkpoint"
 
 
+def test_continuous_tracers_over_a_patch_spanning_a_cut_periodic_axis_are_refused_on_host_tiles(tmp_path: Path, host_tiles) -> None:
+    # the continuous tracers' coefficient interpolation reads the fine halo corners where the seam
+    # meets a coarse-fine face, which the single hierarchy leaves unwritten
+    (tmp_path / "ito_kh.py").write_text(
+        "from pydantic import computed_field\n"
+        "from simbi.types import TracerScheme\n"
+        "from simbi_configs.examples.newtonian.refined_kh import RefinedKelvinHelmholtz\n\n\n"
+        "class ItoKh(RefinedKelvinHelmholtz):\n"
+        "    @computed_field\n"
+        "    @property\n"
+        "    def n_tracers(self) -> int:\n"
+        "        return 200\n\n"
+        "    @computed_field\n"
+        "    @property\n"
+        "    def tracer_scheme(self) -> TracerScheme:\n"
+        "        return TracerScheme.ITO2\n"
+    )
+    snippet = (
+        "import sys\n"
+        "from simbi.simulation import runner\n"
+        "from ito_kh import ItoKh\n"
+        "runner.run(ItoKh(resolution=(64, 64), gpus=2, decompose=[[26], []], "
+        "refinement_regions=[[-0.5, 0.5, -0.375, 0.375]], data_directory=sys.argv[1]), compute_mode='cpu', max_steps=1)\n"
+    )
+    env = dict(os.environ, SYMBI_GPU_OVERSUBSCRIBE="1", PYTHONPATH=os.pathsep.join([str(tmp_path), os.getcwd(), os.environ.get("PYTHONPATH", "")]))
+    done = subprocess.run([sys.executable, "-c", snippet, str(tmp_path / "out")], capture_output=True, text=True, timeout=600, env=env)
+    assert done.returncode != 0, "continuous tracers over a spanning cut-periodic patch ran on host tiles"
+    flat = " ".join(done.stderr.split())
+    assert "a continuous tracer population whose refined patch spans the periodic axis 0 cut into tiles is outside the gated tiled runs" in flat, flat[-2000:]
+    assert not list((tmp_path / "out").glob("*.h5")), "a refused run published a checkpoint"
+
+
 class NestedMagnetizedSink(MagnetizedBondiSink):
     """the magnetized sink under two nested fine levels"""
 
