@@ -234,6 +234,10 @@ def test_a_magnetized_patch_spanning_an_uncut_periodic_axis_launches_as_the_sing
     for label, workers, layout in [
         ("two workers", 2, _layout(tmp_path / "two.toml", workers=2, shape=(2, 1, 1))),
         ("three uneven workers", 3, _layout(tmp_path / "three.toml", workers=3, cuts=[[12, 22], [], []])),
+        # cuts across the periodic z axis itself: the patch has no face along z, and its level
+        # wraps across the workers at the seam as the root does
+        ("two workers cut across the periodic axis", 2, _layout(tmp_path / "across.toml", workers=2, cuts=[[], [], [12]])),
+        ("four uneven workers cut across it and x", 4, _layout(tmp_path / "both.toml", workers=4, cuts=[[11], [], [9]])),
     ]:
         launched = _script_launch(script, RESOLUTION_3D, tmp_path / label.replace(" ", "_"), layout, STEPS, workers=workers)
         _assert_same_levels(launched, reference, f"spanning vortex: {label}")

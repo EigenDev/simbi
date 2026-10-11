@@ -228,6 +228,11 @@ def test_a_magnetized_patch_spanning_the_periodic_axis_on_tiles_carries_the_sing
     assert np.ptp(fine.mean(axis=(1, 2))) > 0.0, "the fine density is uniform along z; the wrap carries nothing"
     got = _run_variant(where, tmp_path / "tiles", resolution, 4, [[11], [13], []])
     _assert_same(got, want, "3d vortex spanning z on four refined tiles")
+    # cuts across the periodic z axis itself: the patch has no face along z, and its level wraps
+    # across the tiles at the seam as the root does
+    for gpus, decompose in ((2, [[], [], [12]]), (4, [[11], [], [9]])):
+        got = _run_variant(where, tmp_path / f"across{gpus}", resolution, gpus, decompose)
+        _assert_same(got, want, f"3d vortex spanning z on {gpus} refined tiles cut across z at {decompose[2]}")
 
 
 def test_nested_refined_tiles_carry_the_single_hierarchy(tmp_path: Path) -> None:

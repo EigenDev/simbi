@@ -576,23 +576,28 @@ def test_a_shared_face_mismatch_exits_every_worker_and_publishes_no_checkpoint(t
         assert int(f["level_0"].attrs["iteration"]) == 0, "a checkpoint after the perturbation was published"
 
 
-REFINED_RMHD = str(Path(RefinedMhd3D.__module__.replace(".", "/") + ".py"))
-
-
 @pytest.mark.parametrize(
-    ("script", "reason"),
-    [(REFINED_RMHD, "a refined patch on the periodic face of axis 2 with mesh refinement")],
+    ("region", "reason"),
+    [([0.25, 0.75, 0.25, 0.75, 0.0, 0.5], "a refined patch on the periodic face of axis 2 with mesh refinement")],
 )
-def test_out_of_scope_problems_are_refused_by_name(tmp_path: Path, script: str, reason: str) -> None:
-    # a layout with as many axes as the problem's grid cutting its last axis, the periodic z the
-    # fine box spans, so the refusal is the scope's
-    problem_class = {REFINED_RMHD: RefinedMhd3D}[script]
-    default = problem_class.model_fields["resolution"].default
-    dims = max(1, sum(1 for r in default if int(r) > 1))
-    layout = _layout(tmp_path / "two.toml", workers=2, shape=(1,) * (dims - 1) + (2,))
+def test_out_of_scope_problems_are_refused_by_name(tmp_path: Path, region: list[float], reason: str) -> None:
+    # the 3d vortex's fine box narrowed along z to reach the periodic z face without spanning the
+    # axis, so it has a face on the domain's seam; a layout cutting z alone makes the refusal the
+    # scope's
+    script = tmp_path / "one_sided_vortex.py"
+    script.write_text(
+        "from typing import Annotated\n"
+        "from simbi import ProblemParam\n"
+        f"from {RefinedMhd3D.__module__} import RefinedMhd3D\n\n\n"
+        "class OneSided(RefinedMhd3D):\n"
+        f"    refinement_regions: Annotated[list[list[float]], ProblemParam([{region!r}], description='r')]\n"
+    )
+    layout = _layout(tmp_path / "two.toml", workers=2, shape=(1, 1, 2))
     out = tmp_path / "out"
-    cmd = [sys.executable, "-m", "simbi.cli", "launch", script, "--layout", str(layout), "--max-steps", "1", "--data-directory", str(out), "--checkpoint-interval", "1e9"]
-    done = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
+    cmd = [sys.executable, "-m", "simbi.cli", "launch", str(script), "--layout", str(layout), "--max-steps", "1", "--data-directory", str(out), "--checkpoint-interval", "1e9"]
+    env = dict(os.environ, PYTHONPATH=os.pathsep.join([os.getcwd(), os.environ.get("PYTHONPATH", "")]))
+    env.pop("SIMBI_LAUNCH_EXPERIMENTAL", None)
+    done = subprocess.run(cmd, capture_output=True, text=True, timeout=600, env=env)
     assert done.returncode != 0, f"the launch succeeded:\n{done.stdout}"
     # the traceback renderer wraps a long message across lines
     assert f"{reason} is outside the distributed first release" in " ".join(done.stderr.split()), done.stderr

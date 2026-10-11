@@ -6873,11 +6873,14 @@ macro_rules! build_and_run_magnetized_decomposed_refined {
                 // hierarchy
                 seed_run_state(&mut sim, cfg)?;
                 let sub = mhd_kernels(sim.substrate(), &settings, LevelRole::Root).map_err(|e| format!("tile {flat}: {e}"))?;
+                let ring = whole.topology(counts);
                 let mut h = if tile_regions.is_empty() {
                     Hierarchy::single(sim, sub)
                 } else {
-                    let (clipped, whole): (Vec<_>, Vec<_>) = tile_regions.iter().copied().unzip();
-                    Hierarchy::with_refinement_of(sim, sub, &clipped, &whole, prolong, kernels_of)
+                    // the build sees the whole grid and its wrapping axes: a patch spanning a
+                    // periodic axis cut into tiles has no face along it and wraps across the seam
+                    let (clipped, whole_patch): (Vec<_>, Vec<_>) = tile_regions.iter().copied().unzip();
+                    Hierarchy::with_refinement_placed(sim, sub, &clipped, &whole_patch, prolong, kernels_of, n, std::array::from_fn(|ax| ring.is_periodic(ax)))
                         .map_err(|e| format!("tile {flat} refinement build: {e:?}"))?
                 };
                 // the sinks on each tile's finest level at their global positions, gravity-only
@@ -6885,7 +6888,6 @@ macro_rules! build_and_run_magnetized_decomposed_refined {
                 if !cfg.bodies.is_empty() {
                     h = h.try_with_bodies(build_bodies_and_horizon::<$d>(cfg)).map_err(|e| format!("tile {flat}: {e}"))?;
                 }
-                let ring = whole.topology(counts);
                 h.set_root_layout(n, tile_lo, std::array::from_fn(|ax| ring.is_periodic(ax)));
                 Ok(h)
             })?;
@@ -11102,8 +11104,8 @@ fn validate_refined_launch_scope(cfg: &Config) -> Result<(), String> {
 }
 
 /// the first periodic axis cut into tiles whose domain face the launch's refined patch reaches,
-/// short of a gas patch spanning the whole axis: that patch has no face along it and its level
-/// wraps across the tiles as the root does
+/// short of a patch spanning the whole axis: that patch has no face along it and its level, its
+/// staggered faces included, wraps across the tiles as the root does
 fn patch_on_periodic_face<const D: usize>(cfg: &Config) -> Result<Option<usize>, String> {
     let whole = whole_grid::<D>(cfg);
     let patch = launch_patch::<D>(cfg)?;
@@ -11111,8 +11113,7 @@ fn patch_on_periodic_face<const D: usize>(cfg: &Config) -> Result<Option<usize>,
     let counts = tile_partition(n, cfg)?.counts();
     Ok((0..D).find(|&ax| {
         let spans = patch[ax].0 == 0 && patch[ax].1 >= cfg.n_cells[ax];
-        let magnetized = matches!(cfg.regime.as_str(), "nmhd" | "imhd" | "rmhd");
-        whole.periodic(ax) && counts[ax] > 1 && (patch[ax].0 == 0 || patch[ax].1 >= cfg.n_cells[ax]) && (magnetized || !spans)
+        whole.periodic(ax) && counts[ax] > 1 && (patch[ax].0 == 0 || patch[ax].1 >= cfg.n_cells[ax]) && !spans
     }))
 }
 

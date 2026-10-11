@@ -1624,13 +1624,15 @@ where
             validate_coverage(&coverage, parent, ng, prolong_order, real_on_cut).map_err(|detail| {
                 symbi_xpu::XpuError { operation: "refinement region", code: 0, detail }
             })?;
-            // a side of the fine level lying on a cut the patch continues across
+            // a side of the fine level lying on a cut the patch continues across: past the whole
+            // patch's own extent, or across the seam of a wrapping axis the first patch spans
             let cut_sides: [[bool; 2]; NDIM] = std::array::from_fn(|ax| {
                 let whole = &whole_coverages.last().unwrap().spaces[ax];
                 let (c, p) = (&coverage.spaces[ax], &parent.geom.interior.spaces[ax]);
+                let wraps = levels.len() == 1 && spans_wrap[ax];
                 [
-                    c.lo == p.lo && parent.boundaries.lo(ax) == BoundaryType::CoarseFine && whole.lo != c.lo,
-                    c.hi == p.hi && parent.boundaries.hi(ax) == BoundaryType::CoarseFine && whole.hi != c.hi,
+                    c.lo == p.lo && parent.boundaries.lo(ax) == BoundaryType::CoarseFine && (whole.lo != c.lo || wraps),
+                    c.hi == p.hi && parent.boundaries.hi(ax) == BoundaryType::CoarseFine && (whole.hi != c.hi || wraps),
                 ]
             });
 
