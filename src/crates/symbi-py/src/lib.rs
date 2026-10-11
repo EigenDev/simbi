@@ -9254,46 +9254,7 @@ fn validate_run(cfg: &Config) -> Result<(), String> {
 
 /// the admission of every tiled march, in-process host tiles and launched workers alike: the
 /// operators the single grid applies that no tiled driver carries yet are refused by name
-/// the first periodic axis cut into tiles that the run's first refined patch spans whole: the
-/// patch's level wraps across the tiles at the seam
-fn patch_spans_cut_periodic_axis(cfg: &Config) -> Result<Option<usize>, String> {
-    fn of<const D: usize>(cfg: &Config) -> Result<Option<usize>, String> {
-        let whole = whole_grid::<D>(cfg);
-        let patch = launch_patch::<D>(cfg)?;
-        let n: [usize; D] = std::array::from_fn(|ax| cfg.n_cells[ax]);
-        let counts = tile_partition(n, cfg)?.counts();
-        Ok((0..D).find(|&ax| whole.periodic(ax) && counts[ax] > 1 && patch[ax].0 == 0 && patch[ax].1 >= n[ax]))
-    }
-    if !cfg.refinement_enabled || cfg.refinement_regions.is_empty() {
-        return Ok(None);
-    }
-    match cfg.dims {
-        1 => of::<1>(cfg),
-        2 => of::<2>(cfg),
-        _ => of::<3>(cfg),
-    }
-}
-
-/// the halo corners where a seam meets a coarse-fine face, which a patch spanning a cut periodic
-/// axis leaves without a single-hierarchy reference, are read by a viscous run's cross
-/// derivatives and by the continuous tracers' cell-centered interpolation of their coefficients
-fn validate_spanning_periodic_patch(cfg: &Config) -> Result<(), String> {
-    let viscous = cfg.viscosity > 0.0 || cfg.alpha > 0.0;
-    let continuous = cfg.n_tracers > 0 && matches!(cfg.tracer_scheme.as_str(), "ito2" | "ito3");
-    if viscous || continuous {
-        if let Some(ax) = patch_spans_cut_periodic_axis(cfg)? {
-            let what = if viscous { "a viscous run" } else { "a continuous tracer population" };
-            return Err(format!(
-                "{what} whose refined patch spans the periodic axis {ax} cut into tiles is outside \
-                 the gated tiled runs; run it on one device, or cut the other axes alone"
-            ));
-        }
-    }
-    Ok(())
-}
-
 fn validate_tiled_march(cfg: &Config) -> Result<(), String> {
-    validate_spanning_periodic_patch(cfg)?;
     // the gas and isothermal tiles, flat and refined, read a stationary target's residual off the
     // tiled pipeline and lay a declared perturbation over it; the magnetized tiles carry none
     if cfg.equilibrium_json.is_some() && !matches!(cfg.regime.as_str(), "newtonian" | "rhd" | "isothermal") {
@@ -11041,7 +11002,6 @@ fn validate_launch_scope(cfg: &Config) -> Result<(), String> {
 /// where the outer scope admits them for the regime. every other refined combination is named and
 /// refused.
 fn validate_refined_launch_scope(cfg: &Config) -> Result<(), String> {
-    validate_spanning_periodic_patch(cfg)?;
     let refused = |what: &str| Err(format!("{what} with mesh refinement is outside the distributed first release"));
     if !matches!(cfg.regime.as_str(), "newtonian" | "rhd" | "isothermal" | "nmhd" | "imhd" | "rmhd") {
         return refused(&format!("the {} regime", cfg.regime));

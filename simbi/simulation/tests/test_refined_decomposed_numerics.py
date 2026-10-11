@@ -264,39 +264,18 @@ def test_a_patch_spanning_a_cut_periodic_axis_on_host_tiles_matches_the_single_h
             assert x.shape == y.shape and np.array_equal(x, y), f"{gpus} refined tiles cut across the periodic axis: {name} differs"
 
 
-def test_a_viscous_patch_spanning_a_cut_periodic_axis_is_refused_on_host_tiles(tmp_path: Path, host_tiles) -> None:
-    (tmp_path / "viscous_kh.py").write_text(
-        "from pydantic import computed_field\n"
-        "from simbi_configs.examples.newtonian.refined_kh import RefinedKelvinHelmholtz\n\n\n"
-        "class ViscousKh(RefinedKelvinHelmholtz):\n"
+SPANNING_KH = {
+    "viscous": (
+        "viscous_kh",
+        "class Variant(RefinedKelvinHelmholtz):\n"
         "    @computed_field\n"
         "    @property\n"
         "    def viscosity(self) -> float:\n"
-        "        return 0.001\n"
-    )
-    snippet = (
-        "import sys\n"
-        "from simbi.simulation import runner\n"
-        "from viscous_kh import ViscousKh\n"
-        "runner.run(ViscousKh(resolution=(64, 64), gpus=2, decompose=[[26], []], "
-        "refinement_regions=[[-0.5, 0.5, -0.375, 0.375]], data_directory=sys.argv[1]), compute_mode='cpu', max_steps=1)\n"
-    )
-    env = dict(os.environ, SYMBI_GPU_OVERSUBSCRIBE="1", PYTHONPATH=os.pathsep.join([str(tmp_path), os.getcwd(), os.environ.get("PYTHONPATH", "")]))
-    done = subprocess.run([sys.executable, "-c", snippet, str(tmp_path / "out")], capture_output=True, text=True, timeout=600, env=env)
-    assert done.returncode != 0, "a viscous run spanning a cut periodic axis ran on host tiles"
-    flat = " ".join(done.stderr.split())
-    assert "a viscous run whose refined patch spans the periodic axis 0 cut into tiles is outside the gated tiled runs" in flat, flat[-2000:]
-    assert not list((tmp_path / "out").glob("*.h5")), "a refused run published a checkpoint"
-
-
-def test_continuous_tracers_over_a_patch_spanning_a_cut_periodic_axis_are_refused_on_host_tiles(tmp_path: Path, host_tiles) -> None:
-    # the continuous tracers' coefficient interpolation reads the fine halo corners where the seam
-    # meets a coarse-fine face, which the single hierarchy leaves unwritten
-    (tmp_path / "ito_kh.py").write_text(
-        "from pydantic import computed_field\n"
-        "from simbi.types import TracerScheme\n"
-        "from simbi_configs.examples.newtonian.refined_kh import RefinedKelvinHelmholtz\n\n\n"
-        "class ItoKh(RefinedKelvinHelmholtz):\n"
+        "        return 0.001\n",
+    ),
+    "ito2": (
+        "ito_kh",
+        "class Variant(RefinedKelvinHelmholtz):\n"
         "    @computed_field\n"
         "    @property\n"
         "    def n_tracers(self) -> int:\n"
@@ -304,21 +283,63 @@ def test_continuous_tracers_over_a_patch_spanning_a_cut_periodic_axis_are_refuse
         "    @computed_field\n"
         "    @property\n"
         "    def tracer_scheme(self) -> TracerScheme:\n"
-        "        return TracerScheme.ITO2\n"
+        "        return TracerScheme.ITO2\n",
+    ),
+}
+
+
+def _spanning_kh_variant(tmp_path: Path, name: str) -> str:
+    stem, body = SPANNING_KH[name]
+    (tmp_path / f"{stem}.py").write_text(
+        "from pydantic import computed_field\n"
+        "from simbi.types import TracerScheme\n"
+        "from simbi_configs.examples.newtonian.refined_kh import RefinedKelvinHelmholtz\n\n\n" + body
     )
+    return stem
+
+
+def _run_spanning_kh(tmp_path: Path, stem: str, out: Path, gpus: int, **kwargs) -> Path:
+    """the variant's kh run with its fine box widened over the whole periodic x axis, in a fresh
+    interpreter: the example draws its noise from a module-level generator"""
+    fields = "".join(f", {k}={v!r}" for k, v in kwargs.items())
     snippet = (
         "import sys\n"
         "from simbi.simulation import runner\n"
-        "from ito_kh import ItoKh\n"
-        "runner.run(ItoKh(resolution=(64, 64), gpus=2, decompose=[[26], []], "
-        "refinement_regions=[[-0.5, 0.5, -0.375, 0.375]], data_directory=sys.argv[1]), compute_mode='cpu', max_steps=1)\n"
+        f"from {stem} import Variant\n"
+        f"runner.run(Variant(resolution=(64, 64), gpus={gpus}, refinement_regions=[[-0.5, 0.5, -0.375, 0.375]], data_directory=sys.argv[1]{fields}), "
+        f"compute_mode='cpu', max_steps={STEPS})\n"
     )
-    env = dict(os.environ, SYMBI_GPU_OVERSUBSCRIBE="1", PYTHONPATH=os.pathsep.join([str(tmp_path), os.getcwd(), os.environ.get("PYTHONPATH", "")]))
-    done = subprocess.run([sys.executable, "-c", snippet, str(tmp_path / "out")], capture_output=True, text=True, timeout=600, env=env)
-    assert done.returncode != 0, "continuous tracers over a spanning cut-periodic patch ran on host tiles"
-    flat = " ".join(done.stderr.split())
-    assert "a continuous tracer population whose refined patch spans the periodic axis 0 cut into tiles is outside the gated tiled runs" in flat, flat[-2000:]
-    assert not list((tmp_path / "out").glob("*.h5")), "a refused run published a checkpoint"
+    env = dict(os.environ, PYTHONPATH=os.pathsep.join([str(tmp_path), os.getcwd(), os.environ.get("PYTHONPATH", "")]))
+    done = subprocess.run([sys.executable, "-c", snippet, str(out)], capture_output=True, text=True, timeout=900, env=env)
+    assert done.returncode == 0, f"{stem} on {gpus} device(s) failed:\n{done.stderr[-3000:]}"
+    (final,) = sorted(out.glob("*final*.h5"))
+    return final
+
+
+@pytest.mark.parametrize("name", list(SPANNING_KH))
+def test_a_patch_spanning_a_cut_periodic_axis_carries_the_corner_reading_operators_on_host_tiles(tmp_path: Path, host_tiles, name: str) -> None:
+    # the viscous cross derivatives and the continuous tracers' coefficient interpolation read the
+    # fine halo cells where the seam meets a coarse-fine face: the periodic image of the prolonged
+    # ghost rows on the single hierarchy, the fine exchange's on the tiles
+    from simbi.simulation.tests.test_decomposed_mhd import _population
+
+    stem = _spanning_kh_variant(tmp_path, name)
+    want = _run_spanning_kh(tmp_path, stem, tmp_path / "single", 1)
+    plain = _fresh_kh(tmp_path / "plain", 1, refinement_regions=[[-0.5, 0.5, -0.375, 0.375]])
+    if name == "viscous":
+        assert any(not np.array_equal(x, _datasets(plain)[n]) for n, x in _datasets(want).items()), "the viscosity left the run unchanged; the gate is vacuous"
+    else:
+        population = _population(want, "continuous_tracers")
+        levels = population["owner"].astype(np.uint64) >> np.uint64(56)
+        assert 1 in set(levels.tolist()), "no tracer lives on the fine level; the interpolation there is never read"
+    for gpus, cuts in ((2, [[26], []]), (4, [[20], [36]])):
+        got = _run_spanning_kh(tmp_path, stem, tmp_path / f"tiles{gpus}", gpus, decompose=cuts)
+        _assert_same(got, want, f"{name} kh spanning x on {gpus} tiles cut at {cuts}")
+        if name != "viscous":
+            tiled = _population(got, "continuous_tracers")
+            assert tiled.keys() == population.keys(), "the tracer fields differ"
+            for field, values in population.items():
+                np.testing.assert_array_equal(tiled[field], values, err_msg=f"{gpus} tiles: continuous_tracers/{field}")
 
 
 class NestedMagnetizedSink(MagnetizedBondiSink):

@@ -217,6 +217,37 @@ def test_a_patch_spanning_an_uncut_periodic_axis_launches_as_the_single_grid_run
         _assert_same_levels(launched, reference, f"spanning kh: {label}")
 
 
+@pytest.mark.parametrize("name", ["viscous", "ito2"])
+def test_a_patch_spanning_a_cut_periodic_axis_launches_the_corner_reading_operators_as_the_single_grid_runs(tmp_path: Path, monkeypatch, name: str) -> None:
+    # the viscous cross derivatives and the continuous tracers' coefficient interpolation read the
+    # fine halo cells where the seam meets a coarse-fine face; the workers cut across the seam
+    from simbi.simulation.tests.test_decomposed_mhd import _population
+    from simbi.simulation.tests.test_refined_decomposed_numerics import SPANNING_KH
+
+    stem = "spanning_" + SPANNING_KH[name][0]
+    (tmp_path / f"{stem}.py").write_text(
+        "from typing import Annotated\n"
+        "from pydantic import computed_field\n"
+        "from simbi import ProblemParam\n"
+        "from simbi.types import TracerScheme\n"
+        f"from {KH[0]} import {KH[1]} as RefinedKelvinHelmholtz\n\n\n"
+        + SPANNING_KH[name][1].replace("class Variant(RefinedKelvinHelmholtz):", "class Spanning(RefinedKelvinHelmholtz):\n    refinement_regions: Annotated[list[list[float]], ProblemParam([[-0.5, 0.5, -0.375, 0.375]], description='r')]\n")
+    )
+    monkeypatch.setenv("PYTHONPATH", os.pathsep.join([str(tmp_path), os.getcwd(), os.environ.get("PYTHONPATH", "")]))
+    script = str(tmp_path / f"{stem}.py")
+    reference = _script_reference(stem, "Spanning", KH_RESOLUTION, tmp_path / "single", STEPS)
+    layout = _layout(tmp_path / "across.toml", workers=2, cuts=[[26], []])
+    launched = _script_launch(script, KH_RESOLUTION, tmp_path / "across", layout, STEPS, workers=2)
+    _assert_same_levels(launched, reference, f"{name} spanning kh on two workers cut across the periodic axis")
+    if name == "ito2":
+        want, got = _population(reference, "continuous_tracers"), _population(launched, "continuous_tracers")
+        levels = want["owner"].astype(np.uint64) >> np.uint64(56)
+        assert 1 in set(levels.tolist()), "no tracer lives on the fine level; the interpolation there is never read"
+        assert got.keys() == want.keys(), "the tracer fields differ"
+        for field, values in want.items():
+            np.testing.assert_array_equal(got[field], values, err_msg=f"launched continuous_tracers/{field}")
+
+
 def test_a_magnetized_patch_spanning_an_uncut_periodic_axis_launches_as_the_single_grid_runs(tmp_path: Path, monkeypatch) -> None:
     # the vortex box spans the whole periodic z axis with a flow along z through the seam; the
     # workers cut x alone, so the root's parent face stencil reads past the z faces at their
