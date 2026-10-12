@@ -652,6 +652,20 @@ pub fn plan_schema<const D: usize, const DOF: usize, M: MemorySpace>(
     schema
 }
 
+/// the schema of a level's band plan: the primitive density and the band equilibria over the
+/// one ghost layer beside each cut, the cells a balanced band chain resumes from
+pub fn plan_band_schema() -> crate::atlas::FieldSchema {
+    crate::atlas::FieldSchema::new().cell_band("rho", 1).cell_band("band_anchor", 1)
+}
+
+/// the fields `plan_band_schema` realizes on a level's store, the band equilibria in `anchor`
+pub fn plan_band_fields<'a, const D: usize, const DOF: usize, M: MemorySpace>(
+    store: &'a FieldStore<D, DOF, M>,
+    anchor: &'a Field<f64, D, M>,
+) -> Vec<&'a Field<f64, D, M>> {
+    vec![&store.fields.prim.rho, anchor]
+}
+
 /// exchange same-level halos across the shared face a `leg` names: `lo`'s hi face on the
 /// leg's axis against `hi`'s lo face, with the leg's clip carrying the two-pass transverse
 /// rule and `reach` the halo width. fills the prim + bcell ghost cells and -- for MHD -- the

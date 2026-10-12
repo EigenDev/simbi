@@ -42,7 +42,7 @@ pub struct LevelAtlas<const D: usize> {
 }
 
 /// the id on level `level`'s plan of held root tile `k`'s tile of the level
-fn level_id(held: &Held<'_>, level: usize, k: usize) -> Option<TileId> {
+pub(crate) fn level_id(held: &Held<'_>, level: usize, k: usize) -> Option<TileId> {
     if level == 0 { Some(held.root_ids[k]) } else { held.level_ids(level)[k] }
 }
 

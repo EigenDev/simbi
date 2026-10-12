@@ -8887,7 +8887,7 @@ fn dispatch_and_run(
     validate_declared_target(cfg, validate_primitive_rows(cfg, prims)?)?;
     if cfg.n_gpus > 1 {
         validate_tiled_march(cfg)?;
-        validate_tiled_balance(cfg, false)?;
+        validate_tiled_balance(cfg)?;
     }
     match cfg.regime.as_str() {
         "newtonian" => hydro_dispatch!(cfg, prims, Newtonian, Newtonian),
@@ -10708,9 +10708,9 @@ fn launch_experimental_opt_in() -> bool {
 /// body source read the cells beside each face, which the halo exchange fills, and are gated on
 /// the cartesian grids, the spherical line and (r, theta) shell and the cylindrical line; under
 /// refinement, on the 2D and 3D cartesian grids, the balanced coarse-fine transfer and the seam
-/// band rewrite start their chains from cells of the whole patch: the host tiles carry a band's
-/// chains across one cut inside it, and the launched workers keep every band on one tile
-fn validate_tiled_balance(cfg: &Config, launched: bool) -> Result<(), String> {
+/// band rewrite start their chains from cells of the whole patch: the tiles carry a band's chains
+/// across one cut inside it
+fn validate_tiled_balance(cfg: &Config) -> Result<(), String> {
     if !cfg.wb_reconstruction {
         return Ok(());
     }
@@ -10733,13 +10733,10 @@ fn validate_tiled_balance(cfg: &Config, launched: bool) -> Result<(), String> {
             2 => cuts_in_balanced_bands::<2>(cfg)?,
             _ => cuts_in_balanced_bands::<3>(cfg)?,
         };
-        // the host tiles carry a band's chains across one cut inside it; the launched workers
-        // carry no band anchors, and a cut on the patch face or two cuts inside one band leave the
-        // chains no tile to resume on
+        // the tiles carry a band's chains across one cut inside it; a cut on the patch face or two
+        // cuts inside one band leave the chains no tile to resume on
         let refused = crossings.iter().find(|c| {
-            launched
-                || c.on_face
-                || crossings.iter().filter(|o| (o.level, o.axis, o.face) == (c.level, c.axis, c.face)).count() > 1
+            c.on_face || crossings.iter().filter(|o| (o.level, o.axis, o.face) == (c.level, c.axis, c.face)).count() > 1
         });
         if let Some(c) = refused {
             let (level, ax, cut, face, band) = (c.level, c.axis, c.cut, c.face, c.band);
@@ -10748,7 +10745,7 @@ fn validate_tiled_balance(cfg: &Config, launched: bool) -> Result<(), String> {
             } else {
                 format!("the level-{} patch face at level-{level} cell {face}", level + 1)
             };
-            if !launched && !c.on_face {
+            if !c.on_face {
                 return Err(format!(
                     "wb_reconstruction with mesh refinement on several tiles: two cuts on axis {ax} \
                      cross the {band}-cell balanced restriction band inside {at}; the band's chains \
@@ -10766,6 +10763,23 @@ fn validate_tiled_balance(cfg: &Config, launched: bool) -> Result<(), String> {
     Ok(())
 }
 
+/// the seams whose balanced band a cut runs inside, as `(parent level, axis, high)` in the order
+/// the restriction rewrites them: by level, then axis, the low side first. every launched worker
+/// opens the band point of each at every restriction into its level
+fn launched_band_seams<const D: usize>(cfg: &Config) -> Result<Vec<(u8, u8, bool)>, String> {
+    if !cfg.wb_reconstruction || !cfg.refinement_enabled {
+        return Ok(Vec::new());
+    }
+    let mut seams: Vec<(u8, u8, bool)> = cuts_in_balanced_bands::<D>(cfg)?
+        .iter()
+        .filter(|c| !c.on_face)
+        .map(|c| (c.level as u8, c.axis as u8, c.high))
+        .collect();
+    seams.sort();
+    seams.dedup();
+    Ok(seams)
+}
+
 /// a cut of the tile partition inside or on the face of a seam band of a refined patch
 struct BandCrossing {
     /// the parent level of the band, the axis of the cut, the root cut, the patch face in parent
@@ -10777,6 +10791,8 @@ struct BandCrossing {
     band: usize,
     /// the cut lies on the patch face itself
     on_face: bool,
+    /// the band lies inside the patch's high face along the axis
+    high: bool,
 }
 
 /// every cut of the tile partition that falls in a seam band of a refined patch: the balanced
@@ -10808,10 +10824,10 @@ fn cuts_in_balanced_bands<const D: usize>(cfg: &Config) -> Result<Vec<BandCrossi
                 let cut = partition.tile_extents(tc)[ax].0;
                 let at = cut * scale;
                 if lo > 0 && (lo..lo + band).contains(&at) {
-                    crossings.push(BandCrossing { level, axis: ax, cut, face: lo, band, on_face: at == lo });
+                    crossings.push(BandCrossing { level, axis: ax, cut, face: lo, band, on_face: at == lo, high: false });
                 }
                 if hi < n[ax] * scale && (hi.saturating_sub(band) + 1..=hi).contains(&at) {
-                    crossings.push(BandCrossing { level, axis: ax, cut, face: hi, band, on_face: at == hi });
+                    crossings.push(BandCrossing { level, axis: ax, cut, face: hi, band, on_face: at == hi, high: true });
                 }
             }
         }
@@ -11015,7 +11031,7 @@ fn validate_launch_scope(cfg: &Config) -> Result<(), String> {
     // a combination the launched tiles build as the single path does but that no distributed
     // gate has validated: refused by name, or run as experimental under an explicit opt-in.
     // successful construction is no evidence of validated support
-    validate_tiled_balance(cfg, true)?;
+    validate_tiled_balance(cfg)?;
     if let Some(property) = authorize_launch(ungated_launch_combination(cfg), launch_experimental_opt_in())? {
         eprintln!("SIMBI launch: experimental combination without a distributed gate: {property}");
     }
@@ -11051,7 +11067,12 @@ fn validate_refined_launch_scope(cfg: &Config) -> Result<(), String> {
     // the phase table of every level's subcycle fits the wire byte up to an implementation depth;
     // a deeper run is refused here, before any session is built, never truncated
     let stages = cfg.timestepping.stages().len() as u8;
-    if let Err(e) = symbi_sim::phase_table::PhaseTable::nested(stages, 2, depth as u8) {
+    let band_seams = match cfg.dims {
+        2 => launched_band_seams::<2>(cfg)?,
+        3 => launched_band_seams::<3>(cfg)?,
+        _ => Vec::new(),
+    };
+    if let Err(e) = symbi_sim::phase_table::PhaseTable::nested_banded(stages, 2, depth as u8, &band_seams) {
         return refused(&format!("{depth} levels, the root included ({e}),"));
     }
     // the root and seed plans carry the wrap of a periodic axis cut into tiles; the fine level and
@@ -11785,6 +11806,28 @@ where
     } else {
         Vec::new()
     };
+    // the balanced bands a cut runs inside: at each such seam's band point the restricted density
+    // and the band equilibria cross the cuts on the plans of the band's coarse and fine levels,
+    // each on its level's partition with the level's own ghost width
+    let band_seams = launched_band_seams::<D>(cfg)?;
+    let band_plans: Vec<ExchangePlan<D>> = if band_seams.is_empty() {
+        Vec::new()
+    } else {
+        let band_schema = symbi_sim::decomp::plan_band_schema();
+        let mut plans = vec![
+            ExchangePlan::compile(partition, &wrap, &band_schema, ng).map_err(|e| e.to_string())?,
+            ExchangePlan::compile_shifted(&fine_partition.partition, &fine_topology, &band_schema, ng + 1, &fine_lo).map_err(|e| e.to_string())?,
+        ];
+        for i in 0..nested_parts.len() {
+            let frames = &nested_frames[i];
+            plans.push(
+                ExchangePlan::compile_shifted(&nested_parts[i].partition, &open, &band_schema, ng + 1, &|t: TileId| frames[t.0 as usize])
+                    .map_err(|e| e.to_string())?,
+            );
+        }
+        plans
+    };
+    digests.extend(band_plans.iter().map(|p| p.digest));
     let nested_seed_plans: Vec<ExchangePlan<D>> = (0..nested_parts.len())
         .map(|i| {
             let (parent_part, frames) =
@@ -11849,7 +11892,7 @@ where
         }
     }
     let stages = cfg.timestepping.stages().len() as u8;
-    let table = PhaseTable::nested(stages, 2, depth as u8).map_err(|e| format!("{depth} refinement levels: {e}"))?;
+    let table = PhaseTable::nested_banded(stages, 2, depth as u8, &band_seams).map_err(|e| format!("{depth} refinement levels: {e}"))?;
     // each plan takes the fabric ids after the last one's
     fn placed<'a, const D2: usize>(
         plan: &'a ExchangePlan<D2>,
@@ -11909,6 +11952,19 @@ where
             next(plan, placement, PlanRole::LevelCoefficients { level: level as u8 })
         })
         .collect();
+    // the band plans take the ids after the coefficient plans
+    let bands: Vec<_> = band_plans
+        .iter()
+        .enumerate()
+        .map(|(level, plan)| {
+            let placement = match level {
+                0 => placement,
+                1 => &fine_placement,
+                _ => &nested_placements[level - 2],
+            };
+            next(plan, placement, PlanRole::BandSeam { level: level as u8 })
+        })
+        .collect();
     let plan_digest = {
         let mut h = Fnv::new();
         for d in digests {
@@ -11955,6 +12011,7 @@ where
         }
     }
     all.extend(coefficients.iter());
+    all.extend(bands.iter());
     let max_payload = (all.iter().flat_map(|p| p.lens()).max().unwrap_or(0) * 8).max(credit as usize);
     let built = build_clock.elapsed();
     let connect_clock = std::time::Instant::now();
@@ -11972,7 +12029,7 @@ where
         let _ = std::io::stderr().write_all(line.as_bytes());
     }
     let mut fabric = fabric_for(&all, link, session).with_block_credit(credit);
-    let plans = RefinedPlans { root, seed, fine, flux, emf, faces, corrected, stencil, nested: nested_plans, coefficients };
+    let plans = RefinedPlans { root, seed, fine, flux, emf, faces, corrected, stencil, nested: nested_plans, coefficients, bands, band_seams };
     let root_devices = vec![0i32; n_root];
     let fine_devices = vec![0i32; n_fine];
     let nested_held: Vec<NestedHeld> = nested_ids

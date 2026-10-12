@@ -82,6 +82,12 @@ pub struct RefinedPlans<'p, const D: usize> {
     /// the continuous tracers' ito coefficients of every level, the level `l` at `l`, at the
     /// level's coefficient points: empty on a run without them
     pub coefficients: Vec<PlanExchange<'p, D>>,
+    /// the band plans of every level, the level `l` at `l`, at the band points of the seams in
+    /// `band_seams`: empty on a run whose balanced bands each lie on one tile
+    pub bands: Vec<PlanExchange<'p, D>>,
+    /// the seams whose balanced band a cut runs inside, `(parent level, axis, high)` in the order
+    /// the restriction rewrites them
+    pub band_seams: Vec<(u8, u8, bool)>,
 }
 
 /// the plans of one nested refined level (two or deeper): its patch faces lie off every cut,
@@ -105,6 +111,93 @@ pub struct NestedHeld {
     pub n: usize,
     /// the device of every tile of the level's plan, by tile id
     pub devices: Vec<i32>,
+}
+
+/// the restriction of level `level + 1` into level `level` on the held tiles holding both, with
+/// the seam bands rewritten seam by seam in the single hierarchy's order: the tiles holding a
+/// band's uncovered cell rewrite their part, and at each seam whose band a cut runs inside every
+/// worker opens the seam's band point, where the restricted density and the band equilibria beside
+/// the cuts cross them, before the tiles past the cut resume their chains there. a worker holding
+/// no band cell opens the points with nothing to send. the equilibria a far tile reads are the ones
+/// the near tiles wrote in this attempt, delivered at this attempt's epoch
+#[allow(clippy::too_many_arguments)]
+fn restrict_with_bands<R, const D: usize, const DOF: usize, M, E, S, Mem, K, T, L>(
+    tiles: &mut [Hierarchy<R, D, DOF, M, E, S, Mem, K>],
+    held: &Held<'_>,
+    plans: &RefinedPlans<'_, D>,
+    level: usize,
+    path: u8,
+    alpha: f64,
+    step: u64,
+    attempt: u16,
+    transport: &T,
+    fabric: &mut Fabric<L>,
+    deadline: Duration,
+    spent: &mut Duration,
+) -> Result<(), symbi_fabric::FabricError>
+where
+    R: Regime<f64, D> + Copy,
+    M: Metric<f64, D> + Copy + Send + Sync,
+    E: symbi_hydro::eos::EosFor<f64, <R as Regime<f64, D>>::Energy> + Copy + Send + Sync,
+    S: ExecutionSpace,
+    Mem: MemorySpace + Sync,
+    K: KernelSet<D, DOF, Mem, f64>,
+    T: HaloTransport,
+    L: Link,
+{
+    use crate::refinement::launched_tracers::level_id;
+    use crate::refinement::transfer::BandSide;
+    let devices_of = |lv: usize| if lv == 0 { held.root_devices } else { held.level_devices(lv) };
+    let dev = |k: usize| devices_of(level)[level_id(held, level, k).expect("a held tile of the level").0 as usize];
+    let holders: Vec<usize> = (0..tiles.len()).filter(|&k| tiles[k].levels.len() > level + 1).collect();
+    for &k in &holders {
+        with_device(dev(k), || tiles[k].level_restrict_cells(level));
+    }
+    for axis in 0..D {
+        for high in [false, true] {
+            let seams: Vec<(usize, crate::refinement::transfer::BandSeam<D>)> = holders
+                .iter()
+                .filter(|&&k| tiles[k].rewrites_bands(level))
+                .filter_map(|&k| tiles[k].band_seam(level, axis, high).map(|seam| (k, seam)))
+                .collect();
+            for (k, seam) in seams.iter().filter(|(_, seam)| seam.side == BandSide::Near) {
+                with_device(dev(*k), || tiles[*k].rewrite_band_seam(level, seam));
+            }
+            if !plans.band_seams.contains(&(level as u8, axis as u8, high)) {
+                continue;
+            }
+            {
+                let mut fields: [Vec<Vec<&symbi_grid::Field<f64, D, Mem>>>; 2] = [level, level + 1]
+                    .map(|lv| (0..plans.bands[lv].plan().n_tiles()).map(|_| Vec::new()).collect());
+                for (side, lv) in [level, level + 1].into_iter().enumerate() {
+                    for (k, tile) in tiles.iter().enumerate() {
+                        let Some(id) = level_id(held, lv, k) else { continue };
+                        if tile.levels.len() <= lv {
+                            continue;
+                        }
+                        let l = &tile.levels[lv];
+                        let anchor = l.band_anchor.get_or_init(|| {
+                            symbi_grid::Field::zeros(&l.state.geom.allocated).expect("band anchor scratch")
+                        });
+                        fields[side][id.0 as usize] = symbi_sim::decomp::plan_band_fields(&l.state, anchor);
+                    }
+                }
+                let parts = [
+                    PlanPart { plan: &plans.bands[level], fields: &fields[0], devices: devices_of(level), fault: None, dst_fields: None },
+                    PlanPart { plan: &plans.bands[level + 1], fields: &fields[1], devices: devices_of(level + 1), fault: None, dst_fields: None },
+                ];
+                let point = ExchangePoint::BandSeam { level: level as u8, path, axis: axis as u8, high };
+                exchange_point_plans(&parts, transport, fabric, point, step, attempt, deadline, spent)?;
+            }
+            for (k, seam) in seams.iter().filter(|(_, seam)| seam.side != BandSide::Near) {
+                with_device(dev(*k), || tiles[*k].rewrite_band_seam(level, seam));
+            }
+        }
+    }
+    for &k in &holders {
+        with_device(dev(k), || tiles[k].level_restrict_finish(level, alpha));
+    }
+    Ok(())
 }
 
 /// the tiles this worker holds: parallel over the held root tiles
@@ -1066,11 +1159,8 @@ where
                                     rejected = true;
                                     break 'subcycle;
                                 }
-                                for (k, h) in tiles.iter_mut().enumerate() {
-                                    if h.levels.len() > 2 {
-                                        with_device(fine_dev(k), || h.level_restrict_reflux(1, alpha));
-                                    }
-                                }
+                                restrict_with_bands(tiles, held, plans, 1, sub as u8, alpha, iter, attempt, transport, fabric, deadline, &mut timing.exchange)
+                                    .map_err(|e| fail(fabric, e.into()))?;
                                 {
                                     let fine = fine_fields!();
                                     let part = PlanPart { plan: &plans.fine, fields: &fine, devices: held.fine_devices, fault: None, dst_fields: None };
@@ -1112,9 +1202,8 @@ where
                             // post-tail exchange, so the staggered faces it carries to the neighbors
                             // across the cuts are the corrected ones
                             if sub + 1 == RATIO {
-                                for &k in &refined {
-                                    with_device(root_dev(k), || tiles[k].level_restrict_reflux(0, 0.0));
-                                }
+                                restrict_with_bands(tiles, held, plans, 0, 0, 0.0, iter, attempt, transport, fabric, deadline, &mut timing.exchange)
+                                    .map_err(|e| fail(fabric, e.into()))?;
                             }
                             fine_tail_point!(sub, iter, attempt);
                             if base.audit_every_point {
@@ -1503,10 +1592,10 @@ where
             }
             // a tile holding this level and none finer recovers it as the restriction recovers the
             // single hierarchy's
+            restrict_with_bands(tiles, cx.held, cx.plans, level, path, alpha, step, attempt, cx.transport, fabric, deadline, &mut timing.exchange)
+                .map_err(|e| fail(fabric, e.into()))?;
             for (r, &k) in mine.iter().enumerate() {
-                if tiles[k].levels.len() > level + 1 {
-                    with_device(dev(r), || tiles[k].level_restrict_reflux(level, alpha));
-                } else {
+                if tiles[k].levels.len() <= level + 1 {
                     with_device(dev(r), || tiles[k].recover_level(level));
                 }
             }

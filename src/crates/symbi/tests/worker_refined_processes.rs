@@ -545,7 +545,7 @@ fn run_worker(arm: &Arm, me: WorkerId, out: PathBuf) -> Result<(), WorkerError> 
     let (link, session) = connect(&r, max_payload.max(4096))?;
     // the block credit the handshake agreed, which a checkpoint's blocks are sent under
     let mut fabric = fabric_for(&all, link, session).with_block_credit(4096);
-    let plans = RefinedPlans { root, seed, fine, flux, emf: None, faces: None, corrected: None, stencil: None, nested: Vec::new(), coefficients: Vec::new() };
+    let plans = RefinedPlans { root, seed, fine, flux, emf: None, faces: None, corrected: None, stencil: None, nested: Vec::new(), coefficients: Vec::new(), bands: Vec::new(), band_seams: Vec::new() };
     let cfg = RefinedConfig {
         base: WorkerConfig {
             regime: RegimeKind::of::<f64, 2, Newtonian>(),

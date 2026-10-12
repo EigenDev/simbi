@@ -61,6 +61,10 @@ pub enum PlanRole {
     /// at the level's coefficient point (the root after its stages, a refined level in each of its
     /// substeps)
     LevelCoefficients { level: u8 },
+    /// level `level`'s restricted density and band equilibria beside its cuts: every transfer
+    /// moves at the band points of the restriction into level `level` (the coarse side of the
+    /// band) and into level `level - 1` (the fine side)
+    BandSeam { level: u8 },
 }
 
 /// a fault injected into one plan's staging at one point, for the gates of the
@@ -196,6 +200,10 @@ impl<'p, const D: usize> PlanExchange<'p, D> {
             ),
             PlanRole::CorrectedFace => point == ExchangePoint::CorrectedFaces,
             PlanRole::FaceStencil => point == ExchangePoint::Stage(self.table.stages() - 1),
+            PlanRole::BandSeam { level } => match point {
+                ExchangePoint::BandSeam { level: l, .. } => (l == level || l + 1 == level) && !t.audit,
+                _ => false,
+            },
             PlanRole::LevelCoefficients { level } => {
                 let at_level = match point {
                     ExchangePoint::RootCoefficients => level == 0,

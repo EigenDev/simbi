@@ -74,7 +74,8 @@ fn moving(point: ExchangePoint) -> Vec<(TransferId, WorkerId, WorkerId, u8)> {
         | ExchangePoint::Seed { .. }
         | ExchangePoint::TracerCoefficients
         | ExchangePoint::EquilibriumLevel { .. }
-        | ExchangePoint::RootCoefficients => vec![],
+        | ExchangePoint::RootCoefficients
+        | ExchangePoint::BandSeam { .. } => vec![],
     }
 }
 

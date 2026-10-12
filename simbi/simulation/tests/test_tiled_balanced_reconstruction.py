@@ -21,6 +21,7 @@
 # =============================================================================
 
 import os
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -330,9 +331,13 @@ def test_the_balanced_reconstruction_on_refined_tiles_matches_the_single_grid(tm
         got = _final(_run(fixture, "RefinedBalancedAtmosphere", out, gpus, f", decompose={cuts!r}"), out, f"refined host tiles cut at {cuts}")
         _assert_same_state(got, want, f"refined host tiles cut at {cuts}")
     monkeypatch.delenv("SIMBI_LAUNCH_EXPERIMENTAL", raising=False)
-    layout = _layout(tmp_path / "launch.toml", workers=4, cuts=[[12], [16]])
-    got = _script_launch(str(_launch_script(fixture, "RefinedBalancedAtmosphere")), (24, 32), tmp_path / "launched", layout, STEPS, workers=4, env=_launch_env(fixture))
-    _assert_same_state(got, want, "refined launch on four workers")
+    # the launched workers carry a band's chains across a cut inside it at the seam's band point:
+    # x = 8 inside the x band, and with y = 10 the bands intersect at a corner cut on both axes
+    for cuts in [[[12], [16]], [[8], []], [[8], [10]]]:
+        workers = int(np.prod([len(c) + 1 for c in cuts]))
+        layout = _layout(tmp_path / f"launch_{cuts[0]}_{cuts[1]}.toml", workers=workers, cuts=cuts)
+        got = _script_launch(str(_launch_script(fixture, "RefinedBalancedAtmosphere")), (24, 32), tmp_path / f"launched_{cuts[0]}_{cuts[1]}", layout, STEPS, workers=workers, env=_launch_env(fixture))
+        _assert_same_state(got, want, f"refined launch on {workers} workers cut at {cuts}")
 
 
 def test_the_balanced_reconstruction_on_nested_refined_tiles_matches_the_single_grid(tmp_path: Path, fixture: Path, monkeypatch) -> None:
@@ -350,12 +355,51 @@ def test_the_balanced_reconstruction_on_nested_refined_tiles_matches_the_single_
         got = _final(_run(fixture, "NestedBalancedAtmosphere", out, gpus, f", decompose={cuts!r}"), out, f"nested host tiles cut at {cuts}")
         _assert_same_state(got, want, f"nested host tiles cut at {cuts}")
     monkeypatch.delenv("SIMBI_LAUNCH_EXPERIMENTAL", raising=False)
-    layout = _layout(tmp_path / "launch.toml", workers=4, cuts=[[12], [16]])
-    got = _script_launch(str(_launch_script(fixture, "NestedBalancedAtmosphere")), (24, 32), tmp_path / "launched", layout, STEPS, workers=4, env=_launch_env(fixture))
-    _assert_same_state(got, want, "nested launch on four workers")
+    for cuts in [[[12], [16]], [[10], []]]:
+        workers = int(np.prod([len(c) + 1 for c in cuts]))
+        layout = _layout(tmp_path / f"launch_{cuts[0]}_{cuts[1]}.toml", workers=workers, cuts=cuts)
+        got = _script_launch(str(_launch_script(fixture, "NestedBalancedAtmosphere")), (24, 32), tmp_path / f"launched_{cuts[0]}_{cuts[1]}", layout, STEPS, workers=workers, env=_launch_env(fixture))
+        _assert_same_state(got, want, f"nested launch on {workers} workers cut at {cuts}")
 
 
-BAND = "the cut at root cell 8 on axis 0 crosses the 4-cell balanced restriction band inside the patch face at 6"
+REJECTIONS = re.compile(r"SIMBI launch: worker=\d+/\d+ steps=\d+ rejections=(\d+)")
+
+
+def _launch_to(fixture: Path, cls: str, out: Path, layout: Path, workers: int, steps: int, inject: str | None) -> tuple[Path, set[int]]:
+    """the launch's final checkpoint and every worker's rejection count"""
+    cmd = [sys.executable, "-m", "simbi.cli", "launch", str(_launch_script(fixture, cls)), "--layout", str(layout), "--max-steps", str(steps),
+           "--resolution", "24,32", "--data-directory", str(out), "--checkpoint-interval", "1e9"]
+    env = dict(os.environ, **_launch_env(fixture))
+    env.pop("SIMBI_LAUNCH_EXPERIMENTAL", None)
+    if inject is not None:
+        env["SIMBI_FABRIC_INJECT"] = inject
+    done = subprocess.run(cmd, capture_output=True, text=True, timeout=600, env=env)
+    assert done.returncode == 0, f"launch failed:\n{done.stderr[-3000:]}"
+    (final,) = sorted(out.glob("*final*.h5"))
+    return final, {int(r) for r in REJECTIONS.findall(done.stderr)}
+
+
+def test_a_rejection_after_a_band_exchange_replays_the_band_on_launch(tmp_path: Path, fixture: Path) -> None:
+    # every level-1 substep restricts level 2 into level 1 and, with the root cut x = 10 inside
+    # level 2's band, opens the band's point. worker 1 rejects a stage of the second level-1
+    # substep of step 2, after the first substep's band equilibria crossed the cut; the replayed
+    # step exchanges its own. the same rejection with the cut at x = 12, clear of every band,
+    # exchanges no equilibrium, and the tiles equal the single hierarchy on both layouts: the two
+    # runs publish one checkpoint only if the replay resumes every chain from the equilibria of
+    # its own attempt
+    step = 2
+    published = {}
+    for cuts in ([[10], []], [[12], []]):
+        layout = _layout(tmp_path / f"two_{cuts[0][0]}.toml", workers=2, cuts=cuts)
+        final, counts = _launch_to(fixture, "NestedBalancedAtmosphere", tmp_path / f"rejecting_{cuts[0][0]}", layout, 2, step + 1, f"reject_level:1:{step}:1:1:1")
+        assert counts == {1}, f"cut at {cuts}: the rejection was not counted once on every worker: {counts}"
+        published[cuts[0][0]] = final
+    clean, _ = _launch_to(fixture, "NestedBalancedAtmosphere", tmp_path / "clean", _layout(tmp_path / "clean.toml", workers=2, cuts=[[10], []]), 2, step + 1, None)
+    with h5py.File(published[10], "r") as fr, h5py.File(clean, "r") as fc:
+        assert float(fr["level_0"].attrs["dt"]) < float(fc["level_0"].attrs["dt"]), "the rejection left the timestep unreduced; the replay is never exercised"
+    _assert_same_state(published[10], published[12], "the rejecting runs cut inside and clear of level 2's band")
+
+
 # two cuts inside the x band 6..10: the band's chains resume across one cut alone
 TWO_CUTS = "two cuts on axis 0 cross the 4-cell balanced restriction band inside the patch face at 6"
 
@@ -375,16 +419,16 @@ def test_the_balanced_reconstruction_outside_the_gated_scope_is_refused_on_host_
     assert not list((tmp_path / "out").glob("*.h5")), "output was written before the refusal"
 
 
-def test_a_cut_in_a_balanced_band_is_refused_on_launch(tmp_path: Path, fixture: Path) -> None:
+def test_two_cuts_in_a_balanced_band_are_refused_on_launch(tmp_path: Path, fixture: Path) -> None:
     env = dict(os.environ, **_launch_env(fixture))
     env.pop("SIMBI_LAUNCH_EXPERIMENTAL", None)
-    layout = _layout(tmp_path / "two.toml", workers=2, cuts=[[8], []])
+    layout = _layout(tmp_path / "three.toml", workers=3, cuts=[[7, 9], []])
     out = tmp_path / "out"
     cmd = [sys.executable, "-m", "simbi.cli", "launch", str(_launch_script(fixture, "RefinedBalancedAtmosphere")), "--layout", str(layout),
            "--max-steps", "1", "--resolution", "24,32", "--data-directory", str(out), "--checkpoint-interval", "1e9"]
     done = subprocess.run(cmd, capture_output=True, text=True, timeout=600, env=env)
     assert done.returncode != 0, f"the launch succeeded:\n{done.stdout}"
-    assert BAND in " ".join(done.stderr.split()), done.stderr
+    assert TWO_CUTS in " ".join(done.stderr.split()), done.stderr
     assert not (out.exists() and list(out.glob("*.h5"))), "a checkpoint was published"
 
 

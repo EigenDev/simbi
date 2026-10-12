@@ -80,7 +80,7 @@ impl PhaseTable {
     /// the table of a run with one fine level: after the root stages, `substeps` fine
     /// substeps of `fine_stages` stages each, then the restriction, then the post-step
     pub fn refined(stages: u8, substeps: u8, fine_stages: u8) -> Result<Self, PhaseTableError> {
-        Self::build(stages, substeps, fine_stages, if substeps > 0 { 2 } else { 1 })
+        Self::build(stages, substeps, fine_stages, if substeps > 0 { 2 } else { 1 }, &[])
     }
 
     /// the table of a run of `depth` levels, every refined level subcycled in `substeps`
@@ -88,10 +88,19 @@ impl PhaseTable {
     /// substeps of level `l + 1` and the exchange of level `l` after their restriction into it.
     /// a depth whose phases overflow the wire byte is refused here, before any session holds it
     pub fn nested(stages: u8, substeps: u8, depth: u8) -> Result<Self, PhaseTableError> {
-        Self::build(stages, substeps, stages, depth)
+        Self::build(stages, substeps, stages, depth, &[])
     }
 
-    fn build(stages: u8, substeps: u8, fine_stages: u8, depth: u8) -> Result<Self, PhaseTableError> {
+    /// `nested` with the band points of the seams whose balanced band a cut runs inside: each
+    /// `(level, axis, high)` names the seam of level `level + 1`'s patch whose band on level
+    /// `level` the cut crosses. every restriction into `level` opens its seams' points in the
+    /// listed order, axis by axis and the low side first, after the restriction and before the
+    /// exchange that follows it
+    pub fn nested_banded(stages: u8, substeps: u8, depth: u8, bands: &[(u8, u8, bool)]) -> Result<Self, PhaseTableError> {
+        Self::build(stages, substeps, stages, depth, bands)
+    }
+
+    fn build(stages: u8, substeps: u8, fine_stages: u8, depth: u8, bands: &[(u8, u8, bool)]) -> Result<Self, PhaseTableError> {
         if stages == 0 || (substeps > 0 && fine_stages == 0) || depth == 0 || (depth > 1) != (substeps > 0) {
             return Err(PhaseTableError::Empty);
         }
@@ -150,8 +159,13 @@ impl PhaseTable {
             }
             phases.push(skippable(ExchangePoint::Fine { substep: s, point: FinePoint::Coefficients }));
             if depth > 2 {
-                nested_phases(&mut phases, 2, s, substeps, fine_stages, depth)?;
+                nested_phases(&mut phases, 2, s, substeps, fine_stages, depth, bands)?;
+                push_band_points(&mut phases, bands, 1, s);
                 phases.push(mandatory(ExchangePoint::NestedRestrict { level: 1, path: s }));
+            }
+            // the restriction into the root, in the last substep before its post-tail point
+            if s + 1 == substeps {
+                push_band_points(&mut phases, bands, 0, 0);
             }
             phases.push(mandatory(ExchangePoint::Fine { substep: s, point: FinePoint::PostTail }));
             phases.push(skippable(ExchangePoint::Fine { substep: s, point: FinePoint::AuditTail }));
@@ -255,6 +269,16 @@ impl PhaseTable {
     }
 }
 
+/// the band points of the restriction into `level` along `path`, in the listed seam order; every
+/// worker opens them, the ones holding no band cell with nothing to send
+fn push_band_points(phases: &mut Vec<Phase>, bands: &[(u8, u8, bool)], level: u8, path: u8) {
+    for &(l, axis, high) in bands {
+        if l == level {
+            phases.push(Phase { point: ExchangePoint::BandSeam { level, path, axis, high }, skippable: false, init_only: false });
+        }
+    }
+}
+
 /// the substeps of nested level `level` inside the substep `path` of its parent, in execution
 /// order: each substep's prolongation, its stages, the substeps of the level below with the
 /// exchange after their restriction, then its post-tail point. the path packs into the five low
@@ -266,6 +290,7 @@ fn nested_phases(
     substeps: u8,
     stages: u8,
     depth: u8,
+    bands: &[(u8, u8, bool)],
 ) -> Result<(), PhaseTableError> {
     let mandatory = |point| Phase { point, skippable: false, init_only: false };
     let skippable = |point| Phase { point, skippable: true, init_only: false };
@@ -283,7 +308,8 @@ fn nested_phases(
         }
         phases.push(skippable(ExchangePoint::Nested { level, path, point: FinePoint::Coefficients }));
         if level + 1 < depth {
-            nested_phases(phases, level + 1, path, substeps, stages, depth)?;
+            nested_phases(phases, level + 1, path, substeps, stages, depth, bands)?;
+            push_band_points(phases, bands, level, path);
             phases.push(mandatory(ExchangePoint::NestedRestrict { level, path }));
         }
         phases.push(mandatory(ExchangePoint::Nested { level, path, point: FinePoint::PostTail }));
