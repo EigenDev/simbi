@@ -169,6 +169,10 @@ pub struct FaceStencil<const D: usize, Mem: MemorySpace> {
     pub old: Vec<Field<f64, D, Mem>>,
     pub new: Vec<Field<f64, D, Mem>>,
     filled: std::cell::Cell<bool>,
+    /// sqrt(gamma) at the center of every face the stencil holds, from the parent level's geometry,
+    /// on a curved spacetime: the densitized prolongation stages the parent flux over the stencil's
+    /// boxes, which reach past the tile's own face lattice
+    metric: std::sync::OnceLock<Option<FaceMetric<D, Mem>>>,
 }
 
 impl<const D: usize, Mem: MemorySpace> FaceStencil<D, Mem> {
@@ -2629,7 +2633,7 @@ where
                 old.push(Field::zeros(b)?);
                 new.push(Field::zeros(b)?);
             }
-            self.levels[level].face_stencil = Some(FaceStencil { old, new, filled: std::cell::Cell::new(false) });
+            self.levels[level].face_stencil = Some(FaceStencil { old, new, filled: std::cell::Cell::new(false), metric: std::sync::OnceLock::new() });
         }
         Ok(())
     }
@@ -2691,7 +2695,7 @@ where
             old.push(Field::zeros(b)?);
             new.push(Field::zeros(b)?);
         }
-        self.levels[1].face_stencil = Some(FaceStencil { old, new, filled: std::cell::Cell::new(false) });
+        self.levels[1].face_stencil = Some(FaceStencil { old, new, filled: std::cell::Cell::new(false), metric: std::sync::OnceLock::new() });
         Ok(())
     }
 
@@ -4339,27 +4343,21 @@ where
             .face_metric
             .get_or_init(|| {
                 let mhd = level.state.fields.mhd.as_ref()?;
-                if matches!(level.state.geom.spacetime, symbi_geometry::Spacetime::Minkowski) {
-                    return None;
-                }
-                let metric = level.state.physics.metric;
-                let face_field = |d: usize, f: &dyn Fn(f64) -> f64| {
-                    let field = Field::zeros(mhd.bface[d].domain()).expect("face metric field");
-                    {
-                        let v = field.view_mut();
-                        for c in mhd.bface[d].domain().clone().iter() {
-                            let g = metric.sqrt_det_gamma(symbi_algebra::Tensor::new(level.state.geom.face_coord(c, d)));
-                            v.set(c, f(g));
-                        }
-                    }
-                    field
-                };
-                Some(FaceMetric {
-                    sqrtg: std::array::from_fn(|d| face_field(d, &|g| g)),
-                    inv_sqrtg: std::array::from_fn(|d| face_field(d, &|g| 1.0 / g)),
-                    scratch: std::array::from_fn(|d| Field::zeros(mhd.bface[d].domain()).expect("face metric scratch")),
-                    scratch_new: std::array::from_fn(|d| Field::zeros(mhd.bface[d].domain()).expect("face metric scratch")),
-                })
+                let domains: [Domain<NDIM>; NDIM] = std::array::from_fn(|d| mhd.bface[d].domain().clone());
+                curved_face_metric(&level.state, &domains)
+            })
+            .as_ref()
+    }
+
+    /// the face metric over the faces of level `level`'s gathered parent stencil, from the parent
+    /// level's geometry; `None` without a stencil or on a flat spacetime
+    fn stencil_face_metric(&self, level: usize) -> Option<&FaceMetric<NDIM, Mem>> {
+        let stencil = self.levels[level].face_stencil.as_ref()?;
+        stencil
+            .metric
+            .get_or_init(|| {
+                let domains: [Domain<NDIM>; NDIM] = std::array::from_fn(|d| stencil.old[d].domain().clone());
+                curved_face_metric(&self.levels[level - 1].state, &domains)
             })
             .as_ref()
     }
@@ -4658,14 +4656,10 @@ where
                 Some(_) => panic!("the parent face stencil is read before the root stages gathered it"),
                 None => (&bface_old[..], &pmhd.bface.b[..]),
             };
-            // the densitized prolongation reads the parent's flux on its own face lattice, where the
-            // parent's face metric lives; a gathered stencil holds faces past a tile's lattice
-            let metrics = self.face_metric(level - 1).zip(self.face_metric(level));
-            assert!(
-                metrics.is_none() || fine.face_stencil.is_none(),
-                "the densitized coarse-fine face halo reads the parent's own face lattice; a gathered parent \
-                 face stencil on a curved spacetime is outside the gated refined runs"
-            );
+            // the densitized prolongation stages the parent flux over the faces it reads: the parent's
+            // own face lattice, or a gathered stencil's boxes past a tile's lattice with their own metric
+            let parent_metric = if fine.face_stencil.is_some() { self.stencil_face_metric(level) } else { self.face_metric(level - 1) };
+            let metrics = parent_metric.zip(self.face_metric(level));
             for dd in 0..NDIM {
                 for slab in bface_cf_halo_slabs(&fine.state.geom.interior, &prolonged, dd) {
                     prof("refine_prolong_face", || match metrics {
@@ -6653,6 +6647,45 @@ where
 
 /// level `level`'s materialized ito coefficients across its cuts, after each tile filled its
 /// physical and coarse-fine ghosts
+/// sqrt(gamma) of `state`'s metric at the center of every face in `domains`, one domain per face
+/// axis in `state`'s index space, its reciprocal and the staging scratches; `None` on a flat
+/// spacetime or a level without staggered faces. a face's coordinate carries the level's global
+/// index offset, so every tile evaluates the face the single hierarchy does at the same point
+fn curved_face_metric<R, const NDIM: usize, const DOF: usize, M, E, S, Mem>(
+    state: &SimStateGeneric<R, NDIM, DOF, M, E, S, Mem>,
+    domains: &[Domain<NDIM>; NDIM],
+) -> Option<FaceMetric<NDIM, Mem>>
+where
+    R: Regime<f64, NDIM> + Copy,
+    M: Metric<f64, NDIM> + Copy + Send + Sync,
+    E: symbi_hydro::eos::EosFor<f64, <R as Regime<f64, NDIM>>::Energy> + Copy + Send + Sync,
+    S: ExecutionSpace,
+    Mem: MemorySpace + Sync,
+{
+    state.fields.mhd.as_ref()?;
+    if matches!(state.geom.spacetime, symbi_geometry::Spacetime::Minkowski) {
+        return None;
+    }
+    let metric = state.physics.metric;
+    let face_field = |d: usize, f: &dyn Fn(f64) -> f64| {
+        let field = Field::zeros(&domains[d]).expect("face metric field");
+        {
+            let v = field.view_mut();
+            for c in domains[d].iter() {
+                let g = metric.sqrt_det_gamma(symbi_algebra::Tensor::new(state.geom.face_coord(c, d)));
+                v.set(c, f(g));
+            }
+        }
+        field
+    };
+    Some(FaceMetric {
+        sqrtg: std::array::from_fn(|d| face_field(d, &|g| g)),
+        inv_sqrtg: std::array::from_fn(|d| face_field(d, &|g| 1.0 / g)),
+        scratch: std::array::from_fn(|d| Field::zeros(&domains[d]).expect("face metric scratch")),
+        scratch_new: std::array::from_fn(|d| Field::zeros(&domains[d]).expect("face metric scratch")),
+    })
+}
+
 /// carry every tile's band anchors on level `level` into its neighbors' cut ghosts
 fn exchange_level_band_anchor<R, const NDIM: usize, const DOF: usize, M, E, S, Mem, K, T>(
     tiles: &[Hierarchy<R, NDIM, DOF, M, E, S, Mem, K>],
