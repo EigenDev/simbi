@@ -394,10 +394,34 @@ def test_a_rejection_after_a_band_exchange_replays_the_band_on_launch(tmp_path: 
         final, counts = _launch_to(fixture, "NestedBalancedAtmosphere", tmp_path / f"rejecting_{cuts[0][0]}", layout, 2, step + 1, f"reject_level:1:{step}:1:1:1")
         assert counts == {1}, f"cut at {cuts}: the rejection was not counted once on every worker: {counts}"
         published[cuts[0][0]] = final
-    clean, _ = _launch_to(fixture, "NestedBalancedAtmosphere", tmp_path / "clean", _layout(tmp_path / "clean.toml", workers=2, cuts=[[10], []]), 2, step + 1, None)
+    layout = _layout(tmp_path / "control.toml", workers=2, cuts=[[10], []])
+    clean, _ = _launch_to(fixture, "NestedBalancedAtmosphere", tmp_path / "clean", layout, 2, step + 1, None)
     with h5py.File(published[10], "r") as fr, h5py.File(clean, "r") as fc:
-        assert float(fr["level_0"].attrs["dt"]) < float(fc["level_0"].attrs["dt"]), "the rejection left the timestep unreduced; the replay is never exercised"
+        accepted = float(fr["level_0"].attrs["dt"])
+        assert accepted < float(fc["level_0"].attrs["dt"]), "the rejection left the timestep unreduced; the replay is never exercised"
     _assert_same_state(published[10], published[12], "the rejecting runs cut inside and clear of level 2's band")
+    # the clean control: the run whose timestep at the rejected step is capped to the one the
+    # replay accepted, the replay entering from the rejected attempt's entry state
+    capped, capped_counts = _launch_to(fixture, "NestedBalancedAtmosphere", tmp_path / "capped", layout, 2, step + 1, f"cap:{step}:{int(np.float64(accepted).view(np.uint64))}")
+    assert capped_counts == {0}, "the capped control rejected a step"
+    _assert_same_state(published[10], capped, "the run replaying a step after its band exchange against the capped clean run")
+
+
+def test_a_rejected_balanced_refined_step_replays_to_the_capped_clean_run_on_launch(tmp_path: Path, fixture: Path) -> None:
+    # the root step's band rewrite leaves the root's band pressure off the recovery of its
+    # conserved state; worker 1 rejects a stage of the second fine substep of step 2, and the
+    # replay enters from the rejected attempt's entry, that pressure included
+    step = 2
+    layout = _layout(tmp_path / "two.toml", workers=2, cuts=[[12], []])
+    rejecting, counts = _launch_to(fixture, "RefinedBalancedAtmosphere", tmp_path / "rejecting", layout, 2, step + 1, f"reject_level:1:{step}:1:1:1")
+    assert counts == {1}, f"the rejection was not counted once on every worker: {counts}"
+    clean, _ = _launch_to(fixture, "RefinedBalancedAtmosphere", tmp_path / "clean", layout, 2, step + 1, None)
+    with h5py.File(rejecting, "r") as fr, h5py.File(clean, "r") as fc:
+        accepted = float(fr["level_0"].attrs["dt"])
+        assert accepted < float(fc["level_0"].attrs["dt"]), "the rejection left the timestep unreduced; the replay is never exercised"
+    capped, capped_counts = _launch_to(fixture, "RefinedBalancedAtmosphere", tmp_path / "capped", layout, 2, step + 1, f"cap:{step}:{int(np.float64(accepted).view(np.uint64))}")
+    assert capped_counts == {0}, "the capped control rejected a step"
+    _assert_same_state(rejecting, capped, "the balanced refined run replaying a rejected step against the capped clean run")
 
 
 # two cuts inside the x band 6..10: the band's chains resume across one cut alone

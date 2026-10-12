@@ -245,6 +245,10 @@ where
     /// the start of a coarse band chain at its reference row, copied apart from the pressure and
     /// the anchor the decode writes in place
     pub band_reference: std::sync::OnceLock<Field<f64, NDIM, Mem>>,
+    /// the primitive pressure at the root attempt's entry of a level whose seam bands are
+    /// rewritten: the band decode writes the pressure and rebuilds the energy from it, so the
+    /// entry pressure differs from the recovery of the entry state, and a replay restores it
+    pub band_entry_pressure: std::sync::OnceLock<Field<f64, NDIM, Mem>>,
     /// the region of this level covered by the next finer level, in absolute
     /// indices of this level. None on the finest. single-coverage cap: one
     /// refined box per level (a single `Domain`,
@@ -393,6 +397,9 @@ where
     /// a pending forced rejection at (root step, fine substep, fine stage), consumed when it
     /// fires
     forced_fine_rejection: Option<(u64, u8, usize)>,
+    /// the agreed root timestep of one step capped once: (step, cap). a test facility for the
+    /// clean control of a rejection, which replays its step at the timestep it accepted
+    forced_dt_cap: Option<(u64, f64)>,
     /// a forced rejection on any refined level: (root step, level, substep of the level within
     /// the root step, stage)
     forced_level_rejection: Option<(u64, usize, u64, usize)>,
@@ -1233,6 +1240,7 @@ where
                 band_departure: std::sync::OnceLock::new(),
                 band_anchor: std::sync::OnceLock::new(),
                 band_reference: std::sync::OnceLock::new(),
+                band_entry_pressure: std::sync::OnceLock::new(),
                 bcell_old: None,
                 bface_old: None,
                 attempt_entry: None,
@@ -1263,6 +1271,7 @@ where
             equilibrium_mask_radius: None,
             prev_dt_cfl: 0.0,
             forced_fine_rejection: None,
+            forced_dt_cap: None,
             forced_level_rejection: None,
             face_entry: None,
             level_face_entry: Vec::new(),
@@ -1488,6 +1497,7 @@ where
             band_departure: std::sync::OnceLock::new(),
             band_anchor: std::sync::OnceLock::new(),
             band_reference: std::sync::OnceLock::new(),
+            band_entry_pressure: std::sync::OnceLock::new(),
             bcell_old: None,
             bface_old: None,
             attempt_entry: None,
@@ -1748,6 +1758,7 @@ where
                 band_departure: std::sync::OnceLock::new(),
                 band_anchor: std::sync::OnceLock::new(),
                 band_reference: std::sync::OnceLock::new(),
+                band_entry_pressure: std::sync::OnceLock::new(),
                 bcell_old: None,
                 bface_old: None,
                 attempt_entry: Some(attempt_entry),
@@ -1845,6 +1856,7 @@ where
             equilibrium_mask_radius: None,
             prev_dt_cfl: 0.0,
             forced_fine_rejection: None,
+            forced_dt_cap: None,
             forced_level_rejection: None,
             face_entry: None,
             level_face_entry: Vec::new(),
@@ -2530,6 +2542,16 @@ where
                 restore_cons_region(&level.state.fields.cons, entry, &level.state.geom.allocated);
             }
         }
+        for ll in 0..self.levels.len() {
+            if self.rewrites_bands(ll) {
+                let level = &self.levels[ll];
+                let pre = level.state.fields.prim.pre_field().expect("a balanced band level carries pressure");
+                let saved = level.band_entry_pressure.get_or_init(|| {
+                    Field::zeros(&level.state.geom.allocated).expect("band entry pressure scratch")
+                });
+                copy_field_region(pre, saved, &level.state.geom.allocated);
+            }
+        }
     }
 
     /// restore every finer level to the root attempt's entry after a rejection, the
@@ -2706,6 +2728,15 @@ where
                 self.fill_physical_ghosts(ll);
             }
         }
+        // a level whose seam bands are rewritten entered the step with the band's decoded
+        // pressure, which the recovery above reproduces to within its rounding alone
+        for ll in 0..self.levels.len() {
+            if let Some(saved) = self.levels[ll].band_entry_pressure.get().filter(|_| self.rewrites_bands(ll)) {
+                let level = &self.levels[ll];
+                let pre = level.state.fields.prim.pre_field().expect("a balanced band level carries pressure");
+                copy_field_region(saved, pre, &level.state.geom.allocated);
+            }
+        }
     }
 
     pub fn snapshot_retry_sidecars(&self) -> HierarchyRetrySidecars<NDIM> {
@@ -2850,7 +2881,20 @@ where
         let Some(dt) = agree_tiles_dt(std::slice::from_mut(self), None, t_final) else {
             return;
         };
+        let dt = match self.forced_dt_cap {
+            Some((step, cap)) if step == self.levels[0].state.iteration => {
+                self.forced_dt_cap = None;
+                dt.min(cap)
+            }
+            _ => dt,
+        };
         self.step_root_with_dt(dt);
+    }
+
+    /// cap the agreed root timestep of root step `step` at `cap` once: a test facility for the
+    /// clean control of a rejection at that step
+    pub fn cap_root_dt_once_at(&mut self, step: u64, cap: f64) {
+        self.forced_dt_cap = Some((step, cap));
     }
 
     /// record a fatal timestep estimate and halt on this state: the evolve loop reports it and the
