@@ -8989,17 +8989,6 @@ fn validate_run(cfg: &Config) -> Result<(), String> {
                     reflux assumes 1/dx curl coefficients)"
             .to_string());
     }
-    // on a curved spacetime the refined face transfers carry the densitized flux sqrt(gamma) B the
-    // GR curl conserves, over the parent's own face lattice; the tiles read a coarse-fine face
-    // halo's parent faces from a gathered stencil
-    if cfg.refinement_enabled && cfg.regime.contains("mhd") && cfg.spacetime != "minkowski" && cfg.n_gpus > 1 {
-        return Err(format!(
-            "magnetized mesh refinement on the {} spacetime with several tiles: the densitized face \
-             transfers read the parent's own face lattice, which a tile's gathered face stencil extends; \
-             run it on one device",
-            cfg.spacetime
-        ));
-    }
     validate_mesh_motion(cfg)?;
     // immersed bodies + refinement: the finest-owns-bodies AMR sync (`hier.with_bodies` — full
     // bodies on the finest level, gravity-only proxy on coarser) is wired for every hydro regime

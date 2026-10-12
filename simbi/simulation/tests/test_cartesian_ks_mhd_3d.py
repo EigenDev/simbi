@@ -421,9 +421,16 @@ def test_a_refined_kerr_schild_field_keeps_the_densitized_divergence_on_both_lev
 
 
 @needs_backend
-def test_magnetized_refinement_on_a_curved_spacetime_with_several_tiles_is_refused(tmp_path: Path, monkeypatch) -> None:
+def test_a_refined_kerr_schild_field_on_host_tiles_publishes_the_single_grid_checkpoint(tmp_path: Path, monkeypatch) -> None:
+    # every tile carries the densitized face flux with the sqrt(gamma) of the same global face
+    # coordinates the single grid evaluates; the root cut at y = 8 runs through the refined box (root
+    # cells 12..14 x 6..10 x 6..10), two cells from its faces
+    from simbi.simulation.tests.checkpoint_compare import assert_same_checkpoint
+
     monkeypatch.setenv("SYMBI_GPU_OVERSUBSCRIBE", "1")
-    p = _RefinedCartesianKsMhd3D(data_directory=tmp_path, gpus=2)
-    with pytest.raises(Exception, match="magnetized mesh refinement on the schwarzschild_ks spacetime with several tiles"):
-        runner.run(p, compute_mode="cpu", max_steps=1)
-    assert not list(tmp_path.glob("*.h5")), "output was written before the refusal"
+    runs = {}
+    for gpus, extra in ((1, {}), (2, {"decompose": [[], [8], []]})):
+        out = tmp_path / f"gpus{gpus}"
+        runner.run(_RefinedCartesianKsMhd3D(data_directory=out, gpus=gpus, **extra), compute_mode="cpu", max_steps=6)
+        (runs[gpus],) = sorted(out.glob("*final*.h5"))
+    assert_same_checkpoint(runs[2], runs[1], "refined kerr-schild mhd on two host tiles", expect=("level_1",))
