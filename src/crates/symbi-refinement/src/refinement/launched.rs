@@ -394,8 +394,9 @@ where
     {
         let root_stores: Vec<&FieldStore<D, DOF, Mem, f64>> = tiles.iter().map(|h| &*h.levels[0].state).collect();
         let root_kernels: Vec<&K> = tiles.iter().map(|h| &h.levels[0].kernels).collect();
-        // the relativistic gas carries a curved spacetime on the refined workers
-        let curved = <R as Regime<f64, D>>::SPEC.name == "rhd";
+        // the relativistic gas and the relativistic magnetized gas carry a curved spacetime on the
+        // refined workers
+        let curved = matches!(<R as Regime<f64, D>>::SPEC.name, "rhd" | "rmhd");
         refuse(&root_stores, &root_kernels, curved).map_err(|e| fail(fabric, e))?;
         let fine_stores: Vec<&FieldStore<D, DOF, Mem, f64>> = refined.iter().map(|&k| &*tiles[k].levels[1].state).collect();
         let fine_kernels: Vec<&K> = refined.iter().map(|&k| &tiles[k].levels[1].kernels).collect();

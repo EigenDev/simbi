@@ -434,3 +434,52 @@ def test_a_refined_kerr_schild_field_on_host_tiles_publishes_the_single_grid_che
         runner.run(_RefinedCartesianKsMhd3D(data_directory=out, gpus=gpus, **extra), compute_mode="cpu", max_steps=6)
         (runs[gpus],) = sorted(out.glob("*final*.h5"))
     assert_same_checkpoint(runs[2], runs[1], "refined kerr-schild mhd on two host tiles", expect=("level_1",))
+
+
+def _ks_launch(tmp_path: Path, out: Path, layout: Path, workers: int, steps: int, excised: bool, resume: Path | None = None) -> Path:
+    import subprocess
+    import sys
+
+    script = tmp_path / ("refined_ks_mhd_excised.py" if excised else "refined_ks_mhd.py")
+    script.write_text(
+        "from typing import Annotated\n"
+        "from simbi import ProblemParam\n"
+        "from simbi.simulation.tests.test_cartesian_ks_mhd_3d import _RefinedCartesianKsMhd3D\n\n\n"
+        "class Launched(_RefinedCartesianKsMhd3D):\n"
+        + (f"    excision_radius: Annotated[float, ProblemParam({EXCISION})]\n" if excised else "    pass\n")
+    )
+    cmd = [sys.executable, "-m", "simbi.cli", "launch", str(script), "--layout", str(layout), "--max-steps", str(steps),
+           "--data-directory", str(out), "--checkpoint-interval", "1e9"] + (["--checkpoint", str(resume)] if resume else [])
+    env = dict(os.environ, PYTHONPATH=os.pathsep.join([os.getcwd(), os.environ.get("PYTHONPATH", "")]))
+    env.pop("SIMBI_LAUNCH_EXPERIMENTAL", None)
+    done = subprocess.run(cmd, capture_output=True, text=True, timeout=900, env=env)
+    assert done.returncode == 0, f"the launch on {workers} workers failed:\n{done.stderr[-3000:]}"
+    (final,) = sorted(out.glob("*final*.h5"))
+    return final
+
+
+# the singular core inside the horizon (r_+ = 2M = 2), clear of the refined box
+EXCISION = 1.4
+
+
+@needs_backend
+@pytest.mark.parametrize("excised", [False, True])
+def test_a_refined_kerr_schild_field_launches_as_the_single_grid_runs(tmp_path: Path, excised: bool) -> None:
+    # the launched workers gather each refined tile's parent faces past its lattice into a stencil
+    # and weight them by the parent's sqrt(gamma) there; the root cut at y = 8 runs through the
+    # refined box (root cells 12..14 x 6..10 x 6..10) two cells from its faces
+    from simbi.simulation.tests.checkpoint_compare import assert_same_checkpoint
+    from simbi.simulation.tests.test_launch import _layout
+
+    single_out = tmp_path / "single"
+    runner.run(_RefinedCartesianKsMhd3D(data_directory=single_out, excision_radius=EXCISION if excised else 0.0), compute_mode="cpu", max_steps=6)
+    (single,) = sorted(single_out.glob("*final*.h5"))
+    for label, workers, cuts in (("two workers", 2, [[], [8], []]), ("four uneven workers", 4, [[10], [8], []])):
+        layout = _layout(tmp_path / f"{workers}.toml", workers=workers, cuts=cuts)
+        got = _ks_launch(tmp_path, tmp_path / f"launch{workers}", layout, workers, 6, excised)
+        assert_same_checkpoint(got, single, f"refined kerr-schild mhd launched on {label}", expect=("level_1",))
+    # a launch stopped after three steps and resumed continues the uninterrupted run
+    layout = _layout(tmp_path / "resume.toml", workers=2, cuts=[[], [8], []])
+    first = _ks_launch(tmp_path, tmp_path / "first", layout, 2, 3, excised)
+    resumed = _ks_launch(tmp_path, tmp_path / "resumed", layout, 2, 6, excised, first)
+    assert_same_checkpoint(resumed, single, "refined kerr-schild mhd launched and resumed", exclude=("body_diagnostics",), expect=("level_1",))

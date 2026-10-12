@@ -7189,10 +7189,10 @@ fn baked_gr_mhd(dims: usize, coords: &str, spacetime: &str) -> bool {
     )
 }
 
-/// the curved spacetimes the launched refined workers build: the relativistic gas on the
-/// three-dimensional kerr-schild box, its root excised or not
+/// the curved spacetimes the launched refined workers build: the relativistic gas and the
+/// relativistic magnetized gas on the three-dimensional kerr-schild box, its root excised or not
 fn launched_refined_gr(cfg: &Config) -> bool {
-    cfg.regime == "rhd" && cfg.dims == 3 && cfg.coord_system == "cartesian" && matches!(cfg.spacetime.as_str(), "schwarzschild_ks" | "kerr_ks")
+    matches!(cfg.regime.as_str(), "rhd" | "rmhd") && cfg.dims == 3 && cfg.coord_system == "cartesian" && matches!(cfg.spacetime.as_str(), "schwarzschild_ks" | "kerr_ks")
 }
 
 /// the baked GR-hydro combinations the launched gas workers build: the kerr-schild box in three
@@ -11386,14 +11386,13 @@ fn run_refined_worker_process(
             // the refined tiles of a magnetized regime on the 2.5D plane (newtonian or relativistic MHD),
             // each seeded from its slice of the global staggered faces
             macro_rules! refined_mhd {
-                ($regime:ident) => {{
-                    type Sim = SimDefaultGeneric<$regime, $d, 3, Cartesian, EosSelect<f64>>;
+                ($regime:ident, $geom:expr, $geom_ty:ty) => {{
+                    type Sim = SimDefaultGeneric<$regime, $d, 3, $geom_ty, EosSelect<f64>>;
                     if bufs.len() < 3 {
                         return Err(format!("mhd needs 3 staggered b-field generators, got {}", bufs.len()));
                     }
                     // the numerics, sources, driven boundaries and gradient walls the single hierarchy
-                    // installs, on every level a worker holds; a launched refined run carries no
-                    // excision, so its root is built as every other level
+                    // installs, on every level a worker holds; the root alone carries the excision
                     let settings = KernelSettings::of(cfg, <$regime as Regime<f64, $d>>::SPEC);
                     let kernels_of = |s: &Sim, role: LevelRole| mhd_kernels(s.substrate(), &settings, role).expect("refined kernel set");
                     let mut tiles = Vec::with_capacity(layout.mine.len());
@@ -11402,7 +11401,7 @@ fn run_refined_worker_process(
                         let (tile_lo, m) = (tile.offset, tile.cells);
                         let tile_faces: Vec<Vec<f64>> = (0..$d).map(|d| tile_face_buffer::<$d>(&bufs[d], n, m, tile_lo, d)).collect();
                         // the rollback snapshot restores every level's faces when a step is rejected
-                        let sim = Sim::build($regime, host_eos(cfg), Cartesian)
+                        let sim = Sim::build($regime, host_eos(cfg), $geom)
                             .placed(&whole, &tile)
                             .ghosts(ghost_width(cfg))
                             .cfl(cfg.cfl)
@@ -11423,7 +11422,7 @@ fn run_refined_worker_process(
                         tiles.push(refined_tile(cfg, &layout, flat, &whole, &tile, sim, kernels_of)?);
                     }
                     seed_refined_worker_tracers(cfg, &mut tiles, || {
-                        Ok(Sim::build($regime, host_eos(cfg), Cartesian)
+                        Ok(Sim::build($regime, host_eos(cfg), $geom)
                             .placed(&whole, &whole.single())
                             .ghosts(ghost_width(cfg))
                             .cfl(cfg.cfl)
@@ -11456,8 +11455,20 @@ fn run_refined_worker_process(
                     KerrKSCartesian<f64>
                 ),
                 "rhd" => refined_gas!(Rhd, Cartesian, Cartesian),
-                "nmhd" => refined_mhd!(NewtonianMhd),
-                "rmhd" => refined_mhd!(Rmhd),
+                "nmhd" => refined_mhd!(NewtonianMhd, Cartesian, Cartesian),
+                // the relativistic magnetized gas on the kerr-schild box, its face transfers carrying
+                // the densitized flux
+                "rmhd" if cfg.spacetime == "schwarzschild_ks" => refined_mhd!(
+                    Rmhd,
+                    SchwarzschildKSCartesian { mass: cfg.schwarzschild_mass },
+                    SchwarzschildKSCartesian<f64>
+                ),
+                "rmhd" if cfg.spacetime == "kerr_ks" => refined_mhd!(
+                    Rmhd,
+                    KerrKSCartesian { mass: cfg.schwarzschild_mass, spin: cfg.kerr_spin },
+                    KerrKSCartesian<f64>
+                ),
+                "rmhd" => refined_mhd!(Rmhd, Cartesian, Cartesian),
                 "isothermal" => {
                     type Sim = SimDefault<IsoNewtonian, $d, Cartesian, Isothermal<f64>>;
                     // the numerics, sources, driven boundaries and gradient walls the single hierarchy
