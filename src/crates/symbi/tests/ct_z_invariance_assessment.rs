@@ -496,6 +496,7 @@ macro_rules! arm_impl {
                             let name = match hp {
                                 HookPoint::AfterFlux => "after flux",
                                 HookPoint::BeforeGhostFill => "before ghost fill",
+                                HookPoint::AfterGhostFill => "after ghost fill",
                                 HookPoint::BeforeC2p => "before recovery",
                             };
                             hit.set(report(&format!("step {step} stage {stage} {name}"), broken(&s, false)));
