@@ -736,11 +736,14 @@ where
 
     // prime: the root primitives and physical ghosts, then the root state and the root
     // conserved halos across the cuts in one phase, the physical ghosts again, the prime
-    // audit, then the fine level seeded by prolongation from the exchanged root
+    // audit, then the fine level seeded by prolongation from the exchanged root. a resumed root
+    // keeps the primitives its checkpoint stored, as the single hierarchy's resume does
     {
         for (k, h) in tiles.iter().enumerate() {
             with_device(root_dev(k), || {
-                h.levels[0].kernels.c2p(&h.levels[0].state);
+                if !h.levels[0].state.primitives_loaded {
+                    h.levels[0].kernels.c2p(&h.levels[0].state);
+                }
                 h.levels[0].kernels.ghost_fill(&h.levels[0].state);
             });
         }

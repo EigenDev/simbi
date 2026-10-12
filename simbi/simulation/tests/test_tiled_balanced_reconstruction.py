@@ -424,6 +424,50 @@ def test_a_rejected_balanced_refined_step_replays_to_the_capped_clean_run_on_lau
     _assert_same_state(rejecting, capped, "the balanced refined run replaying a rejected step against the capped clean run")
 
 
+def _launch_resumable(fixture: Path, cls: str, out: Path, layout: Path, steps: int, resume: Path | None = None) -> Path:
+    cmd = [sys.executable, "-m", "simbi.cli", "launch", str(_launch_script(fixture, cls)), "--layout", str(layout), "--max-steps", str(steps),
+           "--resolution", "24,32", "--data-directory", str(out), "--checkpoint-interval", "1e9"] + (["--checkpoint", str(resume)] if resume else [])
+    env = dict(os.environ, **_launch_env(fixture))
+    env.pop("SIMBI_LAUNCH_EXPERIMENTAL", None)
+    done = subprocess.run(cmd, capture_output=True, text=True, timeout=600, env=env)
+    assert done.returncode == 0, f"launch failed:\n{done.stderr[-3000:]}"
+    (final,) = sorted(out.glob("*final*.h5"))
+    return final
+
+
+@pytest.mark.parametrize("cls", ["RefinedBalancedAtmosphere", "NestedBalancedAtmosphere"])
+def test_a_resumed_balanced_refined_run_continues_the_uninterrupted_one(tmp_path: Path, fixture: Path, cls: str) -> None:
+    # the band rewrite leaves each band's stored pressure off the recovery of its conserved state:
+    # the checkpoint stores that pressure, and a resumed run continues from it on every driver.
+    # the body history covers the resumed segment alone and stays out of the comparison
+    from simbi.simulation.tests.checkpoint_compare import assert_same_checkpoint
+
+    total, half = 4, 2
+    for label, gpus, extra in (("single grid", 1, ""), ("host tiles", 2, ", decompose=[[12], []]")):
+        whole = _run_steps(fixture, cls, tmp_path / f"w{gpus}", gpus, extra, total, None)
+        first = _run_steps(fixture, cls, tmp_path / f"h{gpus}", gpus, extra, half, None)
+        resumed = _run_steps(fixture, cls, tmp_path / f"r{gpus}", gpus, extra, total, first)
+        assert_same_checkpoint(resumed, whole, f"{cls} resumed on the {label}", exclude=("body_diagnostics",))
+    layout = _layout(tmp_path / "launch.toml", workers=2, cuts=[[12], []])
+    whole = _launch_resumable(fixture, cls, tmp_path / "lw", layout, total)
+    first = _launch_resumable(fixture, cls, tmp_path / "lh", layout, half)
+    resumed = _launch_resumable(fixture, cls, tmp_path / "lr", layout, total, first)
+    assert_same_checkpoint(resumed, whole, f"{cls} resumed on two launched workers", exclude=("body_diagnostics",))
+
+
+def _run_steps(fixture: Path, cls: str, out: Path, gpus: int, extra: str, steps: int, resume: Path | None) -> Path:
+    resume_arg = f", checkpoint_file={str(resume)!r}" if resume else ""
+    snippet = (
+        "import sys\n"
+        f"sys.path.insert(0, {str(fixture.parent)!r})\n"
+        "from simbi.simulation import runner\n"
+        f"from balanced_atmosphere import {cls}\n"
+        f"runner.run({cls}(gpus={gpus}, data_directory=sys.argv[1], checkpoint_interval=1e9{extra}{resume_arg}), compute_mode='cpu', max_steps={steps})\n"
+    )
+    done = subprocess.run([sys.executable, "-c", snippet, str(out)], capture_output=True, text=True, timeout=900, env=dict(os.environ, SYMBI_GPU_OVERSUBSCRIBE="1"))
+    return _final(done, out, f"{cls} for {steps} steps")
+
+
 # two cuts inside the x band 6..10: the band's chains resume across one cut alone
 TWO_CUTS = "two cuts on axis 0 cross the 4-cell balanced restriction band inside the patch face at 6"
 
