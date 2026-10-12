@@ -1484,6 +1484,66 @@ pub fn restrict_bface<const D: usize, Mem: MemorySpace>(
     }
 }
 
+/// a curved-spacetime level's face metric: sqrt(gamma) at the center of every face of each axis's
+/// face lattice, its reciprocal, and a face-shaped scratch the densitized transfers stage the flux
+/// sqrt(gamma) B in. the GR curl updates a face's B by the curl of the densitized EMF over the
+/// face's own sqrt(gamma), so the flux is the quantity a transfer between levels conserves
+pub struct FaceMetric<const D: usize, Mem: MemorySpace> {
+    pub sqrtg: [symbi_grid::Field<f64, D, Mem>; D],
+    pub inv_sqrtg: [symbi_grid::Field<f64, D, Mem>; D],
+    pub scratch: [symbi_grid::Field<f64, D, Mem>; D],
+    /// a second face-shaped scratch: a prolongation stages both time levels of the parent flux
+    pub scratch_new: [symbi_grid::Field<f64, D, Mem>; D],
+}
+
+/// `prolong_face_field` of the densitized face flux: the parent's flux sqrt(gamma) B at both time
+/// levels, the divergence-free prolongation of that flux onto the fine faces of `region`, and the
+/// fine face field carrying it. the prolongation's divergence closure then holds for the flux the
+/// GR curl conserves, so every fine cell of a parent is free of densitized divergence whenever the
+/// parent is
+#[allow(clippy::too_many_arguments)]
+pub fn prolong_face_field_densitized<const D: usize, Mem: MemorySpace>(
+    axis: usize,
+    old: &[symbi_grid::Field<f64, D, Mem>],
+    new: &[symbi_grid::Field<f64, D, Mem>],
+    parent: &FaceMetric<D, Mem>,
+    fine: &FaceMetric<D, Mem>,
+    dst: &symbi_grid::Field<f64, D, Mem>,
+    region: &Domain<D>,
+    alpha: f64,
+) {
+    let product = KernelId::FieldProduct { ndim: D as u8 }.name();
+    for t in 0..D {
+        let faces = old[t].domain().clone();
+        dispatch_fields_each::<f64, Mem, D>(product, &faces, &[&parent.sqrtg[t], &old[t]], &[&parent.scratch[t]], &[], &[]);
+        dispatch_fields_each::<f64, Mem, D>(product, &faces, &[&parent.sqrtg[t], &new[t]], &[&parent.scratch_new[t]], &[], &[]);
+    }
+    prolong_face_field(axis, &parent.scratch, &parent.scratch_new, &fine.scratch[axis], region, alpha);
+    dispatch_fields_each::<f64, Mem, D>(product, region, &[&fine.scratch[axis], &fine.inv_sqrtg[axis]], &[dst], &[], &[]);
+}
+
+/// `restrict_bface` of the densitized face flux: each fine face's flux sqrt(gamma)_f B_f, the
+/// coarse face's average of its coincident fine fluxes, and the coarse face field carrying it,
+/// B_c = sum_f (sqrt(gamma)_f B_f) / (n sqrt(gamma)_c). a covered coarse cell's densitized
+/// divergence is then the sum of its children's
+pub fn restrict_bface_densitized<const D: usize, Mem: MemorySpace>(
+    fine: &symbi_sim::state::BfaceFields<D, Mem>,
+    fine_metric: &FaceMetric<D, Mem>,
+    coarse: &symbi_sim::state::BfaceFields<D, Mem>,
+    coarse_metric: &FaceMetric<D, Mem>,
+    coverage: &Domain<D>,
+) {
+    let product = KernelId::FieldProduct { ndim: D as u8 }.name();
+    for aa in 0..D {
+        let fine_faces = fine[aa].domain().clone();
+        dispatch_fields_each::<f64, Mem, D>(product, &fine_faces, &[&fine_metric.sqrtg[aa], &fine[aa]], &[&fine_metric.scratch[aa]], &[], &[]);
+        let face_dom = coverage.extend(aa, 0, 1);
+        let restrict = KernelId::RefineRestrictFace { axis: aa as u8, ndim: D as u8 }.name();
+        dispatch_fields_each::<f64, Mem, D>(restrict, &face_dom, &[&fine_metric.scratch[aa]], &[&coarse_metric.scratch[aa]], &[], &[]);
+        dispatch_fields_each::<f64, Mem, D>(product, &face_dom, &[&coarse_metric.scratch[aa], &coarse_metric.inv_sqrtg[aa]], &[&coarse[aa]], &[], &[]);
+    }
+}
+
 /// re-derive the in-plane cell-centered B from the (restricted + reflux-corrected) face
 /// field over `region` — the same kernel the single-level CT corrector runs, on an arbitrary
 /// exec domain. the energy slot of an adiabatic regime selects the kernel and stays unwritten:

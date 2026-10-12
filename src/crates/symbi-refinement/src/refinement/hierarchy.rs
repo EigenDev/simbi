@@ -115,7 +115,7 @@ use super::transfer::{face_stencil_boxes,
     ProlongOrder, ProlongSweepScratch, bcell_from_bface_region, bface_cf_halo_slabs,
     cf_ghost_slabs, clip_to_prolongable, copy_field, copy_field_region, prolong_face_field,
     prolong_field,
-    prolong_prims_balanced, prolong_prims_swept, prolong_prims_targeted, BandSeam, BandSide, band_seam, rewrite_band_seam,
+    prolong_prims_balanced, prolong_prims_swept, prolong_prims_targeted, BandSeam, BandSide, FaceMetric, band_seam, prolong_face_field_densitized, restrict_bface_densitized, rewrite_band_seam,
     restrict_bface, restrict_cell_field, restrict_cons,
 };
 use std::ops::ControlFlow;
@@ -249,6 +249,9 @@ where
     /// rewritten: the band decode writes the pressure and rebuilds the energy from it, so the
     /// entry pressure differs from the recovery of the entry state, and a replay restores it
     pub band_entry_pressure: std::sync::OnceLock<Field<f64, NDIM, Mem>>,
+    /// sqrt(gamma) at this level's face centers on a curved spacetime, built on its first
+    /// densitized transfer; `None` inside on a flat one, whose face transfers move B itself
+    pub face_metric: std::sync::OnceLock<Option<FaceMetric<NDIM, Mem>>>,
     /// the region of this level covered by the next finer level, in absolute
     /// indices of this level. None on the finest. single-coverage cap: one
     /// refined box per level (a single `Domain`,
@@ -1160,9 +1163,13 @@ where
                 for dd in 0..NDIM {
                     zero_faces.push(Field::<f64, NDIM, Mem>::zeros(cm.bface[dd].domain())?);
                 }
+                let metrics = self.face_metric(ll - 1).zip(self.face_metric(ll));
                 for dd in 0..NDIM {
                     let face_region = fine.geom.interior.extend(dd, 0, 1);
-                    prolong_face_field(dd, &cm.bface.b[..], &zero_faces[..], &fm.bface[dd], &face_region, 0.0);
+                    match metrics {
+                        Some((parent, child)) => prolong_face_field_densitized(dd, &cm.bface.b[..], &zero_faces[..], parent, child, &fm.bface[dd], &face_region, 0.0),
+                        None => prolong_face_field(dd, &cm.bface.b[..], &zero_faces[..], &fm.bface[dd], &face_region, 0.0),
+                    }
                 }
                 bcell_from_bface_region(fm, fc.nrg_field(), &region);
                 fm.bface_initialized
@@ -1241,6 +1248,7 @@ where
                 band_anchor: std::sync::OnceLock::new(),
                 band_reference: std::sync::OnceLock::new(),
                 band_entry_pressure: std::sync::OnceLock::new(),
+                face_metric: std::sync::OnceLock::new(),
                 bcell_old: None,
                 bface_old: None,
                 attempt_entry: None,
@@ -1386,7 +1394,10 @@ where
         if let Some(Some(reg)) = self.emf_registers.first() {
             let mhd = l.state.fields.mhd.as_ref().expect("an emf register lives on a magnetized level");
             let inv_dx: [f64; NDIM] = std::array::from_fn(|ax| 1.0 / l.state.geom.dx[ax]);
-            reg.apply(&mhd.bface, &inv_dx);
+            match self.face_metric(0) {
+                Some(metric) => reg.apply_densitized(&mhd.bface, &inv_dx, metric),
+                None => reg.apply(&mhd.bface, &inv_dx),
+            }
             if reg.has_receiving() {
                 self.reconcile_shell();
             }
@@ -1498,6 +1509,7 @@ where
             band_anchor: std::sync::OnceLock::new(),
             band_reference: std::sync::OnceLock::new(),
             band_entry_pressure: std::sync::OnceLock::new(),
+            face_metric: std::sync::OnceLock::new(),
             bcell_old: None,
             bface_old: None,
             attempt_entry: None,
@@ -1759,6 +1771,7 @@ where
                 band_anchor: std::sync::OnceLock::new(),
                 band_reference: std::sync::OnceLock::new(),
                 band_entry_pressure: std::sync::OnceLock::new(),
+                face_metric: std::sync::OnceLock::new(),
                 bcell_old: None,
                 bface_old: None,
                 attempt_entry: Some(attempt_entry),
@@ -2298,7 +2311,7 @@ where
             for aa in 0..DOF {
                 restrict_cell_field(&fmhd.bcell[aa], &cmhd.bcell[aa], cov);
             }
-            restrict_bface(&fmhd.bface, &cmhd.bface, cov);
+            self.restrict_faces_into(ll);
             bcell_from_bface_region(cmhd, coarse.state.fields.cons.nrg_field(), cov);
         }
         for ll in 0..self.levels.len() {
@@ -4204,7 +4217,7 @@ where
             for aa in 0..DOF {
                 restrict_cell_field(&fmhd.bcell[aa], &cmhd.bcell[aa], cov);
             }
-            restrict_bface(&fmhd.bface, &cmhd.bface, cov);
+            self.restrict_faces_into(level);
             let shell = shell_around(cov, &coarse.state.geom.interior);
             bcell_from_bface_region(cmhd, coarse.state.fields.cons.nrg_field(), &shell);
         }
@@ -4246,12 +4259,13 @@ where
                 for aa in 0..DOF {
                     restrict_cell_field(&fmhd.bcell[aa], &cmhd.bcell[aa], cov);
                 }
-                restrict_bface(&fmhd.bface, &cmhd.bface, cov);
+                self.restrict_faces_into(level);
                 let inv_dx: [f64; NDIM] = std::array::from_fn(|ax| 1.0 / coarse.state.geom.dx[ax]);
-                self.emf_registers[level]
-                    .as_ref()
-                    .unwrap()
-                    .apply(&cmhd.bface, &inv_dx);
+                let register = self.emf_registers[level].as_ref().unwrap();
+                match self.face_metric(level) {
+                    Some(metric) => register.apply_densitized(&cmhd.bface, &inv_dx, metric),
+                    None => register.apply(&cmhd.bface, &inv_dx),
+                }
                 let shell = shell_around(cov, &coarse.state.geom.interior);
                 bcell_from_bface_region(cmhd, coarse.state.fields.cons.nrg_field(), &shell);
             }
@@ -4314,6 +4328,53 @@ where
             && self.levels[level].cons_eq.is_none()
             && self.cf_transfer_balanced(level + 1)
             && wb_band_enabled()
+    }
+
+    /// level `ll`'s face metric on a curved spacetime, built on first use from the level's metric
+    /// at every face center of its staggered lattice; `None` on a flat spacetime or a level
+    /// without staggered faces
+    pub fn face_metric(&self, ll: usize) -> Option<&FaceMetric<NDIM, Mem>> {
+        let level = &self.levels[ll];
+        level
+            .face_metric
+            .get_or_init(|| {
+                let mhd = level.state.fields.mhd.as_ref()?;
+                if matches!(level.state.geom.spacetime, symbi_geometry::Spacetime::Minkowski) {
+                    return None;
+                }
+                let metric = level.state.physics.metric;
+                let face_field = |d: usize, f: &dyn Fn(f64) -> f64| {
+                    let field = Field::zeros(mhd.bface[d].domain()).expect("face metric field");
+                    {
+                        let v = field.view_mut();
+                        for c in mhd.bface[d].domain().clone().iter() {
+                            let g = metric.sqrt_det_gamma(symbi_algebra::Tensor::new(level.state.geom.face_coord(c, d)));
+                            v.set(c, f(g));
+                        }
+                    }
+                    field
+                };
+                Some(FaceMetric {
+                    sqrtg: std::array::from_fn(|d| face_field(d, &|g| g)),
+                    inv_sqrtg: std::array::from_fn(|d| face_field(d, &|g| 1.0 / g)),
+                    scratch: std::array::from_fn(|d| Field::zeros(mhd.bface[d].domain()).expect("face metric scratch")),
+                    scratch_new: std::array::from_fn(|d| Field::zeros(mhd.bface[d].domain()).expect("face metric scratch")),
+                })
+            })
+            .as_ref()
+    }
+
+    /// level `level + 1`'s staggered faces restricted into the faces of level `level` it covers:
+    /// the densitized flux on a curved spacetime, the face field itself on a flat one
+    fn restrict_faces_into(&self, level: usize) {
+        let coarse = &self.levels[level];
+        let fine = &self.levels[level + 1];
+        let cov = coarse.coverage.as_ref().unwrap();
+        let (cmhd, fmhd) = (coarse.state.fields.mhd.as_ref().unwrap(), fine.state.fields.mhd.as_ref().unwrap());
+        match (self.face_metric(level), self.face_metric(level + 1)) {
+            (Some(cm), Some(fm)) => restrict_bface_densitized(&fmhd.bface, fm, &cmhd.bface, cm, cov),
+            _ => restrict_bface(&fmhd.bface, &cmhd.bface, cov),
+        }
     }
 
     /// the band of the seam on `axis` (low or `high` side) of level `level + 1`'s whole patch
@@ -4597,10 +4658,21 @@ where
                 Some(_) => panic!("the parent face stencil is read before the root stages gathered it"),
                 None => (&bface_old[..], &pmhd.bface.b[..]),
             };
+            // the densitized prolongation reads the parent's flux on its own face lattice, where the
+            // parent's face metric lives; a gathered stencil holds faces past a tile's lattice
+            let metrics = self.face_metric(level - 1).zip(self.face_metric(level));
+            assert!(
+                metrics.is_none() || fine.face_stencil.is_none(),
+                "the densitized coarse-fine face halo reads the parent's own face lattice; a gathered parent \
+                 face stencil on a curved spacetime is outside the gated refined runs"
+            );
             for dd in 0..NDIM {
                 for slab in bface_cf_halo_slabs(&fine.state.geom.interior, &prolonged, dd) {
-                    prof("refine_prolong_face", || {
-                        prolong_face_field(dd, old, new, &fmhd.bface[dd], &slab, alpha)
+                    prof("refine_prolong_face", || match metrics {
+                        Some((parent_metric, fine_metric)) => {
+                            prolong_face_field_densitized(dd, old, new, parent_metric, fine_metric, &fmhd.bface[dd], &slab, alpha)
+                        }
+                        None => prolong_face_field(dd, old, new, &fmhd.bface[dd], &slab, alpha),
                     });
                 }
             }

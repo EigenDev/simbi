@@ -9,9 +9,11 @@
 // that divergence at machine zero on each level. restricting the fine faces
 // into the coarse faces they cover keeps it there only when the restriction
 // sums densitized flux; the same state on a flat metric (mass zero) is the
-// control that separates the metric from the indexing. the curved arm is a
-// diagnostic record: the transfers carry the flat flux, and run admission
-// refuses magnetized refinement on a curved spacetime by name.
+// control that separates the metric from the indexing. evolved, a swirling
+// gas carries the field across the coarse-fine interface for several root
+// steps, through the prolongation of the fine level's coarse-fine faces and
+// the EMF reflux of the coarse faces outside the patch, and the densitized
+// divergence stays at machine zero on both levels.
 //
 // run: cargo test -p symbi --test refinement_gr_mhd_divb
 // =============================================================================
@@ -96,11 +98,6 @@ fn max_densitized_divergence(sim: &Sim, metric: &KerrKSCartesian<f64>) -> f64 {
         .fold(0.0, f64::max)
 }
 
-fn coarse_faces(h: &Hier) -> Vec<f64> {
-    let mhd = h.levels[0].state.fields.mhd.as_ref().unwrap();
-    mhd.bface[0].domain().clone().iter().map(|f| *mhd.bface[0].view().at(f)).collect()
-}
-
 /// the coarse divergence after restricting the fine faces, with its premises asserted
 fn restricted_divergence(mass: f64) -> f64 {
     let (h, metric) = two_level(mass);
@@ -108,12 +105,21 @@ fn restricted_divergence(mass: f64) -> f64 {
         let div = max_densitized_divergence(&level.state, &metric);
         assert!(div < DIVB_TOL, "mass {mass}: level {ll} starts with a densitized divergence of {div:e}");
     }
-    let before = coarse_faces(&h);
+    // every covered coarse face holds a value the restriction has to replace: a face it skipped
+    // would keep it and break the divergence of the cells it bounds
+    const SENTINEL: f64 = 7.0;
+    let cov = h.levels[0].coverage.clone().expect("the root carries the patch coverage");
+    let mhd = h.levels[0].state.fields.mhd.as_ref().unwrap();
+    for aa in 0..3 {
+        let v = mhd.bface[aa].view_mut();
+        for f in cov.extend(aa, 0, 1).iter() {
+            v.set(f, SENTINEL);
+        }
+    }
     h.sync_fine_to_coarse(0);
-    let after = coarse_faces(&h);
-    let moved = before.iter().zip(&after).map(|(a, b)| (a - b).abs()).fold(0.0, f64::max);
-    if mass > 0.0 {
-        assert!(moved > 1e-10, "the restriction changed no coarse face by more than {moved:e}; the gate is vacuous");
+    for aa in 0..3 {
+        let left = cov.extend(aa, 0, 1).iter().filter(|f| *mhd.bface[aa].view().at(*f) == SENTINEL).count();
+        assert_eq!(left, 0, "mass {mass}: the restriction left {left} covered faces of axis {aa} unwritten");
     }
     max_densitized_divergence(&h.levels[0].state, &metric)
 }
@@ -124,13 +130,58 @@ fn restricting_a_flat_metric_field_keeps_the_divergence_at_machine_zero() {
     assert!(div < DIVB_TOL, "the coarse divergence after the restriction is {div:e}");
 }
 
-/// the refined face transfers carry the flat face flux, so this records a coarse densitized
-/// divergence of ~1.1e-6 after one restriction; magnetized refinement on a curved spacetime is
-/// refused by name in run admission until the transfers carry the densitized flux, and this
-/// becomes the gate of that repair
 #[test]
-#[ignore = "diagnostic record of the refused scope; run with --ignored"]
 fn restricting_a_kerr_schild_field_keeps_the_densitized_divergence_at_machine_zero() {
     let div = restricted_divergence(0.2);
     assert!(div < DIVB_TOL, "the coarse densitized divergence after the restriction is {div:e}");
+}
+
+/// a swirling gas under the seeded field, every level's faces from the same closure
+fn swirling(mass: f64) -> (Hier, KerrKSCartesian<f64>) {
+    let metric = KerrKSCartesian { mass, spin: SPIN };
+    let dx = 1.0 / N as f64;
+    let s = 2.0 * std::f64::consts::PI;
+    let root = Sim::build(Rmhd, IdealGas { gamma: GAMMA }, metric)
+        .cells([N; 3])
+        .origin([X_LO; 3])
+        .spacing([dx; 3])
+        .boundaries(Boundaries::uniform(BoundaryType::Outflow))
+        .cfl(CFL)
+        .allocate()
+        .expect("root")
+        .set_initial(|[x, y, z]| {
+            MhdPrim::new(
+                Prim::adiabatic(Density(1.0), Tensor::new([0.1 * (s * y).sin(), 0.1 * (s * z).sin(), 0.1 * (s * x).sin()]), Pressure(0.5)),
+                Tensor::new([0.0; 3]),
+            )
+        })
+        .seed_faces(|d, x| if d == 0 { B0 / metric.sqrt_det_gamma(Tensor::new(x)) } else { 0.0 })
+        .build();
+    let k = kernels(&root);
+    let region = RefinementRegion { x_lo: [X_LO + 0.25; 3], x_hi: [X_LO + 0.75; 3] };
+    let h = Hier::with_refinement(root, k, &[region], ProlongOrder::Ppm, kernels).expect("hierarchy");
+    h.seed_fine_from_coarse().expect("seed fine");
+    (h, metric)
+}
+
+#[test]
+fn an_evolved_refined_kerr_schild_field_keeps_the_densitized_divergence_at_machine_zero() {
+    for mass in [0.0, 0.2] {
+        let (mut h, metric) = swirling(mass);
+        for (ll, level) in h.levels.iter().enumerate() {
+            let div = max_densitized_divergence(&level.state, &metric);
+            assert!(div < DIVB_TOL, "mass {mass}: level {ll} is seeded with a densitized divergence of {div:e}");
+        }
+        let start = h.levels[1].state.fields.mhd.as_ref().unwrap().bface[0].domain().clone();
+        let before: Vec<f64> = start.iter().map(|f| *h.levels[1].state.fields.mhd.as_ref().unwrap().bface[0].view().at(f)).collect();
+        h.evolve_steps(3).expect("evolve");
+        assert!(h.crash.is_none(), "mass {mass}: the run crashed: {:?}", h.crash);
+        let after: Vec<f64> = start.iter().map(|f| *h.levels[1].state.fields.mhd.as_ref().unwrap().bface[0].view().at(f)).collect();
+        let moved = before.iter().zip(&after).map(|(a, b)| (a - b).abs()).fold(0.0, f64::max);
+        assert!(moved > 1e-6, "mass {mass}: the fine field moved by {moved:e}; the swirl transports nothing");
+        for (ll, level) in h.levels.iter().enumerate() {
+            let div = max_densitized_divergence(&level.state, &metric);
+            assert!(div < DIVB_TOL, "mass {mass}: level {ll} holds a densitized divergence of {div:e} after three root steps");
+        }
+    }
 }

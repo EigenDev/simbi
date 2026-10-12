@@ -357,7 +357,19 @@ impl<const D: usize, Mem: MemorySpace> EmfRegister<D, Mem> {
     /// included) replaced by the fine restriction, this closes div(curl) = 0
     /// on every outside cell.
     pub fn apply(&self, bface: &BfaceFields<D, Mem>, inv_dx: &[f64; D]) {
+        self.apply_with(bface, inv_dx, None);
+    }
+
+    /// `apply` on a curved spacetime: the GR curl updates a face's B by the curl of the densitized
+    /// EMF over the face's own sqrt(gamma), so each corrected face takes the correction on its flux
+    /// sqrt(gamma) B, the faces of the slab staged in the face metric's scratch and carried back
+    pub fn apply_densitized(&self, bface: &BfaceFields<D, Mem>, inv_dx: &[f64; D], metric: &super::transfer::FaceMetric<D, Mem>) {
+        self.apply_with(bface, inv_dx, Some(metric));
+    }
+
+    fn apply_with(&self, bface: &BfaceFields<D, Mem>, inv_dx: &[f64; D], metric: Option<&super::transfer::FaceMetric<D, Mem>>) {
         let name = KernelId::FieldAxpyShift { ndim: D as u8 }.name();
+        let product = KernelId::FieldProduct { ndim: D as u8 }.name();
         for slab in self.slabs.iter().filter(|s| s.role != FaceRole::Contributing) {
             let (tt, bb, side, aa) = (slab.tt, slab.bb, slab.side, slab.aa);
             // the curl coefficient of edge E_t in face bface_a: with
@@ -400,14 +412,14 @@ impl<const D: usize, Mem: MemorySpace> EmfRegister<D, Mem> {
             if side == 0 {
                 ints[bb] = 1;
             }
-            dispatch_fields_each::<f64, Mem, D>(
-                name,
-                &dom,
-                &[&slab.reg],
-                &[&bface[aa]],
-                &ints[..D],
-                &[scale],
-            );
+            match metric {
+                None => dispatch_fields_each::<f64, Mem, D>(name, &dom, &[&slab.reg], &[&bface[aa]], &ints[..D], &[scale]),
+                Some(m) => {
+                    dispatch_fields_each::<f64, Mem, D>(product, &dom, &[&m.sqrtg[aa], &bface[aa]], &[&m.scratch[aa]], &[], &[]);
+                    dispatch_fields_each::<f64, Mem, D>(name, &dom, &[&slab.reg], &[&m.scratch[aa]], &ints[..D], &[scale]);
+                    dispatch_fields_each::<f64, Mem, D>(product, &dom, &[&m.scratch[aa], &m.inv_sqrtg[aa]], &[&bface[aa]], &[], &[]);
+                }
+            }
         }
     }
 }

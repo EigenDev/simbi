@@ -335,19 +335,95 @@ def test_ct_contact_upwinding_is_ill_posed_on_a_flow_symmetry_plane() -> None:
 
 
 class _RefinedCartesianKsMhd3D(_CartesianKsMhd3D):
+    # a 16^3 root over [-5, 5]^3 and a box on its cell faces clear of the horizon (r_+ = 2M = 2):
+    # every refined cell lies at r >= 2.5
     resolution: Annotated[tuple[int, int, int], ProblemParam((16, 16, 16))]
     refinement_enabled: Annotated[bool, ProblemParam(True)]
     refinement_max_levels: Annotated[int, ProblemParam(2)]
-    refinement_regions: Annotated[list[list[float]], ProblemParam([[-1.25, 1.25, -1.25, 1.25, -1.25, 1.25]])]
+    refinement_regions: Annotated[list[list[float]], ProblemParam([[2.5, 3.75, -1.25, 1.25, -1.25, 1.25]])]
     refinement_ratios: Annotated[list[int], ProblemParam([2])]
+
+    def initial_primitive_state(self) -> InitialStateType:
+        # the root's own faces: the parent of the refined box seeds it by the densitized prolongation
+        nx, ny, nz = self.resolution
+        d = 2.0 * L / nx
+        xc = lambda i: -L + (i + 0.5) * d
+        zf = lambda k: -L + k * d
+
+        def gas_state() -> GasStateGenerator:
+            for _ in range(nx * ny * nz):
+                yield (RHO0, 0.0, 0.0, 0.0, PRE0)
+
+        def b_field(bn: str):
+            def gen():
+                if bn == "b1":
+                    for _ in range((nx + 1) * ny * nz):
+                        yield 0.0
+                elif bn == "b2":
+                    for _ in range(nx * (ny + 1) * nz):
+                        yield 0.0
+                else:
+                    for k in range(nz + 1):
+                        for j in range(ny):
+                            for i in range(nx):
+                                yield BZ0 / _sqrtg(xc(i), xc(j), zf(k))
+
+            return gen
+
+        return (gas_state, b_field("b1"), b_field("b2"), b_field("b3"))
+
+
+def _densitized_divergence(level, lo: tuple[float, float, float], dd: float) -> tuple[float, float]:
+    """the largest |div(sqrt(gamma) B)| over a published level's cells and its largest face field,
+    sqrt(gamma) the kernel's own, its r >= M/2 clamp included"""
+    mag = level["partition_0/hydro/magnetic"]
+    b1, b2, b3 = (mag[f"B{k}"]["data"][:] for k in (1, 2, 3))
+    nz, ny, nx = b1.shape[0], b1.shape[1], b1.shape[2] - 1
+    centers = [lo[a] + (np.arange(n) + 0.5) * dd for a, n in enumerate((nx, ny, nz))]
+    faces = [lo[a] + np.arange(n + 1) * dd for a, n in enumerate((nx, ny, nz))]
+
+    def w(xg, yg, zg):
+        rr = np.sqrt(xg * xg + yg * yg + zg * zg)
+        r_true = rr.copy()
+        np.maximum(rr, 0.5 * MASS, out=rr)
+        return np.sqrt(1.0 + (2.0 * MASS / rr) * (r_true / rr) ** 2)
+
+    zc, yc, xf = np.meshgrid(centers[2], centers[1], faces[0], indexing="ij")
+    w1 = w(xf, yc, zc)
+    zc, yf, xc = np.meshgrid(centers[2], faces[1], centers[0], indexing="ij")
+    w2 = w(xc, yf, zc)
+    zf, yc, xc = np.meshgrid(faces[2], centers[1], centers[0], indexing="ij")
+    w3 = w(xc, yc, zf)
+    div = (
+        (w1[:, :, 1:] * b1[:, :, 1:] - w1[:, :, :-1] * b1[:, :, :-1])
+        + (w2[:, 1:, :] * b2[:, 1:, :] - w2[:, :-1, :] * b2[:, :-1, :])
+        + (w3[1:, :, :] * b3[1:, :, :] - w3[:-1, :, :] * b3[:-1, :, :])
+    ) / dd
+    return float(np.abs(div).max()), float(max(np.abs(b1).max(), np.abs(b2).max(), np.abs(b3).max()))
 
 
 @needs_backend
-def test_magnetized_refinement_on_a_curved_spacetime_is_refused(tmp_path: Path) -> None:
-    # the face-field restriction, prolongation and EMF reflux sum flat face fluxes, while the GR curl
-    # conserves the densitized flux sqrt(gamma) B: one restriction on this chart leaves a coarse
-    # densitized divergence of ~1e-6 that the constrained transport carries forward
+def test_a_refined_kerr_schild_field_keeps_the_densitized_divergence_on_both_levels(tmp_path: Path) -> None:
+    # the refined face transfers carry the densitized flux the GR curl conserves: the published
+    # faces of both levels hold div(sqrt(gamma) B) at machine zero after the gas has carried the
+    # field across the box for several root steps
     p = _RefinedCartesianKsMhd3D(data_directory=tmp_path)
-    with pytest.raises(Exception, match="magnetized mesh refinement on the schwarzschild_ks spacetime"):
+    runner.run(p, compute_mode="cpu", max_steps=6)
+    (final,) = sorted(tmp_path.glob("*final*.h5"))
+    with h5py.File(final, "r") as h:
+        assert "level_1" in h, "the run published no refined level"
+        root_div, root_b = _densitized_divergence(h["level_0"], (-L, -L, -L), 2.0 * L / 16)
+        fine_div, fine_b = _densitized_divergence(h["level_1"], (2.5, -1.25, -1.25), L / 16)
+        fine_transverse = float(np.abs(h["level_1/partition_0/hydro/magnetic/B1/data"][:]).max())
+    assert fine_transverse > 1e-10, "the fine level's transverse field never developed; the gate is vacuous"
+    assert root_div < 1e-12 * max(1.0, root_b / 1e-3), f"root densitized div(B) {root_div:e}"
+    assert fine_div < 1e-12 * max(1.0, fine_b / 1e-3), f"refined densitized div(B) {fine_div:e}"
+
+
+@needs_backend
+def test_magnetized_refinement_on_a_curved_spacetime_with_several_tiles_is_refused(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setenv("SYMBI_GPU_OVERSUBSCRIBE", "1")
+    p = _RefinedCartesianKsMhd3D(data_directory=tmp_path, gpus=2)
+    with pytest.raises(Exception, match="magnetized mesh refinement on the schwarzschild_ks spacetime with several tiles"):
         runner.run(p, compute_mode="cpu", max_steps=1)
     assert not list(tmp_path.glob("*.h5")), "output was written before the refusal"
