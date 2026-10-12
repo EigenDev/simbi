@@ -8875,6 +8875,28 @@ fn validate_passive_scalar(cfg: &Config) -> Result<(), String> {
     Ok(())
 }
 
+/// the stack a run executes on: the dispatch onto a run's monomorphized driver holds every
+/// driver's state in one frame, about 12 MB optimized and over 100 MB unoptimized, past the 8 MiB
+/// a python main thread is commonly given. the reservation is virtual; a run commits the pages its
+/// frames touch
+const RUN_STACK_BYTES: usize = 512 * 1024 * 1024;
+
+/// run `f` on a thread of its own with `RUN_STACK_BYTES` of stack, the caller blocked until it
+/// returns; a panic on that thread resumes on the caller
+fn on_run_stack<T: Send>(f: impl FnOnce() -> T + Send) -> T {
+    std::thread::scope(|scope| {
+        let run = std::thread::Builder::new()
+            .name("simbi-run".into())
+            .stack_size(RUN_STACK_BYTES)
+            .spawn_scoped(scope, f)
+            .expect("the run thread starts");
+        match run.join() {
+            Ok(value) => value,
+            Err(payload) => std::panic::resume_unwind(payload),
+        }
+    })
+}
+
 /// runtime dispatch on the config tags -> a monomorphized sim. hydro regimes
 /// (newtonian/rhd/isothermal) x cartesian (+ curvilinear for adiabatic) x 1/2/3d;
 /// the mhd regimes (rmhd/nmhd/imhd) x cartesian x 1/2/3d.
@@ -10241,7 +10263,7 @@ fn run_simulation(
     // the solve is pure rust with no python access — release the gil so rayon
     // gets real parallelism (and python stays responsive).
     let diagnostics = py
-        .detach(|| dispatch_and_run(&cfg, &prims, &bfields))
+        .detach(|| on_run_stack(|| dispatch_and_run(&cfg, &prims, &bfields)))
         .map_err(PyRuntimeError::new_err)?;
     Ok(NativeRunDiagnostics { inner: diagnostics })
 }
@@ -13720,7 +13742,7 @@ fn launch_worker(
             initial_excision_scales(&prims).map_err(PyValueError::new_err)?;
     }
     let drained = drain_clock.elapsed();
-    py.detach(|| run_worker_process(&cfg, &prims, &bufs, &params, drained))
+    py.detach(|| on_run_stack(|| run_worker_process(&cfg, &prims, &bufs, &params, drained)))
         .map_err(PyRuntimeError::new_err)
 }
 
