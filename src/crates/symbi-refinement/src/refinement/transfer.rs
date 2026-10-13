@@ -902,6 +902,22 @@ pub struct BandSeam<const D: usize> {
     pub side: BandSide,
 }
 
+/// the coarse cells between a band part and the uncovered cell of its seam along the normal: zero
+/// on the near side, and on a far side the count of band cells held toward the seam by other tiles
+pub fn band_distance<const D: usize>(seam: &BandSeam<D>) -> isize {
+    let span = &seam.band.spaces[seam.axis];
+    if seam.high { seam.uncovered - span.hi } else { span.lo - seam.uncovered - 1 }
+}
+
+/// the distinct distances of the far band parts among `seams`, nearest first: the order the far
+/// tiles resume the chains in, one cut per hop
+pub fn band_hops<'a, const D: usize>(seams: impl Iterator<Item = &'a BandSeam<D>>) -> Vec<isize> {
+    let mut hops: Vec<isize> = seams.filter(|s| s.side != BandSide::Near).map(band_distance).collect();
+    hops.sort_unstable();
+    hops.dedup();
+    hops
+}
+
 /// the band of the seam on `axis` (low or `high` side) of the whole patch `whole` the tile with
 /// coverage `coverage` holds cells of, `None` when it holds none. the band spans `band` coarse
 /// cells inward from the seam and the whole coverage across it; the tile holds the uncovered cell
@@ -983,9 +999,10 @@ pub fn band_seam<const D: usize>(
 /// wave standing at the seam encodes to its full amplitude.
 ///
 /// a tile holds a seam band whole or in part: the near side's chains start at the
-/// uncovered cell, and its encode and decode leave the chained equilibrium in `fine_anchor` and
-/// `coarse_anchor`. the far side's chains resume from those anchors at the rows beside its cut,
-/// carried into its halo, and take the same steps in the same order as the uncut chains.
+/// uncovered cell, and every side's encode and decode leave the chained equilibrium in
+/// `fine_anchor` and `coarse_anchor`. a far side's chains resume from the anchors of the tile
+/// toward the seam at the rows beside its cut, carried into its halo, and take the same steps in
+/// the same order as the uncut chains.
 #[allow(clippy::too_many_arguments)]
 pub fn rewrite_band_seam<const D: usize, const DOF: usize, Mem: MemorySpace>(
     seam: &BandSeam<D>,
@@ -993,6 +1010,7 @@ pub fn rewrite_band_seam<const D: usize, const DOF: usize, Mem: MemorySpace>(
     fine_interior: &Domain<D>,
     departure: &symbi_grid::Field<f64, D, Mem>,
     fine_anchor: &symbi_grid::Field<f64, D, Mem>,
+    fine_reference: &symbi_grid::Field<f64, D, Mem>,
     coarse_departure: &symbi_grid::Field<f64, D, Mem>,
     coarse_prim: &PrimFieldsGeneric<D, DOF, Mem>,
     coarse_nrg: &symbi_grid::Field<f64, D, Mem>,
@@ -1098,6 +1116,12 @@ pub fn rewrite_band_seam<const D: usize, const DOF: usize, Mem: MemorySpace>(
             let mut hi = fine_hi.clone();
             lo[ax] = fine_row as i32;
             hi[ax] = fine_row as i32;
+            // the chain's start at the row beside the cut, in its own buffer: the encode writes
+            // the equilibrium of its band cells into the anchor
+            let mut reference_row = fine_band.clone();
+            reference_row.spaces[ax].lo = fine_row;
+            reference_row.spaces[ax].hi = fine_row + 1;
+            copy_field_region(fine_anchor, fine_reference, &reference_row);
             let ints: Vec<i32> = lo.iter().chain(hi.iter()).copied().collect();
             let mut scalars = Vec::new();
             scalars.extend_from_slice(fine_x_lo);
@@ -1111,8 +1135,8 @@ pub fn rewrite_band_seam<const D: usize, const DOF: usize, Mem: MemorySpace>(
                     }
                     .name(),
                     fine_band,
-                    &[&fine.rho, fine_pre, fine_anchor],
-                    &[departure],
+                    &[&fine.rho, fine_pre, fine_reference],
+                    &[departure, fine_anchor],
                     &ints,
                     &scalars,
                 );

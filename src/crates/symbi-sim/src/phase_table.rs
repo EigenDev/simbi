@@ -92,15 +92,15 @@ impl PhaseTable {
     }
 
     /// `nested` with the band points of the seams whose balanced band a cut runs inside: each
-    /// `(level, axis, high)` names the seam of level `level + 1`'s patch whose band on level
-    /// `level` the cut crosses. every restriction into `level` opens its seams' points in the
-    /// listed order, axis by axis and the low side first, after the restriction and before the
-    /// exchange that follows it
-    pub fn nested_banded(stages: u8, substeps: u8, depth: u8, bands: &[(u8, u8, bool)]) -> Result<Self, PhaseTableError> {
+    /// entry names the seam of level `level + 1`'s patch whose band on level `level` its cuts
+    /// cross, one point per cut. every restriction into `level` opens its seams' points in the
+    /// listed order, axis by axis and the low side first, the cut nearest the seam first, after
+    /// the restriction and before the exchange that follows it
+    pub fn nested_banded(stages: u8, substeps: u8, depth: u8, bands: &[BandHops]) -> Result<Self, PhaseTableError> {
         Self::build(stages, substeps, stages, depth, bands)
     }
 
-    fn build(stages: u8, substeps: u8, fine_stages: u8, depth: u8, bands: &[(u8, u8, bool)]) -> Result<Self, PhaseTableError> {
+    fn build(stages: u8, substeps: u8, fine_stages: u8, depth: u8, bands: &[BandHops]) -> Result<Self, PhaseTableError> {
         if stages == 0 || (substeps > 0 && fine_stages == 0) || depth == 0 || (depth > 1) != (substeps > 0) {
             return Err(PhaseTableError::Empty);
         }
@@ -271,10 +271,23 @@ impl PhaseTable {
 
 /// the band points of the restriction into `level` along `path`, in the listed seam order; every
 /// worker opens them, the ones holding no band cell with nothing to send
-fn push_band_points(phases: &mut Vec<Phase>, bands: &[(u8, u8, bool)], level: u8, path: u8) {
-    for &(l, axis, high) in bands {
-        if l == level {
-            phases.push(Phase { point: ExchangePoint::BandSeam { level, path, axis, high }, skippable: false, init_only: false });
+/// the cuts inside the balanced band of one seam: the band of the seam on `axis` (its `high` side)
+/// of level `level + 1`'s patch, lying on level `level`, and the distance of every cut inside it
+/// from the seam in level-`level` cells, nearest first. the far tiles resume the band's chains
+/// hop by hop, one cut per hop, in that order
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct BandHops {
+    pub level: u8,
+    pub axis: u8,
+    pub high: bool,
+    pub distances: Vec<isize>,
+}
+
+fn push_band_points(phases: &mut Vec<Phase>, bands: &[BandHops], level: u8, path: u8) {
+    for band in bands.iter().filter(|b| b.level == level) {
+        for hop in 0..band.distances.len() as u8 {
+            let point = ExchangePoint::BandSeam { level, path, axis: band.axis, high: band.high, hop };
+            phases.push(Phase { point, skippable: false, init_only: false });
         }
     }
 }
@@ -290,7 +303,7 @@ fn nested_phases(
     substeps: u8,
     stages: u8,
     depth: u8,
-    bands: &[(u8, u8, bool)],
+    bands: &[BandHops],
 ) -> Result<(), PhaseTableError> {
     let mandatory = |point| Phase { point, skippable: false, init_only: false };
     let skippable = |point| Phase { point, skippable: true, init_only: false };

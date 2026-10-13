@@ -331,8 +331,8 @@ pub enum ExchangePoint {
     /// inside the restriction into level `level` along its substep path `path`: the restricted
     /// densities and the band chains' equilibria beside the cuts inside the band of the seam on
     /// `axis` (its `high` side) of the finer level's patch, the start the far tiles resume their
-    /// chains from
-    BandSeam { level: u8, path: u8, axis: u8, high: bool },
+    /// chains from, across the `hop`-th cut from the seam
+    BandSeam { level: u8, path: u8, axis: u8, high: bool, hop: u8 },
     Rollback,
     /// after the named exchange: each tile below a cut sends its copy of the shared
     /// interface face to the tile above, which compares it with its own bit for bit. the
@@ -481,7 +481,9 @@ impl ExchangePoint {
             ExchangePoint::ExciseRebuild(k) => (32, k as u32, 0),
             ExchangePoint::EquilibriumLevel { level, troubled } => (33, level as u32, troubled as u32),
             ExchangePoint::RootCoefficients => (36, 0, 0),
-            ExchangePoint::BandSeam { level, path, axis, high } => (37, (level as u32) << 5 | path as u32, (axis as u32) << 1 | high as u32),
+            ExchangePoint::BandSeam { level, path, axis, high, hop } => {
+                (37, (level as u32) << 5 | path as u32, (hop as u32) << 3 | (axis as u32) << 1 | high as u32)
+            }
         };
         kind << 16 | a << 8 | b
     }

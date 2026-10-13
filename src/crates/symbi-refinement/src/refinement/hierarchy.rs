@@ -115,7 +115,7 @@ use super::transfer::{face_stencil_boxes,
     ProlongOrder, ProlongSweepScratch, bcell_from_bface_region, bface_cf_halo_slabs,
     cf_ghost_slabs, clip_to_prolongable, copy_field, copy_field_region, prolong_face_field,
     prolong_field,
-    prolong_prims_balanced, prolong_prims_swept, prolong_prims_targeted, BandSeam, BandSide, FaceMetric, band_seam, prolong_face_field_densitized, restrict_bface_densitized, rewrite_band_seam,
+    prolong_prims_balanced, prolong_prims_swept, prolong_prims_targeted, BandSeam, BandSide, FaceMetric, band_distance, band_hops, band_seam, prolong_face_field_densitized, restrict_bface_densitized, rewrite_band_seam,
     restrict_bface, restrict_cell_field, restrict_cons,
 };
 use std::ops::ControlFlow;
@@ -4430,6 +4430,9 @@ where
         let fine_anchor = fine.band_anchor.get_or_init(|| {
             Field::zeros(&fine.state.geom.allocated).expect("band anchor scratch")
         });
+        let fine_reference = fine.band_reference.get_or_init(|| {
+            Field::zeros(&fine.state.geom.allocated).expect("band reference scratch")
+        });
         let coarse_anchor = coarse.band_anchor.get_or_init(|| {
             Field::zeros(&coarse.state.geom.allocated).expect("band anchor scratch")
         });
@@ -4443,6 +4446,7 @@ where
                 &fine.state.geom.interior,
                 departure,
                 fine_anchor,
+                fine_reference,
                 coarse_departure,
                 &coarse.state.fields.prim,
                 coarse
@@ -6761,12 +6765,14 @@ fn decomposed_bands<R, const NDIM: usize, const DOF: usize, M, E, S, Mem, K, T>(
             for (i, d, seam) in seams.iter().filter(|(_, _, s)| s.side == BandSide::Near) {
                 symbi_xpu::with_device(*d, || tiles[*i].rewrite_band_seam(level, seam));
             }
-            if seams.iter().any(|(_, _, s)| s.side != BandSide::Near) {
+            // the far tiles rewrite hop by hop away from the uncovered cell: each resumes the chains
+            // the tile between it and the seam carried to their common cut
+            for hop in band_hops(seams.iter().map(|(_, _, s)| s)) {
                 exchange_level_halos(tiles, level, coarse.0, coarse.1, coarse.2, transport);
                 exchange_level_halos(tiles, level + 1, &fine.order, fine.counts, &fine.devices, transport);
                 exchange_level_band_anchor(tiles, level, coarse.0, coarse.1, coarse.2, transport);
                 exchange_level_band_anchor(tiles, level + 1, &fine.order, fine.counts, &fine.devices, transport);
-                for (i, d, seam) in seams.iter().filter(|(_, _, s)| s.side != BandSide::Near) {
+                for (i, d, seam) in seams.iter().filter(|(_, _, s)| s.side != BandSide::Near && band_distance(s) == hop) {
                     symbi_xpu::with_device(*d, || tiles[*i].rewrite_band_seam(level, seam));
                 }
             }

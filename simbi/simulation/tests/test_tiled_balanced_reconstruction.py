@@ -13,9 +13,10 @@
 # refined box the coarse-fine transfer chains each fine ghost from the patch
 # cell nearest it and the restriction band rewrites the four covered cells
 # inside each seam from the uncovered cell beyond it: refined host tiles and a
-# refined launch whose cuts keep every band on one tile publish the single
-# grid's state. a chart outside that scope (the (r, z) plane), a cut inside a
-# band and nested refinement are refused by name before any output.
+# refined launch publish the single grid's state whether the cuts keep every
+# band on one tile or cross a band once or twice, the far tiles resuming the
+# band's chains across each cut. a chart outside that scope (the (r, z) plane)
+# is refused by name before any output.
 #
 # run: pytest -m simulation simbi/simulation/tests/test_tiled_balanced_reconstruction.py
 # =============================================================================
@@ -323,17 +324,18 @@ def test_the_balanced_reconstruction_on_refined_tiles_matches_the_single_grid(tm
     with h5py.File(want, "r") as a, h5py.File(plain, "r") as b:
         assert not np.array_equal(a["level_1/conserved/den"][()], b["level_1/conserved/den"][()]), "the balance left the refined run unchanged; the gate is vacuous"
     # the patch spans root cells 6..18 in x and 8..24 in y, its bands 6..10, 14..18 and 8..12,
-    # 20..24: x = 8 and x = 16 cut inside an x band, and with y = 10 the bands intersect at a
-    # corner cut on both axes
-    for cuts in [[[12], []], [[12], [16]], [[8], []], [[16], []], [[8], [10]]]:
+    # 20..24: x = 8 and x = 16 cut inside an x band, with y = 10 the bands intersect at a corner
+    # cut on both axes, and 7, 9 and 15, 17 cut each x band twice around a two-cell tile
+    for cuts in [[[12], []], [[12], [16]], [[8], []], [[16], []], [[8], [10]], [[7, 9, 15, 17], []]]:
         gpus = int(np.prod([len(c) + 1 for c in cuts]))
         out = tmp_path / f"tiles{gpus}_{cuts[0]}_{cuts[1]}"
         got = _final(_run(fixture, "RefinedBalancedAtmosphere", out, gpus, f", decompose={cuts!r}"), out, f"refined host tiles cut at {cuts}")
         _assert_same_state(got, want, f"refined host tiles cut at {cuts}")
     monkeypatch.delenv("SIMBI_LAUNCH_EXPERIMENTAL", raising=False)
-    # the launched workers carry a band's chains across a cut inside it at the seam's band point:
-    # x = 8 inside the x band, and with y = 10 the bands intersect at a corner cut on both axes
-    for cuts in [[[12], [16]], [[8], []], [[8], [10]]]:
+    # the launched workers carry a band's chains across each cut inside it at the seam's band
+    # points, the cut nearest the seam first: x = 8 inside the x band, with y = 10 the bands
+    # intersect at a corner cut on both axes, and 7, 9 and 15, 17 cut each x band twice
+    for cuts in [[[12], [16]], [[8], []], [[8], [10]], [[7, 9, 15, 17], []]]:
         workers = int(np.prod([len(c) + 1 for c in cuts]))
         layout = _layout(tmp_path / f"launch_{cuts[0]}_{cuts[1]}.toml", workers=workers, cuts=cuts)
         got = _script_launch(str(_launch_script(fixture, "RefinedBalancedAtmosphere")), (24, 32), tmp_path / f"launched_{cuts[0]}_{cuts[1]}", layout, STEPS, workers=workers, env=_launch_env(fixture))
@@ -468,15 +470,10 @@ def _run_steps(fixture: Path, cls: str, out: Path, gpus: int, extra: str, steps:
     return _final(done, out, f"{cls} for {steps} steps")
 
 
-# two cuts inside the x band 6..10: the band's chains resume across one cut alone
-TWO_CUTS = "two cuts on axis 0 cross the 4-cell balanced restriction band inside the patch face at 6"
-
-
 @pytest.mark.parametrize(
     ("cls", "decompose", "reason"),
     [
         ("CylindricalPlaneAtmosphere", None, "wb_reconstruction on the 2-dimensional (r, z) cylindrical grid with several tiles is outside the gated tiled runs"),
-        ("RefinedBalancedAtmosphere", [[7, 9], []], TWO_CUTS),
     ],
 )
 def test_the_balanced_reconstruction_outside_the_gated_scope_is_refused_on_host_tiles(tmp_path: Path, fixture: Path, cls: str, decompose, reason: str) -> None:
@@ -485,19 +482,6 @@ def test_the_balanced_reconstruction_outside_the_gated_scope_is_refused_on_host_
     assert done.returncode != 0, f"{cls} ran on host tiles"
     assert reason in " ".join(done.stderr.split()), done.stderr[-1500:]
     assert not list((tmp_path / "out").glob("*.h5")), "output was written before the refusal"
-
-
-def test_two_cuts_in_a_balanced_band_are_refused_on_launch(tmp_path: Path, fixture: Path) -> None:
-    env = dict(os.environ, **_launch_env(fixture))
-    env.pop("SIMBI_LAUNCH_EXPERIMENTAL", None)
-    layout = _layout(tmp_path / "three.toml", workers=3, cuts=[[7, 9], []])
-    out = tmp_path / "out"
-    cmd = [sys.executable, "-m", "simbi.cli", "launch", str(_launch_script(fixture, "RefinedBalancedAtmosphere")), "--layout", str(layout),
-           "--max-steps", "1", "--resolution", "24,32", "--data-directory", str(out), "--checkpoint-interval", "1e9"]
-    done = subprocess.run(cmd, capture_output=True, text=True, timeout=600, env=env)
-    assert done.returncode != 0, f"the launch succeeded:\n{done.stdout}"
-    assert TWO_CUTS in " ".join(done.stderr.split()), done.stderr
-    assert not (out.exists() and list(out.glob("*.h5"))), "a checkpoint was published"
 
 
 def test_an_ungated_balanced_chart_is_refused_on_launch(tmp_path: Path, fixture: Path) -> None:

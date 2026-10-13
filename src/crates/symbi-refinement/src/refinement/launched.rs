@@ -85,9 +85,9 @@ pub struct RefinedPlans<'p, const D: usize> {
     /// the band plans of every level, the level `l` at `l`, at the band points of the seams in
     /// `band_seams`: empty on a run whose balanced bands each lie on one tile
     pub bands: Vec<PlanExchange<'p, D>>,
-    /// the seams whose balanced band a cut runs inside, `(parent level, axis, high)` in the order
-    /// the restriction rewrites them
-    pub band_seams: Vec<(u8, u8, bool)>,
+    /// the seams whose balanced band a cut runs inside, with the cuts' distances from the seam, in
+    /// the order the restriction rewrites them
+    pub band_seams: Vec<symbi_sim::phase_table::BandHops>,
 }
 
 /// the plans of one nested refined level (two or deeper): its patch faces lie off every cut,
@@ -146,7 +146,7 @@ where
     L: Link,
 {
     use crate::refinement::launched_tracers::level_id;
-    use crate::refinement::transfer::BandSide;
+    use crate::refinement::transfer::{BandSide, band_distance};
     let devices_of = |lv: usize| if lv == 0 { held.root_devices } else { held.level_devices(lv) };
     let dev = |k: usize| devices_of(level)[level_id(held, level, k).expect("a held tile of the level").0 as usize];
     let holders: Vec<usize> = (0..tiles.len()).filter(|&k| tiles[k].levels.len() > level + 1).collect();
@@ -163,10 +163,22 @@ where
             for (k, seam) in seams.iter().filter(|(_, seam)| seam.side == BandSide::Near) {
                 with_device(dev(*k), || tiles[*k].rewrite_band_seam(level, seam));
             }
-            if !plans.band_seams.contains(&(level as u8, axis as u8, high)) {
-                continue;
+            let hops = plans.band_seams.iter().find(|b| (b.level, b.axis, b.high) == (level as u8, axis as u8, high));
+            // every far band part this worker holds resumes at one of the plan's hops
+            for (_, seam) in seams.iter().filter(|(_, seam)| seam.side != BandSide::Near) {
+                assert!(
+                    hops.is_some_and(|h| h.distances.contains(&band_distance(seam))),
+                    "a far part of the level-{level} band on axis {axis} (high {high}) starts {} cells from the \
+                     seam, a cut the launch's band plan holds no hop for",
+                    band_distance(seam)
+                );
             }
-            {
+            let Some(hops) = hops else {
+                continue;
+            };
+            // the far tiles resume the chains hop by hop: across the cut nearest the seam first,
+            // each from the equilibrium the tile toward the seam reached beside it
+            for (hop, &distance) in hops.distances.iter().enumerate() {
                 let mut fields: [Vec<Vec<&symbi_grid::Field<f64, D, Mem>>>; 2] = [level, level + 1]
                     .map(|lv| (0..plans.bands[lv].plan().n_tiles()).map(|_| Vec::new()).collect());
                 for (side, lv) in [level, level + 1].into_iter().enumerate() {
@@ -186,11 +198,11 @@ where
                     PlanPart { plan: &plans.bands[level], fields: &fields[0], devices: devices_of(level), fault: None, dst_fields: None },
                     PlanPart { plan: &plans.bands[level + 1], fields: &fields[1], devices: devices_of(level + 1), fault: None, dst_fields: None },
                 ];
-                let point = ExchangePoint::BandSeam { level: level as u8, path, axis: axis as u8, high };
+                let point = ExchangePoint::BandSeam { level: level as u8, path, axis: axis as u8, high, hop: hop as u8 };
                 exchange_point_plans(&parts, transport, fabric, point, step, attempt, deadline, spent)?;
-            }
-            for (k, seam) in seams.iter().filter(|(_, seam)| seam.side != BandSide::Near) {
-                with_device(dev(*k), || tiles[*k].rewrite_band_seam(level, seam));
+                for (k, seam) in seams.iter().filter(|(_, seam)| seam.side != BandSide::Near && band_distance(seam) == distance) {
+                    with_device(dev(*k), || tiles[*k].rewrite_band_seam(level, seam));
+                }
             }
         }
     }

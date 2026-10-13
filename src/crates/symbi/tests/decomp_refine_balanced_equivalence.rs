@@ -7,9 +7,11 @@
 // patch cell nearest it and whose restriction band rewrites the covered coarse
 // cells within four cells of each seam from the uncovered cell beyond it. the
 // tiles equal the single hierarchy in every root and fine density over about
-// seventy-five root steps on every layout keeping each seam band on one tile:
-// one cut through the patch, cuts on the band edges, cuts crossing the seams
-// transversely, and ragged cuts off the bands. the balance changes the run.
+// seventy-five root steps on layouts keeping each seam band on one tile (one
+// cut through the patch, cuts on the band edges, cuts crossing the seams
+// transversely, ragged cuts off the bands) and on layouts cutting a band once
+// and twice, whose far tiles resume the chains across each cut. the balance
+// changes the run.
 //
 // run: cargo test -p symbi --test decomp_refine_balanced_equivalence
 // =============================================================================
@@ -184,6 +186,19 @@ fn balanced_refined_tiles_match_the_single_hierarchy_with_a_cut_inside_a_seam_ba
         [vec![10], vec![10]],
         [vec![22], vec![9]],
     ] {
+        assert_tiles_match(cuts, &want);
+    }
+}
+
+/// two cuts inside one seam band: the band crosses a tile two cells wide, the narrowest tile the
+/// plm halo admits, and the far tile resumes the chains the middle tile carried to its cut, one hop
+/// further from the seam, so the tiles equal the single hierarchy bit for bit. the layouts cut the
+/// low and the high x band, and an x and a y band at once
+#[test]
+fn balanced_refined_tiles_match_the_single_hierarchy_with_two_cuts_inside_a_seam_band() {
+    let want = { let mut h = mono(true); h.evolve(T_FINAL).unwrap(); h };
+    // the patch spans root cells 8..24 on both axes, the bands 8..12 and 20..24
+    for cuts in [[vec![9, 11], vec![]], [vec![21, 23], vec![]], [vec![9, 11], vec![21, 23]]] {
         assert_tiles_match(cuts, &want);
     }
 }

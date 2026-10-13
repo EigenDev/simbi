@@ -1451,10 +1451,12 @@ pub fn wb_band_encode_gv(ndim: usize, n_bodies: usize, normal: usize) -> KernelP
 /// trace the balanced restriction's fine encode on the far side of a cut inside a band: the
 /// chain resumes from the equilibrium the near side's encode reached at the cell beside the cut
 /// (`anchor` at the reference row) and continues through the fine cells' own densities, the same
-/// steps in the same order as the uncut encode. a cell's departure is its pressure less the chain.
+/// steps in the same order as the uncut encode. a cell's departure is its pressure less the chain,
+/// and the chain itself is written for a tile across the next cut inside the band to resume from.
 ///
-/// buffers: src_rho, src_pre (the fine primitives, inputs), anchor (the near side's equilibrium,
-/// read at the reference row) then dst (the fine departure, output). ints: lo_{ax}, hi_{ax} (the
+/// buffers: src_rho, src_pre (the fine primitives, inputs), anchor (the equilibrium the tile
+/// toward the seam reached, read at the reference row) then dst (the fine departure) and eq (the
+/// chained equilibrium), the outputs. ints: lo_{ax}, hi_{ax} (the
 /// reference clamp: the row beside the cut on the seam's normal axis, the interior elsewhere).
 /// scalars: x_lo_{ax}, dx_{ax} (fine), then the body slots.
 pub fn wb_band_encode_anchored_gv(ndim: usize, n_bodies: usize, normal: usize) -> KernelProgram {
@@ -1500,7 +1502,10 @@ pub fn wb_band_encode_anchored_gv(ndim: usize, n_bodies: usize, normal: usize) -
             &vary,
         );
         let departure = pre_cell - p_eq;
-        let writes = vec![KernelWrite::new("dst", "dst", departure.node())];
+        let writes = vec![
+            KernelWrite::new("dst", "dst", departure.node()),
+            KernelWrite::new("eq", "eq", p_eq.node()),
+        ];
         writes
     })
 }

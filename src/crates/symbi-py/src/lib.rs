@@ -10814,25 +10814,16 @@ fn validate_tiled_balance(cfg: &Config) -> Result<(), String> {
             2 => cuts_in_balanced_bands::<2>(cfg)?,
             _ => cuts_in_balanced_bands::<3>(cfg)?,
         };
-        // the tiles carry a band's chains across one cut inside it; a cut on the patch face or two
-        // cuts inside one band leave the chains no tile to resume on
-        let refused = crossings.iter().find(|c| {
-            c.on_face || crossings.iter().filter(|o| (o.level, o.axis, o.face) == (c.level, c.axis, c.face)).count() > 1
-        });
-        if let Some(c) = refused {
+        // the tiles carry a band's chains across every cut inside it, hop by hop from the seam; a
+        // cut on the patch face leaves the uncovered cell the chains start from on a tile beside the
+        // band
+        if let Some(c) = crossings.iter().find(|c| c.on_face) {
             let (level, ax, cut, face, band) = (c.level, c.axis, c.cut, c.face, c.band);
             let at = if level == 0 {
                 format!("the patch face at {face}")
             } else {
                 format!("the level-{} patch face at level-{level} cell {face}", level + 1)
             };
-            if !c.on_face {
-                return Err(format!(
-                    "wb_reconstruction with mesh refinement on several tiles: two cuts on axis {ax} \
-                     cross the {band}-cell balanced restriction band inside {at}; the band's chains \
-                     resume across one cut, so keep at most one cut inside it"
-                ));
-            }
             return Err(format!(
                 "wb_reconstruction with mesh refinement on several tiles: the cut at root cell {cut} on \
                  axis {ax} crosses the {band}-cell balanced restriction band inside {at}, which rewrites \
@@ -10847,17 +10838,25 @@ fn validate_tiled_balance(cfg: &Config) -> Result<(), String> {
 /// the seams whose balanced band a cut runs inside, as `(parent level, axis, high)` in the order
 /// the restriction rewrites them: by level, then axis, the low side first. every launched worker
 /// opens the band point of each at every restriction into its level
-fn launched_band_seams<const D: usize>(cfg: &Config) -> Result<Vec<(u8, u8, bool)>, String> {
+fn launched_band_seams<const D: usize>(cfg: &Config) -> Result<Vec<symbi_sim::phase_table::BandHops>, String> {
     if !cfg.wb_reconstruction || !cfg.refinement_enabled {
         return Ok(Vec::new());
     }
-    let mut seams: Vec<(u8, u8, bool)> = cuts_in_balanced_bands::<D>(cfg)?
-        .iter()
-        .filter(|c| !c.on_face)
-        .map(|c| (c.level as u8, c.axis as u8, c.high))
-        .collect();
-    seams.sort();
-    seams.dedup();
+    let mut seams: Vec<symbi_sim::phase_table::BandHops> = Vec::new();
+    for c in cuts_in_balanced_bands::<D>(cfg)?.iter().filter(|c| !c.on_face) {
+        let at = c.cut << c.level;
+        let distance = if c.high { c.face - at } else { at - c.face } as isize;
+        let (level, axis) = (c.level as u8, c.axis as u8);
+        match seams.iter_mut().find(|s| (s.level, s.axis, s.high) == (level, axis, c.high)) {
+            Some(s) => s.distances.push(distance),
+            None => seams.push(symbi_sim::phase_table::BandHops { level, axis, high: c.high, distances: vec![distance] }),
+        }
+    }
+    for s in seams.iter_mut() {
+        s.distances.sort_unstable();
+        s.distances.dedup();
+    }
+    seams.sort_by_key(|s| (s.level, s.axis, s.high));
     Ok(seams)
 }
 
