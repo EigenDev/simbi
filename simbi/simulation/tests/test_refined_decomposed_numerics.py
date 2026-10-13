@@ -16,8 +16,6 @@
 # - the refined isothermal blob on two, three uneven and six tiles cut along
 #   both axes through the fine box; a locally isothermal refined run on tiles is
 #   refused by name before any output.
-# a census, which the tiled drivers do not reduce across tiles, is refused by
-# name on host tiles and through `simbi launch` rather than left unrecorded.
 # a gravitating body over two nested levels on two host tiles publishes every
 # level of the single hierarchy's state bit for bit.
 # a gravitating draining sink under two nested levels of a 2.5D newtonian MHD
@@ -44,7 +42,6 @@ import h5py
 import numpy as np
 import pytest
 
-import simbi.expression as expr
 from simbi.simulation import runner
 from simbi.simulation.tests.test_launch import _layout
 from simbi import ProblemParam, SimbiProblem
@@ -68,18 +65,6 @@ class DyedRefinedBlast(RefinedBlast):
                     yield 0.25 + 0.5 * ((ii + 0.5) / nx) + 0.1 * ((jj + 0.5) / ny)
 
         return dye()
-
-
-def _census():
-    g = expr.ExprGraph()
-    mass = expr.density(g) * expr.cell_volume(g)
-    return expr.Census(name="total", axes=[], values={"mass": mass}).serialize()
-
-
-class CensusedRefinedBlast(RefinedBlast):
-    @property
-    def census_expressions(self):
-        return [_census()]
 
 
 def _run(cls, out: Path, gpus: int, steps: int = STEPS, resolution=RESOLUTION, **kwargs) -> Path:
@@ -131,33 +116,6 @@ def test_a_passive_scalar_on_two_refined_tiles_matches_the_single_hierarchy(tmp_
     assert any("chi" in n for n in _datasets(single)), "the single hierarchy wrote no dye; the gate is vacuous"
     tiles = _run(DyedRefinedBlast, tmp_path / "tiles", 2)
     _assert_same(tiles, single, "two refined tiles carrying a dye")
-
-
-def test_a_census_on_host_tiles_is_refused_by_name(tmp_path: Path, host_tiles) -> None:
-    with pytest.raises(Exception, match="a census with several tiles awaits a cross-tile census reduction"):
-        _run(CensusedRefinedBlast, tmp_path / "tiles", 2, refinement_enabled=False)
-    assert not list((tmp_path / "tiles").glob("*final*.h5")), "a refused run published a final checkpoint"
-
-
-def test_a_census_through_launch_is_refused_by_name(tmp_path: Path) -> None:
-    script = tmp_path / "censused.py"
-    script.write_text(
-        "import simbi.expression as expr\n"
-        "from simbi_configs.examples.newtonian.kh import KelvinHelmholtz\n\n"
-        "class CensusedKh(KelvinHelmholtz):\n"
-        "    @property\n"
-        "    def census_expressions(self):\n"
-        "        g = expr.ExprGraph()\n"
-        "        return [expr.Census(name='total', axes=[], values={'mass': expr.density(g) * expr.cell_volume(g)}).serialize()]\n"
-    )
-    layout = _layout(tmp_path / "two.toml", workers=2, shape=(2, 1))
-    cmd = [sys.executable, "-m", "simbi.cli", "launch", str(script), "--layout", str(layout), "--max-steps", "1",
-           "--resolution", "16,16", "--data-directory", str(tmp_path / "out"), "--checkpoint-interval", "1e9"]
-    env = dict(os.environ, PYTHONPATH=os.pathsep.join([os.getcwd(), os.environ.get("PYTHONPATH", "")]))
-    done = subprocess.run(cmd, capture_output=True, text=True, timeout=600, env=env)
-    assert done.returncode != 0, f"the launch succeeded:\n{done.stdout}"
-    assert "a census with several tiles awaits a cross-tile census reduction" in " ".join(done.stderr.split()), done.stderr
-    assert not list((tmp_path / "out").glob("*.h5")), "a refused launch published a checkpoint"
 
 
 # the second region spans the cut at x = 0 that two tiles place, with no face on it

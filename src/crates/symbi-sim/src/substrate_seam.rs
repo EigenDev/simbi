@@ -540,6 +540,22 @@ where
         None
     }
 
+    /// one partial sample per registration of `censuses` over this store's leaf cells, which
+    /// leave out the ghosts, the `covered` cells a finer level resolves, the excised core and the
+    /// interior of every masking body; `CensusPartial::None` for a registration not due at `now` on
+    /// `level` or of another cadence. `None` on a kernel set without census sampling
+    fn census_partials(
+        &self,
+        _store: &FieldStore<NDIM, DOF, Mem, f64>,
+        _censuses: &[crate::census::RegisteredCensus],
+        _level: usize,
+        _cadence: Option<crate::census::Cadence>,
+        _covered: Option<&symbi_algebra::Domain<NDIM>>,
+        _now: f64,
+    ) -> Option<Vec<crate::census::CensusPartial>> {
+        None
+    }
+
     /// the immersed-boundary penalization: the property-
     /// algebra surface physics (drain, walls, porosity, thermal surfaces),
     /// applied post-source each substage — the one body

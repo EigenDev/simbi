@@ -3463,6 +3463,19 @@ where
         for s in stores.iter_mut() {
             advance_state_clock(&mut **s, dt);
         }
+        // the registered censuses at the tail of the accepted step, at the state's new clock as on
+        // the single grid: the tiles' exact partials merge into the whole grid's sample, which
+        // every tile records
+        let census = {
+            let sh = shared!();
+            crate::census::tile_census_partials(&sh, &sh[0].censuses, kernels, devices, 0, None, |_| None, sh[0].time)
+        };
+        if let Some(partials) = census {
+            let now = stores[0].time;
+            for s in stores.iter_mut() {
+                s.record_census(now, 0, &partials);
+            }
+        }
         if has_discrete_tracers {
             let partition = {
                 let sh: Vec<&FieldStore<D, DOF, M, f64>> = stores.iter().map(|s| &**s).collect();

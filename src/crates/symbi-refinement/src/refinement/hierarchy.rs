@@ -3054,8 +3054,7 @@ where
             symbi_substrate::census_sample::merge_partials(&mut totals, &partial, &ops);
         }
         // an additive census sums every level's leaf cells exactly and rounds once
-        let totals = totals.iter().map(|p| p.round()).collect();
-        symbi_substrate::census_sample::record_samples(&mut self.levels[0].state, time, totals);
+        self.levels[0].state.store.record_census(time, 0, &totals);
     }
 
     /// body feedback + motion at the tail of an accepted root step: the finest level owns the
@@ -3956,6 +3955,12 @@ where
         }
     }
 
+    /// the cells of `level` a census leaves out as nonphysical beyond its covered cells: its
+    /// excised core, from the level's own kernel set
+    fn census_nonphysical(&self, level: usize) -> symbi_substrate::census_sample::NonphysicalCells {
+        symbi_substrate::census_sample::NonphysicalCells { excision_radius: self.levels[level].kernels.excision_radius() }
+    }
+
     /// record a per-level census sample from this level's own accepted subcycle step, stamped
     /// `time`, the end of that substep.
     ///
@@ -3965,17 +3970,11 @@ where
     /// therefore left to the consumer.
     ///
     /// the registrations live on the root, which owns the history; a finer level defers to it.
-    /// the cells of `level` a census leaves out as nonphysical beyond its covered cells: its
-    /// excised core, from the level's own kernel set
-    fn census_nonphysical(&self, level: usize) -> symbi_substrate::census_sample::NonphysicalCells {
-        symbi_substrate::census_sample::NonphysicalCells { excision_radius: self.levels[level].kernels.excision_radius() }
-    }
-
     fn sample_per_level_censuses(&mut self, level: usize, time: f64) {
         if self.levels[0].state.store.censuses.is_empty() {
             return;
         }
-        let partial = symbi_substrate::census_sample::level_partials(
+        let partial = symbi_substrate::census_sample::level_partials_exact(
             &self.levels[level].state,
             &self.levels[0].state.store.censuses,
             level,
@@ -3988,15 +3987,7 @@ where
             self.census_nonphysical(level),
             time,
         );
-        if partial.iter().all(|(values, _)| values.is_empty()) {
-            return;
-        }
-        symbi_substrate::census_sample::record_samples_at_level(
-            &mut self.levels[0].state,
-            time,
-            level,
-            partial,
-        );
+        self.levels[0].state.store.record_census(time, level, &partial);
     }
 
     /// derive one level's accepted-step coefficients before its finer level
@@ -7778,6 +7769,40 @@ where
 /// partition the sink region — the deltas sum across tiles into the true global reaction,
 /// and the identical global delta + prescribed advance applies to every tile's bodies, so
 /// all tiles stay in lockstep), then the root halo refresh for the next step's stage 0.
+/// the root-step census partials of a set of tiles at their root's clock: every level's tiles
+/// reduce their leaf cells against the first tile root's registrations, on `device(tile)`, and the
+/// exact partials of every level and tile merge
+pub fn tiles_root_step_census<R, const NDIM: usize, const DOF: usize, M, E, S, Mem, K>(
+    tiles: &[Hierarchy<R, NDIM, DOF, M, E, S, Mem, K>],
+    device: impl Fn(usize) -> i32,
+) -> Vec<symbi_sim::census::CensusPartial>
+where
+    R: Regime<f64, NDIM>,
+    M: Metric<f64, NDIM> + Copy,
+    E: symbi_hydro::eos::Eos<f64>,
+    S: ExecutionSpace,
+    Mem: MemorySpace,
+    K: KernelSet<NDIM, DOF, Mem, f64>,
+{
+    let root_step = Some(symbi_sim::census::Cadence::RootStep);
+    let now = tiles[0].levels[0].state.time;
+    let registrations = &tiles[0].levels[0].state.store.censuses;
+    let ops: Vec<_> = registrations.iter().map(|r| r.evaluator.spec().op()).collect();
+    let mut total = vec![symbi_sim::census::CensusPartial::None; ops.len()];
+    let depth = tiles.iter().map(|h| h.levels.len()).max().unwrap_or(1);
+    for level in 0..depth {
+        let holders: Vec<usize> = (0..tiles.len()).filter(|&i| tiles[i].levels.len() > level).collect();
+        let stores: Vec<_> = holders.iter().map(|&i| &tiles[i].levels[level].state.store).collect();
+        let kernels: Vec<&K> = holders.iter().map(|&i| &tiles[i].levels[level].kernels).collect();
+        let level_devices: Vec<i32> = holders.iter().map(|&i| device(i)).collect();
+        let covered = |k: usize| tiles[holders[k]].levels[level].state.composite_ownership.coverage.as_ref();
+        let partial = symbi_sim::census::tile_census_partials(&stores, registrations, &kernels, &level_devices, 0, root_step, covered, now)
+            .expect("the root registers a census");
+        symbi_substrate::census_sample::merge_partials(&mut total, &partial, &ops);
+    }
+    total
+}
+
 fn decomposed_root_post<R, const NDIM: usize, const DOF: usize, M, E, S, Mem, K, T>(
     tiles: &mut [Hierarchy<R, NDIM, DOF, M, E, S, Mem, K>],
     counts: [usize; NDIM],
@@ -7797,6 +7822,16 @@ where
     T: HaloTransport,
 {
     let n = tiles.len();
+    // the root-step censuses at the root's new clock, ahead of the body step as on the single
+    // hierarchy: the merged sample of every level of every tile, recorded on every tile's root
+    if !tiles[0].levels[0].state.censuses.is_empty() {
+        drain_devices::<Mem>(devices);
+        let total = tiles_root_step_census(tiles, |i| devices[i]);
+        let now = tiles[0].levels[0].state.time;
+        for tile in tiles.iter_mut() {
+            tile.levels[0].state.store.record_census(now, 0, &total);
+        }
+    }
         // per-step immersed-body bookkeeping, the hierarchy form of the flat decomposed
         // body step: each tile's finest level reduces its local feedback partials (the
         // tile finest interiors partition the sink region — coarser levels carry a

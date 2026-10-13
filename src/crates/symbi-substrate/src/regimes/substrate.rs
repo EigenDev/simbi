@@ -319,6 +319,18 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize>
 impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize> KernelSet<D, D, Mem, Sc>
     for IsoSubstrateKernelSet<Mem, Sc, D>
 {
+    fn census_partials(
+        &self,
+        store: &FieldStore<D, D, Mem, f64>,
+        censuses: &[symbi_sim::census::RegisteredCensus],
+        level: usize,
+        cadence: Option<symbi_sim::census::Cadence>,
+        covered: Option<&symbi_algebra::Domain<D>>,
+        now: f64,
+    ) -> Option<Vec<symbi_sim::census::CensusPartial>> {
+        Some(crate::census_sample::tile_partials_exact(store, censuses, level, cadence, covered, <Self as KernelSet<D, D, Mem, Sc>>::excision_radius(self), now))
+    }
+
     fn flux(&self, sim: &FieldStore<D, D, Mem, Sc>, dir: usize) {
         // the gv iso flux is the Newtonian flux at gamma->1: it reconstructs prim.pre
         // (= cs^2(x)*rho) and takes cs = sqrt(gamma*p/rho) = sqrt(p/rho) = the local sound

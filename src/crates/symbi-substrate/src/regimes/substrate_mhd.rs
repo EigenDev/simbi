@@ -824,6 +824,18 @@ where
     Mem: MemorySpace + Sync,
     Sc: Scalar + OrderedNumeric,
 {
+    fn census_partials(
+        &self,
+        store: &FieldStore<D, 3, Mem, f64>,
+        censuses: &[symbi_sim::census::RegisteredCensus],
+        level: usize,
+        cadence: Option<symbi_sim::census::Cadence>,
+        covered: Option<&symbi_algebra::Domain<D>>,
+        now: f64,
+    ) -> Option<Vec<symbi_sim::census::CensusPartial>> {
+        Some(crate::census_sample::tile_partials_exact(store, censuses, level, cadence, covered, <Self as KernelSet<D, 3, Mem, Sc>>::excision_radius(self), now))
+    }
+
     /// viscous with a constant nu or an alpha prescription: the post-step recipe runs the
     /// transport below exactly then
     fn is_viscous(&self) -> bool {

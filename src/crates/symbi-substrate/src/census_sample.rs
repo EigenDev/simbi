@@ -13,16 +13,9 @@
 use symbi_geometry::Metric;
 use symbi_hydro::eos::Eos;
 use symbi_hydro::regime::Regime;
-use symbi_sim::state::SimStateGeneric;
+use symbi_sim::state::{FieldStore, SimStateGeneric};
 use symbi_xpu::{ExecutionSpace, MemorySpace};
 
-/// evaluate every registered census over the current state and append one sample each.
-///
-/// a tracerless-style inertness holds: with no registrations this is a length check and
-/// nothing is allocated or evaluated, so an unregistered run pays nothing.
-///
-/// the samples are collected before any is recorded because evaluating a census borrows the
-/// state immutably while appending to its series needs it mutably.
 /// reduce one level's leaf cells into a partial sample per registered census.
 ///
 /// `covered` is the region a finer level resolves; those cells are not this level's to count.
@@ -36,29 +29,24 @@ use symbi_xpu::{ExecutionSpace, MemorySpace};
 /// volume: the covered coarse cells are excluded from the parent, and a fine level holding no
 /// registrations contributes nothing in their place, so the total is short by exactly the refined
 /// region and is otherwise smooth, positive and of the right order.
-pub fn level_partials_exact<R, const D: usize, const DOF: usize, M, E, S, Mem>(
-    sim: &SimStateGeneric<R, D, DOF, M, E, S, Mem>,
+#[allow(clippy::too_many_arguments)]
+pub fn store_partials_exact<const D: usize, const DOF: usize, Mem: MemorySpace>(
+    sim: &FieldStore<D, DOF, Mem, f64>,
     censuses: &[symbi_sim::census::RegisteredCensus],
     level: usize,
     cadence: Option<symbi_sim::census::Cadence>,
     covered: Option<&symbi_algebra::Domain<D>>,
     nonphysical: NonphysicalCells,
     now: f64,
-) -> Vec<symbi_sim::census::CensusPartial>
-where
-    R: Regime<f64, D>,
-    M: Metric<f64, D> + Copy,
-    E: Eos<f64>,
-    S: ExecutionSpace,
-    Mem: MemorySpace,
-{
+    interpret: &dyn Fn(&symbi_sim::census::CensusEvaluator, &symbi_sim::census::CensusFields<D, Mem>) -> Option<()>,
+) -> Vec<symbi_sim::census::CensusPartial> {
     symbi_sim::driver::prof("census", || {
         censuses
             .iter()
             .enumerate()
             .map(|(index, registered)| {
             // not due: an empty partial, which `merge_partials` folds as a no-op and
-            // `record_samples` skips. the alternative — dropping the entry — would misalign every
+            // `record_census` skips. the alternative — dropping the entry — would misalign every
             // registration after it, since partials are matched to registrations by position.
             // and a registration whose declared cadence is not the one being driven here: a
             // root-step census must not also sample inside a subcycle, and a per-level one must
@@ -75,7 +63,7 @@ where
             // per-cell interpreter when it does not apply. both write into the same scratch, whose
             // every cell starts excluded, so whichever runs leaves untouched cells out of the
             // reduction rather than in bucket zero.
-            let fields = census_map_fields(sim, censuses, index, &registered.evaluator, covered, nonphysical).unwrap_or_else(|| {
+            let fields = census_map_fields(sim, censuses, index, &registered.evaluator, covered, nonphysical, interpret).unwrap_or_else(|| {
                 panic!(
                     "census '{}' cannot be evaluated on this store: neither the compiled map nor \
                      the per-cell interpreter applies here",
@@ -100,6 +88,45 @@ where
             symbi_sim::census::CensusPartial::Values { values: reduced.values, dropped: reduced.dropped }
         })
         .collect()
+    })
+}
+
+/// `store_partials_exact` on a tile, which carries no typed metric: the compiled map evaluates
+/// every census a tiled run admits
+#[allow(clippy::too_many_arguments)]
+pub fn tile_partials_exact<const D: usize, const DOF: usize, Mem: MemorySpace>(
+    store: &FieldStore<D, DOF, Mem, f64>,
+    censuses: &[symbi_sim::census::RegisteredCensus],
+    level: usize,
+    cadence: Option<symbi_sim::census::Cadence>,
+    covered: Option<&symbi_algebra::Domain<D>>,
+    excision_radius: Option<f64>,
+    now: f64,
+) -> Vec<symbi_sim::census::CensusPartial> {
+    store_partials_exact(store, censuses, level, cadence, covered, NonphysicalCells { excision_radius }, now, &|_, _| None)
+}
+
+/// `store_partials_exact` on a typed state, whose metric lets the per-cell interpreter stand in
+/// where the compiled map declines
+#[allow(clippy::too_many_arguments)]
+pub fn level_partials_exact<R, const D: usize, const DOF: usize, M, E, S, Mem>(
+    sim: &SimStateGeneric<R, D, DOF, M, E, S, Mem>,
+    censuses: &[symbi_sim::census::RegisteredCensus],
+    level: usize,
+    cadence: Option<symbi_sim::census::Cadence>,
+    covered: Option<&symbi_algebra::Domain<D>>,
+    nonphysical: NonphysicalCells,
+    now: f64,
+) -> Vec<symbi_sim::census::CensusPartial>
+where
+    R: Regime<f64, D>,
+    M: Metric<f64, D> + Copy,
+    E: Eos<f64>,
+    S: ExecutionSpace,
+    Mem: MemorySpace,
+{
+    store_partials_exact(&sim.store, censuses, level, cadence, covered, nonphysical, now, &|ev, fields| {
+        sim.census_fill_interpreted(ev, fields)
     })
 }
 
@@ -161,48 +188,8 @@ pub fn sample_censuses<R, const D: usize, const DOF: usize, M, E, S, Mem>(
         return;
     }
     let time = sim.time;
-    let samples = level_partials(sim, &sim.store.censuses, 0, None, None, nonphysical, time);
-    record_samples(sim, time, samples);
-}
-
-/// commit one already-reduced sample per registration.
-pub fn record_samples<R, const D: usize, const DOF: usize, M, E, S, Mem>(
-    sim: &mut SimStateGeneric<R, D, DOF, M, E, S, Mem>,
-    time: f64,
-    samples: Vec<(Vec<f64>, u64)>,
-) where
-    R: Regime<f64, D>,
-    M: Metric<f64, D> + Copy,
-    E: Eos<f64>,
-    S: ExecutionSpace,
-    Mem: MemorySpace,
-{
-    record_samples_at_level(sim, time, 0, samples);
-}
-
-/// commit one already-reduced sample per registration, tagged with the level that produced it.
-pub fn record_samples_at_level<R, const D: usize, const DOF: usize, M, E, S, Mem>(
-    sim: &mut SimStateGeneric<R, D, DOF, M, E, S, Mem>,
-    time: f64,
-    level: usize,
-    samples: Vec<(Vec<f64>, u64)>,
-) where
-    R: Regime<f64, D>,
-    M: Metric<f64, D> + Copy,
-    E: Eos<f64>,
-    S: ExecutionSpace,
-    Mem: MemorySpace,
-{
-    for (registered, (values, dropped)) in sim.store.censuses.iter_mut().zip(samples) {
-        // an empty partial is a registration that was not due this step.
-        if values.is_empty() {
-            continue;
-        }
-        registered
-            .history
-            .push_at_level(time, level as u64, &values, dropped);
-        registered.mark_sampled(level, time);
-    }
+    let partials = level_partials_exact(sim, &sim.store.censuses, 0, None, None, nonphysical, time);
+    sim.store.record_census(time, 0, &partials);
 }
 
 /// the per-cell artifacts of registration `index`, by whichever path applies.
@@ -211,20 +198,15 @@ pub fn record_samples_at_level<R, const D: usize, const DOF: usize, M, E, S, Mem
 /// cells are marked excluded afterwards, uniformly. that ordering is what makes the scratch
 /// reusable: a fill that skipped covered cells would leave the previous sample's bucket standing in
 /// a cell that is no longer this level's to count.
-pub fn census_map_fields<'a, R, const D: usize, const DOF: usize, M, E, S, Mem>(
-    sim: &'a SimStateGeneric<R, D, DOF, M, E, S, Mem>,
+pub fn census_map_fields<'a, const D: usize, const DOF: usize, Mem: MemorySpace>(
+    sim: &'a FieldStore<D, DOF, Mem, f64>,
     censuses: &[symbi_sim::census::RegisteredCensus],
     index: usize,
     ev: &symbi_sim::census::CensusEvaluator,
     covered: Option<&symbi_algebra::Domain<D>>,
     nonphysical: NonphysicalCells,
+    interpret: &dyn Fn(&symbi_sim::census::CensusEvaluator, &symbi_sim::census::CensusFields<D, Mem>) -> Option<()>,
 ) -> Option<&'a symbi_sim::census::CensusFields<D, Mem>>
-where
-    R: Regime<f64, D>,
-    M: Metric<f64, D> + Copy,
-    E: Eos<f64>,
-    S: ExecutionSpace,
-    Mem: MemorySpace,
 {
     let scratch = sim.census_scratch_pooled(censuses, index)?;
     // the body and excision masks the sample time sees: a moved body changes the stamp, so a
@@ -243,14 +225,14 @@ where
             .is_some_and(|cached| cached == stamp)
     });
     let compiled = crate::regimes::substrate_kernels::census_compiled::census_map_compiled(
-        &sim.store,
+        sim,
         ev,
         &scratch.values,
         &scratch.segment,
         !segment_is_cached,
     );
     if !compiled {
-        sim.census_fill_interpreted(ev, scratch)?;
+        interpret(ev, scratch)?;
     }
     // The interpreter always writes the segment. The split compiled kernel does so only when the
     // geometry/coverage stamp changed; a cached segment already includes its covered-cell mask.
@@ -335,16 +317,10 @@ struct NonphysicalMasks {
 /// the excised core and the interiors of the bodies whose surface acts on the gas (an accretor's
 /// drain, a porous or rigid wall), each at the position and orientation it holds now. a body that
 /// only gravitates masks nothing: the gas it pulls on is gas
-fn nonphysical_masks<R, const D: usize, const DOF: usize, M, E, S, Mem>(
-    sim: &SimStateGeneric<R, D, DOF, M, E, S, Mem>,
+fn nonphysical_masks<const D: usize, const DOF: usize, Mem: MemorySpace>(
+    sim: &FieldStore<D, DOF, Mem, f64>,
     nonphysical: NonphysicalCells,
 ) -> NonphysicalMasks
-where
-    R: Regime<f64, D>,
-    M: Metric<f64, D> + Copy,
-    E: Eos<f64>,
-    S: ExecutionSpace,
-    Mem: MemorySpace,
 {
     use std::hash::{Hash, Hasher};
     use symbi_ib::sdf::SdfExpr;
@@ -379,18 +355,12 @@ where
 /// mark the excised cells and the cells inside a masking body excluded: a cell is out when its
 /// centroid lies strictly inside the excised core (the excision kernels' own predicate) or strictly
 /// inside a body (negative signed distance). a whole-cell rule: a cell is gas or it is not
-fn exclude_nonphysical<R, const D: usize, const DOF: usize, M, E, S, Mem>(
-    sim: &SimStateGeneric<R, D, DOF, M, E, S, Mem>,
+fn exclude_nonphysical<const D: usize, const DOF: usize, Mem: MemorySpace>(
+    sim: &FieldStore<D, DOF, Mem, f64>,
     ev: &symbi_sim::census::CensusEvaluator,
     segment: &symbi_grid::Field<f64, D, Mem>,
     masks: &NonphysicalMasks,
-) where
-    R: Regime<f64, D>,
-    M: Metric<f64, D> + Copy,
-    E: Eos<f64>,
-    S: ExecutionSpace,
-    Mem: MemorySpace,
-{
+) {
     if masks.excised.is_none() && masks.bodies.is_empty() {
         return;
     }

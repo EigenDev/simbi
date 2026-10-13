@@ -192,6 +192,46 @@ pub fn combine_horizon_partials<L: Link>(
     Ok(total)
 }
 
+/// the whole run's census partials from every worker's: each worker supplies, at its own window,
+/// one tag per registration and then the payload of each due one, every worker receives every
+/// block, and the merge by each census's op is exact, so every worker holds the whole grid's
+/// sample whatever the partition. every worker reaches the same due registrations from the same
+/// clock and schedule; a block whose tags differ from this worker's is refused
+pub fn combine_census_partials<L: Link>(
+    fabric: &mut Fabric<L>,
+    workers: usize,
+    registrations: &[crate::census::RegisteredCensus],
+    local: &[crate::census::CensusPartial],
+    deadline: Duration,
+) -> Result<Vec<crate::census::CensusPartial>, WorkerError> {
+    use crate::census::CensusPartial;
+    let slots: Vec<usize> = registrations.iter().map(|r| r.evaluator.spec().n_segments() * r.evaluator.spec().n_values()).collect();
+    let tags: Vec<u64> = local.iter().map(CensusPartial::tag).collect();
+    let mut block = tags.clone();
+    local.iter().for_each(|p| block.extend(p.payload_words()));
+    let words = block.len();
+    let base = fabric.me().0 as u64 * words as u64;
+    let entries: Vec<(u64, u64)> = block.into_iter().enumerate().map(|(i, w)| (base + i as u64, w)).collect();
+    let assembled = fabric.assemble_windowed((workers * words) as u64, &entries, deadline).map_err(|e| fail(fabric, e.into()))?;
+    let ops: Vec<_> = registrations.iter().map(|r| r.evaluator.spec().op()).collect();
+    let mut total = vec![CensusPartial::None; local.len()];
+    for w in 0..workers {
+        let block = &assembled[w * words..(w + 1) * words];
+        if block[..tags.len()] != tags[..] {
+            return Err(fail(fabric, WorkerError::Numerics(format!("worker {w} sampled another set of censuses: tags {:?} against {tags:?}", &block[..tags.len()]))));
+        }
+        let mut at = tags.len();
+        for (ii, (&tag, &n)) in tags.iter().zip(&slots).enumerate() {
+            let len = CensusPartial::payload_len(tag, n);
+            let partial = CensusPartial::from_payload(tag, n, &block[at..at + len])
+                .map_err(|e| fail(fabric, WorkerError::Numerics(format!("worker {w}'s census partial {ii} is missing or malformed: {e}"))))?;
+            total[ii].merge(&partial, ops[ii]);
+            at += len;
+        }
+    }
+    Ok(total)
+}
+
 /// the launched worker's scope: 1D to 3D grids in host memory, a curved spacetime only where
 /// `curved` admits it (the relativistic gas and magnetized gas), a horizon body where the kernel
 /// set books its diagnostic shell, and tracers on the cartesian chart of a flat spacetime alone. the charts and settings a launch admits are decided
@@ -2003,6 +2043,23 @@ where
         }
         for s in stores.iter_mut() {
             advance_state_clock(&mut **s, dt);
+        }
+        // the registered censuses at the tail of the accepted step, at the state's new clock as on
+        // the single grid: every worker merges its tiles' exact partials, the workers' partials
+        // merge into the whole grid's sample, and every tile records it
+        if stores.first().is_some_and(|s| !s.censuses.is_empty()) {
+            let local = {
+                let sh = shared!();
+                let tile_devices: Vec<i32> = tiles.iter().map(|t| devices[t.0 as usize]).collect();
+                crate::census::tile_census_partials(&sh, &sh[0].censuses, kernels, &tile_devices, 0, None, |_| None, sh[0].time)
+                    .expect("the tiles register a census")
+            };
+            let workers = exchange.placement().workers as usize;
+            let total = combine_census_partials(fabric, workers, &stores[0].censuses, &local, deadline)?;
+            let now = stores[0].time;
+            for s in stores.iter_mut() {
+                s.record_census(now, 0, &total);
+            }
         }
         if has_tracers {
             for (k, s) in stores.iter_mut().enumerate() {

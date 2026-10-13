@@ -843,6 +843,70 @@ impl CensusPartial {
         }
     }
 
+    /// the tag word a partial travels under: not due, exact sums, combined values
+    pub fn tag(&self) -> u64 {
+        match self {
+            CensusPartial::None => 0,
+            CensusPartial::Sums { .. } => 1,
+            CensusPartial::Values { .. } => 2,
+        }
+    }
+
+    /// the partial's payload on the wire, after its tag: the dropped count and every accumulator,
+    /// each word below 2^32 so none takes the bits of an absent word. an exact sum travels as its
+    /// carried digits, a value as the two halves of its bits
+    pub fn payload_words(&self) -> Vec<u64> {
+        let halves = |bits: u64| [bits & 0xffff_ffff, bits >> 32];
+        match self {
+            CensusPartial::None => Vec::new(),
+            CensusPartial::Sums { values, dropped } => {
+                let mut words = halves(*dropped).to_vec();
+                values.iter().for_each(|v| words.extend(v.to_words()));
+                words
+            }
+            CensusPartial::Values { values, dropped } => {
+                let mut words = halves(*dropped).to_vec();
+                values.iter().for_each(|v| words.extend(halves(v.to_bits())));
+                words
+            }
+        }
+    }
+
+    /// the number of payload words a partial of `tag` over `slots` accumulators carries
+    pub fn payload_len(tag: u64, slots: usize) -> usize {
+        match tag {
+            0 => 0,
+            1 => 2 + slots * symbi_algebra::ExactSum::WORDS,
+            _ => 2 + slots * 2,
+        }
+    }
+
+    /// read back a partial of `tag` over `slots` accumulators from its payload words
+    pub fn from_payload(tag: u64, slots: usize, words: &[u64]) -> Result<CensusPartial, String> {
+        if words.len() != Self::payload_len(tag, slots) {
+            return Err(format!("a census partial of tag {tag} over {slots} slots travels as {} words, not {}", Self::payload_len(tag, slots), words.len()));
+        }
+        if let Some(w) = words.iter().find(|w| **w > 0xffff_ffff) {
+            return Err(format!("a census partial's word {w:#x} leaves its 32 bits"));
+        }
+        let joined = |pair: &[u64]| pair[0] | (pair[1] << 32);
+        Ok(match tag {
+            0 => CensusPartial::None,
+            1 => CensusPartial::Sums {
+                dropped: joined(&words[..2]),
+                values: words[2..]
+                    .chunks(symbi_algebra::ExactSum::WORDS)
+                    .map(symbi_algebra::ExactSum::from_words)
+                    .collect::<Result<_, _>>()?,
+            },
+            2 => CensusPartial::Values {
+                dropped: joined(&words[..2]),
+                values: words[2..].chunks(2).map(|pair| f64::from_bits(joined(pair))).collect(),
+            },
+            other => return Err(format!("census partial tag {other} names no partial")),
+        })
+    }
+
     /// the sample this partial rounds to: each accumulator once, and the cells outside the edges;
     /// an empty sample where the census was not due
     pub fn round(&self) -> (Vec<f64>, u64) {
@@ -931,6 +995,83 @@ pub struct CensusFields<const D: usize, Mem: symbi_xpu::MemorySpace> {
     pub segment_stamp: std::sync::Mutex<Option<u64>>,
 }
 
+impl<const D: usize, const DOF: usize, Mem: symbi_xpu::MemorySpace> crate::state::FieldStore<D, DOF, Mem, f64> {
+    /// commit one sample per registration, tagged with the level that produced it: each partial
+    /// rounded once; a registration whose partial is `None` was not due and records nothing
+    pub fn record_census(&mut self, time: f64, level: usize, partials: &[CensusPartial]) {
+        assert_eq!(self.censuses.len(), partials.len(), "one census partial per registration");
+        for (registered, partial) in self.censuses.iter_mut().zip(partials) {
+            if matches!(partial, CensusPartial::None) {
+                continue;
+            }
+            let (values, dropped) = partial.round();
+            registered.history.push_at_level(time, level as u64, &values, dropped);
+            registered.mark_sampled(level, time);
+        }
+    }
+
+    /// the persistent scratch of registration `index`, allocated on first use and reused after.
+    ///
+    /// the artifacts of a census have a fixed shape for the life of a run — one full-grid field per
+    /// accumulator plus the bucket — so reallocating them per sample moves that memory for no
+    /// information. reuse is sound because a fill writes every interior cell and the ghosts, which
+    /// are the only cells a fill does not reach, are excluded once at allocation and never move.
+    ///
+    /// the pool is built for every registration at once, since it is published through a single
+    /// write; `index` is a position in `censuses`.
+    ///
+    /// the registration list is passed in rather than read from this store because on a refinement
+    /// hierarchy the registrations live on the root alone, while the scratch they are evaluated
+    /// into belongs to whichever level is being reduced.
+    pub fn census_scratch_pooled(
+        &self,
+        censuses: &[RegisteredCensus],
+        index: usize,
+    ) -> Option<&CensusFields<D, Mem>> {
+        if self.workspace.census_scratch.get().is_none() {
+            let pool: Vec<CensusFields<D, Mem>> = censuses
+                .iter()
+                .map(|registered| self.census_scratch(&registered.evaluator))
+                .collect::<Option<_>>()?;
+            let _ = self.workspace.census_scratch.set(pool);
+        }
+        let pool = self.workspace.census_scratch.get()?;
+        assert!(
+            index < pool.len(),
+            "census registration {index} was sampled, but the scratch pool holds {} entry(ies). \
+             the pool is sized once from the registration list, so a census registered after the \
+             first sample has no artifacts and would otherwise reduce another census's buffers",
+            pool.len()
+        );
+        pool.get(index)
+    }
+
+    /// allocate the per-cell artifacts with every cell excluded.
+    ///
+    /// separated from the fill so a compiled map can write into the same scratch: the exclusion
+    /// default is what makes ghosts, and any cell a fill skips, absent from the reduction rather
+    /// than silently binned into bucket zero.
+    pub fn census_scratch(&self, ev: &CensusEvaluator) -> Option<CensusFields<D, Mem>> {
+        let n_values = ev.spec.n_values();
+        let values: Vec<symbi_grid::Field<f64, D, Mem>> = (0..n_values)
+            .map(|_| symbi_grid::Field::<f64, D, Mem>::zeros(&self.geom.allocated))
+            .collect::<Result<_, _>>()
+            .ok()?;
+        let segment = symbi_grid::Field::<f64, D, Mem>::zeros(&self.geom.allocated).ok()?;
+        if Mem::IS_HOST_ACCESSIBLE {
+            let excluded = ev.spec.excluded_marker();
+            for c in self.geom.allocated.iter() {
+                segment.view_mut().set(c, excluded);
+            }
+        }
+        Some(CensusFields {
+            values,
+            segment,
+            segment_stamp: std::sync::Mutex::new(None),
+        })
+    }
+}
+
 impl<R, const D: usize, const DOF: usize, M, E, S, Mem>
     crate::state::SimStateGeneric<R, D, DOF, M, E, S, Mem, f64>
 where
@@ -968,67 +1109,6 @@ where
             self.census_exclude_covered(ev, &fields, region);
         }
         Some(fields)
-    }
-
-    /// the persistent scratch of registration `index`, allocated on first use and reused after.
-    ///
-    /// the artifacts of a census have a fixed shape for the life of a run — one full-grid field per
-    /// accumulator plus the bucket — so reallocating them per sample moves that memory for no
-    /// information. reuse is sound because a fill writes every interior cell and the ghosts, which
-    /// are the only cells a fill does not reach, are excluded once at allocation and never move.
-    ///
-    /// the pool is built for every registration at once, since it is published through a single
-    /// write; `index` is a position in `censuses`.
-    ///
-    /// the registration list is passed in rather than read from this store because on a refinement
-    /// hierarchy the registrations live on the root alone, while the scratch they are evaluated
-    /// into belongs to whichever level is being reduced.
-    pub fn census_scratch_pooled(
-        &self,
-        censuses: &[RegisteredCensus],
-        index: usize,
-    ) -> Option<&CensusFields<D, Mem>> {
-        if self.store.workspace.census_scratch.get().is_none() {
-            let pool: Vec<CensusFields<D, Mem>> = censuses
-                .iter()
-                .map(|registered| self.census_scratch(&registered.evaluator))
-                .collect::<Option<_>>()?;
-            let _ = self.store.workspace.census_scratch.set(pool);
-        }
-        let pool = self.store.workspace.census_scratch.get()?;
-        assert!(
-            index < pool.len(),
-            "census registration {index} was sampled, but the scratch pool holds {} entry(ies). \
-             the pool is sized once from the registration list, so a census registered after the \
-             first sample has no artifacts and would otherwise reduce another census's buffers",
-            pool.len()
-        );
-        pool.get(index)
-    }
-
-    /// allocate the per-cell artifacts with every cell excluded.
-    ///
-    /// separated from the fill so a compiled map can write into the same scratch: the exclusion
-    /// default is what makes ghosts, and any cell a fill skips, absent from the reduction rather
-    /// than silently binned into bucket zero.
-    pub fn census_scratch(&self, ev: &CensusEvaluator) -> Option<CensusFields<D, Mem>> {
-        let n_values = ev.spec.n_values();
-        let values: Vec<symbi_grid::Field<f64, D, Mem>> = (0..n_values)
-            .map(|_| symbi_grid::Field::<f64, D, Mem>::zeros(&self.geom.allocated))
-            .collect::<Result<_, _>>()
-            .ok()?;
-        let segment = symbi_grid::Field::<f64, D, Mem>::zeros(&self.geom.allocated).ok()?;
-        if Mem::IS_HOST_ACCESSIBLE {
-            let excluded = ev.spec.excluded_marker();
-            for c in self.geom.allocated.iter() {
-                segment.view_mut().set(c, excluded);
-            }
-        }
-        Some(CensusFields {
-            values,
-            segment,
-            segment_stamp: std::sync::Mutex::new(None),
-        })
     }
 
     /// mark a level's covered cells excluded, after a fill that did not know about them.
@@ -1160,6 +1240,41 @@ where
 
         Some(())
     }
+}
+
+/// the partial sample of one level cut into tiles, every tile reduced on its device against the
+/// run's `registrations` and the exact partials merged; `None` when the run registers no census.
+/// `covered(tile)` is the tile's cells a finer level resolves
+#[allow(clippy::too_many_arguments)]
+pub fn tile_census_partials<'c, const D: usize, const DOF: usize, Mem, K>(
+    stores: &[&crate::state::FieldStore<D, DOF, Mem, f64>],
+    registrations: &[RegisteredCensus],
+    kernels: &[&K],
+    devices: &[i32],
+    level: usize,
+    cadence: Option<Cadence>,
+    covered: impl Fn(usize) -> Option<&'c symbi_algebra::Domain<D>>,
+    now: f64,
+) -> Option<Vec<CensusPartial>>
+where
+    Mem: symbi_xpu::MemorySpace,
+    K: crate::substrate_seam::KernelSet<D, DOF, Mem, f64> + ?Sized,
+{
+    if registrations.is_empty() {
+        return None;
+    }
+    let ops: Vec<ReductionOp> = registrations.iter().map(|r| r.evaluator.spec().op()).collect();
+    let mut total = vec![CensusPartial::None; ops.len()];
+    for (ii, store) in stores.iter().enumerate() {
+        let partials = symbi_xpu::with_device(devices[ii], || {
+            kernels[ii].census_partials(store, registrations, level, cadence, covered(ii), now)
+        })
+        .unwrap_or_else(|| panic!("tile {ii}: its kernel set samples no census"));
+        for ((acc, add), op) in total.iter_mut().zip(&partials).zip(&ops) {
+            acc.merge(add, *op);
+        }
+    }
+    Some(total)
 }
 
 #[cfg(test)]

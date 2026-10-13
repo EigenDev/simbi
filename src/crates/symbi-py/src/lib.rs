@@ -6124,12 +6124,25 @@ where
         LevelTiles, TileView, load_partitioned_level, write_partitioned_checkpoint,
     };
 
+    // every tile carries the registrations and records the whole grid's samples
+    for (tile, _) in tiles.iter_mut() {
+        attach_configured_censuses(tile, cfg)?;
+    }
     // a restart reads each tile's own block of the checkpoint's global grid, whatever partition
-    // wrote it; the exchange rebuilds the cut halos when the march primes.
+    // wrote it; the exchange rebuilds the cut halos when the march primes. the censuses continue
+    // the file's sampling schedule and accumulations on every tile
     if let Some(path) = cfg.restart_path.as_deref() {
         for (flat, (tile, _)) in tiles.iter_mut().enumerate() {
             load_partitioned_level(tile, path, 0, offsets[flat], &grid)
                 .map_err(|e| format!("restart of tile {flat} from '{path}': {e}"))?;
+            let restart_time = tile.time;
+            let warnings = symbi_sim::checkpoint::restore_census_state(path, &mut tile.store.censuses, 1, restart_time)
+                .map_err(|e| format!("census restart of tile {flat} from '{path}': {e}"))?;
+            if flat == 0 {
+                for warning in warnings {
+                    eprintln!("warning: {warning}");
+                }
+            }
         }
     }
     // one checkpoint write from the tiles as they stand: every tile streams its owned block.
@@ -6564,6 +6577,10 @@ where
             tiles[i].levels[level].state.geom.whole_span = Some(span);
         }
     }
+    // every tile's root carries the registrations and records the whole hierarchy's samples
+    for tile in tiles.iter_mut() {
+        attach_configured_censuses(&mut tile.levels[0].state, cfg)?;
+    }
     // a restart reads every level of every tile from the checkpoint's global grids.
     if let Some(path) = cfg.restart_path.as_deref() {
         let stored = symbi_sim::checkpoint::checkpoint_level_count(path).map_err(|e| format!("{e}"))?;
@@ -6578,6 +6595,14 @@ where
         for (i, tile) in tiles.iter_mut().enumerate() {
             load_partitioned_level(&mut tile.levels[0].state, path, 0, root_offsets[i], &root_grid)
                 .map_err(|e| format!("restart of tile {i} root from '{path}': {e}"))?;
+            let restart_time = tile.levels[0].state.time;
+            let warnings = symbi_sim::checkpoint::restore_census_state(path, &mut tile.levels[0].state.store.censuses, depth, restart_time)
+                .map_err(|e| format!("census restart of tile {i} from '{path}': {e}"))?;
+            if i == 0 {
+                for warning in warnings {
+                    eprintln!("warning: {warning}");
+                }
+            }
         }
         for (level, (fg, offsets, grid)) in fine.iter().enumerate().map(|(k, f)| (k + 1, f)) {
             for (k, &i) in fg.order.iter().enumerate() {
@@ -9572,13 +9597,24 @@ fn validate_tiled_march(cfg: &Config) -> Result<(), String> {
             ));
         }
     }
-    // a census reduces over the whole grid; the tiled marches carry no cross-tile census
-    if !cfg.census_jsons.is_empty() {
-        return Err(
-            "a census with several tiles awaits a cross-tile census reduction; run on one device or \
-             drop the census"
-                .to_string(),
-        );
+    // the tiles sample a census at each accepted root step through its compiled map, merging
+    // their exact partials into the whole grid's sample; a refined level's own steps run
+    // independently on each tile
+    for evaluator in lower_configured_censuses(&cfg.census_jsons)? {
+        let name = evaluator.spec().name().to_string();
+        if cfg.refinement_enabled && evaluator.spec().cadence() == symbi_sim::census::Cadence::PerLevelStep {
+            return Err(format!(
+                "census '{name}' samples every refined level's own steps, which with several tiles \
+                 awaits a cross-tile reduction inside the subcycle; sample it per root step or run on \
+                 one device"
+            ));
+        }
+        if let Err(e) = evaluator.lower() {
+            return Err(format!(
+                "census '{name}' has no compiled map ({e}); several tiles sample a census through its \
+                 compiled map alone; run it on one device"
+            ));
+        }
     }
     Ok(())
 }
@@ -12404,9 +12440,25 @@ where
         grids = grids.with_nested(part.partition.n_cells(), *origin);
     }
     symbi::sim::refinement::launched::record_level_spans(&mut tiles, &held, &plans, &grids);
+    // every tile's root carries the registrations and records the whole hierarchy's samples
+    for tile in tiles.iter_mut() {
+        attach_configured_censuses(&mut tile.levels[0].state, cfg)?;
+    }
     let restart = cfg.restart_path.is_some();
     if let Some(path) = cfg.restart_path.as_deref() {
         load_refined_tiles(&mut tiles, &held, &plans, &grids, path).map_err(|e| e.to_string())?;
+        // the censuses continue the file's sampling schedule and accumulations on every tile
+        let levels = 2 + plans.nested.len();
+        for (k, tile) in tiles.iter_mut().enumerate() {
+            let restart_time = tile.levels[0].state.time;
+            let warnings = symbi_sim::checkpoint::restore_census_state(path, &mut tile.levels[0].state.store.censuses, levels, restart_time)
+                .map_err(|e| format!("census restart from '{path}': {e}"))?;
+            if k == 0 && launch.worker == 0 {
+                for warning in warnings {
+                    eprintln!("warning: {warning}");
+                }
+            }
+        }
     }
     let identity = PhysicsIdentity::of(&tiles[0].levels[0].state);
     let refined_cfg = RefinedConfig {
@@ -13476,11 +13528,24 @@ where
             perturb(sim)?;
         }
     }
-    // the restart from a partitioned checkpoint, after the stationary target's probe
+    // every tile carries the registrations and records the whole grid's samples
+    for (sim, _) in tiles.iter_mut() {
+        attach_configured_censuses(sim, cfg)?;
+    }
+    // the restart from a partitioned checkpoint, after the stationary target's probe; the
+    // censuses continue the file's sampling schedule and accumulations on every tile
     if let Some(path) = cfg.restart_path.as_deref() {
-        for (&flat, (sim, _)) in mine.iter().zip(tiles.iter_mut()) {
+        for (k, (&flat, (sim, _))) in mine.iter().zip(tiles.iter_mut()).enumerate() {
             symbi_sim::checkpoint::load_partitioned_level(sim, path, 0, offsets[flat], &restart_grid)
                 .map_err(|e| format!("restart of tile {flat} from '{path}': {e}"))?;
+            let restart_time = sim.time;
+            let warnings = symbi_sim::checkpoint::restore_census_state(path, &mut sim.store.censuses, 1, restart_time)
+                .map_err(|e| format!("census restart of tile {flat} from '{path}': {e}"))?;
+            if k == 0 && me == WorkerId(0) {
+                for warning in warnings {
+                    eprintln!("warning: {warning}");
+                }
+            }
         }
     }
 

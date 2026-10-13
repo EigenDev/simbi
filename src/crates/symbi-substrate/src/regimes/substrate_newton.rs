@@ -370,6 +370,18 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize>
 impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize, const DOF: usize>
     KernelSet<D, DOF, Mem, Sc> for AdiabaticSubstrateKernelSet<Mem, Sc, D>
 {
+    fn census_partials(
+        &self,
+        store: &FieldStore<D, DOF, Mem, f64>,
+        censuses: &[symbi_sim::census::RegisteredCensus],
+        level: usize,
+        cadence: Option<symbi_sim::census::Cadence>,
+        covered: Option<&symbi_algebra::Domain<D>>,
+        now: f64,
+    ) -> Option<Vec<symbi_sim::census::CensusPartial>> {
+        Some(crate::census_sample::tile_partials_exact(store, censuses, level, cadence, covered, <Self as KernelSet<D, DOF, Mem, Sc>>::excision_radius(self), now))
+    }
+
     fn flux(&self, sim: &FieldStore<D, DOF, Mem, Sc>, dir: usize) {
         let pre = sim
             .fields

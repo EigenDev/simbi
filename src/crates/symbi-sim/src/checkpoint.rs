@@ -3033,8 +3033,7 @@ where
     R: Regime<f64, D>,
     Mem: MemorySpace,
 {
-    let whole = levels.first().is_some_and(|l| l.tiles.len() == 1);
-    let mut stream = CheckpointStream::open::<R, D, DOF, Mem>(identity, levels, path, extras, budget, whole, None, None)?;
+    let mut stream = CheckpointStream::open::<R, D, DOF, Mem>(identity, levels, path, extras, budget, None, None)?;
     for (idx, level) in levels.iter().enumerate() {
         for tile in &level.tiles {
             let mut sink = |dataset_path: &str, start: &[usize], count: &[usize], data: &[f64]| {
@@ -3058,15 +3057,14 @@ impl CheckpointStream {
     /// open the temporary at `path`, write the metadata tree, and declare every cell and face
     /// dataset at the global shape. `levels` supplies each level's grid and the authority
     /// tile (its first) for the clock, the physics identity, and the dataset list; the tiles
-    /// listed need not cover the level. `whole` marks a level held as one tile, whose
-    /// censuses are written with it.
+    /// listed need not cover the level. the authority carries the run's censuses, each tile
+    /// holding the whole grid's samples, and writes them.
     pub fn open<R, const D: usize, const DOF: usize, Mem>(
         identity: &PhysicsIdentity,
         levels: &[LevelTiles<'_, D, DOF, Mem>],
         path: &str,
         extras: &Metadata,
         budget: usize,
-        whole: bool,
         population: Option<&[symbi_sim_tracers::TracerSet<D>]>,
         continuous: Option<&[symbi_sim_tracers::ContinuousTracerSet<D, Mem>]>,
     ) -> Result<Self>
@@ -3188,7 +3186,7 @@ impl CheckpointStream {
         );
     }
     // the sidecars every tile shares: the finest level's body state, the tiles' tracer union,
-    // the continuous tracers, the body series, and, for a level held whole, its censuses.
+    // the continuous tracers, the body series, and the censuses.
     let finest_bodies = levels
         .iter()
         .filter_map(|l| l.template().immersed.as_ref())
@@ -3250,13 +3248,11 @@ impl CheckpointStream {
                 .with_dataset(Dataset::new("torque", vec![n, nb, 3], DataRef::F64(im.history.torque()))),
         );
     }
-    if whole {
-        for group in census_groups(authority) {
-            root.push_group(group);
-        }
-        for group in census_schedule_groups(authority) {
-            root.push_group(group);
-        }
+    for group in census_groups(authority) {
+        root.push_group(group);
+    }
+    for group in census_schedule_groups(authority) {
+        root.push_group(group);
     }
 
         let stream = Hdf5Stream::create(Path::new(path))?;

@@ -1390,6 +1390,18 @@ where
         if continuous {
             relocate_continuous_to_finest(tiles, held, atlas.as_ref().unwrap(), depth, fabric, deadline).map_err(|e| fail(fabric, e.into()))?;
         }
+        // the root-step censuses at the root's new clock, ahead of the body step as on the single
+        // hierarchy: every worker merges its tiles' exact partials of every level, the workers'
+        // partials merge into the whole hierarchy's sample, and every tile's root records it
+        if !tiles[0].levels[0].state.censuses.is_empty() {
+            let local = crate::refinement::hierarchy::tiles_root_step_census(tiles, root_dev);
+            let workers = plans.root.placement().workers as usize;
+            let total = symbi_sim::worker::combine_census_partials(fabric, workers, &tiles[0].levels[0].state.censuses, &local, deadline)?;
+            let now = tiles[0].levels[0].state.time;
+            for h in tiles.iter_mut() {
+                h.levels[0].state.store.record_census(now, 0, &total);
+            }
+        }
         if tiles.iter().any(|h| h.levels[0].state.has_bodies()) {
             refined_body_step(tiles, held, plans, fabric, dt, deadline).map_err(|e| fail(fabric, e))?;
         }
