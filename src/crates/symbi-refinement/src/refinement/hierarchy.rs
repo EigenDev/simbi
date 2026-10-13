@@ -2392,6 +2392,14 @@ where
             fresh.iteration = iteration;
             fresh.motion = motion;
         }
+        // the censuses continue the file's sampling schedule and accumulations; their registrations
+        // live on the root
+        let (levels, restart_time) = (self.levels.len(), self.levels[0].state.time);
+        let warnings = symbi_sim::checkpoint::restore_census_state(path, &mut self.levels[0].state.store.censuses, levels, restart_time)
+            .map_err(|e| format!("{e}"))?;
+        for warning in warnings {
+            eprintln!("warning: {warning}");
+        }
         Ok(stored)
     }
 

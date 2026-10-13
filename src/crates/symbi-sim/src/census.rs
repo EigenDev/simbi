@@ -720,6 +720,36 @@ impl CensusHistory {
         self.accumulate
     }
 
+    /// take up the rows a checkpoint holds, in place of this history's own: an accumulating
+    /// census continues folding into them after a restart, as the uninterrupted run would.
+    /// `values` holds `time.len()` rows of this registration's segments times values; a shape
+    /// that differs from the registration's is an error
+    pub fn restore_rows(
+        &mut self,
+        time: &[f64],
+        level: &[u64],
+        values: &[f64],
+        dropped: &[u64],
+        n_samples: &[u64],
+        t_start: &[f64],
+    ) -> Result<(), String> {
+        let n = time.len();
+        let stride = self.n_segments * self.n_values;
+        if [level.len(), dropped.len(), n_samples.len(), t_start.len()].iter().any(|&l| l != n) || values.len() != n * stride {
+            return Err(format!(
+                "the checkpoint holds {n} rows of {} accumulators, the registration {stride} per row",
+                values.len().checked_div(n).unwrap_or(0)
+            ));
+        }
+        self.time = time.to_vec();
+        self.level = level.to_vec();
+        self.values = values.to_vec();
+        self.dropped = dropped.to_vec();
+        self.n_samples = n_samples.to_vec();
+        self.t_start = t_start.to_vec();
+        Ok(())
+    }
+
     /// samples folded into each row; all ones unless accumulating.
     pub fn n_samples(&self) -> &[u64] {
         &self.n_samples

@@ -983,6 +983,103 @@ where
     load_checkpoint_level(sim, path, 0)
 }
 
+/// the sampling schedule of every registered census, one group each, written whether or not the
+/// census has sampled this segment: `levels` and, for each level that has sampled, the time of its
+/// latest sample as `last_sample_{level}`. a restart reads it to continue the cadence the run had
+fn census_schedule_groups<'a, const D: usize, const DOF: usize, Mem: symbi_xpu::MemorySpace>(
+    sim: &'a FieldStore<D, DOF, Mem, f64>,
+) -> Vec<Tree<'a>> {
+    sim.censuses
+        .iter()
+        .map(|registered| {
+            let mut group = Tree::new(&format!("census_schedule/{}", registered.evaluator.spec().name()))
+                .with_attr("levels", registered.last_sample.len() as u64);
+            for (level, last) in registered.last_sample.iter().enumerate() {
+                if let Some(t) = last {
+                    group = group.with_attr(&format!("last_sample_{level}"), *t);
+                }
+            }
+            group
+        })
+        .collect()
+}
+
+/// continue each registered census from the checkpoint at `path`: its per-level sampling
+/// schedule, so the first sample after the restart falls where the uninterrupted run's would,
+/// and the rows of an accumulating census, which go on folding the resumed samples. a plain
+/// census starts its history empty, so the records before and after the restart concatenate
+/// without a repeated row.
+///
+/// a file written before the schedule was recorded holds no schedule: the census then takes the
+/// restart time as its latest sample on every one of `levels` levels, so its next sample falls
+/// one interval after the restart, and the returned warning says the cadence before and after the
+/// restart may differ in phase by up to one interval. a census the file does not name starts fresh.
+pub fn restore_census_state(
+    path: &str,
+    censuses: &mut [crate::census::RegisteredCensus],
+    levels: usize,
+    restart_time: f64,
+) -> Result<Vec<String>> {
+    if censuses.is_empty() {
+        return Ok(Vec::new());
+    }
+    let tree = Hdf5Backend.read(Path::new(path))?;
+    let named = |root: &str, name: &str| -> Option<&TreeBuf> {
+        tree.find_group(root)
+            .and_then(|g| g.find_group(name))
+            .or_else(|| tree.find_group(&format!("{root}/{name}")))
+    };
+    let mut warnings = Vec::new();
+    for registered in censuses.iter_mut() {
+        let name = registered.evaluator.spec().name().to_string();
+        match named("census_schedule", &name) {
+            Some(schedule) => {
+                let stored = match schedule.find_attr("levels") {
+                    Some(a) => a.as_u64(&format!("census_schedule/{name}/levels"))? as usize,
+                    None => 0,
+                };
+                registered.last_sample = (0..stored)
+                    .map(|level| {
+                        schedule
+                            .find_attr(&format!("last_sample_{level}"))
+                            .map(|a| a.as_f64(&format!("census_schedule/{name}/last_sample_{level}")))
+                            .transpose()
+                    })
+                    .collect::<Result<Vec<_>>>()?;
+            }
+            None if registered.evaluator.spec().sample_interval().is_some() => {
+                registered.last_sample = vec![Some(restart_time); levels];
+                warnings.push(format!(
+                    "census '{name}': checkpoint '{path}' records no sampling schedule; the next \
+                     sample falls one interval after the restart time {restart_time}, and the \
+                     cadence may differ in phase from the run before the restart by up to one \
+                     interval"
+                ));
+            }
+            None => {}
+        }
+        if registered.history.accumulate()
+            && let Some(rows) = named("census", &name)
+        {
+            let f64s = |d: &str| rows.find_dataset(d).and_then(|x| x.data.as_f64().map(|v| v.to_vec()));
+            let u64s = |d: &str| rows.find_dataset(d).and_then(|x| x.data.as_u64().map(|v| v.to_vec()));
+            let (Some(time), Some(level), Some(values), Some(dropped), Some(n_samples), Some(t_start)) =
+                (f64s("time"), u64s("level"), f64s("values"), u64s("dropped"), u64s("n_samples"), f64s("t_start"))
+            else {
+                return Err(IoError::Backend(format!(
+                    "census '{name}' in '{path}': the accumulated rows are incomplete; the \
+                     accumulation cannot continue"
+                )));
+            };
+            registered
+                .history
+                .restore_rows(&time, &level, &values, &dropped, &n_samples, &t_start)
+                .map_err(|e| IoError::Backend(format!("census '{name}' in '{path}': {e}")))?;
+        }
+    }
+    Ok(warnings)
+}
+
 /// how many refinement levels a checkpoint carries.
 ///
 /// a restart may run deeper than the file it resumes from — that is the whole point of a
@@ -3155,6 +3252,9 @@ impl CheckpointStream {
     }
     if whole {
         for group in census_groups(authority) {
+            root.push_group(group);
+        }
+        for group in census_schedule_groups(authority) {
             root.push_group(group);
         }
     }
