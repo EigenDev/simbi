@@ -9,8 +9,9 @@
 # the closure changes the run (the globally isothermal gas on the same rows
 # lands elsewhere). the isothermal orszag-tang vortex carries the closure on
 # two launched workers and resumed onto three uneven ones, periodic and with
-# outflow faces. refinement with the closure on launch is refused in
-# test_launch_isothermal.
+# outflow faces, and refined by a central patch on two and three uneven host
+# tiles, two launched workers and resumed onto three uneven workers, the
+# single hierarchy's every dataset bit for bit, halos included.
 #
 # run: pytest -m simulation simbi/simulation/tests/test_locally_isothermal_tiles.py
 # =============================================================================
@@ -107,6 +108,15 @@ class LocalImhd(IsothermalOrszagTang):
                 yield (*row, row[0] * (1.0 + 0.1 * math.sin(row[1]) + 0.05 * math.sin(row[2])))
 
         return (rows, *faces)
+
+
+class RefinedLocalImhd(LocalImhd):
+    """the vortex refined by a central patch, which the cuts at x = 10 and 21 cross"""
+
+    refinement_enabled: Annotated[bool, ProblemParam(True, description="refined")]
+    refinement_max_levels: Annotated[int, ProblemParam(2, description="coarse + 1 fine")]
+    refinement_regions: Annotated[list[list[float]], ProblemParam([[0.25, 0.75, 0.25, 0.75]], description="central patch")]
+    refinement_ratios: Annotated[list[int], ProblemParam([2], description="ratio")]
 
 
 class OutflowLocalImhd(LocalImhd):
@@ -210,3 +220,39 @@ def test_isothermal_mhd_workers_carry_the_local_closure_as_the_single_grid(tmp_p
     three = _layout(tmp_path / "three.toml", workers=3, cuts=[[10, 21], []])
     # the step cap is an absolute root iteration: the resume from STEPS // 2 runs to STEPS
     _assert_same(_launch(variants, problem, tmp_path / "resumed", three, STEPS, checkpoint=first), want, f"{problem}: resumed onto three uneven workers")
+
+
+def _whole(path: Path) -> dict[str, np.ndarray]:
+    """every cell and face dataset of every level whole, halos included"""
+    out: dict[str, np.ndarray] = {}
+    with h5py.File(path, "r") as f:
+        for level in (k for k in f.keys() if k.startswith("level_")):
+            f[level].visititems(lambda n, obj, lv=level: out.__setitem__(f"{lv}/{n}", obj[()])
+                                if isinstance(obj, h5py.Dataset) and not n.startswith("mesh") else None)
+    return out
+
+
+def test_refined_isothermal_mhd_tiles_and_workers_carry_the_local_closure_as_the_single_hierarchy(tmp_path: Path, variants: Path) -> None:
+    want = _single("RefinedLocalImhd", tmp_path / "single")
+    ys = _whole(want)
+    # premise: the closure varies across the fine level along x, the axis every layout here cuts
+    with h5py.File(want, "r") as f:
+        ng = int(f["level_1"]["mesh"].attrs["halo_width"])
+        cs2 = f["level_1"]["iso_cs2"][()][ng:-ng, ng:-ng]
+    assert not np.all(cs2 == cs2[:, :1]), "the fine closure is uniform along the cut axis; the gate is vacuous"
+
+    def same(got: Path, label: str) -> None:
+        xs = _whole(got)
+        assert xs.keys() == ys.keys(), f"{label}: datasets {sorted(set(xs) ^ set(ys))} differ"
+        for name, x in xs.items():
+            np.testing.assert_array_equal(x, ys[name], err_msg=f"{label}: {name}")
+
+    same(_single("RefinedLocalImhd", tmp_path / "tiles", gpus=2), "two host tiles")
+    same(_single("RefinedLocalImhd", tmp_path / "uneven", gpus=3, extra=", decompose=[[10, 21], []]"), "three uneven host tiles")
+    two = _layout(tmp_path / "two.toml", workers=2, shape=(2, 1))
+    same(_launch(variants, "RefinedLocalImhd", tmp_path / "two", two, STEPS), "two workers")
+    first = _launch(variants, "RefinedLocalImhd", tmp_path / "first", two, STEPS // 2)
+    three = _layout(tmp_path / "three.toml", workers=3, cuts=[[10, 21], []])
+    # the step cap is an absolute root iteration: the resume from STEPS // 2 runs to STEPS
+    same(_launch(variants, "RefinedLocalImhd", tmp_path / "resumed", three, STEPS, checkpoint=first), "resumed onto three uneven workers")
+
