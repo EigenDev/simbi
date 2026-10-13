@@ -10,7 +10,9 @@
 // tiles reach the single hierarchy's conserved state and cell field on every
 // level bit for bit, and every staggered face. the gate asserts its premises:
 // the fine density moves, the fine field evolves, and the same run without a
-// field leaves a measurably different gas.
+// field leaves a measurably different gas. a second level nested in the
+// spanning patch, clear of the periodic faces with the cuts through it,
+// reaches the single hierarchy on the same tiles.
 //
 // run: cargo test -p symbi --test decomp_refine_mhd_periodic_span
 // =============================================================================
@@ -112,19 +114,29 @@ fn build_single(scale: f64) -> Hier {
     build_single_shifted(scale, 0.0)
 }
 
+/// the nested level clear of the periodic faces over root cells 6..26 in x
+fn nested_clear() -> RefinementRegion<2> {
+    RefinementRegion { x_lo: [0.1875, 0.4375], x_hi: [0.8125, 0.5625] }
+}
+
 fn build_single_shifted(scale: f64, shift: f64) -> Hier {
+    build_single_over(scale, shift, &[whole()])
+}
+
+fn build_single_over(scale: f64, shift: f64, regions: &[RefinementRegion<2>]) -> Hier {
     let bnd = Boundaries([[BoundaryType::Periodic; 2], [BoundaryType::Outflow; 2]]);
     let root = build_root_shifted([N, N], [0, 0], bnd, scale, shift);
     let k = kset(&root);
-    let mut h = Hier::with_refinement(root, k, &[whole()], ProlongOrder::Ppm, kset).expect("single hierarchy");
+    let mut h = Hier::with_refinement(root, k, regions, ProlongOrder::Ppm, kset).expect("single hierarchy");
     h.seed_fine_from_coarse().expect("seed fine");
     h.prime();
     h
 }
 
 /// root tiles cut along x alone: the seam and the cuts are coarse-fine sides to each tile, the
-/// root wraps along x, and every tile refines its share of the patch
-fn build_tiles(partition: &Partition<2>) -> Vec<Hier> {
+/// root wraps along x, and every tile refines its share of each region down to the first region
+/// it holds no cell of, as the production tiles clip them
+fn build_tiles(partition: &Partition<2>, regions: &[RefinementRegion<2>]) -> Vec<Hier> {
     let counts = partition.counts();
     let mut tiles: Vec<Hier> = (0..partition.n_tiles())
         .map(|flat| {
@@ -133,8 +145,16 @@ fn build_tiles(partition: &Partition<2>) -> Vec<Hier> {
             let root = build_root([ext[0].1, ext[1].1], [ext[0].0, ext[1].0], bnd, B_SCALE);
             let k = kset(&root);
             let (lo, hi) = (ext[0].0 as f64 * DX, (ext[0].0 + ext[0].1) as f64 * DX);
-            let region = RefinementRegion { x_lo: [lo, PY_LO], x_hi: [hi, PY_HI] };
-            Hier::with_refinement_placed(root, k, &[region], &[whole()], ProlongOrder::Ppm, kset, [N, N], [true, false])
+            let mut clipped = Vec::new();
+            for (k, r) in regions.iter().enumerate() {
+                let (c_lo, c_hi) = (r.x_lo[0].max(lo), r.x_hi[0].min(hi));
+                if c_hi - c_lo <= 0.5 * DX * 0.5f64.powi(k as i32) {
+                    break;
+                }
+                clipped.push(RefinementRegion { x_lo: [c_lo, r.x_lo[1]], x_hi: [c_hi, r.x_hi[1]] });
+            }
+            let whole_patches = &regions[..clipped.len()];
+            Hier::with_refinement_placed(root, k, &clipped, whole_patches, ProlongOrder::Ppm, kset, [N, N], [true, false])
                 .expect("tile hierarchy")
         })
         .collect();
@@ -223,9 +243,13 @@ fn assert_same(label: &str, single: &Hier, tiles: &[Hier]) {
 }
 
 fn assert_tiles_match(cuts: Vec<usize>, single: &Hier) {
+    assert_tiles_match_over(cuts, single, &[whole()]);
+}
+
+fn assert_tiles_match_over(cuts: Vec<usize>, single: &Hier, regions: &[RefinementRegion<2>]) {
     let partition = Partition::explicit([N, N], [cuts.clone(), vec![]]).expect("cuts inside the grid");
-    let mut tiles = build_tiles(&partition);
-    assert_same(&format!("cuts {cuts:?}, seeded"), &build_single(B_SCALE), &tiles);
+    let mut tiles = build_tiles(&partition, regions);
+    assert_same(&format!("cuts {cuts:?}, seeded"), &build_single_over(B_SCALE, 0.0, regions), &tiles);
     let devices = vec![0; tiles.len()];
     evolve_hierarchy_decomposed(&mut tiles, partition.counts(), &devices, &LocalCopy, Timestepping::Rk2, 0.0, T_FINAL, u64::MAX, |_, _, _| {
         std::ops::ControlFlow::Continue(())
@@ -295,4 +319,41 @@ fn a_magnetized_patch_spanning_a_periodic_axis_evolves_the_same_wherever_the_sea
         .collect();
     differing.sort();
     assert!(differing.is_empty(), "{} values differ under the translation, first {:?}", differing.len(), differing.first());
+}
+
+fn evolved_nested(regions: &[RefinementRegion<2>]) -> Hier {
+    let initial = build_single_over(B_SCALE, 0.0, regions);
+    let mut single = build_single_over(B_SCALE, 0.0, regions);
+    single.evolve(T_FINAL).expect("single evolve");
+    assert!(single.crash.is_none(), "the single hierarchy crashed: {:?}", single.crash);
+    assert_eq!(single.levels.len(), 3, "the hierarchy holds {} levels", single.levels.len());
+    // the nested level evolves its gas and its field
+    let nested = &single.levels[2].state;
+    let start = &initial.levels[2].state;
+    let moved = nested
+        .geom
+        .interior
+        .iter()
+        .map(|c| (*nested.fields.cons.den.view().at([c[0], c[1]]) - *start.fields.cons.den.view().at([c[0], c[1]])).abs())
+        .fold(0.0, f64::max);
+    assert!(moved > 1.0e-2, "the nested density moved by {moved:e}");
+    let field = nested
+        .geom
+        .interior
+        .iter()
+        .map(|c| {
+            let (now, then) = (nested.fields.mhd.as_ref().unwrap(), start.fields.mhd.as_ref().unwrap());
+            (*now.bface[1].view().at([c[0], c[1]]) - *then.bface[1].view().at([c[0], c[1]])).abs()
+        })
+        .fold(0.0, f64::max);
+    assert!(field > 1.0e-3, "the nested y-face field moved by {field:e}");
+    single
+}
+
+#[test]
+fn a_nested_magnetized_patch_clear_of_the_periodic_faces_matches_the_single_hierarchy_across_a_cut() {
+    let regions = [whole(), nested_clear()];
+    let single = evolved_nested(&regions);
+    assert_tiles_match_over(vec![16], &single, &regions);
+    assert_tiles_match_over(vec![10, 21], &single, &regions);
 }

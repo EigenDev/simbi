@@ -264,6 +264,108 @@ def test_a_patch_spanning_a_cut_periodic_axis_on_host_tiles_matches_the_single_h
             assert x.shape == y.shape and np.array_equal(x, y), f"{gpus} refined tiles cut across the periodic axis: {name} differs"
 
 
+# a second kh box spanning the whole periodic x axis inside the first; the tiles cut across x
+NESTED_SPANNING_REASON = "a nested refined patch reaching the periodic face of axis 0, which is cut into tiles"
+
+
+def test_a_nested_patch_spanning_a_cut_periodic_axis_is_refused_by_name_on_host_tiles_and_launch(tmp_path: Path) -> None:
+    script = _nested_kh_script(tmp_path, [-0.5, 0.5, -0.125, 0.125])
+    env = _nested_kh_env(tmp_path)
+    single = subprocess.run(_nested_kh_in_process(tmp_path / "single", 1), capture_output=True, text=True, timeout=600, env=env)
+    assert single.returncode == 0, f"the single hierarchy refused the nested spanning run; the refusal is no gap:\n{single.stderr[-2000:]}"
+    arms = {
+        "host tiles": (_nested_kh_in_process(tmp_path / "tiles", 2, [[26], []]), dict(env, SYMBI_GPU_OVERSUBSCRIBE="1"), tmp_path / "tiles"),
+        "launch": (_nested_kh_launch(script, _layout(tmp_path / "two.toml", workers=2, cuts=[[26], []]), tmp_path / "launched"), env, tmp_path / "launched"),
+    }
+    for label, (cmd, arm_env, out) in arms.items():
+        done = subprocess.run(cmd, capture_output=True, text=True, timeout=600, env=arm_env)
+        assert done.returncode != 0, f"{label}: the run succeeded"
+        assert NESTED_SPANNING_REASON in " ".join((done.stdout + done.stderr).split()), f"{label}: refusal not named:\n{done.stderr[-2000:]}"
+        assert not list(out.glob("*.h5")), f"{label}: a refused run published a checkpoint"
+
+
+def _nested_kh_script(tmp_path: Path, inner: list[float]) -> Path:
+    """the kh run whose first box spans the whole periodic x axis, with a second box `inner`"""
+    script = tmp_path / "nested_kh.py"
+    script.write_text(
+        "from typing import Annotated\n"
+        "from simbi import ProblemParam\n"
+        "from simbi_configs.examples.newtonian.refined_kh import RefinedKelvinHelmholtz\n\n"
+        "class NestedKh(RefinedKelvinHelmholtz):\n"
+        "    refinement_max_levels: Annotated[int, ProblemParam(3, description='levels')]\n"
+        "    refinement_ratios: Annotated[list, ProblemParam([2, 2], description='ratios')]\n"
+        f"    refinement_regions: Annotated[list, ProblemParam([[-0.5, 0.5, -0.375, 0.375], {inner!r}], description='boxes')]\n"
+    )
+    return script
+
+
+def _nested_kh_env(tmp_path: Path) -> dict:
+    env = dict(os.environ, PYTHONPATH=os.pathsep.join([str(tmp_path), os.getcwd(), os.environ.get("PYTHONPATH", "")]))
+    env.pop("SIMBI_LAUNCH_EXPERIMENTAL", None)
+    return env
+
+
+def _nested_kh_in_process(out: Path, gpus: int, cuts: list | None = None, fields: str = "") -> list[str]:
+    decompose = f", decompose={cuts!r}" if cuts is not None else ""
+    snippet = (
+        "import sys\n"
+        "from simbi.simulation import runner\n"
+        "from nested_kh import NestedKh\n"
+        f"runner.run(NestedKh({fields}resolution=(64, 64), gpus={gpus}{decompose}, data_directory=sys.argv[1]), compute_mode='cpu', max_steps={STEPS})\n"
+    )
+    return [sys.executable, "-c", snippet, str(out)]
+
+
+def _nested_kh_launch(script: Path, layout: Path, out: Path) -> list[str]:
+    return [sys.executable, "-m", "simbi.cli", "launch", str(script), "--layout", str(layout), "--max-steps", str(STEPS),
+            "--resolution", "64,64", "--checkpoint-interval", "1e9", "--data-directory", str(out)]
+
+
+def _assert_same_trimmed(got: Path, want: Path, label: str) -> None:
+    # the conserved datasets carry the halo ring a periodic root leaves zero on the single writer
+    # and filled on the tiled writers; every interior value and every other dataset compares whole
+    xs, ys = _datasets(got), _datasets(want)
+    assert xs.keys() == ys.keys(), f"{label}: dataset sets differ: {sorted(xs.keys() ^ ys.keys())}"
+    with h5py.File(want, "r") as f:
+        ng = {lv: int(f[lv]["mesh"].attrs["halo_width"]) for lv in f if lv.startswith("level_")}
+    for name, x in xs.items():
+        level, _, field = name.partition("/")
+        y = ys[name]
+        if field.startswith("conserved/"):
+            h = ng[level]
+            x, y = x[h:-h, h:-h], y[h:-h, h:-h]
+        assert x.shape == y.shape and np.array_equal(x, y), f"{label}: {name} differs"
+
+
+ONE_BOX = "refinement_max_levels=2, refinement_ratios=[2], refinement_regions=[[-0.5, 0.5, -0.375, 0.375]], "
+
+
+def test_a_nested_patch_under_a_patch_spanning_a_cut_periodic_axis_matches_the_single_hierarchy(tmp_path: Path) -> None:
+    # the first box spans the periodic x axis, which the tiles cut; the second box sits clear of the
+    # periodic faces over root cells 16..48 in x, and the cuts run through it
+    script = _nested_kh_script(tmp_path, [-0.25, 0.25, -0.125, 0.125])
+    env = _nested_kh_env(tmp_path)
+    runs = {}
+    for label, cmd, arm_env in (
+        ("single", _nested_kh_in_process(tmp_path / "single", 1), env),
+        ("one box", _nested_kh_in_process(tmp_path / "one", 1, fields=ONE_BOX), env),
+        ("two host tiles", _nested_kh_in_process(tmp_path / "tiles2", 2, [[26], []]), dict(env, SYMBI_GPU_OVERSUBSCRIBE="1")),
+        ("three uneven host tiles", _nested_kh_in_process(tmp_path / "tiles3", 3, [[20, 41], []]), dict(env, SYMBI_GPU_OVERSUBSCRIBE="1")),
+        ("two workers", _nested_kh_launch(script, _layout(tmp_path / "two.toml", workers=2, cuts=[[26], []]), tmp_path / "launch2"), env),
+        ("three uneven workers", _nested_kh_launch(script, _layout(tmp_path / "three.toml", workers=3, cuts=[[20, 41], []]), tmp_path / "launch3"), env),
+    ):
+        out = Path(cmd[-1])
+        done = subprocess.run(cmd, capture_output=True, text=True, timeout=900, env=arm_env)
+        assert done.returncode == 0, f"{label} failed:\n{done.stderr[-3000:]}"
+        (runs[label],) = sorted(out.glob("*final*.h5"))
+    with h5py.File(runs["single"], "r") as f:
+        assert "level_2" in f, "the single hierarchy wrote no second refined level"
+    one = _datasets(runs["one box"])
+    assert any(not np.array_equal(x, one[n]) for n, x in _datasets(runs["single"]).items() if n in one), "the second box left the run unchanged"
+    for label in ("two host tiles", "three uneven host tiles", "two workers", "three uneven workers"):
+        _assert_same_trimmed(runs[label], runs["single"], label)
+
+
 SPANNING_KH = {
     "viscous": (
         "viscous_kh",

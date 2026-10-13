@@ -9316,6 +9316,23 @@ fn validate_tiled_march(cfg: &Config) -> Result<(), String> {
     if cfg.bodies.iter().any(|b| b.magnetic_slip.is_some()) {
         return Err("a magnetic slip body with several tiles awaits its tiled slip step; run it on one device".to_string());
     }
+    // the tiles wrap a periodic axis cut into them on the root and on a first patch spanning that
+    // axis; a nested level wraps within its own tile, so a nested patch keeps clear of the
+    // periodic faces of a cut axis
+    if cfg.refinement_enabled && cfg.refinement_regions.len() > 1 {
+        let reached = match cfg.dims {
+            1 => nested_patch_on_periodic_face::<1>(cfg, true)?,
+            2 => nested_patch_on_periodic_face::<2>(cfg, true)?,
+            _ => nested_patch_on_periodic_face::<3>(cfg, true)?,
+        };
+        if let Some(ax) = reached {
+            return Err(format!(
+                "a nested refined patch reaching the periodic face of axis {ax}, which is cut into tiles, \
+                 awaits nested levels that wrap across the tiles; keep the nested regions clear of that \
+                 face or run on one device"
+            ));
+        }
+    }
     // a census reduces over the whole grid; the tiled marches carry no cross-tile census
     if !cfg.census_jsons.is_empty() {
         return Err(
@@ -10998,9 +11015,6 @@ fn ungated_launch_combination(cfg: &Config) -> Option<String> {
     None
 }
 
-/// the distributed first release: 2D cartesian adiabatic newtonian hydro on a static uniform
-/// grid with a linear checkpoint cadence. every other configuration is named and refused here,
-/// before any tile is built.
 /// whether the run spaces any axis non-uniformly
 fn axis_maps_any(cfg: &Config) -> bool {
     match cfg.dims {
@@ -11033,8 +11047,8 @@ fn validate_launch_scope(cfg: &Config) -> Result<(), String> {
         return refused(&format!("a {}-dimensional grid", cfg.dims));
     }
     // a curved spacetime carries the relativistic gas and the relativistic magnetized gas on the
-    // kerr-schild charts, with or without excision, on a static unrefined mesh without bodies or
-    // tracers
+    // kerr-schild charts, with or without excision, on a static mesh without bodies, refined on the
+    // three-dimensional kerr-schild box
     if cfg.spacetime != "minkowski" {
         // the single grid runs the baked GR-hydro and GR-MHD combinations, the launched workers the
         // ones the worker chart arms build
@@ -11153,9 +11167,9 @@ fn validate_refined_launch_scope(cfg: &Config) -> Result<(), String> {
     // span an uncut periodic axis, whose levels wrap within each tile
     if magnetized && nested > 1 {
         let nested_seam = match cfg.dims {
-            1 => nested_patch_on_periodic_face::<1>(cfg)?,
-            2 => nested_patch_on_periodic_face::<2>(cfg)?,
-            _ => nested_patch_on_periodic_face::<3>(cfg)?,
+            1 => nested_patch_on_periodic_face::<1>(cfg, false)?,
+            2 => nested_patch_on_periodic_face::<2>(cfg, false)?,
+            _ => nested_patch_on_periodic_face::<3>(cfg, false)?,
         };
         if let Some(ax) = nested_seam {
             return refused(&format!("a nested magnetized patch on the periodic face of axis {ax}"));
@@ -11186,14 +11200,17 @@ fn patch_on_periodic_face<const D: usize>(cfg: &Config) -> Result<Option<usize>,
 }
 
 /// the first periodic axis a nested refinement region (every region past the first) reaches the
-/// domain face of
-fn nested_patch_on_periodic_face<const D: usize>(cfg: &Config) -> Result<Option<usize>, String> {
+/// domain face of; with `cut_only`, among the axes cut into tiles
+fn nested_patch_on_periodic_face<const D: usize>(cfg: &Config, cut_only: bool) -> Result<Option<usize>, String> {
     let whole = whole_grid::<D>(cfg);
     let regions = refinement_regions_nd::<D>(&cfg.refinement_regions)?;
     let cell = |x: f64, ax: usize| ((x - cfg.x_lo[ax]) / cfg.dx[ax]).round() as usize;
+    let n: [usize; D] = std::array::from_fn(|ax| cfg.n_cells[ax]);
+    let counts = tile_partition(n, cfg)?.counts();
     for region in regions.iter().skip(1) {
         for ax in 0..D {
-            if whole.periodic(ax) && (cell(region.x_lo[ax], ax) == 0 || cell(region.x_hi[ax], ax) >= cfg.n_cells[ax]) {
+            let considered = !cut_only || counts[ax] > 1;
+            if considered && whole.periodic(ax) && (cell(region.x_lo[ax], ax) == 0 || cell(region.x_hi[ax], ax) >= cfg.n_cells[ax]) {
                 return Ok(Some(ax));
             }
         }
