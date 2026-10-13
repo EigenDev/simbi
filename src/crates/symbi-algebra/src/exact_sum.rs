@@ -108,6 +108,60 @@ impl ExactSum {
         self.empty &= other.empty;
     }
 
+    /// the length of the wire form `to_words` writes
+    pub const WORDS: usize = DIGITS + 1;
+
+    /// the sum's wire form: its carried digits as 32-bit two's-complement words, the top one
+    /// carrying the sign, then a word of flags. every word lies below 2^32, so none takes the bits
+    /// of a word reserved for an absent value; `from_words` reads it back exactly
+    pub fn to_words(&self) -> [u64; Self::WORDS] {
+        let mut acc = self.clone();
+        acc.carry();
+        let top = acc.digits[DIGITS - 1];
+        assert!(
+            (-(1i64 << 31)..(1i64 << 31)).contains(&top),
+            "an exact sum's top digit {top} leaves its 32-bit word; the total exceeds the accumulator"
+        );
+        let mut words = [0u64; Self::WORDS];
+        for (word, digit) in words.iter_mut().zip(acc.digits.iter()) {
+            *word = (*digit as u64) & 0xffff_ffff;
+        }
+        words[DIGITS] = u64::from(self.nan)
+            | u64::from(self.pos_inf) << 1
+            | u64::from(self.neg_inf) << 2
+            | u64::from(self.all_negative_zero) << 3
+            | u64::from(self.empty) << 4;
+        words
+    }
+
+    /// the sum `to_words` wrote; a word out of its range is an error
+    pub fn from_words(words: &[u64]) -> Result<Self, String> {
+        if words.len() != Self::WORDS {
+            return Err(format!("an exact sum travels as {} words, not {}", Self::WORDS, words.len()));
+        }
+        if let Some(k) = words[..DIGITS].iter().position(|&w| w > 0xffff_ffff) {
+            return Err(format!("word {k} of an exact sum leaves its 32 bits: {:#x}", words[k]));
+        }
+        let flags = words[DIGITS];
+        if flags > 0x1f {
+            return Err(format!("an exact sum's flag word {flags:#x} names no flag set"));
+        }
+        let mut digits = [0i64; DIGITS];
+        for (digit, word) in digits.iter_mut().zip(words.iter()).take(DIGITS - 1) {
+            *digit = *word as i64;
+        }
+        digits[DIGITS - 1] = i64::from(words[DIGITS - 1] as u32 as i32);
+        Ok(Self {
+            digits,
+            pending: 0,
+            nan: flags & 1 != 0,
+            pos_inf: flags & 2 != 0,
+            neg_inf: flags & 4 != 0,
+            all_negative_zero: flags & 8 != 0,
+            empty: flags & 16 != 0,
+        })
+    }
+
     /// propagate carries: every digit below the top in [0, 2^32), the top digit carrying the sign
     fn carry(&mut self) {
         for k in 0..DIGITS - 1 {
@@ -324,6 +378,53 @@ mod tests {
         assert_eq!(exact(&[-0.0, -0.0]).to_bits(), (-0.0f64).to_bits());
         assert_eq!(exact(&[-0.0, 0.0]).to_bits(), 0.0f64.to_bits());
         assert_eq!(exact(&[1.0, -1.0]).to_bits(), 0.0f64.to_bits());
+    }
+
+    #[test]
+    fn the_wire_form_carries_every_partition_exactly() {
+        let t = terms(11, 3000, 600);
+        let whole = exact(&t);
+        let mut total = ExactSum::new();
+        for chunk in t.chunks(700) {
+            let mut partial = ExactSum::new();
+            for &x in chunk {
+                partial.add(x);
+            }
+            total.merge(&ExactSum::from_words(&partial.to_words()).expect("round trip"));
+        }
+        assert_eq!(total.value().to_bits(), whole.to_bits());
+        let mut negative = ExactSum::new();
+        negative.add(-3.5e200);
+        negative.add(-f64::from_bits(1));
+        let back = ExactSum::from_words(&negative.to_words()).unwrap();
+        assert_eq!(back.to_words(), negative.to_words());
+        assert_eq!(back.value(), negative.value());
+    }
+
+    #[test]
+    fn a_negative_total_never_takes_the_absent_bits() {
+        let mut negative = ExactSum::new();
+        negative.add(-1.0);
+        assert!(negative.to_words().iter().all(|&w| w <= 0xffff_ffff && w != u64::MAX));
+    }
+
+    #[test]
+    fn the_flags_round_trip_and_malformed_words_are_refused() {
+        for terms in [vec![f64::NAN], vec![f64::INFINITY], vec![f64::NEG_INFINITY], vec![-0.0], vec![]] {
+            let mut acc = ExactSum::new();
+            for x in &terms {
+                acc.add(*x);
+            }
+            let back = ExactSum::from_words(&acc.to_words()).unwrap();
+            assert_eq!(back.value().to_bits(), acc.value().to_bits(), "{terms:?}");
+        }
+        let mut words = ExactSum::new().to_words();
+        words[3] = u64::MAX;
+        assert!(ExactSum::from_words(&words).is_err());
+        assert!(ExactSum::from_words(&words[1..]).is_err());
+        let mut flags = ExactSum::new().to_words();
+        flags[ExactSum::WORDS - 1] = 0x20;
+        assert!(ExactSum::from_words(&flags).is_err());
     }
 
     #[test]

@@ -317,6 +317,28 @@ impl HorizonPartial {
     pub fn rates(&self) -> (f64, f64) {
         (-self.mass.value(), -self.nrg.value())
     }
+
+    /// the length of the wire form `to_words` writes
+    pub const WORDS: usize = 2 * symbi_algebra::ExactSum::WORDS;
+
+    /// the partial's wire form: the mass sum's words, then the energy sum's
+    pub fn to_words(&self) -> Vec<u64> {
+        let mut words = self.mass.to_words().to_vec();
+        words.extend_from_slice(&self.nrg.to_words());
+        words
+    }
+
+    /// the partial `to_words` wrote
+    pub fn from_words(words: &[u64]) -> Result<Self, String> {
+        if words.len() != Self::WORDS {
+            return Err(format!("a horizon partial travels as {} words, not {}", Self::WORDS, words.len()));
+        }
+        let half = symbi_algebra::ExactSum::WORDS;
+        Ok(Self {
+            mass: symbi_algebra::ExactSum::from_words(&words[..half])?,
+            nrg: symbi_algebra::ExactSum::from_words(&words[half..])?,
+        })
+    }
 }
 
 /// the partial of a horizon-bearing store from its kernel set, which books the shell flux of every
@@ -595,5 +617,23 @@ mod tests {
         assert!(matches!(refused, Err(TimestepFailure::Invalid(_))) && !reached, "an invalid value reached the collective");
         let failed = agree_timestep([0.02], 0.0, 1.0, |_| Err::<f64, &str>("lost"));
         assert!(matches!(failed, Err(TimestepFailure::Collective("lost"))));
+    }
+}
+
+#[cfg(test)]
+mod horizon_partial_tests {
+    use super::HorizonPartial;
+
+    /// a partial travels as words and merges after decoding to the same totals as before
+    #[test]
+    fn a_horizon_partial_round_trips_its_words() {
+        let mut a = HorizonPartial::from_rates(0.3, -1.25e-7);
+        a.merge(&HorizonPartial::from_rates(-2.0e-300, 4.5));
+        let b = HorizonPartial::from_words(&a.to_words()).expect("round trip");
+        assert_eq!(b.to_words(), a.to_words());
+        assert_eq!(b.rates().0.to_bits(), a.rates().0.to_bits());
+        assert_eq!(b.rates().1.to_bits(), a.rates().1.to_bits());
+        assert!(a.to_words().iter().all(|&w| w != u64::MAX), "a word takes the absent bits");
+        assert!(HorizonPartial::from_words(&a.to_words()[1..]).is_err());
     }
 }

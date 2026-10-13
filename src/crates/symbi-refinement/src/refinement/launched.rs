@@ -12,9 +12,9 @@
 // with its reflux and the root's post-restriction refresh, then the clock. a
 // rejection at any stage of any level restores every level's snapshot on
 // every worker, refreshes both levels' halos at the rollback point and replays
-// the step at a halved timestep. the fine tail's viscous pass, horizon ledger
-// and bodies run on the globally finest level alone, as the single hierarchy
-// runs them. three plans share the fabric: the root state, the root conserved
+// the step at a halved timestep. the fine tail's viscous pass and bodies run on
+// the globally finest level alone and the root books the horizon ledger, as the
+// single hierarchy runs them. three plans share the fabric: the root state, the root conserved
 // seed (moved at the prime alone, from which the fine level is prolonged) and
 // the fine state.
 //
@@ -1066,6 +1066,28 @@ where
                             with_device(root_dev(k), || {
                                 h.level_tail_emf(0, dt);
                                 h.level_tail_excise(0);
+                            });
+                        }
+                        // the root's horizon ledger: every held tile's exact shell partial, merged
+                        // across the workers into the whole root's and booked on every level of every
+                        // held tile, once per root step inside the attempt, whose restore unbooks it
+                        if let Some((_, radius)) = symbi_sim::driver::horizon_request(&tiles[0].levels[0].state) {
+                            let mut local = symbi_sim::driver::HorizonPartial::default();
+                            for (k, h) in tiles.iter().enumerate() {
+                                let root = &h.levels[0];
+                                let partial = with_device(root_dev(k), || {
+                                    symbi_sim::driver::horizon_partial_of(&root.kernels, &root.state, radius)
+                                });
+                                local.merge(&partial);
+                            }
+                            let workers = plans.root.placement().workers as usize;
+                            let total = symbi_sim::worker::combine_horizon_partials(fabric, workers, &local, deadline)?;
+                            for h in tiles.iter_mut() {
+                                h.book_horizon_on_every_level(&total, dt);
+                            }
+                        }
+                        for (k, h) in tiles.iter().enumerate() {
+                            with_device(root_dev(k), || {
                                 // rigid walls also act on the uncovered root cells; the restriction
                                 // replaces the covered ones after the fine subcycle, and the sinks stay
                                 // off the root's gravity-only proxies

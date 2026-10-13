@@ -161,9 +161,40 @@ impl From<FabricError> for WorkerError {
     }
 }
 
+/// whether a store carries immersed bodies but no horizon body: a step of such a run has no body
+/// restore on the launched march
+fn bodies_without_horizon<const D: usize, const DOF: usize, M: MemorySpace>(store: &FieldStore<D, DOF, M, f64>) -> bool {
+    store.immersed.is_some() && crate::driver::horizon_request(store).is_none()
+}
+
+/// the whole run's horizon partial from every worker's: each worker supplies its own partial's
+/// words at its own window, every worker receives every partial, and the merge is exact, so every
+/// worker holds the integer the whole grid's sum holds whatever the partition
+pub fn combine_horizon_partials<L: Link>(
+    fabric: &mut Fabric<L>,
+    workers: usize,
+    local: &crate::driver::HorizonPartial,
+    deadline: Duration,
+) -> Result<crate::driver::HorizonPartial, WorkerError> {
+    use crate::driver::HorizonPartial;
+    let words = HorizonPartial::WORDS;
+    let base = fabric.me().0 as u64 * words as u64;
+    let entries: Vec<(u64, u64)> = local.to_words().into_iter().enumerate().map(|(i, w)| (base + i as u64, w)).collect();
+    let assembled = fabric.assemble_windowed((workers * words) as u64, &entries, deadline).map_err(|e| fail(fabric, e.into()))?;
+    let mut total = HorizonPartial::default();
+    for w in 0..workers {
+        let block = &assembled[w * words..(w + 1) * words];
+        let partial = HorizonPartial::from_words(block).map_err(|e| {
+            fail(fabric, WorkerError::Numerics(format!("worker {w}'s horizon partial is missing or malformed: {e}")))
+        })?;
+        total.merge(&partial);
+    }
+    Ok(total)
+}
+
 /// the launched worker's scope: 1D to 3D grids in host memory, a curved spacetime only where
-/// `curved` admits it (the flat relativistic gas), without a horizon body, and with tracers on the
-/// cartesian chart of a flat spacetime alone. the charts and settings a launch admits are decided
+/// `curved` admits it (the relativistic gas and magnetized gas), a horizon body where the kernel
+/// set books its diagnostic shell, and tracers on the cartesian chart of a flat spacetime alone. the charts and settings a launch admits are decided
 /// at the launch's front door.
 pub fn refuse<const D: usize, const DOF: usize, M: MemorySpace, K: KernelSet<D, DOF, M, f64>>(
     stores: &[&FieldStore<D, DOF, M, f64>],
@@ -183,8 +214,10 @@ pub fn refuse<const D: usize, const DOF: usize, M: MemorySpace, K: KernelSet<D, 
         let flat = store.geom.spacetime == symbi_geometry::Spacetime::Minkowski;
         let reason = if !flat && !curved {
             Some(format!("the {:?} spacetime", store.geom.spacetime))
-        } else if crate::driver::horizon_request(store).is_some() {
-            Some("a horizon body".to_string())
+        } else if let Some((_, radius)) = crate::driver::horizon_request(store)
+            && _kernels.iter().any(|k| k.horizon_accretion(store, radius).is_none())
+        {
+            Some("a horizon body on a kernel set without the diagnostic-shell kernels".to_string())
         } else if (store.tracers.is_some() || store.continuous_tracers.is_some()) && !flat {
             Some(format!("a tracer population on the {:?} spacetime", store.geom.spacetime))
         } else if store.continuous_tracers.is_some() && store.geom.coords != symbi_geometry::Geometry::Cartesian {
@@ -1309,9 +1342,10 @@ where
         for k in 0..sh.len() {
             // a replay from anything but the step entry is a different computation dressed as a
             // retry: every worker ends the session instead. the attempt restores the tracers
-            // itself; the kernel set restores the fields, and an immersed body's state has no
-            // restore on this march
-            if !kernels[k].field_rollback_is_complete(sh[k]) || sh[k].immersed.is_some() {
+            // itself; the kernel set restores the fields. the bodies of a run carrying a horizon
+            // change after acceptance alone (the ledger, the feedback and the motion), so its
+            // replay starts from the entry bodies; other immersed bodies have no restore here
+            if !kernels[k].field_rollback_is_complete(sh[k]) || bodies_without_horizon(sh[k]) {
                 return Err(fail(
                     self.fabric,
                     WorkerError::Numerics(
@@ -1580,7 +1614,7 @@ where
         // a rejection replays the step from its entry, which needs the whole entry state kept
         if !cfg.injection.reject_at.is_empty() {
             for (store, kernel) in sh.iter().zip(kernels) {
-                if !kernel.field_rollback_is_complete(store) || store.immersed.is_some() {
+                if !kernel.field_rollback_is_complete(store) || bodies_without_horizon(store) {
                     return Err(fail(
                         fabric,
                         WorkerError::Refused(
@@ -1926,6 +1960,26 @@ where
             }
             if let Err(e) = folded {
                 return Err(fail(fabric, WorkerError::Numerics(e.to_string())));
+            }
+        }
+        // the root's horizon ledger, once per accepted step: every worker merges its tiles' exact
+        // shell partials, the workers' partials merge into the whole grid's, and every tile books
+        // the rates rounded once, as the single grid does
+        if let Some((index, radius)) = stores.first().and_then(|s| crate::driver::horizon_request(&**s)) {
+            let mut local = crate::driver::HorizonPartial::default();
+            {
+                let sh = shared!();
+                for (k, store) in sh.iter().enumerate() {
+                    let partial = with_device(devices[tiles[k].0 as usize], || {
+                        crate::driver::horizon_partial_of(kernels[k], store, radius)
+                    });
+                    local.merge(&partial);
+                }
+            }
+            let total = combine_horizon_partials(fabric, exchange.placement().workers as usize, &local, deadline)?;
+            let (mdot, edot) = total.rates();
+            for s in stores.iter_mut() {
+                crate::driver::book_horizon_receipt(&mut **s, index, mdot, edot, dt);
             }
         }
         if stores.iter().any(|s| s.immersed.is_some()) {

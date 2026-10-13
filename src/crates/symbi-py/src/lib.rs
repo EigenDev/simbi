@@ -11173,8 +11173,9 @@ fn validate_launch_scope(cfg: &Config) -> Result<(), String> {
         return refused(&format!("a {}-dimensional grid", cfg.dims));
     }
     // a curved spacetime carries the relativistic gas and the relativistic magnetized gas on the
-    // kerr-schild charts, with or without excision, on a static mesh without bodies, refined on the
-    // three-dimensional kerr-schild box
+    // kerr-schild charts, with or without excision, on a static mesh, refined on the
+    // three-dimensional kerr-schild box; the relativistic gas carries immersed bodies on that box
+    // when it is excised
     if cfg.spacetime != "minkowski" {
         // the single grid runs the baked GR-hydro and GR-MHD combinations, the launched workers the
         // ones the worker chart arms build
@@ -11189,8 +11190,21 @@ fn validate_launch_scope(cfg: &Config) -> Result<(), String> {
         if cfg.refinement_enabled && !launched_refined_gr(cfg) {
             return refused(&format!("the {} spacetime with mesh refinement", cfg.spacetime));
         }
-        if !cfg.bodies.is_empty() || cfg.bonded_assembly.is_some() {
-            return refused(&format!("immersed bodies on the {} spacetime", cfg.spacetime));
+        // the relativistic gas carries immersed bodies on the excised three-dimensional
+        // kerr-schild box, where the root books the horizon ledger across the workers
+        let body_box = cfg.regime == "rhd"
+            && cfg.dims == 3
+            && cfg.coord_system == "cartesian"
+            && matches!(cfg.spacetime.as_str(), "schwarzschild_ks" | "kerr_ks")
+            && cfg.excision_radius > 0.0;
+        if cfg.bonded_assembly.is_some() {
+            return refused(&format!("a bonded assembly on the {} spacetime", cfg.spacetime));
+        }
+        if !cfg.bodies.is_empty() && !body_box {
+            return refused(&format!(
+                "immersed bodies with the {} regime on the {} spacetime off the excised three-dimensional kerr-schild box",
+                cfg.regime, cfg.spacetime
+            ));
         }
     }
 
