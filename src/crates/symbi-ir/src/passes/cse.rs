@@ -53,25 +53,51 @@
 use std::collections::{HashMap, HashSet};
 
 use crate::graph::ConstValue;
-use crate::passes::scalarize::{LoweredFn, ScalarExpr, ScalarStmt};
+use crate::passes::scalarize::{LoweredFn, LoweredParam, ScalarExpr, ScalarStmt};
 use crate::{ElementTy, KernelScalarized};
 
 /// run CSE over a `LoweredFn` (elemental-style). mutates body in place
 /// to insert `__cse_<n>` Let statements; results are rewritten to
 /// reference the temps.
 pub fn cse_lowered_fn(f: &mut LoweredFn) {
-    cse_in_place(&mut f.body, &mut f.results, "__cse_");
+    let ints = non_float_names(&f.params, &f.body);
+    cse_in_place(&mut f.body, &mut f.results, "__cse_", &ints);
 }
 
 /// run CSE over a `KernelScalarized` (kernel-style). same shape as
 /// `cse_lowered_fn` but operates on the kernel emitter's body + outputs.
 pub fn cse_kernel(k: &mut KernelScalarized) {
-    cse_in_place(&mut k.body, &mut k.outputs, "__cse_");
+    let ints = non_float_names(&k.params, &k.body);
+    cse_in_place(&mut k.body, &mut k.outputs, "__cse_", &ints);
 }
 
 // ----- internals -----
 
-fn cse_in_place(body: &mut Vec<ScalarStmt>, outputs: &mut Vec<ScalarExpr>, prefix: &str) {
+/// the names a variable reference may carry that hold a non-float value: the integer and boolean
+/// params (the thread coordinates, the region bounds) and every non-float binding of the body, its
+/// nested blocks included. a hoisted temp is typed f64, so an expression over these stays inline
+fn non_float_names(params: &[LoweredParam], body: &[ScalarStmt]) -> HashSet<String> {
+    fn scan(stmts: &[ScalarStmt], out: &mut HashSet<String>) {
+        for stmt in stmts {
+            match stmt {
+                ScalarStmt::Let { name, element, .. } | ScalarStmt::LetMut { name, element, .. } if !element.is_float() => {
+                    out.insert(name.clone());
+                }
+                ScalarStmt::Scope { body, .. } | ScalarStmt::For { body, .. } | ScalarStmt::If { then_body: body, .. } => scan(body, out),
+                ScalarStmt::IfElse { then_body, else_body, .. } => {
+                    scan(then_body, out);
+                    scan(else_body, out);
+                }
+                _ => {}
+            }
+        }
+    }
+    let mut out: HashSet<String> = params.iter().filter(|p| !p.element.is_float()).map(|p| p.name.clone()).collect();
+    scan(body, &mut out);
+    out
+}
+
+fn cse_in_place(body: &mut Vec<ScalarStmt>, outputs: &mut Vec<ScalarExpr>, prefix: &str, ints: &HashSet<String>) {
     // scope-aware CSE. before the flat-pass below
     // runs, recursively CSE each `Scope`'s body so duplicates local to a
     // scope land inside that scope's braces (the scope acts as a hoisting
@@ -83,7 +109,7 @@ fn cse_in_place(body: &mut Vec<ScalarStmt>, outputs: &mut Vec<ScalarExpr>, prefi
     // `recursive_cse_scopes` also walks into `For` / `If` bodies — those
     // stay opaque to the outer flat-pass below, but a `Scope`
     // nested inside them still benefits from per-scope CSE.
-    recursive_cse_scopes(body, prefix);
+    recursive_cse_scopes(body, prefix, ints);
 
     // pass 1: O(N) hash + count.
     let mut counts: HashMap<u64, usize> = HashMap::new();
@@ -125,6 +151,7 @@ fn cse_in_place(body: &mut Vec<ScalarStmt>, outputs: &mut Vec<ScalarExpr>, prefi
         emitted: HashMap::new(),
         next_id,
         prefix: prefix.to_string(),
+        ints: ints.clone(),
     };
     let body_take = std::mem::take(body);
     let mut rewritten: Vec<ScalarStmt> = Vec::with_capacity(body_take.len());
@@ -242,7 +269,7 @@ fn dce_in_place(body: &mut Vec<ScalarStmt>, outputs: &[ScalarExpr]) {
 /// counts only immediate child expressions) — it only sees the Scope's
 /// `result` expression. that's the architectural intent: scopes are
 /// hoisting barriers.
-fn recursive_cse_scopes(body: &mut Vec<ScalarStmt>, prefix: &str) {
+fn recursive_cse_scopes(body: &mut Vec<ScalarStmt>, prefix: &str, ints: &HashSet<String>) {
     use crate::graph::ConstValue;
     for stmt in body.iter_mut() {
         match stmt {
@@ -256,17 +283,17 @@ fn recursive_cse_scopes(body: &mut Vec<ScalarStmt>, prefix: &str) {
                 // (possibly Var-rewritten) result.
                 let placeholder = ScalarExpr::Const(ConstValue::F64(0.0));
                 let mut outputs = vec![std::mem::replace(result, placeholder)];
-                cse_in_place(scope_body, &mut outputs, prefix);
+                cse_in_place(scope_body, &mut outputs, prefix, ints);
                 *result = outputs.into_iter().next().expect("scope outputs vec");
             }
             ScalarStmt::For { body: for_body, .. } => {
                 // For/If bodies are opaque to the outer flat CSE (iter-var /
                 // branch scope), but a Scope nested inside still benefits
                 // from per-scope CSE — recurse to find it.
-                recursive_cse_scopes(for_body, prefix);
+                recursive_cse_scopes(for_body, prefix, ints);
             }
             ScalarStmt::If { then_body, .. } => {
-                recursive_cse_scopes(then_body, prefix);
+                recursive_cse_scopes(then_body, prefix, ints);
             }
             ScalarStmt::IfElse {
                 then_body,
@@ -276,8 +303,8 @@ fn recursive_cse_scopes(body: &mut Vec<ScalarStmt>, prefix: &str) {
                 // both cond arms are opaque to the outer flat CSE (branch
                 // scope), but a Scope nested inside an arm still benefits from
                 // per-scope CSE — recurse into each arm to find it.
-                recursive_cse_scopes(then_body, prefix);
-                recursive_cse_scopes(else_body, prefix);
+                recursive_cse_scopes(then_body, prefix, ints);
+                recursive_cse_scopes(else_body, prefix, ints);
             }
             _ => {}
         }
@@ -626,28 +653,29 @@ fn is_trivial(e: &ScalarExpr) -> bool {
 }
 
 /// only F64-typed expressions are eligible. Bool / comparison results
-/// would need separate element tracking in the emitted Let.
-fn is_f64_expr(e: &ScalarExpr) -> bool {
+/// would need separate element tracking in the emitted Let. a variable is f64 unless `ints` names
+/// it
+fn is_f64_expr(e: &ScalarExpr, ints: &HashSet<String>) -> bool {
     use crate::passes::scalarize::BinaryKind;
     match e {
         ScalarExpr::Const(ConstValue::F64(_)) => true,
         ScalarExpr::Const(_) => false,
-        ScalarExpr::Var(_) => true, // assume f64; conservative
+        ScalarExpr::Var(name) => !ints.contains(name),
         ScalarExpr::BinOp(op, a, _b) => {
             matches!(
                 op,
                 BinaryKind::Add | BinaryKind::Sub | BinaryKind::Mul | BinaryKind::Div
-            ) && is_f64_expr(a)
+            ) && is_f64_expr(a, ints)
         }
-        ScalarExpr::UnaryOp(_, a) => is_f64_expr(a),
+        ScalarExpr::UnaryOp(_, a) => is_f64_expr(a, ints),
         ScalarExpr::MethodCall {
             method, receiver, ..
         } => {
             // is_finite / is_nan return bool; everything else returns
             // the receiver's element type.
-            !matches!(method.as_str(), "is_finite" | "is_nan") && is_f64_expr(receiver)
+            !matches!(method.as_str(), "is_finite" | "is_nan") && is_f64_expr(receiver, ints)
         }
-        ScalarExpr::Select { then, .. } => is_f64_expr(then),
+        ScalarExpr::Select { then, .. } => is_f64_expr(then, ints),
         ScalarExpr::IndexInto { .. } => true,
         ScalarExpr::FieldLoadAt { .. } => true,
         ScalarExpr::FreeCall { .. } => true,
@@ -722,6 +750,8 @@ struct RewriteState {
     emitted: HashMap<u64, String>,
     next_id: usize,
     prefix: String,
+    /// the variables holding a non-float value
+    ints: HashSet<String>,
 }
 
 impl RewriteState {
@@ -879,7 +909,7 @@ fn rewrite_expr(
     //     separate Let element.
     let count = state.counts.get(&self_hash).copied().unwrap_or(0);
     let threshold = effective_threshold(&rewritten);
-    if count >= threshold && !is_trivial(&rewritten) && is_f64_expr(&rewritten) {
+    if count >= threshold && !is_trivial(&rewritten) && is_f64_expr(&rewritten, &state.ints) {
         let temp_name = state.fresh_name();
         state.emitted.insert(self_hash, temp_name.clone());
         out_body.push(ScalarStmt::Let {
@@ -962,7 +992,7 @@ mod tests {
             ScalarExpr::BinOp(BinaryKind::Add, Box::new(ba()), Box::new(v("s"))),
             ScalarExpr::BinOp(BinaryKind::Add, Box::new(ba()), Box::new(v("t"))),
         ];
-        cse_in_place(&mut body, &mut outputs, "__cse_");
+        cse_in_place(&mut body, &mut outputs, "__cse_", &HashSet::new());
         assert_eq!(
             body.len(),
             1,
@@ -988,7 +1018,7 @@ mod tests {
             ScalarExpr::BinOp(BinaryKind::Add, Box::new(deep()), Box::new(v("p"))),
             ScalarExpr::BinOp(BinaryKind::Add, Box::new(deep()), Box::new(v("q"))),
         ];
-        cse_in_place(&mut body, &mut outputs, "__cse_");
+        cse_in_place(&mut body, &mut outputs, "__cse_", &HashSet::new());
         assert_eq!(
             body.len(),
             1,
@@ -1005,7 +1035,7 @@ mod tests {
             Box::new(shallow()),
             Box::new(shallow()),
         )];
-        cse_in_place(&mut body2, &mut outputs2, "__cse_");
+        cse_in_place(&mut body2, &mut outputs2, "__cse_", &HashSet::new());
         assert!(
             body2.is_empty(),
             "shallow cheap share at 2 uses must stay inline, got {:?}",
@@ -1032,7 +1062,7 @@ mod tests {
             ScalarExpr::BinOp(BinaryKind::Add, Box::new(div()), Box::new(v("c"))),
             ScalarExpr::BinOp(BinaryKind::Add, Box::new(div()), Box::new(v("d"))),
         ];
-        cse_in_place(&mut body, &mut outputs, "__cse_");
+        cse_in_place(&mut body, &mut outputs, "__cse_", &HashSet::new());
         // exactly one surviving Let (the shared a/b), no orphan.
         assert_eq!(
             body.len(),
@@ -1060,12 +1090,34 @@ mod tests {
             Box::new(v("x")),
             Box::new(v("y")),
         )];
-        cse_in_place(&mut body, &mut outputs, "__cse_");
+        cse_in_place(&mut body, &mut outputs, "__cse_", &HashSet::new());
         assert!(body.is_empty(), "no CSE Lets expected: {:?}", body);
         assert_eq!(
             outputs[0],
             ScalarExpr::BinOp(BinaryKind::Add, Box::new(v("x")), Box::new(v("y"))),
         );
+    }
+
+    /// a shared expression over integer params stays inline: the hoisted temp is typed f64, and an
+    /// integer value bound to it fails to compile. the same expression over float params hoists
+    #[test]
+    fn a_shared_integer_expression_stays_inline() {
+        use crate::passes::scalarize::LoweredParam;
+        let shared = || ScalarExpr::BinOp(BinaryKind::Div, Box::new(v("i")), Box::new(v("n")));
+        let kernel = |element: ElementTy| KernelScalarized {
+            params: vec![LoweredParam::scalar("i".into(), element), LoweredParam::scalar("n".into(), element)],
+            body: vec![],
+            outputs: vec![
+                ScalarExpr::BinOp(BinaryKind::Add, Box::new(shared()), Box::new(v("a"))),
+                ScalarExpr::BinOp(BinaryKind::Sub, Box::new(shared()), Box::new(v("b"))),
+            ],
+        };
+        let mut ints = kernel(ElementTy::I32);
+        cse_kernel(&mut ints);
+        assert!(ints.body.is_empty(), "an integer expression was hoisted into an f64 temp: {:?}", ints.body);
+        let mut floats = kernel(ElementTy::F64);
+        cse_kernel(&mut floats);
+        assert_eq!(floats.body.len(), 1, "the float expression was not hoisted: {:?}", floats.body);
     }
 
     #[test]
@@ -1078,7 +1130,7 @@ mod tests {
             ScalarExpr::BinOp(BinaryKind::Add, Box::new(xx.clone()), Box::new(v("a"))),
             ScalarExpr::BinOp(BinaryKind::Sub, Box::new(xx.clone()), Box::new(v("b"))),
         ];
-        cse_in_place(&mut body, &mut outputs, "__cse_");
+        cse_in_place(&mut body, &mut outputs, "__cse_", &HashSet::new());
         assert_eq!(body.len(), 1, "expected one CSE Let, got {:?}", body);
         let temp_name = match &body[0] {
             ScalarStmt::Let { name, value, .. } => {
@@ -1123,7 +1175,7 @@ mod tests {
                 Box::new(ScalarExpr::Var("__cse_0".to_string())),
             ),
         ];
-        cse_in_place(&mut body, &mut outputs, "__cse_");
+        cse_in_place(&mut body, &mut outputs, "__cse_", &HashSet::new());
 
         let names: Vec<String> = body
             .iter()
@@ -1160,7 +1212,7 @@ mod tests {
             ScalarExpr::BinOp(BinaryKind::Mul, Box::new(xxpy.clone()), Box::new(v("a"))),
             ScalarExpr::BinOp(BinaryKind::Mul, Box::new(xxpy.clone()), Box::new(v("b"))),
         ];
-        cse_in_place(&mut body, &mut outputs, "__cse_");
+        cse_in_place(&mut body, &mut outputs, "__cse_", &HashSet::new());
         assert_eq!(body.len(), 2, "expected two CSE Lets, got {:?}", body);
         let (name0, value0) = match &body[0] {
             ScalarStmt::Let { name, value, .. } => (name.clone(), value.clone()),
@@ -1185,7 +1237,7 @@ mod tests {
             ScalarExpr::BinOp(BinaryKind::Add, Box::new(v("x")), Box::new(one.clone())),
             ScalarExpr::BinOp(BinaryKind::Sub, Box::new(v("x")), Box::new(one.clone())),
         ];
-        cse_in_place(&mut body, &mut outputs, "__cse_");
+        cse_in_place(&mut body, &mut outputs, "__cse_", &HashSet::new());
         assert!(
             body.is_empty(),
             "trivial subexprs must not be hoisted: {:?}",
@@ -1202,10 +1254,10 @@ mod tests {
             ScalarExpr::BinOp(BinaryKind::Add, Box::new(xx.clone()), Box::new(v("a"))),
             ScalarExpr::BinOp(BinaryKind::Sub, Box::new(xx.clone()), Box::new(v("b"))),
         ];
-        cse_in_place(&mut body, &mut outputs, "__cse_");
+        cse_in_place(&mut body, &mut outputs, "__cse_", &HashSet::new());
         let body_after_first = body.clone();
         let outs_after_first = outputs.clone();
-        cse_in_place(&mut body, &mut outputs, "__cse_");
+        cse_in_place(&mut body, &mut outputs, "__cse_", &HashSet::new());
         assert_eq!(body, body_after_first);
         assert_eq!(outputs, outs_after_first);
     }
@@ -1235,7 +1287,7 @@ mod tests {
         }
         let mut body: Vec<ScalarStmt> = vec![];
         let mut outputs = vec![e];
-        cse_in_place(&mut body, &mut outputs, "__cse_");
+        cse_in_place(&mut body, &mut outputs, "__cse_", &HashSet::new());
         // 15 CSE Lets: the bottom 15 of the 16 BinOp levels each
         // appear >= 2 times (their immediate parent uses them twice
         // via the Div(x, x) duplication). the topmost BinOp appears
@@ -1310,7 +1362,7 @@ mod tests {
 
         let mut body = vec![scope_stmt("phase", vec![inner_let], inner_result)];
         let mut outputs = vec![v("phase")];
-        cse_in_place(&mut body, &mut outputs, "__cse_");
+        cse_in_place(&mut body, &mut outputs, "__cse_", &HashSet::new());
 
         // the outer body must still be just the one Scope statement.
         assert_eq!(
@@ -1376,7 +1428,7 @@ mod tests {
             scope_stmt("b", inner("q"), v("q")),
         ];
         let mut outputs = vec![v("a"), v("b")];
-        cse_in_place(&mut body, &mut outputs, "__cse_");
+        cse_in_place(&mut body, &mut outputs, "__cse_", &HashSet::new());
 
         // outer body still 2 Scope stmts — neither merged nor hoisted out.
         assert_eq!(body.len(), 2, "outer body should remain 2 Scope stmts");
@@ -1412,7 +1464,7 @@ mod tests {
             Box::new(xy_div.clone()),
             Box::new(xy_div),
         )];
-        cse_in_place(&mut body, &mut outputs, "__cse_");
+        cse_in_place(&mut body, &mut outputs, "__cse_", &HashSet::new());
         // exactly one CSE let in the outer body (for x/y), output references it.
         assert_eq!(body.len(), 1, "expected exactly one CSE let in flat body");
         match &outputs[0] {
@@ -1458,7 +1510,7 @@ mod tests {
         let mul = ScalarExpr::BinOp(BinaryKind::Mul, Box::new(v("x")), Box::new(v("y")));
         let mut body: Vec<ScalarStmt> = vec![];
         let mut outputs = shared_n_times(mul, 3);
-        cse_in_place(&mut body, &mut outputs, "__cse_");
+        cse_in_place(&mut body, &mut outputs, "__cse_", &HashSet::new());
         assert!(
             body.is_empty(),
             "cheap-class Mul shared 3x must NOT hoist; got body = {:?}",
@@ -1472,7 +1524,7 @@ mod tests {
         let mul = ScalarExpr::BinOp(BinaryKind::Mul, Box::new(v("x")), Box::new(v("y")));
         let mut body: Vec<ScalarStmt> = vec![];
         let mut outputs = shared_n_times(mul, 4);
-        cse_in_place(&mut body, &mut outputs, "__cse_");
+        cse_in_place(&mut body, &mut outputs, "__cse_", &HashSet::new());
         assert_eq!(
             body.len(),
             1,
@@ -1487,7 +1539,7 @@ mod tests {
         let div = ScalarExpr::BinOp(BinaryKind::Div, Box::new(v("x")), Box::new(v("y")));
         let mut body: Vec<ScalarStmt> = vec![];
         let mut outputs = shared_n_times(div, 2);
-        cse_in_place(&mut body, &mut outputs, "__cse_");
+        cse_in_place(&mut body, &mut outputs, "__cse_", &HashSet::new());
         assert_eq!(
             body.len(),
             1,
@@ -1507,7 +1559,7 @@ mod tests {
         };
         let mut body: Vec<ScalarStmt> = vec![];
         let mut outputs = shared_n_times(sqrt, 2);
-        cse_in_place(&mut body, &mut outputs, "__cse_");
+        cse_in_place(&mut body, &mut outputs, "__cse_", &HashSet::new());
         assert_eq!(
             body.len(),
             1,
@@ -1527,7 +1579,7 @@ mod tests {
         };
         let mut body: Vec<ScalarStmt> = vec![];
         let mut outputs = shared_n_times(sin, 2);
-        cse_in_place(&mut body, &mut outputs, "__cse_");
+        cse_in_place(&mut body, &mut outputs, "__cse_", &HashSet::new());
         assert_eq!(
             body.len(),
             1,
@@ -1551,7 +1603,7 @@ mod tests {
             Box::new(exp),
             Box::new(v("k")),
         )];
-        cse_in_place(&mut body, &mut outputs, "__cse_");
+        cse_in_place(&mut body, &mut outputs, "__cse_", &HashSet::new());
         assert!(
             body.is_empty(),
             "expensive single-use exp must NOT hoist; got body = {:?}",
@@ -1569,7 +1621,7 @@ mod tests {
         };
         let mut body: Vec<ScalarStmt> = vec![];
         let mut outputs = shared_n_times(load, 2);
-        cse_in_place(&mut body, &mut outputs, "__cse_");
+        cse_in_place(&mut body, &mut outputs, "__cse_", &HashSet::new());
         assert_eq!(
             body.len(),
             1,
@@ -1584,7 +1636,7 @@ mod tests {
         // Var shared 10 times: must not hoist (it's already a register name).
         let mut body: Vec<ScalarStmt> = vec![];
         let mut outputs = shared_n_times(v("x"), 10);
-        cse_in_place(&mut body, &mut outputs, "__cse_");
+        cse_in_place(&mut body, &mut outputs, "__cse_", &HashSet::new());
         assert!(
             body.is_empty(),
             "trivial Var shared 10x must NOT hoist; got body = {:?}",
@@ -1594,7 +1646,7 @@ mod tests {
         // Const shared 10 times: must not hoist either.
         let mut body: Vec<ScalarStmt> = vec![];
         let mut outputs = shared_n_times(ScalarExpr::Const(ConstValue::F64(2.5)), 10);
-        cse_in_place(&mut body, &mut outputs, "__cse_");
+        cse_in_place(&mut body, &mut outputs, "__cse_", &HashSet::new());
         assert!(
             body.is_empty(),
             "trivial Const shared 10x must NOT hoist; got body = {:?}",
@@ -1612,7 +1664,7 @@ mod tests {
         };
         let mut body: Vec<ScalarStmt> = vec![];
         let mut outputs = shared_n_times(call, 2);
-        cse_in_place(&mut body, &mut outputs, "__cse_");
+        cse_in_place(&mut body, &mut outputs, "__cse_", &HashSet::new());
         assert_eq!(
             body.len(),
             1,
@@ -1650,7 +1702,7 @@ mod tests {
 
         let mut body: Vec<ScalarStmt> = vec![];
         let mut outputs = vec![out0, out1];
-        cse_in_place(&mut body, &mut outputs, "__cse_");
+        cse_in_place(&mut body, &mut outputs, "__cse_", &HashSet::new());
         // exactly one CSE Let — for sin(x). a*b stays inline (cheap, only 2 shares).
         assert_eq!(
             body.len(),
@@ -1748,7 +1800,7 @@ mod tests {
 
         let mut body = vec![outer_scope];
         let mut outputs = vec![v("r")];
-        cse_in_place(&mut body, &mut outputs, "__cse_");
+        cse_in_place(&mut body, &mut outputs, "__cse_", &HashSet::new());
 
         // inner scope should have a CSE let for (x+1).
         match &body[0] {
