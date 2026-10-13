@@ -864,37 +864,44 @@ pub fn write_checkpoint<R, const D: usize, const DOF: usize, M, E, S, Mem>(
     extras: &Metadata,
 ) -> Result<()>
 where
-    R: Regime<f64, D>,
-    M: Metric<f64, D> + Copy,
-    E: Eos<f64>,
+    R: Regime<f64, D, Energy = <R as Regime<f64, DOF>>::Energy> + Regime<f64, DOF>,
+    M: Metric<f64, D> + Metric<f64, DOF> + Copy,
+    E: symbi_hydro::eos::EosFor<f64, <R as Regime<f64, D>>::Energy>,
     S: ExecutionSpace,
     Mem: MemorySpace,
+    <R as Regime<f64, DOF>>::Cons: symbi_hydro::state::SeedableCons<f64, DOF>,
+    <R as Regime<f64, DOF>>::Prim: symbi_hydro::state::PrimFromSlots<f64, DOF>,
 {
-    write_partitioned_checkpoint::<R, D, DOF, Mem>(
-        &PhysicsIdentity::of(sim),
-        &[LevelTiles::whole(&sim.store)],
-        path,
-        extras,
-    )
+    write_hierarchy_checkpoint(&[sim], path, extras)
 }
 
 /// write every level of a hierarchy, each held whole by one state, into one file: `levels[0]`
 /// is the coarse level and authors the global metadata.
+///
+/// every level's conserved halo is published as the conserved state of its halo primitives
+/// (`prepare_checkpoint_halo`) and restored once the file is written.
 pub fn write_hierarchy_checkpoint<R, const D: usize, const DOF: usize, M, E, S, Mem>(
     levels: &[&SimStateGeneric<R, D, DOF, M, E, S, Mem>],
     path: &str,
     extras: &Metadata,
 ) -> Result<()>
 where
-    R: Regime<f64, D>,
-    M: Metric<f64, D> + Copy,
-    E: Eos<f64>,
+    R: Regime<f64, D, Energy = <R as Regime<f64, DOF>>::Energy> + Regime<f64, DOF>,
+    M: Metric<f64, D> + Metric<f64, DOF> + Copy,
+    E: symbi_hydro::eos::EosFor<f64, <R as Regime<f64, D>>::Energy>,
     S: ExecutionSpace,
     Mem: MemorySpace,
+    <R as Regime<f64, DOF>>::Cons: symbi_hydro::state::SeedableCons<f64, DOF>,
+    <R as Regime<f64, DOF>>::Prim: symbi_hydro::state::PrimFromSlots<f64, DOF>,
 {
+    let saved: Vec<_> = levels.iter().map(|s| s.prepare_checkpoint_halo()).collect();
     let tiles: Vec<LevelTiles<'_, D, DOF, Mem>> =
         levels.iter().map(|s| LevelTiles::whole(&s.store)).collect();
-    write_partitioned_checkpoint::<R, D, DOF, Mem>(&PhysicsIdentity::of(levels[0]), &tiles, path, extras)
+    let written = write_partitioned_checkpoint::<R, D, DOF, Mem>(&PhysicsIdentity::of(levels[0]), &tiles, path, extras);
+    for (s, halo) in levels.iter().zip(&saved) {
+        s.restore_checkpoint_halo(halo);
+    }
+    written
 }
 
 // =============================================================================
@@ -2201,9 +2208,11 @@ mod tests {
         // **truncation gate**: a cell-centered dataset must carry the full allocated extent
         // (interior + 2*ng) — otherwise a restart loses the halo the
         // next stencil reads before the first ghost-fill, and the reader's `halo_width` trim
-        // would over-cut interior-only data. seed every allocated cell (ghosts included) with a
-        // coord-unique value; assert (a) the on-disk dataset volume is the padded volume, and
-        // (b) every ghost cell survives the write -> load round-trip byte-for-byte.
+        // would over-cut interior-only data. seed every allocated primitive cell (ghosts
+        // included) and every interior conserved cell with a coord-unique value; assert (a) the
+        // on-disk dataset volume is the padded volume, (b) every primitive cell, ghosts included,
+        // and every interior conserved cell survive the write -> load round-trip byte-for-byte,
+        // and (c) every conserved ghost holds the conserved state of its ghost primitives.
         type Sim2 = SimState<Newtonian, 2, Cartesian, IdealGas<f64>, CpuSpace, HostMemory>;
         let ng = 2usize;
         let build = || {
@@ -2228,8 +2237,14 @@ mod tests {
         // a value unique per (coord) so a misplaced or dropped ghost is a loud failure.
         let seed = |c: [isize; 2]| 1000.0 + c[0] as f64 + 31.0 * c[1] as f64;
         let alloc = sim.fields.cons.den.domain().clone();
+        let interior = sim.geom.interior.clone();
+        let pre = sim.fields.prim.pre.as_ref().expect("an adiabatic gas carries a pressure");
         for c in alloc.iter() {
-            sim.fields.cons.den.view_mut().set(c, seed(c));
+            sim.fields.prim.rho.view_mut().set(c, seed(c));
+            pre.view_mut().set(c, 2.0 * seed(c));
+            if interior.contains(c) {
+                sim.fields.cons.den.view_mut().set(c, 3.0 * seed(c));
+            }
         }
 
         let dir = std::env::temp_dir().join("symbi_checkpoint_fullfield");
@@ -2255,20 +2270,22 @@ mod tests {
             alloc.volume()
         );
 
-        // (b) every allocated cell — especially the ghosts outside the interior — round-trips.
+        // (b) every primitive cell and every interior conserved cell round-trip; (c) the conserved
+        // ghosts carry the conserved state of the ghost primitives (at rest, density = rho).
         let mut loaded = build();
         load_checkpoint(&mut loaded, path).unwrap();
-        let interior = sim.geom.interior.clone();
+        let loaded_pre = loaded.fields.prim.pre.as_ref().unwrap();
         let mut ghost_checked = 0usize;
         for c in alloc.iter() {
-            assert_eq!(
-                *loaded.fields.cons.den.view().at(c),
-                seed(c),
-                "cons.den lost/garbled at {c:?} (ghost={})",
-                !interior.contains(c)
-            );
-            if !interior.contains(c) {
+            let ghost = !interior.contains(c);
+            assert_eq!(*loaded.fields.prim.rho.view().at(c), seed(c), "prim.rho lost/garbled at {c:?} (ghost={ghost})");
+            assert_eq!(*loaded_pre.view().at(c), 2.0 * seed(c), "prim.pre lost/garbled at {c:?} (ghost={ghost})");
+            let den = *loaded.fields.cons.den.view().at(c);
+            if ghost {
+                assert_eq!(den, seed(c), "cons.den at ghost {c:?} is not the conserved state of its primitives");
                 ghost_checked += 1;
+            } else {
+                assert_eq!(den, 3.0 * seed(c), "cons.den lost/garbled at {c:?}");
             }
         }
         assert!(

@@ -2429,6 +2429,7 @@ pub struct FieldStore<
 /// (`seed_cell`, `cons_at`, `to_conserved`); a kernel dispatch reads the concrete `KernelSet`,
 /// which bakes `R::SPEC` / `eos_param` at construction. holding them apart
 /// from `FieldStore` is what keeps the `R::Energy` / `R::Schema` bounds off the kernel path.
+#[derive(Clone, Copy)]
 pub struct Physics<R, M, E> {
     pub regime: R,
     pub metric: M,
@@ -2744,34 +2745,108 @@ pub fn axis_name(ax: usize) -> &'static str {
 // scatter_from + (for MHD) bcell <- the magnetic 3-vector. one entry point for every
 // regime/EOS, so `Cons { den, mom, nrg }` is assembled here and the iso-vs-adiabatic split
 // is handled in one place.
-impl<R, const D: usize, const DOF: usize, M, E, S, Mem, Sc>
-    SimStateGeneric<R, D, DOF, M, E, S, Mem, Sc>
-where
-    R: Regime<Sc, D> + Regime<Sc, DOF>,
-    M: Metric<Sc, D> + Metric<Sc, DOF>,
-    E: symbi_hydro::eos::EosFor<Sc, <R as Regime<Sc, DOF>>::Energy>,
-    S: ExecutionSpace,
-    Mem: MemorySpace,
-    Sc: Scalar + OrderedNumeric,
-    <R as Regime<Sc, DOF>>::Cons: symbi_hydro::state::SeedableCons<Sc, DOF>,
-{
-    /// seed one cell from a primitive: conserved gas state <- to_conserved(prim) (scattered
-    /// via the EnergyModel-generic scatter_from), and — for MHD regimes — the cell-centered B
-    /// <- the primitive's magnetic 3-vector. the staggered bface is seeded separately by the
-    /// IC, since a face value is a property of the face rather than of a single cell's primitive.
-    ///
-    /// on a curved spacetime the conserved momentum is the Valencia covariant `S_i = rho h W^2
-    /// gamma_ij v^j`, so the seed evaluates the spatial metric at the cell and stores the covariant
-    /// state (via `to_conserved_covariant`) — the metric radius is the volume-weighted radial
-    /// centroid, the point the metric-aware c2p inverts at, so the storage<->recovery round-trip
-    /// is exact per cell. flat (Minkowski) keeps the orthonormal `to_conserved`.
-    pub fn seed_cell(&self, coord: [isize; D], prim: &<R as Regime<Sc, DOF>>::Prim) {
+
+impl<const D: usize, const DOF: usize, Mem: MemorySpace> FieldStore<D, DOF, Mem, f64> {
+    /// the regime's primitive at a cell from the stored primitive fields: density, the velocity
+    /// components, the pressure where the gas carries energy, and on a magnetized store the cell
+    /// field
+    pub fn prim_at_as<R>(&self, coord: [isize; D]) -> <R as Regime<f64, DOF>>::Prim
+    where
+        R: Regime<f64, DOF>,
+        <R as Regime<f64, DOF>>::Prim: symbi_hydro::state::PrimFromSlots<f64, DOF>,
+    {
+        use symbi_hydro::state::PrimFromSlots;
+        let prim = &self.fields.prim;
+        let mut slots: Vec<f64> = Vec::with_capacity(2 + 2 * DOF);
+        slots.push(*prim.rho.view().at(coord));
+        for k in 0..DOF {
+            slots.push(*prim.vel[k].view().at(coord));
+        }
+        if let Some(pre) = prim.pre_field() {
+            slots.push(*pre.view().at(coord));
+        }
+        if let Some(mhd) = self.fields.mhd.as_ref() {
+            for k in 0..DOF {
+                slots.push(*mhd.bcell[k].view().at(coord));
+            }
+        }
+        <R as Regime<f64, DOF>>::Prim::from_slots(&slots)
+    }
+
+    /// the conserved fields a halo carries, in a fixed order
+    fn halo_conserved_fields(&self) -> Vec<&Field<f64, D, Mem>> {
+        let cons = &self.fields.cons;
+        let mut fields: Vec<&Field<f64, D, Mem>> = vec![&cons.den];
+        fields.extend(cons.mom.iter());
+        fields.extend(cons.nrg_field());
+        fields.extend(cons.chi_field());
+        fields
+    }
+
+    /// the conserved halo a checkpoint publishes: every ghost cell takes the conserved state of
+    /// the primitives the boundary and exchange machinery filled there, the conserved dye following
+    /// as density times concentration. no stage reads the conserved halo, so its contents
+    /// otherwise depend on the driver (zero on a single grid's periodic seam, the prime's exchange
+    /// on tiles). returns the halo it replaced, which `restore_checkpoint_halo` writes back after
+    /// the checkpoint so the run continues independent of when it checkpoints. the interior and the
+    /// stored primitives are untouched
+    pub fn prepare_checkpoint_halo_with<R, M, E>(&self, physics: &Physics<R, M, E>) -> Vec<Vec<f64>>
+    where
+        R: Regime<f64, D> + Regime<f64, DOF>,
+        M: Metric<f64, D> + Metric<f64, DOF>,
+        E: symbi_hydro::eos::EosFor<f64, <R as Regime<f64, DOF>>::Energy>,
+        <R as Regime<f64, DOF>>::Cons: symbi_hydro::state::SeedableCons<f64, DOF>,
+        <R as Regime<f64, DOF>>::Prim: symbi_hydro::state::PrimFromSlots<f64, DOF>,
+    {
+        let interior = &self.geom.interior;
+        let ghost = |c: &[isize; D]| !interior.contains(*c);
+        let saved: Vec<Vec<f64>> = self
+            .halo_conserved_fields()
+            .iter()
+            .map(|f| {
+                let view = f.view();
+                self.geom.allocated.iter().filter(ghost).map(|c| *view.at(c)).collect()
+            })
+            .collect();
+        let cons = &self.fields.cons;
+        for c in self.geom.allocated.iter().filter(ghost) {
+            self.seed_cell_with(physics, c, &self.prim_at_as::<R>(c));
+            if let (Some(cons_chi), Some(prim_chi)) = (cons.chi_field(), self.fields.prim.chi.as_ref()) {
+                let den = *cons.den.view().at(c);
+                cons_chi.view_mut().set(c, den * *prim_chi.view().at(c));
+            }
+        }
+        saved
+    }
+
+    /// write back the conserved halo `prepare_checkpoint_halo_with` replaced
+    pub fn restore_checkpoint_halo(&self, saved: &[Vec<f64>]) {
+        let interior = &self.geom.interior;
+        for (f, values) in self.halo_conserved_fields().into_iter().zip(saved) {
+            let view = f.view_mut();
+            for (c, v) in self.geom.allocated.iter().filter(|c| !interior.contains(*c)).zip(values) {
+                view.set(c, *v);
+            }
+        }
+    }
+}
+
+impl<const D: usize, const DOF: usize, Mem: MemorySpace, Sc: Scalar + OrderedNumeric> FieldStore<D, DOF, Mem, Sc> {
+    /// `SimStateGeneric::seed_cell` on a store under the given physics: the conserved gas state
+    /// (and on a magnetized store the cell field) of a primitive at one cell
+    pub fn seed_cell_with<R, M, E>(&self, physics: &Physics<R, M, E>, coord: [isize; D], prim: &<R as Regime<Sc, DOF>>::Prim)
+    where
+        R: Regime<Sc, D> + Regime<Sc, DOF>,
+        M: Metric<Sc, D> + Metric<Sc, DOF>,
+        E: symbi_hydro::eos::EosFor<Sc, <R as Regime<Sc, DOF>>::Energy>,
+        <R as Regime<Sc, DOF>>::Cons: symbi_hydro::state::SeedableCons<Sc, DOF>,
+    {
         use symbi_hydro::spatial_metric::{Gamma, GammaInv, SpatialMetric};
         use symbi_hydro::state::SeedableCons;
         let cons = if self.geom.spacetime.component_basis()
             == symbi_geometry::ComponentBasis::Orthonormal
         {
-            <R as Regime<Sc, DOF>>::to_conserved(&self.physics.regime, &self.physics.eos, prim)
+            <R as Regime<Sc, DOF>>::to_conserved(&physics.regime, &physics.eos, prim)
         } else {
             // the metric point matches the point the in-kernel geometry evaluates at
             // (`cell_geometry_gv`), so the covariant storage <-> metric-aware c2p round-trip
@@ -2785,7 +2860,7 @@ where
             //                (rh^3 - rl^3) from the cell's radial faces (map-aware, so
             //                log-radial grids match too); angular slots take cell centers.
             let x_dof: Tensor<Sc, DOF> = if matches!(
-                <M as Metric<Sc, DOF>>::geometry(&self.physics.metric),
+                <M as Metric<Sc, DOF>>::geometry(&physics.metric),
                 symbi_geometry::Geometry::Cartesian
             ) {
                 Tensor::new(std::array::from_fn(|k| {
@@ -2802,7 +2877,7 @@ where
                     }
                 }))
             } else {
-                let chart = <M as Metric<Sc, DOF>>::geometry(&self.physics.metric);
+                let chart = <M as Metric<Sc, DOF>>::geometry(&physics.metric);
                 // every gridded slot takes its moment from the shared owner the in-kernel
                 // geometry uses — under the chart's volume element the radial weight differs
                 // between spherical (r^2 dr) and cylindrical (R dR), and the spherical polar slot
@@ -2847,24 +2922,24 @@ where
             };
             let sm = SpatialMetric::new(
                 Gamma::new(<M as Metric<Sc, DOF>>::spatial_metric(
-                    &self.physics.metric,
+                    &physics.metric,
                     x_dof,
                 )),
                 GammaInv::new(<M as Metric<Sc, DOF>>::spatial_metric_inv(
-                    &self.physics.metric,
+                    &physics.metric,
                     x_dof,
                 )),
             );
-            let alpha = <M as Metric<Sc, DOF>>::lapse(&self.physics.metric, x_dof);
-            let shift = <M as Metric<Sc, DOF>>::shift(&self.physics.metric, x_dof);
+            let alpha = <M as Metric<Sc, DOF>>::lapse(&physics.metric, x_dof);
+            let shift = <M as Metric<Sc, DOF>>::shift(&physics.metric, x_dof);
             // the full-chart spatial measure, including the directions the momentum block
             // suppresses: `volume_factor` is r^2 sin(theta)/sqrt(f) on a 1D radial spherical grid
             // where the 1x1 determinant would give only 1/sqrt(f). paired with the lapse it is the
             // sqrt(-g) the densitized relativistic state carries.
-            let sqrt_gamma = <M as Metric<Sc, DOF>>::volume_factor(&self.physics.metric, x_dof);
+            let sqrt_gamma = <M as Metric<Sc, DOF>>::volume_factor(&physics.metric, x_dof);
             <R as Regime<Sc, DOF>>::to_conserved_covariant(
-                &self.physics.regime,
-                &self.physics.eos,
+                &physics.regime,
+                &physics.eos,
                 prim,
                 &sm,
                 alpha,
@@ -2880,6 +2955,32 @@ where
                 }
             }
         }
+    }
+}
+
+impl<R, const D: usize, const DOF: usize, M, E, S, Mem, Sc>
+    SimStateGeneric<R, D, DOF, M, E, S, Mem, Sc>
+where
+    R: Regime<Sc, D> + Regime<Sc, DOF>,
+    M: Metric<Sc, D> + Metric<Sc, DOF>,
+    E: symbi_hydro::eos::EosFor<Sc, <R as Regime<Sc, DOF>>::Energy>,
+    S: ExecutionSpace,
+    Mem: MemorySpace,
+    Sc: Scalar + OrderedNumeric,
+    <R as Regime<Sc, DOF>>::Cons: symbi_hydro::state::SeedableCons<Sc, DOF>,
+{
+    /// seed one cell from a primitive: conserved gas state <- to_conserved(prim) (scattered
+    /// via the EnergyModel-generic scatter_from), and — for MHD regimes — the cell-centered B
+    /// <- the primitive's magnetic 3-vector. the staggered bface is seeded separately by the
+    /// IC, since a face value is a property of the face rather than of a single cell's primitive.
+    ///
+    /// on a curved spacetime the conserved momentum is the Valencia covariant `S_i = rho h W^2
+    /// gamma_ij v^j`, so the seed evaluates the spatial metric at the cell and stores the covariant
+    /// state (via `to_conserved_covariant`) — the metric radius is the volume-weighted radial
+    /// centroid, the point the metric-aware c2p inverts at, so the storage<->recovery round-trip
+    /// is exact per cell. flat (Minkowski) keeps the orthonormal `to_conserved`.
+    pub fn seed_cell(&self, coord: [isize; D], prim: &<R as Regime<Sc, DOF>>::Prim) {
+        self.store.seed_cell_with(&self.physics, coord, prim);
     }
 
     /// seed every interior cell from a closure over its physical center position — the
@@ -2988,6 +3089,20 @@ where
     /// their exchange or prolongation supplies, and a periodic seam carries its conserved cells
     /// across separately. the caller recovers the interior primitives and runs the ghost fill
     /// first
+    /// the conserved halo a checkpoint publishes (`FieldStore::prepare_checkpoint_halo_with`
+    /// under this state's physics); returns the halo it replaced
+    pub fn prepare_checkpoint_halo(&self) -> Vec<Vec<f64>>
+    where
+        <R as Regime<f64, DOF>>::Prim: symbi_hydro::state::PrimFromSlots<f64, DOF>,
+    {
+        self.store.prepare_checkpoint_halo_with(&self.physics)
+    }
+
+    /// write back the conserved halo `prepare_checkpoint_halo` replaced
+    pub fn restore_checkpoint_halo(&self, saved: &[Vec<f64>]) {
+        self.store.restore_checkpoint_halo(saved);
+    }
+
     pub fn fill_conserved_ghosts(&self)
     where
         <R as Regime<f64, DOF>>::Prim: symbi_hydro::state::PrimFromSlots<f64, DOF>,

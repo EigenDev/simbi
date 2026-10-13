@@ -162,11 +162,18 @@ def test_a_refined_locally_isothermal_launch_matches_the_single_hierarchy_fresh_
 
 
 def _assert_same_levels(got: Path, want: Path, label: str) -> None:
-    # every cell dataset of every level, the cells trimmed of their halo (the periodic root's
-    # conserved halo ring is the writer's), and every face dataset whole
-    from simbi.simulation.tests.test_launch_refined_numerics import _all_levels
+    # every cell and face dataset of every level whole, the halos included: every writer publishes
+    # the conserved halo from the halo primitives the boundary and exchange machinery filled
+    def datasets(path: Path) -> dict[str, np.ndarray]:
+        out: dict[str, np.ndarray] = {}
+        with h5py.File(path, "r") as f:
+            for level in (k for k in f.keys() if k.startswith("level_")):
+                f[level].visititems(lambda n, obj, lv=level: out.__setitem__(f"{lv}/{n}", obj[()])
+                                    if isinstance(obj, h5py.Dataset) and not n.startswith("mesh") else None)
+        return out
 
-    xs, ys = _all_levels(got), _all_levels(want)
+    xs, ys = datasets(got), datasets(want)
+    assert any(name.startswith("level_1/") for name in ys), f"{label}: the reference has no refined level; the gate is vacuous"
     assert xs.keys() == ys.keys(), f"{label}: datasets {sorted(set(xs) ^ set(ys))} differ"
     for name, x in xs.items():
         np.testing.assert_array_equal(x, ys[name], err_msg=f"{label}: {name}")

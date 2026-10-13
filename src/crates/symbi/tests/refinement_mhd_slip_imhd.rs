@@ -334,8 +334,13 @@ fn a_refined_isothermal_slip_run_resumes_from_a_checkpoint_bit_for_bit() {
         uninterrupted.step_root_with_dt(DT);
         resumed.step_root_with_dt(DT);
     }
-    if let Some(m) = first_mismatch(&labeled_snapshot(&uninterrupted), &labeled_snapshot(&resumed), false) {
-        panic!("the resumed run diverges from the uninterrupted one at {m}");
+    // every entry beside the conserved ghosts: no stage reads or writes the conserved halo
+    // (refinement_mhd_2p5d::no_stage_reads_or_writes_the_conserved_halo), and a checkpoint
+    // publishes it as the conserved state of the halo primitives
+    let conserved_ghost = |l: &str| l.contains(" ghost ") && [" den ", " mom0 ", " mom1 ", " mom2 "].iter().any(|n| l.contains(n));
+    let (a, b) = (labeled_snapshot(&uninterrupted), labeled_snapshot(&resumed));
+    if let Some(((l, x), _)) = a.iter().zip(&b).find(|((la, x), (_, y))| x != y && !conserved_ghost(la)) {
+        panic!("the resumed run diverges from the uninterrupted one at {l}: {:e}", f64::from_bits(*x));
     }
 }
 

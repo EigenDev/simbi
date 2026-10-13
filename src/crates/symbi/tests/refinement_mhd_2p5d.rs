@@ -442,7 +442,84 @@ fn a_refined_2p5d_isothermal_slip_run_resumes_from_a_checkpoint_bit_for_bit() {
         uninterrupted.step_root_with_dt(DT);
         resumed.step_root_with_dt(DT);
     }
-    assert!(snapshot(&uninterrupted) == snapshot(&resumed), "the resumed run diverges");
+    // every stored word beside the conserved halo, which no stage reads or writes
+    // (no_stage_reads_or_writes_the_conserved_halo) and a checkpoint publishes from the halo
+    // primitives
+    assert!(snapshot_beside_the_conserved_halo(&uninterrupted) == snapshot_beside_the_conserved_halo(&resumed), "the resumed run diverges");
+}
+
+// `snapshot` with the conserved state over the interior alone
+fn snapshot_beside_the_conserved_halo(hier: &IsoH) -> Vec<u64> {
+    let mut v = Vec::new();
+    for l in &hier.levels {
+        let sim = &l.state;
+        let m = sim.fields.mhd.as_ref().unwrap();
+        for c in sim.geom.allocated.iter() {
+            if sim.geom.interior.contains(c) {
+                v.push(sim.fields.cons.den.at(c).to_bits());
+                for k in 0..3 {
+                    v.push(sim.fields.cons.mom[k].at(c).to_bits());
+                }
+            }
+            for k in 0..3 {
+                v.push(m.bcell[k].at(c).to_bits());
+            }
+        }
+        for d in 0..2 {
+            for c in m.bface[d].domain().iter() {
+                v.push(m.bface[d].at(c).to_bits());
+            }
+        }
+        v.push(sim.time.to_bits());
+        v.push(sim.iteration);
+        if let Some(im) = sim.immersed.as_ref() {
+            let b = im.bodies.get(0);
+            if let BodyKind::BlackHole { total_accreted_mass, accretion_rate, .. } = b.kind {
+                v.push(total_accreted_mass.to_bits());
+                v.push(accretion_rate.to_bits());
+            }
+            v.push(b.slip_heat_total.to_bits());
+        }
+    }
+    v
+}
+
+// the conserved halo is storage no stage touches: a refined slip run whose conserved halo is
+// poisoned with NaN on every level after a step evolves its interior, cell field and faces bit for
+// bit as the clean run does over two more steps, and the poison is still in place, so no stage
+// wrote the halo before reading it either. a checkpoint may therefore publish the halo from the
+// halo primitives without changing a resumed run's evolution.
+#[test]
+fn no_stage_reads_or_writes_the_conserved_halo() {
+    let run = |poison: bool| {
+        let mut h = iso(Some(sink(slip_spec())));
+        h.step_root_with_dt(DT);
+        if poison {
+            for l in &h.levels {
+                let s = &l.state;
+                for c in s.geom.allocated.iter().filter(|c| !s.geom.interior.contains(*c)) {
+                    s.fields.cons.den.set(c, f64::NAN);
+                    for k in 0..3 {
+                        s.fields.cons.mom[k].set(c, f64::NAN);
+                    }
+                }
+            }
+        }
+        for _ in 0..2 {
+            h.step_root_with_dt(DT);
+        }
+        let poisoned: usize = h
+            .levels
+            .iter()
+            .map(|l| l.state.geom.allocated.iter().filter(|c| l.state.fields.cons.den.at(*c).is_nan()).count())
+            .sum();
+        (live_snapshot(&h), poisoned)
+    };
+    let ((clean, none), (dirty, poisoned)) = (run(false), run(true));
+    assert_eq!(none, 0, "the clean run carries NaN");
+    let halo: usize = iso(None).levels.iter().map(|l| l.state.geom.allocated.volume() - l.state.geom.interior.volume()).sum();
+    assert_eq!(poisoned, halo, "a stage wrote the conserved halo");
+    assert!(clean == dirty, "a stage read the conserved halo");
 }
 
 fn l2_rel(a: &[f64], b: &[f64]) -> f64 {
