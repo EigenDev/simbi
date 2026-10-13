@@ -5,7 +5,8 @@
 // periodic vortex threaded by an in-plane field and a sheared vertical field, draining onto a
 // slip sink, advanced a few root steps and hashed over every interior conserved value, cell field,
 // and stored face. the refined 2.5D hierarchy composes this step; the single grid is unchanged
-// by that composition.
+// by that composition. the slip solver's inner products and body heat are exact sums rounded
+// once, which the pinned hash records.
 // =============================================================================
 
 use symbi::regimes::substrate_newtonian_mhd::NewtonianMhdSubstrateKernelSet;
@@ -96,4 +97,4 @@ fn the_2p5d_adiabatic_slip_sink_fingerprint_holds() {
     assert_eq!(h, FINGERPRINT, "the single-grid 2.5D adiabatic slip path changed");
 }
 
-const FINGERPRINT: u64 = 0x9a4cb779bb2193e3;
+const FINGERPRINT: u64 = 0x1ecd6bd87a501419;

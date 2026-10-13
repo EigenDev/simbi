@@ -5,7 +5,9 @@
 // in-plane field and a 3D isothermal box with a magnetic-slip sink, each advanced a few root steps
 // and hashed over every interior conserved value, cell field, and stored face. the isothermal
 // closure carries a prescribed sound-speed field; a run whose field is uniform is this run, so
-// the hashes hold across that field's introduction and any later change to the closure.
+// the hashes hold across that field's introduction and any later change to the closure. the
+// slip solver's inner products and body heat are exact sums rounded once, which the 3D hash
+// records.
 // =============================================================================
 
 use symbi::regimes::substrate_isothermal_mhd::IsothermalMhdSubstrateKernelSet;
@@ -133,4 +135,4 @@ fn the_3d_isothermal_slip_sink_fingerprint_holds() {
 }
 
 const FINGERPRINT_2P5D: u64 = 0x6dfa4ab720c0cd33;
-const FINGERPRINT_3D: u64 = 0xfde53997de2c34df;
+const FINGERPRINT_3D: u64 = 0x9c1596142a1aee23;
