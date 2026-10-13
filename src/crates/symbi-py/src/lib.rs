@@ -5391,6 +5391,22 @@ fn tile_partition<const D: usize>(n: [usize; D], cfg: &Config) -> Result<Partiti
     };
     // the declared boundaries the cuts must carry
     whole_grid::<D>(cfg).admits_cuts(partition.counts())?;
+    // a tile's halo fills from the tiles beside it, so every tile spans at least the halo width
+    let ng = ghost_width(cfg);
+    let counts = partition.counts();
+    for ax in 0..D {
+        for k in 0..counts[ax] {
+            let mut tc = [0; D];
+            tc[ax] = k;
+            let width = partition.tile_extents(tc)[ax].1;
+            if width < ng {
+                return Err(format!(
+                    "tile {k} along axis {ax} spans {width} cell(s), fewer than the {ng}-cell halo the \
+                     tiles beside it fill; place the cuts so every tile spans at least {ng} cells"
+                ));
+            }
+        }
+    }
     Ok(partition)
 }
 

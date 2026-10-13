@@ -71,6 +71,7 @@ class Probe(SimbiProblem):
     boundary_conditions: Annotated[list[Any], ProblemParam(_bcs(), description="walls")]
     end_time: Annotated[float, ProblemParam(1.0, cli=True, checkpoint_safe=True, description="t")]
     gpus: Annotated[int, ProblemParam(OV.get("gpus", 1), cli=True, description="devices")]
+    decompose: Annotated[list[list[int]], ProblemParam(OV.get("decompose", []), description="cuts")]
     refinement_enabled: Annotated[bool, ProblemParam(bool(OV.get("regions")), description="refined")]
     refinement_max_levels: Annotated[int, ProblemParam(1 + len(OV.get("regions", [])), description="levels")]
     refinement_regions: Annotated[list[list[float]], ProblemParam(OV.get("regions", []), description="boxes")]
@@ -228,6 +229,20 @@ def test_a_magnetic_slip_body_is_refused_on_launched_workers_as_on_host_tiles(tm
                "--resolution", "32,32,1", "--data-directory", str(tmp_path / f"out{workers}"), "--checkpoint-interval", "1e9"]
         done = subprocess.run(cmd, capture_output=True, text=True, timeout=600, env=_env({}))
         _assert_refused(done, tmp_path / f"out{workers}", reason, f"slip body on {workers} launched worker(s)")
+
+
+def test_a_tile_narrower_than_the_halo_is_refused_by_name_on_host_tiles_and_launch(tmp_path: Path, probe: Path) -> None:
+    # the cuts at 7 and 8 leave a one-cell tile between two wide ones; the plm halo is two cells
+    # deep and fills from the tiles beside it alone
+    reason = "spans 1 cell(s), fewer than the 2-cell halo"
+    settings = {"gpus": 3, "decompose": [[7, 8], []]}
+    _assert_refused(_single(probe, settings, tmp_path / "tiles", gpus=3), tmp_path / "tiles", reason, "a one-cell tile on host tiles")
+    layout = _layout(tmp_path / "three.toml", workers=3, cuts=[[7, 8], []])
+    _assert_refused(_launch(probe, {}, tmp_path / "launched", layout), tmp_path / "launched", reason, "a one-cell tile launched")
+    # the two-cell tile the same cuts leave one cell over runs
+    wide = {"gpus": 3, "decompose": [[7, 9], []]}
+    done = _single(probe, wide, tmp_path / "wide", gpus=3)
+    assert done.returncode == 0, f"a two-cell tile was refused:\n{done.stderr[-2000:]}"
 
 
 def test_a_launch_reads_its_tile_count_from_the_layout(tmp_path: Path, probe: Path) -> None:
