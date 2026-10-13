@@ -864,37 +864,44 @@ pub fn write_checkpoint<R, const D: usize, const DOF: usize, M, E, S, Mem>(
     extras: &Metadata,
 ) -> Result<()>
 where
-    R: Regime<f64, D>,
-    M: Metric<f64, D> + Copy,
-    E: Eos<f64>,
+    R: Regime<f64, D, Energy = <R as Regime<f64, DOF>>::Energy> + Regime<f64, DOF>,
+    M: Metric<f64, D> + Metric<f64, DOF> + Copy,
+    E: symbi_hydro::eos::EosFor<f64, <R as Regime<f64, D>>::Energy>,
     S: ExecutionSpace,
     Mem: MemorySpace,
+    <R as Regime<f64, DOF>>::Cons: symbi_hydro::state::SeedableCons<f64, DOF>,
+    <R as Regime<f64, DOF>>::Prim: symbi_hydro::state::PrimFromSlots<f64, DOF>,
 {
-    write_partitioned_checkpoint::<R, D, DOF, Mem>(
-        &PhysicsIdentity::of(sim),
-        &[LevelTiles::whole(&sim.store)],
-        path,
-        extras,
-    )
+    write_hierarchy_checkpoint(&[sim], path, extras)
 }
 
 /// write every level of a hierarchy, each held whole by one state, into one file: `levels[0]`
 /// is the coarse level and authors the global metadata.
+///
+/// every level's conserved halo is published as the conserved state of its halo primitives
+/// (`prepare_checkpoint_halo`) and restored once the file is written.
 pub fn write_hierarchy_checkpoint<R, const D: usize, const DOF: usize, M, E, S, Mem>(
     levels: &[&SimStateGeneric<R, D, DOF, M, E, S, Mem>],
     path: &str,
     extras: &Metadata,
 ) -> Result<()>
 where
-    R: Regime<f64, D>,
-    M: Metric<f64, D> + Copy,
-    E: Eos<f64>,
+    R: Regime<f64, D, Energy = <R as Regime<f64, DOF>>::Energy> + Regime<f64, DOF>,
+    M: Metric<f64, D> + Metric<f64, DOF> + Copy,
+    E: symbi_hydro::eos::EosFor<f64, <R as Regime<f64, D>>::Energy>,
     S: ExecutionSpace,
     Mem: MemorySpace,
+    <R as Regime<f64, DOF>>::Cons: symbi_hydro::state::SeedableCons<f64, DOF>,
+    <R as Regime<f64, DOF>>::Prim: symbi_hydro::state::PrimFromSlots<f64, DOF>,
 {
+    let saved: Vec<_> = levels.iter().map(|s| s.prepare_checkpoint_halo()).collect();
     let tiles: Vec<LevelTiles<'_, D, DOF, Mem>> =
         levels.iter().map(|s| LevelTiles::whole(&s.store)).collect();
-    write_partitioned_checkpoint::<R, D, DOF, Mem>(&PhysicsIdentity::of(levels[0]), &tiles, path, extras)
+    let written = write_partitioned_checkpoint::<R, D, DOF, Mem>(&PhysicsIdentity::of(levels[0]), &tiles, path, extras);
+    for (s, halo) in levels.iter().zip(&saved) {
+        s.restore_checkpoint_halo(halo);
+    }
+    written
 }
 
 // =============================================================================

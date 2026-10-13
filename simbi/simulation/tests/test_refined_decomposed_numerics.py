@@ -225,21 +225,9 @@ def test_a_periodic_refined_run_on_four_tiles_matches_the_single_hierarchy(tmp_p
     walled = _fresh_kh(tmp_path / "walled", 1, boundary_conditions="outflow")
     assert any(not np.array_equal(x, _datasets(walled)[n]) for n, x in _datasets(single).items()), "the seams left the run unchanged; the wrap is never exercised"
     tiles = _fresh_kh(tmp_path / "tiles", 4, decompose=[[26], [36]])
-    # the conserved halo ring holds no state (no stage reads it and no exchange moves it); on a
-    # periodic root the single writer leaves it zero and the tiled writer fills it, so it is
-    # trimmed here and every other dataset is compared whole
-    xs, ys = _datasets(tiles), _datasets(single)
-    assert xs.keys() == ys.keys(), f"dataset sets differ: {sorted(xs.keys() ^ ys.keys())}"
-    with h5py.File(single, "r") as f:
-        ng = {lv: int(f[lv]["mesh"].attrs["halo_width"]) for lv in f if lv.startswith("level_")}
-    for name, x in xs.items():
-        level, _, field = name.partition("/")
-        if field.startswith("conserved/"):
-            h = ng[level]
-            x, y = x[h:-h, h:-h], ys[name][h:-h, h:-h]
-        else:
-            y = ys[name]
-        assert x.shape == y.shape and np.array_equal(x, y), f"four refined tiles wrapping both axes: {name} differs"
+    # every dataset compares whole, the conserved halo included: every writer publishes it as the
+    # conserved state of its halo primitives
+    _assert_same(tiles, single, "four refined tiles wrapping both axes")
 
 
 def test_a_patch_spanning_a_cut_periodic_axis_on_host_tiles_matches_the_single_hierarchy(tmp_path: Path, host_tiles) -> None:
@@ -251,17 +239,7 @@ def test_a_patch_spanning_a_cut_periodic_axis_on_host_tiles_matches_the_single_h
     assert any(not np.array_equal(x, _datasets(walled)[n]) for n, x in _datasets(single).items()), "the seam left the spanning run unchanged"
     for gpus, cuts in ((2, [[26], []]), (4, [[20], [36]])):
         tiles = _fresh_kh(tmp_path / f"tiles{gpus}", gpus, decompose=cuts, **spanning)
-        xs, ys = _datasets(tiles), _datasets(single)
-        assert xs.keys() == ys.keys(), f"dataset sets differ: {sorted(xs.keys() ^ ys.keys())}"
-        with h5py.File(single, "r") as f:
-            ng = {lv: int(f[lv]["mesh"].attrs["halo_width"]) for lv in f if lv.startswith("level_")}
-        for name, x in xs.items():
-            level, _, field = name.partition("/")
-            y = ys[name]
-            if field.startswith("conserved/"):
-                h = ng[level]
-                x, y = x[h:-h, h:-h], y[h:-h, h:-h]
-            assert x.shape == y.shape and np.array_equal(x, y), f"{gpus} refined tiles cut across the periodic axis: {name} differs"
+        _assert_same(tiles, single, f"{gpus} refined tiles cut across the periodic axis")
 
 
 # a second kh box spanning the whole periodic x axis inside the first; the tiles cut across x
@@ -321,22 +299,6 @@ def _nested_kh_launch(script: Path, layout: Path, out: Path) -> list[str]:
             "--resolution", "64,64", "--checkpoint-interval", "1e9", "--data-directory", str(out)]
 
 
-def _assert_same_trimmed(got: Path, want: Path, label: str) -> None:
-    # the conserved datasets carry the halo ring a periodic root leaves zero on the single writer
-    # and filled on the tiled writers; every interior value and every other dataset compares whole
-    xs, ys = _datasets(got), _datasets(want)
-    assert xs.keys() == ys.keys(), f"{label}: dataset sets differ: {sorted(xs.keys() ^ ys.keys())}"
-    with h5py.File(want, "r") as f:
-        ng = {lv: int(f[lv]["mesh"].attrs["halo_width"]) for lv in f if lv.startswith("level_")}
-    for name, x in xs.items():
-        level, _, field = name.partition("/")
-        y = ys[name]
-        if field.startswith("conserved/"):
-            h = ng[level]
-            x, y = x[h:-h, h:-h], y[h:-h, h:-h]
-        assert x.shape == y.shape and np.array_equal(x, y), f"{label}: {name} differs"
-
-
 ONE_BOX = "refinement_max_levels=2, refinement_ratios=[2], refinement_regions=[[-0.5, 0.5, -0.375, 0.375]], "
 
 
@@ -363,7 +325,7 @@ def test_a_nested_patch_under_a_patch_spanning_a_cut_periodic_axis_matches_the_s
     one = _datasets(runs["one box"])
     assert any(not np.array_equal(x, one[n]) for n, x in _datasets(runs["single"]).items() if n in one), "the second box left the run unchanged"
     for label in ("two host tiles", "three uneven host tiles", "two workers", "three uneven workers"):
-        _assert_same_trimmed(runs[label], runs["single"], label)
+        _assert_same(runs[label], runs["single"], label)
 
 
 SPANNING_KH = {
