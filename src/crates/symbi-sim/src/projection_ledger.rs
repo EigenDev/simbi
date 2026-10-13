@@ -347,6 +347,21 @@ pub fn ledger_report() -> (ProjectionLedger, ProjectionLedger) {
     })
 }
 
+/// make the (attempted, accepted) ledgers a run closed on another thread this thread's book, so
+/// the evidence of a run executed on a thread of its own reads back where the run was started. a
+/// scope must be closed first.
+pub fn ledger_adopt(attempted: ProjectionLedger, accepted: ProjectionLedger) {
+    with_book(|b| {
+        assert!(!b.open, "projection ledger adopted inside an open scope");
+        *b = Book {
+            open: false,
+            attempted,
+            accepted,
+            pending: ProjectionLedger::identity(),
+        };
+    });
+}
+
 /// clear this thread's book between runs. a scope must be closed first.
 pub fn ledger_reset() {
     with_book(|b| {

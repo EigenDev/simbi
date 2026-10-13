@@ -8882,19 +8882,56 @@ fn validate_passive_scalar(cfg: &Config) -> Result<(), String> {
 const RUN_STACK_BYTES: usize = 512 * 1024 * 1024;
 
 /// run `f` on a thread of its own with `RUN_STACK_BYTES` of stack, the caller blocked until it
-/// returns; a panic on that thread resumes on the caller
+/// returns; a panic on that thread resumes on the caller. the projection ledger the run booked on
+/// its thread becomes the caller's, where `projection_ledger_report` reads it
 fn on_run_stack<T: Send>(f: impl FnOnce() -> T + Send) -> T {
-    std::thread::scope(|scope| {
+    let (value, (attempted, accepted)) = std::thread::scope(|scope| {
         let run = std::thread::Builder::new()
             .name("simbi-run".into())
             .stack_size(RUN_STACK_BYTES)
-            .spawn_scoped(scope, f)
+            .spawn_scoped(scope, || (f(), symbi_sim::projection_ledger::ledger_report()))
             .expect("the run thread starts");
         match run.join() {
-            Ok(value) => value,
+            Ok(done) => done,
             Err(payload) => std::panic::resume_unwind(payload),
         }
-    })
+    });
+    symbi_sim::projection_ledger::ledger_adopt(attempted, accepted);
+    value
+}
+
+#[cfg(test)]
+mod run_stack_tests {
+    use super::on_run_stack;
+    use symbi_sim::projection_ledger::{self, ProjectionReceipt};
+
+    /// the projection ledger a run books on its own thread is the one `projection_ledger_report`
+    /// reads on the caller once the run returns
+    #[test]
+    fn the_caller_reads_the_projection_ledger_the_run_booked() {
+        projection_ledger::ledger_reset();
+        on_run_stack(|| {
+            let scope = projection_ledger::open_scope();
+            let mut receipt = ProjectionReceipt::empty();
+            receipt.fired = true;
+            receipt.projected_cells = 3;
+            receipt.min_theta = 0.25;
+            projection_ledger::record(&receipt, 1.0);
+            projection_ledger::step_commit();
+            drop(scope);
+        });
+        let (attempted, accepted) = projection_ledger::ledger_report();
+        assert_eq!((attempted.passes_fired, attempted.projected_cells), (1, 3));
+        assert_eq!((accepted.passes_fired, accepted.projected_cells, accepted.min_theta), (1, 3, 0.25));
+    }
+
+    /// a panic on the run thread resumes on the caller with its own payload
+    #[test]
+    fn a_panic_on_the_run_thread_resumes_on_the_caller() {
+        let caught = std::panic::catch_unwind(|| on_run_stack(|| panic!("the run failed")));
+        let payload = caught.expect_err("the panic reached the caller");
+        assert_eq!(payload.downcast_ref::<&str>(), Some(&"the run failed"));
+    }
 }
 
 /// runtime dispatch on the config tags -> a monomorphized sim. hydro regimes
