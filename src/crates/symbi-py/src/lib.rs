@@ -96,6 +96,9 @@ struct Config {
     max_dt: f64,
     // the retry guard's thresholds; the built-in values when the problem names none
     retry_max_rejections: u32,
+    /// the temporary storage, in MiB per host, a locally isothermal closure on refined tiles may
+    /// take to rebuild each level's whole patch
+    closure_staging_mb: usize,
     retry_severe_ratio: f64,
     retry_sustained_steps: u32,
     cyl_plane: CylPlane,
@@ -1405,6 +1408,7 @@ fn parse_config(dict: &Bound<'_, PyDict>) -> PyResult<Config> {
         kerr_spin: get_f64_or(dict, "kerr_spin", 0.0),
         max_dt: get_f64_or(dict, "max_dt", 0.0),
         retry_max_rejections: get_f64_or(dict, "retry_max_rejections", symbi_sim::retry_guard::RetryGuard::default().max_rejections as f64) as u32,
+        closure_staging_mb: get_f64_or(dict, "closure_staging_mb", CLOSURE_STAGING_DEFAULT_MB as f64) as usize,
         retry_severe_ratio: get_f64_or(dict, "retry_severe_ratio", symbi_sim::retry_guard::RetryGuard::default().severe_ratio),
         retry_sustained_steps: get_f64_or(dict, "retry_sustained_steps", symbi_sim::retry_guard::RetryGuard::default().sustained_steps as f64) as u32,
         cyl_plane,
@@ -4172,6 +4176,99 @@ fn builds_horizon_body(cfg: &Config) -> bool {
     cfg.spacetime != "minkowski" && cfg.coord_system == "cartesian" && cfg.excision_radius > 0.0
 }
 
+/// the host budget for the temporary whole-patch closure, in MiB, when the run names none
+const CLOSURE_STAGING_DEFAULT_MB: usize = 512;
+
+/// the single hierarchy's root ghost depth for the isothermal closure's whole patch: the builder's
+/// default, which the single isothermal paths keep
+const CLOSURE_ROOT_NG: usize = 2;
+
+/// a locally isothermal run's whole levels and its root's whole closure field, built as the single
+/// hierarchy builds them: cs^2 = p / rho over the root interior from the initial rows (pressure in
+/// column `pressure`), continued into the root's ghosts by `rule`'s own continuation. refused by
+/// name when the levels down to `deepest` need more temporary storage than `workers` sharing this
+/// host leave the run's budget
+fn whole_closure_root<const D: usize>(
+    cfg: &Config,
+    prims: &[Vec<f64>],
+    pressure: usize,
+    rule: symbi::sim::refinement::closure_patch::ClosureRule,
+    deepest: usize,
+    workers: usize,
+) -> Result<(Vec<symbi::sim::refinement::closure_patch::WholeLevel<D>>, Field<f64, D, DefaultMemory>), String> {
+    use symbi::sim::refinement::closure_patch::{ClosureRule, clamp_into_ghosts, closure_peak_bytes, whole_levels};
+    let n: [usize; D] = std::array::from_fn(|ax| cfg.n_cells[ax]);
+    let regions = refinement_regions_nd::<D>(&cfg.refinement_regions)?;
+    let levels = whole_levels(
+        n,
+        CLOSURE_ROOT_NG,
+        boundaries_nd::<D>(&cfg.boundaries),
+        std::array::from_fn(|ax| cfg.x_lo[ax]),
+        std::array::from_fn(|ax| cfg.dx[ax]),
+        &regions,
+    );
+    let mib = |bytes: usize| bytes.div_ceil(1 << 20);
+    let peak = closure_peak_bytes(&levels, deepest);
+    let needed = mib(peak) * workers;
+    if needed > cfg.closure_staging_mb {
+        return Err(format!(
+            "a locally isothermal closure on refined tiles rebuilds each level's whole patch: {needed} MiB \
+             of temporary storage on this host ({workers} process(es) x {} MiB) exceeds the {} MiB budget; \
+             set closure_staging_mb >= {needed} to admit it",
+            mib(peak),
+            cfg.closure_staging_mb
+        ));
+    }
+    let root: Field<f64, D, DefaultMemory> = Field::zeros(&levels[0].allocated).map_err(|e| format!("root closure: {e:?}"))?;
+    for g in levels[0].interior.iter() {
+        let row = &prims[global_lin::<D>(&[0; D], &g, &n)];
+        root.set(g, row[pressure] / row[0]);
+    }
+    match rule {
+        ClosureRule::Clamp => clamp_into_ghosts(&root, &levels[0].allocated, &levels[0].interior),
+        ClosureRule::Extend => symbi_sim::state::extend_closure_into_ghosts(&root, &levels[0].allocated, &levels[0].interior, &levels[0].boundaries),
+    }
+    Ok((levels, root))
+}
+
+/// install a locally isothermal run's whole-patch closure on its refined tiles, every level built
+/// as the single hierarchy builds it and sliced at each tile cell's whole-grid index: `$set(level,
+/// cell, value)` stores a value where the regime keeps its closure. the seed then leaves each
+/// level's closure as it stands
+macro_rules! install_refined_closure {
+    ($tiles:expr, $cfg:expr, $prims:expr, $d:literal, $pressure:expr, $rule:expr, $workers:expr, set = |$level:ident, $cell:ident, $value:ident| $set:expr) => {{
+        use symbi::sim::refinement::closure_patch::build_whole_patch_closure;
+        let deepest = $tiles.iter().map(|t| t.levels.len()).max().unwrap_or(1) - 1;
+        let (levels, root) = whole_closure_root::<$d>($cfg, $prims, $pressure, $rule, deepest, $workers)?;
+        let slice = |l: usize, whole: &Field<f64, $d, DefaultMemory>| -> Result<(), String> {
+            for tile in $tiles.iter().filter(|t| t.levels.len() > l) {
+                let $level = &tile.levels[l];
+                let offset = $level.state.geom.index_offset;
+                for $cell in $level.state.geom.allocated.iter() {
+                    let g: [isize; $d] = std::array::from_fn(|ax| $cell[ax] + offset[ax]);
+                    if !levels[l].allocated.contains(g) {
+                        return Err(format!(
+                            "level {l}: tile cell {:?} lies past the whole patch's allocated cells; the \
+                             tiles' ghost depth exceeds the single hierarchy's",
+                            g
+                        ));
+                    }
+                    let $value = *whole.at(g);
+                    $set;
+                }
+            }
+            Ok(())
+        };
+        slice(0, &root)?;
+        let order = prolong_order_for(&$cfg.reconstruction_name);
+        let peak = build_whole_patch_closure(&levels, root, order, $rule, deepest, |l, whole| slice(l, whole))?;
+        for tile in $tiles.iter_mut() {
+            tile.closure_prescribed = true;
+        }
+        eprintln!("SIMBI closure: the whole-patch closure peaked at {} MiB of temporary storage", peak.div_ceil(1 << 20));
+    }};
+}
+
 /// the radius of the horizon ledger's diagnostic shell: 1.5 r_+ of the schwarzschild hole, outside
 /// the horizon and the excised core
 fn horizon_diagnostic_radius(cfg: &Config) -> f64 {
@@ -6669,6 +6766,16 @@ macro_rules! build_and_run_hydro_decomposed_refined {
     (
         $cfg:expr, $prims:expr, $regime:expr, $regime_ty:ty, $d:literal, $geom:expr, $geom_ty:ty,
         $eos:expr, $eos_ty:ty, prim = |$row:ident| $prim:expr, kernels = |$s:ident, $role:ident| $kernels:expr
+    ) => {
+        build_and_run_hydro_decomposed_refined!(
+            $cfg, $prims, $regime, $regime_ty, $d, $geom, $geom_ty, $eos, $eos_ty,
+            prim = |$row| $prim, kernels = |$s, $role| $kernels, closure = |_tiles| {}
+        )
+    };
+    (
+        $cfg:expr, $prims:expr, $regime:expr, $regime_ty:ty, $d:literal, $geom:expr, $geom_ty:ty,
+        $eos:expr, $eos_ty:ty, prim = |$row:ident| $prim:expr, kernels = |$s:ident, $role:ident| $kernels:expr,
+        closure = |$closure_tiles:ident| $closure:expr
     ) => {{
         use symbi::sim::decomp::unflatten;
         use symbi::sim::refinement::launched::receiving_faces_of_tile;
@@ -6795,6 +6902,11 @@ macro_rules! build_and_run_hydro_decomposed_refined {
             })?;
             tiles.push(built);
         }
+        // a locally isothermal closure installed whole on every tile and level before the seed
+        {
+            let $closure_tiles = &mut tiles;
+            $closure;
+        }
         // fine seeding + prime, decomposition-aware and after every tile exists: the seed
         // prolongs conserved components, whose cut ghosts only the dedicated cons exchange
         // fills -- seeded per tile inside the loop, a patch spanning a cut prolongs from the
@@ -6909,7 +7021,13 @@ macro_rules! build_and_run_hydro_decomposed_refined {
 /// seed from their parents after the root cut halos are exchanged. `$prim` builds a cell's primitive
 /// from its row and its cell field.
 macro_rules! build_and_run_magnetized_decomposed_refined {
-    ($cfg:expr, $prims:expr, $bufs:expr, $regime:expr, $regime_ty:ty, $d:literal, $geom:expr, $geom_ty:ty, $eos:expr, $eos_ty:ty, $prim:expr) => {{
+    ($cfg:expr, $prims:expr, $bufs:expr, $regime:expr, $regime_ty:ty, $d:literal, $geom:expr, $geom_ty:ty, $eos:expr, $eos_ty:ty, $prim:expr) => {
+        build_and_run_magnetized_decomposed_refined!(
+            $cfg, $prims, $bufs, $regime, $regime_ty, $d, $geom, $geom_ty, $eos, $eos_ty, $prim, closure = |_tiles| {}
+        )
+    };
+    ($cfg:expr, $prims:expr, $bufs:expr, $regime:expr, $regime_ty:ty, $d:literal, $geom:expr, $geom_ty:ty, $eos:expr, $eos_ty:ty, $prim:expr,
+     closure = |$closure_tiles:ident| $closure:expr) => {{
         use symbi::sim::decomp::unflatten;
         let cfg: &Config = $cfg;
         let prims: &[Vec<f64>] = $prims;
@@ -7001,6 +7119,11 @@ macro_rules! build_and_run_magnetized_decomposed_refined {
                 Ok(h)
             })?;
             tiles.push(built);
+        }
+        // a locally isothermal closure installed whole on every tile and level before the seed
+        {
+            let $closure_tiles = &mut tiles;
+            $closure;
         }
         // the fine levels seed from their parents once every tile exists and the root cut halos are
         // exchanged; prime audits each level's recovery after the seed
@@ -7967,21 +8090,24 @@ macro_rules! build_and_run_imhd_decomposed {
         type Sim = SimDefaultGeneric<IsothermalMhd, $d, 3, $geom_ty, Isothermal<f64>>;
 
         if cfg.refinement_enabled {
-            // a locally isothermal closure on refined tiles needs each fine level's closure from
-            // the whole patch, which a tile's clipped patch does not hold
-            if cfg.locally_isothermal {
-                return Err(
-                    "a locally isothermal closure with mesh refinement and gpus > 1 awaits the whole-patch \
-                     closure on each tile; run it on one device"
-                        .to_string(),
-                );
-            }
+            // a locally isothermal closure: every level's cs^2 rebuilt from the whole patch, as the
+            // single hierarchy's seed builds it
             return build_and_run_magnetized_decomposed_refined!(
                 cfg, prims, bufs, IsothermalMhd, IsothermalMhd, $d, $geom, $geom_ty, Isothermal { cs: cfg.cs }, Isothermal<f64>,
                 |row: &Vec<f64>, mag: [f64; 3]| MhdPrimG::<f64, 3, IsoModel>::new(
                     PrimG::isothermal(Density(row[0]), Tensor::new([row[1], row[2], row[3]])),
                     Tensor::new(mag),
-                )
+                ),
+                closure = |tiles| if cfg.locally_isothermal {
+                    install_refined_closure!(
+                        tiles, cfg, prims, $d, 4, symbi::sim::refinement::closure_patch::ClosureRule::Extend, 1,
+                        set = |level, cell, value| {
+                            if let Some(dst) = level.state.fields.cs2.as_ref() {
+                                dst.set(cell, value);
+                            }
+                        }
+                    );
+                }
             );
         }
 
@@ -8293,20 +8419,24 @@ macro_rules! build_and_run_iso_decomposed {
         type Sim = SimDefault<IsoNewtonian, $d, $geom_ty, Isothermal<f64>>;
 
         if cfg.refinement_enabled {
-            // a locally isothermal closure on refined tiles needs each fine level's closure from
-            // the whole patch, which a tile's clipped patch does not hold
-            if cfg.locally_isothermal {
-                return Err(
-                    "a locally isothermal closure with mesh refinement and gpus > 1 awaits the whole-patch \
-                     closure on each tile; run it on one device"
-                        .to_string(),
-                );
-            }
             let settings = KernelSettings::of(cfg, <IsoNewtonian as Regime<f64, $d>>::SPEC);
+            // a locally isothermal closure: every level's cs^2 rebuilt from the whole patch, in the
+            // kernel set and the state alike, as the single hierarchy holds it
             return build_and_run_hydro_decomposed_refined!(
                 cfg, prims, IsoNewtonian, IsoNewtonian, $d, $geom, $geom_ty, Isothermal { cs: cfg.cs }, Isothermal<f64>,
                 prim = |row| PrimG::<f64, $d, IsoModel>::isothermal(Density(row[0]), Tensor::new(std::array::from_fn(|k| row[1 + k]))),
-                kernels = |s, _role| iso_kernels(s.substrate(), &settings).expect("tile kernel set")
+                kernels = |s, _role| iso_kernels(s.substrate(), &settings).expect("tile kernel set"),
+                closure = |tiles| if cfg.locally_isothermal {
+                    install_refined_closure!(
+                        tiles, cfg, prims, $d, 1 + $d, symbi::sim::refinement::closure_patch::ClosureRule::Clamp, 1,
+                        set = |level, cell, value| {
+                            level.kernels.cs2.set(cell, value);
+                            if let Some(dst) = level.state.fields.cs2.as_ref() {
+                                dst.set(cell, value);
+                            }
+                        }
+                    );
+                }
             );
         }
         let n: [usize; $d] = std::array::from_fn(|ax| cfg.n_cells[ax]);
@@ -11297,10 +11427,6 @@ fn validate_refined_launch_scope(cfg: &Config) -> Result<(), String> {
             return refused(&format!("a nested magnetized patch on the periodic face of axis {ax}"));
         }
     }
-    // the refined worker hierarchy seeds no per-cell closure field on its levels
-    if cfg.locally_isothermal {
-        return refused("a locally isothermal closure");
-    }
     if cfg.excision_radius > 0.0 && !launched_refined_gr(cfg) {
         return refused("excision");
     }
@@ -11694,6 +11820,19 @@ fn run_refined_worker_process(
                         let sim = with_tile_dye!(sim, cfg, tile_lo, n, flat);
                         tiles.push(refined_tile(cfg, &layout, flat, &whole, &tile, sim, kernels_of)?);
                     }
+                    // a locally isothermal closure: every level's cs^2 rebuilt from the whole patch,
+                    // in the kernel set and the state alike, every worker of the host holding one
+                    if cfg.locally_isothermal {
+                        install_refined_closure!(
+                            tiles, cfg, prims, $d, 1 + $d, symbi::sim::refinement::closure_patch::ClosureRule::Clamp, launch.workers,
+                            set = |level, cell, value| {
+                                level.kernels.cs2.set(cell, value);
+                                if let Some(dst) = level.state.fields.cs2.as_ref() {
+                                    dst.set(cell, value);
+                                }
+                            }
+                        );
+                    }
                     seed_refined_worker_tracers(cfg, &mut tiles, || {
                         Ok(Sim::build(IsoNewtonian, Isothermal { cs: cfg.cs }, Cartesian)
                             .placed(&whole, &whole.single())
@@ -11763,6 +11902,18 @@ fn run_refined_worker_process(
                             .with_rollback_snapshot()
                             .map_err(|e| format!("tile {flat} rollback snapshot: {e:?}"))?;
                         tiles.push(refined_tile(cfg, &layout, flat, &whole, &tile, sim, kernels_of)?);
+                    }
+                    // a locally isothermal closure: every level's cs^2 rebuilt from the whole patch, as
+                    // the single hierarchy's seed builds it, every worker of the host holding one
+                    if cfg.locally_isothermal {
+                        install_refined_closure!(
+                            tiles, cfg, prims, $d, 4, symbi::sim::refinement::closure_patch::ClosureRule::Extend, launch.workers,
+                            set = |level, cell, value| {
+                                if let Some(dst) = level.state.fields.cs2.as_ref() {
+                                    dst.set(cell, value);
+                                }
+                            }
+                        );
                     }
                     seed_refined_worker_tracers(cfg, &mut tiles, || {
                         Ok(Sim::build(IsothermalMhd, Isothermal { cs: cfg.cs }, Cartesian)

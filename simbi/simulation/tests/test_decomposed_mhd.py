@@ -25,9 +25,11 @@ import subprocess
 import sys
 from pathlib import Path
 
+import h5py
 import numpy as np
 import pytest
 
+from simbi.simulation.tests.checkpoint_compare import assert_same_checkpoint
 from simbi.simulation.tests.test_launch_refined_numerics import _all_levels
 
 pytestmark = pytest.mark.simulation
@@ -111,7 +113,9 @@ def test_refined_tiles_resume_onto_another_partition(tmp_path: Path) -> None:
     _assert_same(resumed, want, "resumed onto three uneven refined tiles")
 
 
-def test_a_locally_isothermal_refined_run_on_tiles_is_refused(tmp_path: Path) -> None:
+def test_a_locally_isothermal_refined_run_on_tiles_carries_the_single_hierarchy(tmp_path: Path) -> None:
+    # the closure p / rho varies with the vortex's x velocity, across the fine box and every cut;
+    # the tiles rebuild it over the whole patch at startup and slice their cells from it
     script = tmp_path / "local.py"
     script.write_text(
         "from typing import Annotated\n"
@@ -127,22 +131,33 @@ def test_a_locally_isothermal_refined_run_on_tiles_is_refused(tmp_path: Path) ->
         "        gas, *fields = super().initial_primitive_state()\n\n"
         "        def local():\n"
         "            for row in gas():\n"
-        "                yield (*row, 1.0)\n\n"
+        "                yield (*row, row[0] * (1.0 + 0.3 * row[1]))\n\n"
         "        return (local, *fields)\n"
     )
     env = dict(os.environ, SYMBI_GPU_OVERSUBSCRIBE="1", PYTHONPATH=os.pathsep.join([str(tmp_path), os.getcwd(), os.environ.get("PYTHONPATH", "")]))
-    out = tmp_path / "out"
-    snippet = (
-        "import sys\n"
-        "from simbi.simulation import runner\n"
-        "from local import LocalRefined\n"
-        "runner.run(LocalRefined(resolution=(32, 32, 1), gpus=2, checkpoint_interval=1e9, data_directory=sys.argv[1]), compute_mode='cpu', max_steps=1)\n"
-    )
-    done = subprocess.run([sys.executable, "-c", snippet, str(out)], capture_output=True, text=True, timeout=900, env=env)
-    assert done.returncode != 0, "refined tiles ran a locally isothermal closure"
-    flat = " ".join(done.stderr.split())
-    assert "a locally isothermal closure with mesh refinement and gpus > 1 awaits the whole-patch closure" in flat, done.stderr[-1500:]
-    assert not list(out.glob("*.h5")), "output was written before the refusal"
+
+    def run(out: Path, gpus: int, decompose=None) -> Path:
+        cuts = "" if decompose is None else f", decompose={decompose!r}"
+        snippet = (
+            "import sys\n"
+            "from simbi.simulation import runner\n"
+            "from local import LocalRefined\n"
+            f"runner.run(LocalRefined(resolution=(32, 32, 1), gpus={gpus}{cuts}, checkpoint_interval=1e9, data_directory=sys.argv[1]), compute_mode='cpu', max_steps=3)\n"
+        )
+        done = subprocess.run([sys.executable, "-c", snippet, str(out)], capture_output=True, text=True, timeout=900, env=env)
+        assert done.returncode == 0, f"{gpus} device(s) failed:\n{done.stderr[-3000:]}"
+        (final,) = sorted(out.glob("*final*.h5"))
+        return final
+
+    want = run(tmp_path / "single", 1)
+    with h5py.File(want, "r") as f:
+        names: list[str] = []
+        f["level_1"].visit(lambda name: names.append(name) if name.endswith("iso_cs2") else None)
+        fine = f["level_1"][names[0]][()]
+    assert np.ptp(fine) > 1e-3 * np.abs(fine).max(), "the fine closure is uniform; the comparison is vacuous"
+    for gpus, decompose in ((2, None), (3, [[12, 20], []]), (6, [[12, 20], [14]])):
+        got = run(tmp_path / f"tiles{gpus}", gpus, decompose)
+        assert_same_checkpoint(got, want, f"locally isothermal refined vortex on {gpus} tiles", exclude=("body_diagnostics",))
 
 
 VORTEX_3D = "from simbi_configs.examples.newtonian.refined_mhd_3d import RefinedMhd3D as Base"

@@ -287,6 +287,19 @@ class SimbiProblem(BaseModel):
             description="consecutive severely reduced root steps that end the run",
         ),
     ]
+    # the temporary storage a locally isothermal closure on refined tiles takes to rebuild each
+    # level's whole patch at startup, per host; a run needing more is refused by name
+    closure_staging_mb: Annotated[
+        int,
+        ProblemParam(
+            512,
+            gt=0,
+            cli=True,
+            checkpoint_safe=True,
+            description="host budget in MiB for the temporary whole-patch closure of a locally "
+            "isothermal run on refined tiles",
+        ),
+    ]
     regime: Annotated[Regime, ProblemParam(..., description="physics regime")]
     bounds: Annotated[
         Sequence[Sequence[float]],

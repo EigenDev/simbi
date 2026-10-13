@@ -650,6 +650,15 @@ def test_refined_isothermal_tiles_carry_the_single_hierarchy(tmp_path: Path, hos
         _assert_same(got, want, f"refined isothermal blob on {gpus} tiles")
 
 
+def _closure(path: Path, level: str) -> np.ndarray:
+    """a level's locally isothermal closure, cs^2, as the checkpoint publishes it"""
+    with h5py.File(path, "r") as f:
+        names: list[str] = []
+        f[level].visit(lambda name: names.append(name) if name.endswith("iso_cs2") else None)
+        assert names, f"{path.name} publishes no closure on {level}"
+        return f[level][names[0]][()]
+
+
 def test_a_refined_isothermal_run_resumed_on_tiles_continues_the_uninterrupted_one(tmp_path: Path, host_tiles) -> None:
     from simbi_configs.examples.isothermal.refined_isothermal_blob import RefinedIsothermalBlob
 
@@ -664,9 +673,30 @@ def test_a_refined_isothermal_run_resumed_on_tiles_continues_the_uninterrupted_o
         _assert_same(resumed, want, f"refined isothermal blob resumed onto {gpus} tiles")
 
 
-def test_a_locally_isothermal_refined_run_on_tiles_is_refused(tmp_path: Path, host_tiles) -> None:
+def test_a_locally_isothermal_refined_run_on_tiles_carries_the_single_hierarchy(tmp_path: Path, host_tiles) -> None:
     from simbi_configs.examples.isothermal.refined_locally_iso import RefinedLocallyIso
 
-    with pytest.raises(Exception, match="a locally isothermal closure with mesh refinement and gpus > 1 awaits the whole-patch closure"):
-        _run(RefinedLocallyIso, tmp_path / "tiles", 2, resolution=(32, 32))
+    # the fine box covers root cells 8..24 of 32 on both axes; the closure varies across it and
+    # across every cut, which the tiles slice from the whole patch rebuilt at startup. the root is
+    # periodic, so the conserved halo ring is compared trimmed
+    resolution = (32, 32, 1)
+    want = _run(RefinedLocallyIso, tmp_path / "single", 1, resolution=resolution)
+    fine = _closure(want, "level_1")
+    assert np.ptp(fine) > 1e-3 * np.abs(fine).max(), "the fine closure is uniform; the comparison is vacuous"
+    for gpus, decompose in ((2, None), (3, [[12, 20], []]), (6, [[12, 20], [14]])):
+        extra = {} if decompose is None else {"decompose": decompose}
+        got = _run(RefinedLocallyIso, tmp_path / f"tiles{gpus}", gpus, resolution=resolution, **extra)
+        _assert_same_trimmed(got, want, f"locally isothermal refined run on {gpus} tiles")
+    # resumed onto another partition, the run continues the uninterrupted one
+    partial = _run(RefinedLocallyIso, tmp_path / "partial", 2, steps=STEPS // 2, resolution=resolution)
+    resumed = _run(RefinedLocallyIso, tmp_path / "resumed", 3, resolution=resolution, decompose=[[12, 20], []], checkpoint_file=str(partial))
+    _assert_same_trimmed(resumed, want, "locally isothermal refined run resumed onto three tiles")
+
+
+def test_a_locally_isothermal_refined_run_past_its_closure_budget_is_refused(tmp_path: Path, host_tiles) -> None:
+    from simbi_configs.examples.isothermal.refined_locally_iso import RefinedLocallyIso
+
+    # a 512^2 root rebuilds about 7 MiB of whole-patch closure, past a 1 MiB budget
+    with pytest.raises(Exception, match="a locally isothermal closure on refined tiles rebuilds each level's whole patch"):
+        _run(RefinedLocallyIso, tmp_path / "tiles", 2, resolution=(512, 512, 1), closure_staging_mb=1)
     assert not list((tmp_path / "tiles").glob("*.h5")), "output was written before the refusal"

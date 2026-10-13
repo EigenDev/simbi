@@ -421,6 +421,9 @@ where
     /// set while `prime` builds the initial state: the fine face halo is left to the first
     /// substep's prolongation, whose parent face stencil is gathered after the root stages
     priming: bool,
+    /// every level's locally isothermal closure was installed whole from the run's whole patch,
+    /// so the seed leaves each level's cs^2 as it stands
+    pub closure_prescribed: bool,
     /// a tile of a decomposed hierarchy: each level's tracer stage leaves the ancestry blend to
     /// the driver, which ranks the level's ids across every tile
     blend_across_tiles: bool,
@@ -1136,7 +1139,7 @@ where
             // continued into the remaining ghosts. the clip bites where a refined patch runs out to
             // the edge of a decomposed tile; there the continuation equals the prolongation of a
             // uniform cs^2, the globally isothermal closure the tiled drivers admit.
-            if let (Some(ccs), Some(fcs)) = (coarse.fields.cs2.as_ref(), fine.fields.cs2.as_ref()) {
+            if let (false, Some(ccs), Some(fcs)) = (self.closure_prescribed, coarse.fields.cs2.as_ref(), fine.fields.cs2.as_ref()) {
                 let mut band = region.clone();
                 for ax in 0..NDIM {
                     band = band.extend(ax, -2, 2);
@@ -1288,6 +1291,7 @@ where
             face_entry: None,
             level_face_entry: Vec::new(),
             priming: false,
+            closure_prescribed: false,
             blend_across_tiles: false,
             pending_interface: None,
             continuous_domain: None,
@@ -1878,6 +1882,7 @@ where
             face_entry: None,
             level_face_entry: Vec::new(),
             priming: false,
+            closure_prescribed: false,
             blend_across_tiles: false,
             pending_interface: None,
             continuous_domain: None,
@@ -5468,7 +5473,7 @@ fn shell_around<const D: usize>(cov: &Domain<D>, interior: &Domain<D>) -> Domain
 /// from the shared global origin.
 /// the cells of `region` on a lattice of origin `x_lo` and spacing `dx` whose local cell 0 is
 /// whole-grid cell `offset`, in local indices
-fn region_to_domain<const D: usize>(
+pub(crate) fn region_to_domain<const D: usize>(
     region: &RefinementRegion<D>,
     x_lo: &[f64; D],
     dx: &[f64; D],

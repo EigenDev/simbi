@@ -21,6 +21,7 @@
 //  hier.evolve(t_final)?;
 // =============================================================================
 
+pub mod closure_patch;
 pub mod emf_register;
 pub mod equilibrium;
 pub mod flux_register;

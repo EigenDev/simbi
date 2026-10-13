@@ -143,24 +143,30 @@ def test_an_isothermal_magnetized_launch_with_a_correction_against_the_cut_match
     assert _max_div_b(launched) < 1e-10
 
 
-def test_a_refined_locally_isothermal_launch_resumed_from_a_checkpoint_is_refused_by_name(tmp_path: Path) -> None:
-    # a resumed launch passes the same front door before any tile is built or seeded; the
-    # reference stops at root iteration 1, so the cap of 2 leaves the resume one step to take
-    reference = _script_reference(RefinedLocallyIso.__module__, "RefinedLocallyIso", (16, 16, 1), tmp_path / "single", 1)
-    layout = _layout(tmp_path / "two.toml", workers=2, shape=(2, 1))
-    cmd = [sys.executable, "-m", "simbi.cli", "launch", LOCAL_ISO_SCRIPT, "--layout", str(layout), "--max-steps", "2", "--resolution", "16,16,1",
-           "--data-directory", str(tmp_path / "out"), "--checkpoint-interval", "1e9", "--checkpoint", str(reference)]
-    done = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
-    assert done.returncode != 0, f"the resumed launch succeeded:\n{done.stdout}"
-    flat = " ".join(done.stderr.split())
-    assert "a locally isothermal closure with mesh refinement is outside the distributed first release" in flat, done.stderr
-    assert not list((tmp_path / "out").glob("*.h5")), "a checkpoint was published"
+def test_a_refined_locally_isothermal_launch_matches_the_single_hierarchy_fresh_and_resumed(tmp_path: Path) -> None:
+    # the closure varies across the fine box and the cuts; every worker rebuilds the whole patch's
+    # closure at startup and slices its tiles' cells from it, as the single hierarchy holds them
+    want = _script_reference(RefinedLocallyIso.__module__, "RefinedLocallyIso", (32, 32, 1), tmp_path / "single", 4)
+    with h5py.File(want, "r") as f:
+        names: list[str] = []
+        f["level_1"].visit(lambda name: names.append(name) if name.endswith("iso_cs2") else None)
+        fine = f["level_1"][names[0]][()]
+    assert np.ptp(fine) > 1e-3 * np.abs(fine).max(), "the fine closure is uniform; the comparison is vacuous"
+    four = _layout(tmp_path / "four.toml", workers=4, cuts=[[12], [14]])
+    got = _script_launch(LOCAL_ISO_SCRIPT, (32, 32, 1), tmp_path / "four", four, 4, workers=4)
+    _assert_same_levels(got, want, "locally isothermal refined launch on four workers")
+    two = _layout(tmp_path / "two.toml", workers=2, shape=(2, 1))
+    first = _script_launch(LOCAL_ISO_SCRIPT, (32, 32, 1), tmp_path / "first", two, 2, workers=2)
+    resumed = _script_launch(LOCAL_ISO_SCRIPT, (32, 32, 1), tmp_path / "resumed", four, 4, workers=4, checkpoint=first)
+    _assert_same_levels(resumed, want, "locally isothermal refined launch resumed onto four workers")
 
 
-def test_a_refined_locally_isothermal_launch_is_refused_by_name(tmp_path: Path) -> None:
-    layout = _layout(tmp_path / "two.toml", workers=2, shape=(2, 1))
-    cmd = [sys.executable, "-m", "simbi.cli", "launch", LOCAL_ISO_SCRIPT, "--layout", str(layout), "--max-steps", "1", "--resolution", "16,16,1", "--data-directory", str(tmp_path / "out"), "--checkpoint-interval", "1e9"]
-    done = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
-    assert done.returncode != 0, f"the launch succeeded:\n{done.stdout}"
-    flat = " ".join(done.stderr.split())
-    assert "a locally isothermal closure with mesh refinement is outside the distributed first release" in flat, done.stderr
+def _assert_same_levels(got: Path, want: Path, label: str) -> None:
+    # every cell dataset of every level, the cells trimmed of their halo (the periodic root's
+    # conserved halo ring is the writer's), and every face dataset whole
+    from simbi.simulation.tests.test_launch_refined_numerics import _all_levels
+
+    xs, ys = _all_levels(got), _all_levels(want)
+    assert xs.keys() == ys.keys(), f"{label}: datasets {sorted(set(xs) ^ set(ys))} differ"
+    for name, x in xs.items():
+        np.testing.assert_array_equal(x, ys[name], err_msg=f"{label}: {name}")
