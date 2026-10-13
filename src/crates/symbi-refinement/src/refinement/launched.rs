@@ -2288,42 +2288,6 @@ pub fn refined_checkpoint<R, const D: usize, const DOF: usize, M, E, S, Mem, K, 
     audit: bool,
 ) -> Result<(), WorkerError>
 where
-    R: Regime<f64, D, Energy = <R as Regime<f64, DOF>>::Energy> + Regime<f64, DOF> + Copy,
-    M: Metric<f64, D> + Metric<f64, DOF> + Copy + Send + Sync,
-    E: symbi_hydro::eos::EosFor<f64, <R as Regime<f64, D>>::Energy> + Copy + Send + Sync,
-    S: ExecutionSpace,
-    Mem: MemorySpace + Sync,
-    K: KernelSet<D, DOF, Mem, f64>,
-    L: Link,
-    <R as Regime<f64, DOF>>::Cons: symbi_hydro::state::SeedableCons<f64, DOF>,
-    <R as Regime<f64, DOF>>::Prim: symbi_hydro::state::PrimFromSlots<f64, DOF>,
-{
-    // every held tile level's conserved halo published as the conserved state of its halo
-    // primitives, restored once the file is written
-    let halos: Vec<Vec<_>> = tiles.iter().map(|h| h.levels.iter().map(|l| l.state.prepare_checkpoint_halo()).collect()).collect();
-    let written = refined_checkpoint_levels(tiles, held, plans, grids, identity, req, fabric, accepted, audit);
-    for (h, tile_halos) in tiles.iter().zip(&halos) {
-        for (l, halo) in h.levels.iter().zip(tile_halos) {
-            l.state.restore_checkpoint_halo(halo);
-        }
-    }
-    written
-}
-
-/// the levels of `refined_checkpoint` written as they stand
-#[allow(clippy::too_many_arguments)]
-fn refined_checkpoint_levels<R, const D: usize, const DOF: usize, M, E, S, Mem, K, L>(
-    tiles: &[Hierarchy<R, D, DOF, M, E, S, Mem, K>],
-    held: &Held<'_>,
-    plans: &RefinedPlans<'_, D>,
-    grids: &RefinedGrids<D>,
-    identity: &PhysicsIdentity,
-    req: &CheckpointRequest<'_>,
-    fabric: &mut Fabric<L>,
-    accepted: u64,
-    audit: bool,
-) -> Result<(), WorkerError>
-where
     R: Regime<f64, D> + Copy,
     M: Metric<f64, D> + Copy + Send + Sync,
     E: symbi_hydro::eos::EosFor<f64, <R as Regime<f64, D>>::Energy> + Copy + Send + Sync,

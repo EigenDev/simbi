@@ -40,6 +40,7 @@ use symbi_geometry::{
     SchwarzschildKSCylindrical, SchwarzschildKSCylindricalRz,
 };
 use symbi_hydro::energy::IsoModel;
+use symbi_hydro::eos::Eos;
 use symbi_hydro::isothermal::IsoNewtonian;
 use symbi_hydro::mhd_state::MhdPrimG;
 use symbi_hydro::regime::Regime;
@@ -2696,14 +2697,12 @@ fn run_loop<R, const D: usize, const DOF: usize, M, E, S, Mem, K>(
     cfg: &Config,
 ) -> Result<symbi_sim::run_diagnostics::RunDiagnostics, Box<dyn std::error::Error>>
 where
-    R: Regime<f64, D, Energy = <R as Regime<f64, DOF>>::Energy> + Regime<f64, DOF>,
+    R: Regime<f64, D>,
     M: Metric<f64, D> + Metric<f64, DOF> + Copy + Send + Sync,
     E: symbi_hydro::eos::EosFor<f64, <R as Regime<f64, D>>::Energy> + Send + Sync,
     S: ExecutionSpace,
     Mem: MemorySpace + Sync,
     K: KernelSet<D, DOF, Mem, f64>,
-    <R as Regime<f64, DOF>>::Cons: symbi_hydro::state::SeedableCons<f64, DOF>,
-    <R as Regime<f64, DOF>>::Prim: symbi_hydro::state::PrimFromSlots<f64, DOF>,
 {
     let data_dir = &cfg.data_dir;
     let guard = retry_guard_of(cfg);
@@ -6015,15 +6014,13 @@ fn run_decomposed_loop<R, const D: usize, const DOF: usize, M, E, S, Mem, K>(
     residuals: Option<Vec<symbi_sim::state::ConsFieldsGeneric<D, DOF, Mem>>>,
 ) -> Result<symbi_sim::run_diagnostics::RunDiagnostics, String>
 where
-    R: Regime<f64, D, Energy = <R as Regime<f64, DOF>>::Energy> + Regime<f64, DOF> + Copy,
-    M: Metric<f64, D> + Metric<f64, DOF> + Copy + Send + Sync,
-    E: symbi_hydro::eos::EosFor<f64, <R as Regime<f64, D>>::Energy> + Copy + Send + Sync,
+    R: Regime<f64, D>,
+    M: Metric<f64, D> + Copy + Send + Sync,
+    E: Eos<f64> + Send + Sync,
     S: ExecutionSpace,
     Mem: MemorySpace + Sync,
     K: KernelSet<D, DOF, Mem, f64>,
     Cartesian: Metric<f64, D>,
-    <R as Regime<f64, DOF>>::Cons: symbi_hydro::state::SeedableCons<f64, DOF>,
-    <R as Regime<f64, DOF>>::Prim: symbi_hydro::state::PrimFromSlots<f64, DOF>,
 {
     use symbi::sim::decomp::{enable_peer_mesh, evolve_scheduled_hooked};
     use symbi_sim::checkpoint::{
@@ -6038,13 +6035,11 @@ where
                 .map_err(|e| format!("restart of tile {flat} from '{path}': {e}"))?;
         }
     }
-    // one checkpoint write from the tiles as they stand: every tile streams its owned block, its
-    // conserved halo published as the conserved state of its halo primitives and restored after
+    // one checkpoint write from the tiles as they stand: every tile streams its owned block.
     let identity = symbi_sim::checkpoint::PhysicsIdentity::of(&tiles[0].0);
-    let physics = tiles[0].0.physics;
-    let write_tile_level = |states: &[&symbi_sim::state::FieldStore<D, DOF, Mem, f64>],
-                            path: &str,
-                            cp_index: u64|
+    let write_tiles = |states: &[&symbi_sim::state::FieldStore<D, DOF, Mem, f64>],
+                       path: &str,
+                       cp_index: u64|
      -> Result<f64, String> {
         let level = LevelTiles {
             tiles: states
@@ -6059,17 +6054,6 @@ where
         write_partitioned_checkpoint::<R, D, DOF, Mem>(&identity, &[level], path, &checkpoint_metadata(cfg, cp_index))
             .map_err(|e| checkpoint_write_error(path, e))?;
         Ok(t_io.elapsed().as_secs_f64())
-    };
-    let write_tiles = |states: &[&symbi_sim::state::FieldStore<D, DOF, Mem, f64>],
-                       path: &str,
-                       cp_index: u64|
-     -> Result<f64, String> {
-        let halos: Vec<_> = states.iter().map(|s| s.prepare_checkpoint_halo_with(&physics)).collect();
-        let written = write_tile_level(states, path, cp_index);
-        for (s, halo) in states.iter().zip(&halos) {
-            s.restore_checkpoint_halo(halo);
-        }
-        written
     };
 
     let ntiles = tiles.len();
@@ -6357,14 +6341,12 @@ fn run_refined_decomposed_loop<R, const D: usize, const DOF: usize, M, E, S, Mem
     counts: [usize; D],
 ) -> Result<symbi_sim::run_diagnostics::RunDiagnostics, String>
 where
-    R: Regime<f64, D, Energy = <R as Regime<f64, DOF>>::Energy> + Regime<f64, DOF> + Copy,
-    M: Metric<f64, D> + Metric<f64, DOF> + Copy + Send + Sync,
+    R: Regime<f64, D> + Copy,
+    M: Metric<f64, D> + Copy + Send + Sync,
     E: symbi_hydro::eos::EosFor<f64, <R as Regime<f64, D>>::Energy> + Copy + Send + Sync,
     S: ExecutionSpace,
     Mem: MemorySpace + Sync,
     K: KernelSet<D, DOF, Mem, f64>,
-    <R as Regime<f64, DOF>>::Cons: symbi_hydro::state::SeedableCons<f64, DOF>,
-    <R as Regime<f64, DOF>>::Prim: symbi_hydro::state::PrimFromSlots<f64, DOF>,
 {
     use symbi::sim::decomp::enable_peer_mesh;
     use symbi::sim::refinement::{evolve_hierarchy_decomposed, fine_subgrid_of_level};
@@ -6533,20 +6515,10 @@ where
                 header: None,
             });
         }
-        // every tile level's conserved halo published as the conserved state of its halo
-        // primitives, restored once the file is written
-        let halos: Vec<Vec<_>> =
-            tiles.iter().map(|h| h.levels.iter().map(|l| l.state.prepare_checkpoint_halo()).collect()).collect();
         let t_io = std::time::Instant::now();
-        let written = write_partitioned_checkpoint::<R, D, DOF, Mem>(&identity, &levels, path, &checkpoint_metadata(cfg, cp_index))
+        write_partitioned_checkpoint::<R, D, DOF, Mem>(&identity, &levels, path, &checkpoint_metadata(cfg, cp_index))
             .map_err(|e| checkpoint_write_error(path, e))
-            .map(|()| t_io.elapsed().as_secs_f64());
-        for (h, tile_halos) in tiles.iter().zip(&halos) {
-            for (l, halo) in h.levels.iter().zip(tile_halos) {
-                l.state.restore_checkpoint_halo(halo);
-            }
-        }
-        written
+            .map(|()| t_io.elapsed().as_secs_f64())
     };
 
     // t=start initial condition. every device finishes its seeding before the staging reads.
@@ -13139,12 +13111,10 @@ fn worker_session<R, G, E, K, const D: usize, const DOF: usize>(
 ) -> Result<(), String>
 where
     symbi::symbi_geometry::Cartesian: symbi::symbi_geometry::Metric<f64, D>,
-    R: Regime<f64, D, Energy = <R as Regime<f64, DOF>>::Energy> + Regime<f64, DOF> + Copy,
-    G: symbi_geometry::Metric<f64, D> + symbi_geometry::Metric<f64, DOF> + Copy,
-    E: symbi_hydro::eos::EosFor<f64, <R as Regime<f64, D>>::Energy> + Copy,
+    R: Regime<f64, D>,
+    G: symbi_geometry::Metric<f64, D> + Copy,
+    E: Eos<f64>,
     K: symbi_sim::substrate_seam::KernelSet<D, DOF, DefaultMemory, f64>,
-    <R as Regime<f64, DOF>>::Cons: symbi_hydro::state::SeedableCons<f64, DOF>,
-    <R as Regime<f64, DOF>>::Prim: symbi_hydro::state::PrimFromSlots<f64, DOF>,
 {
     use symbi::sim::decomp::{LocalCopy, plan_schema};
     use symbi_fabric::rendezvous::{Identity, Rendezvous, connect};
@@ -13381,12 +13351,11 @@ where
     // the last step whose state an audit certified: a second checkpoint of the same step (the
     // final one after a cadence write) reuses that certification, its audit epoch being spent
     let certified = std::cell::Cell::new(None::<u64>);
-    let physics = tiles[0].0.physics;
-    let write_level = |sh: &[&symbi_sim::state::FieldStore<D, DOF, DefaultMemory, f64>],
-                       fabric: &mut Fabric<_>,
-                       path: &str,
-                       cp_index: u64,
-                       basis: AuditBasis|
+    let write = |sh: &[&symbi_sim::state::FieldStore<D, DOF, DefaultMemory, f64>],
+                 fabric: &mut Fabric<_>,
+                 path: &str,
+                 cp_index: u64,
+                 basis: AuditBasis|
      -> Result<f64, String> {
         let basis = match basis {
             AuditBasis::AfterStep(step) if certified.get() == Some(step) => AuditBasis::Certified(step),
@@ -13427,21 +13396,6 @@ where
             audit_total.set((n + 1, sum));
         }
         Ok(cost.checkpoint.as_secs_f64())
-    };
-    // every held tile's conserved halo published as the conserved state of its halo primitives,
-    // restored once the file is written
-    let write = |sh: &[&symbi_sim::state::FieldStore<D, DOF, DefaultMemory, f64>],
-                 fabric: &mut Fabric<_>,
-                 path: &str,
-                 cp_index: u64,
-                 basis: AuditBasis|
-     -> Result<f64, String> {
-        let halos: Vec<_> = sh.iter().map(|s| s.prepare_checkpoint_halo_with(&physics)).collect();
-        let written = write_level(sh, fabric, path, cp_index, basis);
-        for (s, halo) in sh.iter().zip(&halos) {
-            s.restore_checkpoint_halo(halo);
-        }
-        written
     };
 
     let mut stores: Vec<&mut symbi_sim::state::FieldStore<D, DOF, DefaultMemory, f64>> = Vec::new();
