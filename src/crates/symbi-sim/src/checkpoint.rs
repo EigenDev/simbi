@@ -3732,6 +3732,14 @@ where
     if let Some(a) = attr_of(&level_attrs, "iteration") {
         sim.iteration = a.as_u64(&format!("{level_path}/iteration"))?;
     }
+    // the last step's timestep, which bounds the next one's growth: the run's, then the level's
+    // own where the file carries one, as the single loader restores it
+    if let Some(a) = attr_of(&meta, "dt") {
+        sim.dt = a.as_f64("metadata/dt")?;
+    }
+    if let Some(a) = attr_of(&level_attrs, "dt") {
+        sim.dt = a.as_f64(&format!("{level_path}/dt"))?;
+    }
     let mesh = read_group(file, &format!("{level_path}/mesh"))?;
     let a_checkpoint = match attr_of(&meta, "scale_factor") {
         Some(Attr::F64(v)) => *v,

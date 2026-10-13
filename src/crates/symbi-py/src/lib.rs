@@ -6488,6 +6488,16 @@ where
                     .map_err(|e| format!("restart of tile {i} level {level} from '{path}': {e}"))?;
             }
         }
+        // every level's ghost bands and the kernel sets' own derived fields (the isothermal
+        // pressure cs^2 rho the timestep reads) follow the restored state, as the single hierarchy's
+        // resume refreshes them before its first timestep
+        for (i, tile) in tiles.iter().enumerate() {
+            symbi::symbi_xpu::with_device(i as i32, || {
+                for ll in 0..tile.levels.len() {
+                    tile.fill_physical_ghosts(ll);
+                }
+            });
+        }
     }
     let identity = PhysicsIdentity::of(&tiles[0].levels[0].state);
 

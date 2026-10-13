@@ -650,6 +650,20 @@ def test_refined_isothermal_tiles_carry_the_single_hierarchy(tmp_path: Path, hos
         _assert_same(got, want, f"refined isothermal blob on {gpus} tiles")
 
 
+def test_a_refined_isothermal_run_resumed_on_tiles_continues_the_uninterrupted_one(tmp_path: Path, host_tiles) -> None:
+    from simbi_configs.examples.isothermal.refined_isothermal_blob import RefinedIsothermalBlob
+
+    # the resumed tiles take up the last step's timestep, which bounds the growth of the next, as the
+    # single grid does; resumed onto the same partition and onto another
+    resolution = (32, 32)
+    want = _run(RefinedIsothermalBlob, tmp_path / "single", 1, resolution=resolution)
+    partial = _run(RefinedIsothermalBlob, tmp_path / "partial", 2, steps=STEPS // 2, resolution=resolution)
+    for gpus, decompose in ((2, None), (3, [[12, 20], []])):
+        extra = {} if decompose is None else {"decompose": decompose}
+        resumed = _run(RefinedIsothermalBlob, tmp_path / f"resumed{gpus}", gpus, resolution=resolution, checkpoint_file=str(partial), **extra)
+        _assert_same(resumed, want, f"refined isothermal blob resumed onto {gpus} tiles")
+
+
 def test_a_locally_isothermal_refined_run_on_tiles_is_refused(tmp_path: Path, host_tiles) -> None:
     from simbi_configs.examples.isothermal.refined_locally_iso import RefinedLocallyIso
 
