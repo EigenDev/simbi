@@ -94,7 +94,7 @@ fn samples_with(sim: &mut Sim, n: usize, scale: impl Fn(usize) -> f64) -> Vec<f6
             sim.fields.prim.rho.view_mut().set(c, s * base[i]);
         }
         sim.time = k as f64 * 0.5;
-        symbi_substrate::census_sample::sample_censuses(sim);
+        symbi_substrate::census_sample::sample_censuses(sim, Default::default());
         want.push(s);
     }
     want

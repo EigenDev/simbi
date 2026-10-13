@@ -402,7 +402,10 @@ where
         // sequence has finished and the last stage ended in a conserved-to-primitive
         // recovery, so the primitives every census reads are the ones belonging to the
         // state at `sim.time`. sampling mid-stage would bin a partially advanced state.
-        symbi_substrate::census_sample::sample_censuses(sim);
+        symbi_substrate::census_sample::sample_censuses(
+            sim,
+            symbi_substrate::census_sample::NonphysicalCells { excision_radius: kernels.excision_radius() },
+        );
 
         if sim.iteration - last_cb >= interval {
             last_cb = sim.iteration;

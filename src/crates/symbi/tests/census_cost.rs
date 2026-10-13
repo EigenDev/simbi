@@ -86,10 +86,10 @@ fn sample_ms(n_values: usize, reps: usize) -> f64 {
         CensusEvaluator::new(&census_with(n_values)).expect("census compiles"),
     ));
     // warm the compile cache and the pages before timing.
-    symbi_substrate::census_sample::sample_censuses(&mut sim);
+    symbi_substrate::census_sample::sample_censuses(&mut sim, Default::default());
     let t0 = std::time::Instant::now();
     for _ in 0..reps {
-        symbi_substrate::census_sample::sample_censuses(&mut sim);
+        symbi_substrate::census_sample::sample_censuses(&mut sim, Default::default());
     }
     t0.elapsed().as_secs_f64() * 1e3 / reps as f64
 }
@@ -205,9 +205,9 @@ fn the_scratch_is_allocated_once_and_reused_across_samples() {
         )
     };
 
-    symbi_substrate::census_sample::sample_censuses(&mut sim);
+    symbi_substrate::census_sample::sample_censuses(&mut sim, Default::default());
     let first = addr(&sim);
-    symbi_substrate::census_sample::sample_censuses(&mut sim);
+    symbi_substrate::census_sample::sample_censuses(&mut sim, Default::default());
     let second = addr(&sim);
     assert_eq!(
         first, second,
@@ -242,7 +242,7 @@ fn a_reused_scratch_carries_nothing_from_the_previous_sample() {
         CensusEvaluator::new(&census_with(1)).expect("census compiles"),
     ));
 
-    symbi_substrate::census_sample::sample_censuses(&mut sim);
+    symbi_substrate::census_sample::sample_censuses(&mut sim, Default::default());
     let before = sim.store.censuses[0].history.values()[0];
 
     // triple the density everywhere, so a sample that reflects the new state is exactly 3x and one
@@ -252,7 +252,7 @@ fn a_reused_scratch_carries_nothing_from_the_previous_sample() {
         sim.fields.prim.rho.view_mut().set(c, 3.0 * rho);
     }
     sim.time += 1.0;
-    symbi_substrate::census_sample::sample_censuses(&mut sim);
+    symbi_substrate::census_sample::sample_censuses(&mut sim, Default::default());
     let after = *sim.store.censuses[0]
         .history
         .values()
@@ -293,7 +293,7 @@ fn a_cell_that_becomes_covered_is_excluded_on_the_reused_scratch() {
 
     // uncovered first, which is what leaves a live bucket in every cell of the scratch.
     let full =
-        symbi_substrate::census_sample::level_partials(&sim, &sim.store.censuses, 0, None, None, sim.time);
+        symbi_substrate::census_sample::level_partials(&sim, &sim.store.censuses, 0, None, None, Default::default(), sim.time);
     let half = span(mid, sp.hi);
     let masked = symbi_substrate::census_sample::level_partials(
         &sim,
@@ -301,6 +301,7 @@ fn a_cell_that_becomes_covered_is_excluded_on_the_reused_scratch() {
         0,
         None,
         Some(&half),
+        Default::default(),
         sim.time,
     );
 
@@ -320,6 +321,7 @@ fn a_cell_that_becomes_covered_is_excluded_on_the_reused_scratch() {
         0,
         None,
         Some(&outer),
+        Default::default(),
         sim.time,
     );
     let sum = part + other[0].0[0];

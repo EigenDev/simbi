@@ -42,6 +42,7 @@ pub fn level_partials<R, const D: usize, const DOF: usize, M, E, S, Mem>(
     level: usize,
     cadence: Option<symbi_sim::census::Cadence>,
     covered: Option<&symbi_algebra::Domain<D>>,
+    nonphysical: NonphysicalCells,
     now: f64,
 ) -> Vec<(Vec<f64>, u64)>
 where
@@ -74,7 +75,7 @@ where
             // per-cell interpreter when it does not apply. both write into the same scratch, whose
             // every cell starts excluded, so whichever runs leaves untouched cells out of the
             // reduction rather than in bucket zero.
-            let fields = census_map_fields(sim, censuses, index, &registered.evaluator, covered).unwrap_or_else(|| {
+            let fields = census_map_fields(sim, censuses, index, &registered.evaluator, covered, nonphysical).unwrap_or_else(|| {
                 panic!(
                     "census '{}' cannot be evaluated on this store: neither the compiled map nor \
                      the per-cell interpreter applies here",
@@ -130,6 +131,7 @@ pub fn combine_partials(
 /// state immutably while appending to its series needs it mutably.
 pub fn sample_censuses<R, const D: usize, const DOF: usize, M, E, S, Mem>(
     sim: &mut SimStateGeneric<R, D, DOF, M, E, S, Mem>,
+    nonphysical: NonphysicalCells,
 ) where
     R: Regime<f64, D>,
     M: Metric<f64, D> + Copy,
@@ -141,7 +143,7 @@ pub fn sample_censuses<R, const D: usize, const DOF: usize, M, E, S, Mem>(
         return;
     }
     let time = sim.time;
-    let samples = level_partials(sim, &sim.store.censuses, 0, None, None, time);
+    let samples = level_partials(sim, &sim.store.censuses, 0, None, None, nonphysical, time);
     record_samples(sim, time, samples);
 }
 
@@ -197,6 +199,7 @@ pub fn census_map_fields<'a, R, const D: usize, const DOF: usize, M, E, S, Mem>(
     index: usize,
     ev: &symbi_sim::census::CensusEvaluator,
     covered: Option<&symbi_algebra::Domain<D>>,
+    nonphysical: NonphysicalCells,
 ) -> Option<&'a symbi_sim::census::CensusFields<D, Mem>>
 where
     R: Regime<f64, D>,
@@ -206,8 +209,11 @@ where
     Mem: MemorySpace,
 {
     let scratch = sim.census_scratch_pooled(censuses, index)?;
+    // the body and excision masks the sample time sees: a moved body changes the stamp, so a
+    // cached segment never keeps a cell the body has left out of the reduction
+    let masks = nonphysical_masks(sim, nonphysical);
     let segment_stamp = if ev.axes_are_geometry_only() {
-        Some(static_segment_stamp(sim.motion.a, covered))
+        Some(static_segment_stamp(sim.motion.a, covered, &masks))
     } else {
         None
     };
@@ -234,6 +240,7 @@ where
         if let Some(region) = covered {
             exclude_covered(ev, &scratch.segment, region);
         }
+        exclude_nonphysical(sim, ev, &scratch.segment, &masks);
         if let Some(stamp) = segment_stamp {
             *scratch.segment_stamp.lock().unwrap() = Some(stamp);
         }
@@ -248,10 +255,12 @@ where
 fn static_segment_stamp<const D: usize>(
     scale_factor: f64,
     covered: Option<&symbi_algebra::Domain<D>>,
+    masks: &NonphysicalMasks,
 ) -> u64 {
     use std::hash::{Hash, Hasher};
     let mut h = std::collections::hash_map::DefaultHasher::new();
     scale_factor.to_bits().hash(&mut h);
+    masks.stamp.hash(&mut h);
     covered.is_some().hash(&mut h);
     if let Some(domain) = covered {
         for space in &domain.spaces {
@@ -285,4 +294,99 @@ fn exclude_covered<const D: usize, Mem: MemorySpace>(
         &[],
         &[excluded],
     );
+}
+
+/// the cells of a store a census leaves out beyond its ghosts and its covered cells: a cell whose
+/// centroid lies in the excised core of a kerr-schild horizon, of radius `excision_radius`. the
+/// cells inside an immersed body's mask come from the store's own bodies.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct NonphysicalCells {
+    pub excision_radius: Option<f64>,
+}
+
+/// the masks a sample applies, posed at the sample's time, and the identity of their geometry
+struct NonphysicalMasks {
+    /// the excised core's radius and the hole's spin
+    excised: Option<(f64, f64)>,
+    /// the posed geometry of every body whose surface penalizes the gas: its interior is the
+    /// body, not gas
+    bodies: Vec<symbi_ib::sdf::SdfExpr<f64, 3>>,
+    stamp: u64,
+}
+
+/// the excised core and the interiors of the bodies whose surface acts on the gas (an accretor's
+/// drain, a porous or rigid wall), each at the position and orientation it holds now. a body that
+/// only gravitates masks nothing: the gas it pulls on is gas
+fn nonphysical_masks<R, const D: usize, const DOF: usize, M, E, S, Mem>(
+    sim: &SimStateGeneric<R, D, DOF, M, E, S, Mem>,
+    nonphysical: NonphysicalCells,
+) -> NonphysicalMasks
+where
+    R: Regime<f64, D>,
+    M: Metric<f64, D> + Copy,
+    E: Eos<f64>,
+    S: ExecutionSpace,
+    Mem: MemorySpace,
+{
+    use std::hash::{Hash, Hasher};
+    use symbi_ib::sdf::SdfExpr;
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    let spin = sim.geom.spacetime_scalars.iter().find(|(n, _)| n == "kerr_spin").map_or(0.0, |(_, v)| *v);
+    let excised = nonphysical.excision_radius.filter(|r| *r > 0.0).map(|r| (r, spin));
+    if let Some((r, a)) = excised {
+        (r.to_bits(), a.to_bits()).hash(&mut h);
+    }
+    let mut bodies = Vec::new();
+    if let Some(immersed) = sim.immersed.as_ref() {
+        for (b, body) in immersed.bodies.bodies().iter().enumerate() {
+            if !(body.has_accretion() || body.has_rigid()) {
+                continue;
+            }
+            let center: [f64; 3] = std::array::from_fn(|a| if a < D { body.position[a] } else { 0.0 });
+            let shape = match immersed.shapes.get(b).and_then(|s| s.as_ref()) {
+                Some(shape) => shape.clone().rotated(body.orientation),
+                None => match body.mask_radius() {
+                    Some(radius) => SdfExpr::Sphere { center: [0.0; 3], radius },
+                    None => continue,
+                },
+            };
+            (b, center.map(f64::to_bits), body.orientation.map(|r| r.map(f64::to_bits))).hash(&mut h);
+            body.mask_radius().map(f64::to_bits).hash(&mut h);
+            bodies.push(shape.translated(center));
+        }
+    }
+    NonphysicalMasks { excised, bodies, stamp: h.finish() }
+}
+
+/// mark the excised cells and the cells inside a masking body excluded: a cell is out when its
+/// centroid lies strictly inside the excised core (the excision kernels' own predicate) or strictly
+/// inside a body (negative signed distance). a whole-cell rule: a cell is gas or it is not
+fn exclude_nonphysical<R, const D: usize, const DOF: usize, M, E, S, Mem>(
+    sim: &SimStateGeneric<R, D, DOF, M, E, S, Mem>,
+    ev: &symbi_sim::census::CensusEvaluator,
+    segment: &symbi_grid::Field<f64, D, Mem>,
+    masks: &NonphysicalMasks,
+) where
+    R: Regime<f64, D>,
+    M: Metric<f64, D> + Copy,
+    E: Eos<f64>,
+    S: ExecutionSpace,
+    Mem: MemorySpace,
+{
+    if masks.excised.is_none() && masks.bodies.is_empty() {
+        return;
+    }
+    assert!(
+        !Mem::IS_DEVICE_ACCESSIBLE,
+        "a census over excised or masked cells on device memory awaits its device mask kernel"
+    );
+    let excluded = ev.spec().excluded_marker();
+    for c in sim.geom.interior.iter() {
+        let x = sim.geom.cell_coord(c);
+        let x3: [f64; 3] = std::array::from_fn(|a| if a < D { x[a] } else { 0.0 });
+        let excised = masks.excised.is_some_and(|(r, a)| symbi_ib::excise::ks_excised(&x3, a, r));
+        if excised || masks.bodies.iter().any(|body| body.dist(x3) < 0.0) {
+            segment.view_mut().set(c, excluded);
+        }
+    }
 }

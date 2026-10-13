@@ -3021,6 +3021,7 @@ where
             0,
             root_step,
             self.levels[0].state.composite_ownership.coverage.as_ref(),
+            self.census_nonphysical(0),
             time,
         );
         for level in 1..self.levels.len() {
@@ -3034,6 +3035,7 @@ where
                     .composite_ownership
                     .coverage
                     .as_ref(),
+                self.census_nonphysical(level),
                 time,
             );
             symbi_substrate::census_sample::combine_partials(&mut totals, partial, &ops);
@@ -3948,6 +3950,12 @@ where
     /// therefore left to the consumer.
     ///
     /// the registrations live on the root, which owns the history; a finer level defers to it.
+    /// the cells of `level` a census leaves out as nonphysical beyond its covered cells: its
+    /// excised core, from the level's own kernel set
+    fn census_nonphysical(&self, level: usize) -> symbi_substrate::census_sample::NonphysicalCells {
+        symbi_substrate::census_sample::NonphysicalCells { excision_radius: self.levels[level].kernels.excision_radius() }
+    }
+
     fn sample_per_level_censuses(&mut self, level: usize, time: f64) {
         if self.levels[0].state.store.censuses.is_empty() {
             return;
@@ -3962,6 +3970,7 @@ where
                 .composite_ownership
                 .coverage
                 .as_ref(),
+            self.census_nonphysical(level),
             time,
         );
         if partial.iter().all(|(values, _)| values.is_empty()) {
