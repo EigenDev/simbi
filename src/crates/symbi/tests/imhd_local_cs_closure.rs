@@ -191,9 +191,10 @@ fn the_fine_level_carries_the_prolonged_closure_field_with_its_ghost_band() {
     let coarse = &hier.levels[0].state;
     let fine = &hier.levels[1].state;
     let (ccs, fcs) = (coarse.fields.cs2.as_ref().unwrap(), fine.fields.cs2.as_ref().unwrap());
+    // the fine interior and two ghost cells on every side of it
     let mut band = fine.geom.interior.clone();
     for ax in 0..3 {
-        band = band.extend(ax, 2, 2);
+        band = band.extend(ax, -2, 2);
     }
     let expected: Field<f64, 3, HostMemory> = Field::zeros(&fine.geom.allocated).unwrap();
     let zero: Field<f64, 3, HostMemory> = Field::zeros(&coarse.geom.allocated).unwrap();

@@ -1139,7 +1139,7 @@ where
             if let (Some(ccs), Some(fcs)) = (coarse.fields.cs2.as_ref(), fine.fields.cs2.as_ref()) {
                 let mut band = region.clone();
                 for ax in 0..NDIM {
-                    band = band.extend(ax, 2, 2);
+                    band = band.extend(ax, -2, 2);
                 }
                 let clipped = clip_to_prolongable(&band, &coarse.geom.allocated, order).unwrap_or(region.clone());
                 let bit = (0..NDIM).any(|ax| {
