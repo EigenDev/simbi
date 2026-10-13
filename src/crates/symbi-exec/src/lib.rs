@@ -15,5 +15,6 @@
 // =============================================================================
 
 pub mod engine;
+pub use symbi_algebra::exact_sum;
 pub mod layout;
 pub mod policy;

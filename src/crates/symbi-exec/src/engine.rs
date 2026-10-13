@@ -260,6 +260,50 @@ pub fn field_reduce<Sc: Scalar + OrderedNumeric, Mem: MemorySpace, const D: usiz
     acc
 }
 
+/// the exact sum of `field` over `domain`: every cell's value added into one long accumulator,
+/// the same integer for every slab split, tile partition and visit order. the caller merges
+/// partials of other tiles or workers and rounds once with `ExactSum::value`. host memory only:
+/// a device field has no exact reduction kernel, and its approximate block reduction is no
+/// substitute
+pub fn field_sum_exact<Sc: Scalar + OrderedNumeric, Mem: MemorySpace, const D: usize>(
+    field: &symbi_grid::Field<Sc, D, Mem>,
+    domain: &symbi_algebra::Domain<D>,
+) -> crate::exact_sum::ExactSum {
+    use crate::exact_sum::ExactSum;
+    assert!(
+        !Mem::IS_DEVICE_ACCESSIBLE,
+        "an exact sum of device memory awaits its device kernel; the block reduction reassociates \
+         its terms and is no exact sum"
+    );
+    let split = symbi_algebra::nest_order(D)
+        .next()
+        .expect("Domain rank >= 1");
+    let (outer_lo, outer_hi) = (domain.spaces[split].lo, domain.spaces[split].hi);
+    let slab_sum = |ii: isize| {
+        let mut slab = domain.clone();
+        slab.spaces[split].lo = ii;
+        slab.spaces[split].hi = ii + 1;
+        let mut acc = ExactSum::new();
+        for c in slab.iter() {
+            acc.add(field.view().at(c).to_f64());
+        }
+        acc
+    };
+    const PAR_THRESHOLD: usize = 1 << 16;
+    let mut total = ExactSum::new();
+    if domain.volume() >= PAR_THRESHOLD && (outer_hi - outer_lo) > 1 {
+        use rayon::prelude::*;
+        for partial in (outer_lo..outer_hi).into_par_iter().map(slab_sum).collect::<Vec<_>>() {
+            total.merge(&partial);
+        }
+    } else if domain.volume() > 0 {
+        for ii in outer_lo..outer_hi {
+            total.merge(&slab_sum(ii));
+        }
+    }
+    total
+}
+
 /// whether a reduction's combine order is pinned, and so whether its result is
 /// bit-reproducible from run to run.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

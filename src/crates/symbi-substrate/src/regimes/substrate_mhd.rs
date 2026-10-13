@@ -973,11 +973,13 @@ where
             return true;
         }
         let gamma = self.eos_param.value();
-        let receipt = crate::regimes::mhd_substrate::magnetic_slip_solve::<D, 3, Mem, Sc>(
-            sim, dt, gamma, 1e-10, 500,
-        );
+        let receipt = symbi_sim::driver::prof("magnetic_slip_solve", || {
+            crate::regimes::mhd_substrate::magnetic_slip_solve::<D, 3, Mem, Sc>(sim, dt, gamma, 1e-10, 500)
+        });
         if receipt.converged {
-            crate::regimes::mhd_substrate::magnetic_slip_commit::<D, 3, Mem, Sc>(sim, dt, gamma);
+            symbi_sim::driver::prof("magnetic_slip_commit", || {
+                crate::regimes::mhd_substrate::magnetic_slip_commit::<D, 3, Mem, Sc>(sim, dt, gamma)
+            });
         }
         receipt.converged
     }

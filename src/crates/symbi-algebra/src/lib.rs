@@ -15,6 +15,7 @@ pub mod block;
 pub mod boundary;
 pub mod domain;
 pub mod element;
+pub mod exact_sum;
 pub mod layout;
 pub mod matrix;
 pub mod normalized;
@@ -28,6 +29,7 @@ pub use domain::{
     Axis, Domain, DomainId, IndexName, IntoAxis, IntoRange, Side, Space, Split, domain, index,
 };
 pub use element::FieldElement;
+pub use exact_sum::ExactSum;
 pub use layout::{
     CONTIGUOUS_AXIS, Layout, flat_offset, nest_order, strides_from_extent, unflatten,
 };

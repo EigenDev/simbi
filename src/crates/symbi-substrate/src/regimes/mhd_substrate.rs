@@ -29,6 +29,8 @@ use symbi_ir::ScalarRef;
 use symbi_ir::KernelId;
 use symbi_ir::emit::ReductionOp;
 use crate::regimes::substrate_gpu::field_reduce;
+use symbi_exec::engine::field_sum_exact;
+use symbi_exec::exact_sum::ExactSum;
 use symbi_xpu::MemorySpace;
 
 use symbi_aot::{Buf, BufHandle, CpuField, CpuFieldMut, KernelInvocation};
@@ -2075,7 +2077,7 @@ where
         if let Some(h) = heat.as_ref() {
             slip_cell_pass(sim, "slip_dissipation_3d", h.dt, h.bface_source, h.bz_source, &ws.dissipation_body);
             field_lincomb_over(interior, 1.0, &ws.dissipation, 1.0, &ws.dissipation_body);
-            sums.push((b, field_reduce(&ws.dissipation_body, interior, ReductionOp::Add)));
+            sums.push((b, field_sum_exact(&ws.dissipation_body, interior).value()));
         }
         for c in 0..3 {
             field_lincomb_over(interior, 1.0, &ws.quadrature.b[c], 1.0, &slip_q[c]);
@@ -2233,7 +2235,7 @@ where
         if let Some(h) = heat.as_ref() {
             slip_cell_pass(sim, "slip_dissipation_2d", h.dt, h.bface_source, h.bz_source, &ws.dissipation_body);
             field_lincomb_over(interior, 1.0, &ws.dissipation, 1.0, &ws.dissipation_body);
-            sums.push((b, field_reduce(&ws.dissipation_body, interior, ReductionOp::Add)));
+            sums.push((b, field_sum_exact(&ws.dissipation_body, interior).value()));
         }
         for c in 0..3 {
             field_lincomb_over(interior, 1.0, &ws.quadrature.b[c], 1.0, &slip_q[c]);
@@ -2373,20 +2375,20 @@ fn field_lincomb_over<const D: usize, Mem, Sc>(
 }
 
 /// the face inner product over the interior faces (one entry per unique face per orientation on
-/// a periodic domain): the pointwise product into the workspace scratch, then the field reduction,
-/// whose device path folds block partials on the host so only scalars cross.
+/// a periodic domain): the pointwise product into the workspace scratch, every component's
+/// products added into one exact sum, the same for every partition of the faces.
 fn face_dot<const D: usize, const DOF: usize, Mem, Sc>(
     sim: &FieldStore<D, DOF, Mem, Sc>,
     a: &Face<D, Mem, Sc>,
     b: &Face<D, Mem, Sc>,
     product: &Face<D, Mem, Sc>,
-) -> f64
+) -> ExactSum
 where
     Mem: MemorySpace,
     Sc: Scalar + OrderedNumeric,
 {
     let interior = &sim.geom.interior;
-    let mut s = 0.0;
+    let mut s = ExactSum::new();
     for d in 0..D {
         dispatch_fields_each::<Sc, Mem, D>(
             KernelId::FieldProduct { ndim: D as u8 }.name(),
@@ -2396,7 +2398,7 @@ where
             &[],
             &[],
         );
-        s += field_reduce(&product.b[d], interior, ReductionOp::Add);
+        s.merge(&field_sum_exact(&product.b[d], interior));
     }
     s
 }
@@ -2652,6 +2654,7 @@ fn mixed_copy_interior<const D: usize, const DOF: usize, Mem, Sc>(
 
 /// the mixed inner product: each interior face of each orientation once (one entry per unique
 /// face on a periodic domain) plus each interior cell once, all under the one uniform cell volume.
+/// the products add exactly and the total rounds once.
 fn mixed_dot<const D: usize, const DOF: usize, Mem, Sc>(
     sim: &FieldStore<D, DOF, Mem, Sc>,
     a: Mixed<'_, D, Mem, Sc>,
@@ -2672,9 +2675,9 @@ where
             &[],
             &[],
         );
-        s += field_reduce(pz, &sim.geom.interior, ReductionOp::Add);
+        s.merge(&field_sum_exact(pz, &sim.geom.interior));
     }
-    s
+    s.value()
 }
 
 /// the mixed inner product of two solve vectors through the workspace scratch: `a` and `b` are
