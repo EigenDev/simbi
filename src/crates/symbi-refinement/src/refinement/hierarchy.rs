@@ -3028,7 +3028,7 @@ where
         let registrations = &self.levels[0].state.store.censuses;
         let root_step = Some(symbi_sim::census::Cadence::RootStep);
         let time = self.levels[0].state.time;
-        let mut totals = symbi_substrate::census_sample::level_partials(
+        let mut totals = symbi_substrate::census_sample::level_partials_exact(
             &self.levels[0].state,
             registrations,
             0,
@@ -3038,7 +3038,7 @@ where
             time,
         );
         for level in 1..self.levels.len() {
-            let partial = symbi_substrate::census_sample::level_partials(
+            let partial = symbi_substrate::census_sample::level_partials_exact(
                 &self.levels[level].state,
                 registrations,
                 0,
@@ -3051,8 +3051,10 @@ where
                 self.census_nonphysical(level),
                 time,
             );
-            symbi_substrate::census_sample::combine_partials(&mut totals, partial, &ops);
+            symbi_substrate::census_sample::merge_partials(&mut totals, &partial, &ops);
         }
+        // an additive census sums every level's leaf cells exactly and rounds once
+        let totals = totals.iter().map(|p| p.round()).collect();
         symbi_substrate::census_sample::record_samples(&mut self.levels[0].state, time, totals);
     }
 

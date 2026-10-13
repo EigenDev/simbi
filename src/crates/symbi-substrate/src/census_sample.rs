@@ -36,6 +36,76 @@ use symbi_xpu::{ExecutionSpace, MemorySpace};
 /// volume: the covered coarse cells are excluded from the parent, and a fine level holding no
 /// registrations contributes nothing in their place, so the total is short by exactly the refined
 /// region and is otherwise smooth, positive and of the right order.
+pub fn level_partials_exact<R, const D: usize, const DOF: usize, M, E, S, Mem>(
+    sim: &SimStateGeneric<R, D, DOF, M, E, S, Mem>,
+    censuses: &[symbi_sim::census::RegisteredCensus],
+    level: usize,
+    cadence: Option<symbi_sim::census::Cadence>,
+    covered: Option<&symbi_algebra::Domain<D>>,
+    nonphysical: NonphysicalCells,
+    now: f64,
+) -> Vec<symbi_sim::census::CensusPartial>
+where
+    R: Regime<f64, D>,
+    M: Metric<f64, D> + Copy,
+    E: Eos<f64>,
+    S: ExecutionSpace,
+    Mem: MemorySpace,
+{
+    symbi_sim::driver::prof("census", || {
+        censuses
+            .iter()
+            .enumerate()
+            .map(|(index, registered)| {
+            // not due: an empty partial, which `merge_partials` folds as a no-op and
+            // `record_samples` skips. the alternative — dropping the entry — would misalign every
+            // registration after it, since partials are matched to registrations by position.
+            // and a registration whose declared cadence is not the one being driven here: a
+            // root-step census must not also sample inside a subcycle, and a per-level one must
+            // not also be folded into the composite root sample, or the same physical state would
+            // enter the history twice under two different tags. `None` is a driver with a single
+            // level, where the two cadences are the same instant.
+            let spec_cadence = registered.evaluator.spec().cadence();
+            if cadence.is_some_and(|c| c != spec_cadence) || !registered.is_due_at_level(now, level)
+            {
+                return symbi_sim::census::CensusPartial::None;
+            }
+            let spec = registered.evaluator.spec();
+            // the compiled map first — the same traced kernel a device runs — falling back to the
+            // per-cell interpreter when it does not apply. both write into the same scratch, whose
+            // every cell starts excluded, so whichever runs leaves untouched cells out of the
+            // reduction rather than in bucket zero.
+            let fields = census_map_fields(sim, censuses, index, &registered.evaluator, covered, nonphysical).unwrap_or_else(|| {
+                panic!(
+                    "census '{}' cannot be evaluated on this store: neither the compiled map nor \
+                     the per-cell interpreter applies here",
+                    spec.name()
+                )
+            });
+            let values: Vec<_> = fields.values.iter().collect();
+            // an additive census on host memory sums exactly, so its partials merge across levels,
+            // tiles and workers into the whole grid's sums; the device reduction combines by the op
+            if spec.op() == symbi_ir::emit::ReductionOp::Add && !Mem::IS_DEVICE_ACCESSIBLE {
+                let (sums, dropped) =
+                    symbi_exec::engine::field_segmented_sum_exact(&values, &fields.segment, &sim.geom.interior, spec.n_segments());
+                return symbi_sim::census::CensusPartial::Sums { values: sums, dropped };
+            }
+            let reduced = crate::regimes::substrate_gpu::field_segmented_reduce(
+                &values,
+                &fields.segment,
+                &sim.geom.interior,
+                spec.n_segments(),
+                spec.op(),
+            );
+            symbi_sim::census::CensusPartial::Values { values: reduced.values, dropped: reduced.dropped }
+        })
+        .collect()
+    })
+}
+
+/// `level_partials_exact` with each partial rounded: one sample per registration of this level
+/// alone
+#[allow(clippy::too_many_arguments)]
 pub fn level_partials<R, const D: usize, const DOF: usize, M, E, S, Mem>(
     sim: &SimStateGeneric<R, D, DOF, M, E, S, Mem>,
     censuses: &[symbi_sim::census::RegisteredCensus],
@@ -52,73 +122,21 @@ where
     S: ExecutionSpace,
     Mem: MemorySpace,
 {
-    symbi_sim::driver::prof("census", || {
-        censuses
-            .iter()
-            .enumerate()
-            .map(|(index, registered)| {
-            // not due: an empty partial, which `combine_partials` folds as a no-op and
-            // `record_samples` skips. the alternative — dropping the entry — would misalign every
-            // registration after it, since partials are matched to registrations by position.
-            // and a registration whose declared cadence is not the one being driven here: a
-            // root-step census must not also sample inside a subcycle, and a per-level one must
-            // not also be folded into the composite root sample, or the same physical state would
-            // enter the history twice under two different tags. `None` is a driver with a single
-            // level, where the two cadences are the same instant.
-            let spec_cadence = registered.evaluator.spec().cadence();
-            if cadence.is_some_and(|c| c != spec_cadence) || !registered.is_due_at_level(now, level)
-            {
-                return (Vec::new(), 0u64);
-            }
-            let spec = registered.evaluator.spec();
-            // the compiled map first — the same traced kernel a device runs — falling back to the
-            // per-cell interpreter when it does not apply. both write into the same scratch, whose
-            // every cell starts excluded, so whichever runs leaves untouched cells out of the
-            // reduction rather than in bucket zero.
-            let fields = census_map_fields(sim, censuses, index, &registered.evaluator, covered, nonphysical).unwrap_or_else(|| {
-                panic!(
-                    "census '{}' cannot be evaluated on this store: neither the compiled map nor \
-                     the per-cell interpreter applies here",
-                    spec.name()
-                )
-            });
-            let values: Vec<_> = fields.values.iter().collect();
-            let reduced = crate::regimes::substrate_gpu::field_segmented_reduce(
-                &values,
-                &fields.segment,
-                &sim.geom.interior,
-                spec.n_segments(),
-                spec.op(),
-            );
-            (reduced.values, reduced.dropped)
-        })
+    level_partials_exact(sim, censuses, level, cadence, covered, nonphysical, now)
+        .iter()
+        .map(|p| p.round())
         .collect()
-    })
 }
 
-/// fold one level's partial into a running total, per registration.
-///
-/// the combine is the census's own reduce op, which is why an accumulator has to be a
-/// commutative monoid: the same operator that merges two cells merges two levels, in whatever
-/// order the levels happen to be visited.
-pub fn combine_partials(
-    into: &mut [(Vec<f64>, u64)],
-    from: Vec<(Vec<f64>, u64)>,
+/// fold the partials of another level, tile or worker into running totals, per registration, by
+/// each census's reduce op
+pub fn merge_partials(
+    into: &mut [symbi_sim::census::CensusPartial],
+    from: &[symbi_sim::census::CensusPartial],
     ops: &[symbi_ir::emit::ReductionOp],
 ) {
-    for ((acc, dropped), ((add, d), op)) in into
-        .iter_mut()
-        .zip(from.into_iter().zip(ops.iter().copied()))
-    {
-        // a level that was not due contributes nothing; folding it would be a no-op anyway, but
-        // the lengths would not line up.
-        if add.is_empty() || acc.is_empty() {
-            continue;
-        }
-        for (a, b) in acc.iter_mut().zip(add) {
-            *a = symbi_sim::census::combine(op, *a, b);
-        }
-        *dropped += d;
+    for ((acc, add), op) in into.iter_mut().zip(from).zip(ops) {
+        acc.merge(add, *op);
     }
 }
 

@@ -810,6 +810,50 @@ pub fn combine(op: ReductionOp, a: f64, b: f64) -> f64 {
     }
 }
 
+/// one census's sample over part of the grid (a level, a tile, a worker), before the parts are
+/// combined: an additive census on host memory carries exact sums, which merge into the whole
+/// grid's integers and round once, whatever the partition; otherwise the values combine by the
+/// census's op (an extremal census exact in any order). `None` where the census was not due
+#[derive(Clone, Debug)]
+pub enum CensusPartial {
+    None,
+    Sums { values: Vec<symbi_algebra::ExactSum>, dropped: u64 },
+    Values { values: Vec<f64>, dropped: u64 },
+}
+
+impl CensusPartial {
+    /// fold `other` into this partial with the census's reduce op
+    pub fn merge(&mut self, other: &CensusPartial, op: ReductionOp) {
+        match (self, other) {
+            (_, CensusPartial::None) => {}
+            (me @ CensusPartial::None, theirs) => *me = theirs.clone(),
+            (CensusPartial::Sums { values, dropped }, CensusPartial::Sums { values: v, dropped: d }) => {
+                for (a, b) in values.iter_mut().zip(v) {
+                    a.merge(b);
+                }
+                *dropped += d;
+            }
+            (CensusPartial::Values { values, dropped }, CensusPartial::Values { values: v, dropped: d }) => {
+                for (a, b) in values.iter_mut().zip(v) {
+                    *a = combine(op, *a, *b);
+                }
+                *dropped += d;
+            }
+            _ => panic!("census partials of an additive and an extremal reduction cannot merge"),
+        }
+    }
+
+    /// the sample this partial rounds to: each accumulator once, and the cells outside the edges;
+    /// an empty sample where the census was not due
+    pub fn round(&self) -> (Vec<f64>, u64) {
+        match self {
+            CensusPartial::None => (Vec::new(), 0),
+            CensusPartial::Sums { values, dropped } => (values.iter().map(|v| v.value()).collect(), *dropped),
+            CensusPartial::Values { values, dropped } => (values.clone(), *dropped),
+        }
+    }
+}
+
 /// a registered census plus the samples taken so far this run segment.
 pub struct RegisteredCensus {
     pub evaluator: CensusEvaluator,

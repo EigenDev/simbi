@@ -14,9 +14,12 @@
 //     binning reads distinctly from a physics result.
 //   - the host combine is bit-reproducible across thread counts, per the fixed
 //     slab-order contract the whole-field reduce already holds.
+//   - the exact sum rounds each bucket's true sum once, whatever the split of
+//     the cells and the thread count, and keeps the cells outside the binning
+//     apart from the excluded ones.
 // =============================================================================
 
-use symbi::regimes::substrate_gpu::{ReductionOrder, field_reduce, field_segmented_reduce};
+use symbi::regimes::substrate_gpu::{ReductionOrder, field_reduce, field_segmented_reduce, field_segmented_sum_exact};
 use symbi_algebra::{Domain, Space};
 use symbi_grid::Field;
 use symbi_ir::emit::ReductionOp;
@@ -310,4 +313,82 @@ fn the_host_accumulator_is_double_precision_whatever_the_field_carrier_is() {
         "single precision did not absorb the tail here ({narrow} vs {BIG}); the magnitudes no \
          longer discriminate between the two accumulator widths"
     );
+}
+
+/// the bucket sums of `build`'s first `n_values` fields over the cells of `dom` with x in
+/// `[x_lo, x_hi)`, in exact integer arithmetic: every value is +-1 or +-1e16, an integer
+fn integer_bucket_sums(n_values: usize, x_lo: isize, x_hi: isize) -> Vec<i128> {
+    let mut sums = vec![0i128; N_SEGMENTS * n_values];
+    for c in domain().iter().filter(|c| (x_lo..x_hi).contains(&c[0])) {
+        for v in 0..n_values {
+            sums[bucket(c) as usize * n_values + v] += value(c, v as isize + 1) as i128;
+        }
+    }
+    sums
+}
+
+#[test]
+fn the_exact_bucket_sums_are_the_integer_sums_whatever_the_split() {
+    // the 1e16-against-1 mix is exactly representable cell by cell, and its true bucket sums are
+    // integers: the exact sum rounds each to the nearest double, over the whole grid or merged
+    // from two halves cut at an arbitrary column, and at any thread count
+    let (values, segment) = build(2);
+    let dom = domain();
+    let refs: Vec<&Field<f64, 2, HostMemory>> = values.iter().collect();
+    let truth = integer_bucket_sums(2, 0, NX);
+
+    let float = field_segmented_reduce(&refs, &segment, &dom, N_SEGMENTS, ReductionOp::Add);
+    let lost = float.values.iter().zip(&truth).filter(|(f, t)| f.to_bits() != (**t as f64).to_bits()).count();
+    assert!(lost > 0, "the float bucket sums are all exact; the mix exerts no pressure on the exact sum");
+
+    for threads in [1usize, 3] {
+        let pool = rayon::ThreadPoolBuilder::new().num_threads(threads).build().expect("thread pool");
+        let (whole, dropped) = pool.install(|| field_segmented_sum_exact(&refs, &segment, &dom, N_SEGMENTS));
+        assert_eq!(dropped, 0);
+        for (slot, (sum, want)) in whole.iter().zip(&truth).enumerate() {
+            assert_eq!(sum.value().to_bits(), (*want as f64).to_bits(), "slot {slot} at {threads} threads: {:e} vs {want}", sum.value());
+        }
+    }
+
+    let cut = 173;
+    let (mut left, mut right) = (dom.clone(), dom.clone());
+    left.spaces[0].hi = cut;
+    right.spaces[0].lo = cut;
+    let (mut merged, _) = field_segmented_sum_exact(&refs, &segment, &left, N_SEGMENTS);
+    let (other, _) = field_segmented_sum_exact(&refs, &segment, &right, N_SEGMENTS);
+    for (a, b) in merged.iter_mut().zip(&other) {
+        a.merge(b);
+    }
+    for (slot, (sum, want)) in merged.iter().zip(&truth).enumerate() {
+        assert_eq!(sum.value().to_bits(), (*want as f64).to_bits(), "slot {slot} merged from two halves");
+    }
+}
+
+#[test]
+fn the_exact_sum_counts_dropped_cells_and_skips_excluded_ones() {
+    // segment `n` marks a cell outside the binning, counted; a segment past it marks a cell the
+    // census excludes, counted nowhere and summed nowhere
+    let dom = domain();
+    let field = Field::<f64, 2, HostMemory>::zeros(&dom).expect("value field");
+    let segment = Field::<f64, 2, HostMemory>::zeros(&dom).expect("segment field");
+    let (mut dropped_cells, mut kept) = (0u64, 0i128);
+    for c in dom.iter() {
+        field.view_mut().set(c, 1.0);
+        let seg = match c[0] % 5 {
+            0 => {
+                dropped_cells += 1;
+                N_SEGMENTS
+            }
+            1 => N_SEGMENTS + 1,
+            _ => {
+                kept += 1;
+                bucket(c) as usize
+            }
+        };
+        segment.view_mut().set(c, seg as f64);
+    }
+    let (sums, dropped) = field_segmented_sum_exact(&[&field], &segment, &dom, N_SEGMENTS);
+    assert_eq!(dropped, dropped_cells, "every out-of-range cell is counted, and only those");
+    let total: f64 = sums.iter().map(|s| s.value()).sum();
+    assert_eq!(total, kept as f64, "only the binned cells are summed");
 }

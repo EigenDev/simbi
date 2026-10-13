@@ -461,6 +461,76 @@ pub fn field_segmented_reduce<Sc: Scalar + OrderedNumeric, Mem: MemorySpace, con
     }
 }
 
+/// the exact sums of `field_segmented_reduce` with `Add`: each of `values` summed into the bucket
+/// named by `segment` over `domain`, every bucket an exact accumulator, so the partial sums of any
+/// split of a grid (levels, tiles, workers) merge into the whole grid's integers and round once.
+/// returns `n_segments * values.len()` accumulators, indexed `segment * n_values + value`, and
+/// the cells whose segment is `n_segments` (outside the binning); a segment above that marks an
+/// excluded cell, counted in neither
+pub fn field_segmented_sum_exact<Sc: Scalar + OrderedNumeric, Mem: MemorySpace, const D: usize>(
+    values: &[&symbi_grid::Field<Sc, D, Mem>],
+    segment: &symbi_grid::Field<Sc, D, Mem>,
+    domain: &symbi_algebra::Domain<D>,
+    n_segments: usize,
+) -> (Vec<crate::exact_sum::ExactSum>, u64) {
+    use crate::exact_sum::ExactSum;
+    assert!(
+        !Mem::IS_DEVICE_ACCESSIBLE,
+        "an exact segmented sum of device memory awaits its device kernel; the block reduction \
+         reassociates its terms and is no exact sum"
+    );
+    assert!(!values.is_empty() && n_segments >= 1, "field_segmented_sum_exact: needs a value field and a segment");
+    let n_values = values.len();
+    let n_slots = n_segments * n_values;
+    let visit = |acc: &mut [ExactSum], dropped: &mut u64, c: [isize; D]| {
+        let seg = segment.view().at(c).to_f64() as usize;
+        if seg > n_segments {
+            return;
+        }
+        if seg == n_segments {
+            *dropped += 1;
+            return;
+        }
+        for (v, field) in values.iter().enumerate() {
+            acc[seg * n_values + v].add(field.view().at(c).to_f64());
+        }
+    };
+    // the sums are exact, so any grouping of the cells gives the same integers: the parallel sweep
+    // folds its slabs into one accumulator set per rayon chunk and merges the chunks
+    let fresh = || (vec![ExactSum::new(); n_slots], 0u64);
+    let merged = |(mut acc, dropped): (Vec<ExactSum>, u64), (other, d): (Vec<ExactSum>, u64)| {
+        for (total, partial) in acc.iter_mut().zip(&other) {
+            total.merge(partial);
+        }
+        (acc, dropped + d)
+    };
+    const PAR_THRESHOLD: usize = 1 << 16;
+    let split = symbi_algebra::nest_order(D)
+        .next()
+        .expect("Domain rank >= 1");
+    let (outer_lo, outer_hi) = (domain.spaces[split].lo, domain.spaces[split].hi);
+    if domain.volume() >= PAR_THRESHOLD && (outer_hi - outer_lo) > 1 {
+        use rayon::prelude::*;
+        return (outer_lo..outer_hi)
+            .into_par_iter()
+            .fold(fresh, |(mut acc, mut dropped), ii| {
+                let mut slab = domain.clone();
+                slab.spaces[split].lo = ii;
+                slab.spaces[split].hi = ii + 1;
+                for c in slab.iter() {
+                    visit(&mut acc, &mut dropped, c);
+                }
+                (acc, dropped)
+            })
+            .reduce(fresh, merged);
+    }
+    let (mut acc, mut dropped) = fresh();
+    for c in domain.iter() {
+        visit(&mut acc, &mut dropped, c);
+    }
+    (acc, dropped)
+}
+
 /// the host (f64) identity + combine for a reduction op — the CPU algebra mirroring
 /// the device's `reduction_identity_combine`.
 fn host_identity_combine(op: ReductionOp) -> (f64, fn(f64, f64) -> f64) {
