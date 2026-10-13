@@ -16,7 +16,10 @@
 #   concatenate to the uninterrupted record, with no duplicate and no extra
 #   first sample;
 # - a census sampling every refined level's own steps on tiles is refused by
-#   name before any output.
+#   name before any output;
+# - a rigid wall cut by the tiles leaves its interior out of every tile's and
+#   every worker's census: the counted cells equal an independent count of the
+#   leaf cells whose centroid lies outside the wall, unrefined and refined.
 # the censuses vary over the run and the sampling interval skips steps, so the
 # comparisons exercise the merge and the schedule.
 #
@@ -37,6 +40,7 @@ from simbi import ProblemParam
 from simbi.reader.census import read_census
 from simbi.simulation import runner
 from simbi.simulation.tests.test_launch import _layout
+from simbi.types.bodies import BodyCapability, ImmersedBodyConfig, RigidProperties
 from simbi_configs.examples.newtonian.refined_blast import RefinedBlast
 
 pytestmark = pytest.mark.simulation
@@ -89,7 +93,32 @@ class PerLevelCensusedBlast(RefinedBlast):
         return [_shells(expr.Cadence.PER_LEVEL_STEP)]
 
 
+# a wall wholly inside the refined patch [-0.25, 0.25]^2, crossed by the cuts x = 9, 12, 17 and y = 13
+WALL_CENTER, WALL_RADIUS = (0.07, -0.04), 0.17
+
+
+def _gas_cells():
+    g = expr.ExprGraph()
+    return expr.Census(name="gas", axes=[], values={"cells": expr.constant(1.0, g)}).serialize()
+
+
+class WalledBlast(RefinedBlast):
+    @property
+    def census_expressions(self):
+        return [_gas_cells()]
+
+    @property
+    def immersed_bodies(self):
+        return [ImmersedBodyConfig(capability=BodyCapability.RIGID, mass=0.0, radius=WALL_RADIUS, position=WALL_CENTER,
+                                   velocity=(0.0, 0.0), rigid=RigidProperties(inertia=1.0, apply_no_slip=True))]
+
+
+class FlatWalledBlast(WalledBlast):
+    refinement_enabled: Annotated[bool, ProblemParam(False, description="flat")]
+
+
 ARMS = {False: "FlatCensusedBlast", True: "CensusedBlast"}
+WALLED = {False: "FlatWalledBlast", True: "WalledBlast"}
 
 
 @pytest.fixture
@@ -109,8 +138,9 @@ def _run(out: Path, gpus: int, refined: bool, steps: int = STEPS, cls=None, **kw
     return _final(out)
 
 
-def _launch(tmp_path: Path, refined: bool, out: Path, layout: Path, steps: int = STEPS, checkpoint: Path | None = None) -> Path:
-    problem = ARMS[refined]
+def _launch(tmp_path: Path, refined: bool, out: Path, layout: Path, steps: int = STEPS, checkpoint: Path | None = None,
+            arms: dict = ARMS) -> Path:
+    problem = arms[refined]
     script = tmp_path / f"launched_{problem.lower()}.py"
     script.write_text(f"from simbi.simulation.tests.test_tiled_census import {problem} as Base\n\n\nclass Launched{problem}(Base):\n    pass\n")
     cmd = [sys.executable, "-m", "simbi.cli", "launch", str(script), "--layout", str(layout), "--max-steps", str(steps),
@@ -201,3 +231,37 @@ def test_a_per_level_census_on_refined_tiles_is_refused_by_name(tmp_path: Path, 
     with pytest.raises(Exception, match="samples every refined level's own steps"):
         _run(tmp_path / "tiles", 2, True, cls=PerLevelCensusedBlast)
     assert not list((tmp_path / "tiles").glob("*.h5")), "a refused run published a checkpoint"
+
+
+def _gas_cell_count(refined: bool) -> int:
+    """the leaf cells whose centroid lies outside the wall, counted from the grid alone"""
+    def outside(n: int, lo: float, hi: float, keep) -> int:
+        h = (hi - lo) / n
+        c = lo + (np.arange(n) + 0.5) * h
+        xx, yy = np.meshgrid(c, c, indexing="ij")
+        return int(np.count_nonzero(keep(xx, yy) & (np.hypot(xx - WALL_CENTER[0], yy - WALL_CENTER[1]) >= WALL_RADIUS)))
+
+    everywhere = lambda xx, yy: np.ones_like(xx, dtype=bool)  # noqa: E731
+    if not refined:
+        return outside(RESOLUTION[0], -0.5, 0.5, everywhere)
+    uncovered = lambda xx, yy: ~((np.abs(xx) < 0.25) & (np.abs(yy) < 0.25))  # noqa: E731
+    return outside(RESOLUTION[0], -0.5, 0.5, uncovered) + outside(RESOLUTION[0], -0.25, 0.25, everywhere)
+
+
+@pytest.mark.parametrize("refined", [False, True])
+def test_a_wall_cut_by_tiles_leaves_its_interior_out_of_the_census(tmp_path: Path, host_tiles, refined: bool) -> None:
+    want = _gas_cell_count(refined)
+    leaves = RESOLUTION[0] ** 2 + (3 * RESOLUTION[0] ** 2 // 4 if refined else 0)
+    assert 0 < want < leaves - 40, f"the wall masks {leaves - want} cells; the gate is vacuous"
+    cls = globals()[WALLED[refined]]
+    single = _run(tmp_path / "single", 1, refined, cls=cls)
+    gpus, cuts = (2, [[12], []]) if refined else (6, [[9, 17], [13]])
+    tiles = _run(tmp_path / "tiles", gpus, refined, cls=cls, decompose=cuts)
+    launched = _launch(tmp_path, refined, tmp_path / "launched", _layout(tmp_path / "two.toml", workers=2, cuts=[[12], []]), arms=WALLED)
+    for label, path in (("single", single), (f"{gpus} host tiles", tiles), ("two workers", launched)):
+        gas = read_census(str(path), "gas")
+        assert len(gas.time) == STEPS, f"{label}: {len(gas.time)} rows"
+        counts = gas.values.reshape(len(gas.time), -1)[:, 0]
+        np.testing.assert_array_equal(counts, np.full(STEPS, float(want)), err_msg=f"{label}: counted gas cells")
+        np.testing.assert_array_equal(gas.dropped, 0, err_msg=f"{label}: a masked cell was reported out of the bins")
+
