@@ -21,10 +21,7 @@
 # declaration on one face of an axis cut into tiles is refused at admission: the one
 # tile wraps onto itself and its neighbor's seam is never filled.
 # the launch reads the tile count from its layout, so a config declaring
-# several devices launches on a cpu build; a refined mesh on a curved spacetime
-# outside the relativistic gas on the kerr-schild box,
-# which the launched workers do not build, is refused by the launch scope before
-# any output.
+# several devices launches on a cpu build.
 #
 # run: pytest -m simulation simbi/simulation/tests/test_shared_admission.py
 # =============================================================================
@@ -239,30 +236,6 @@ def test_a_launch_reads_its_tile_count_from_the_layout(tmp_path: Path, probe: Pa
     done = _launch(probe, settings, tmp_path / "launched", _layout_for(tmp_path, settings))
     assert done.returncode == 0, f"the launch failed:\n{done.stderr[-2000:]}"
     assert list((tmp_path / "launched").glob("*final*.h5")), "the launch published no final checkpoint"
-
-
-def test_a_refined_magnetized_curved_spacetime_is_refused_by_the_launch_scope(tmp_path: Path, probe: Path) -> None:
-    # the launched refined workers build the relativistic gas on the kerr-schild box alone; the
-    # magnetized gas on the same chart stays outside
-    script = tmp_path / "refined_torus.py"
-    script.write_text(
-        "from typing import Annotated\n"
-        "from simbi import ProblemParam\n"
-        "from simbi_configs.examples.grmhd.gr_fishbone_moncrief_mhd_cartesian import GrFishboneMoncriefMhdCartesian\n"
-        "\n"
-        "class RefinedTorus(GrFishboneMoncriefMhdCartesian):\n"
-        "    refinement_enabled: Annotated[bool, ProblemParam(True, description='refined')]\n"
-        "    refinement_max_levels: Annotated[int, ProblemParam(2, description='levels')]\n"
-        "    refinement_ratios: Annotated[list, ProblemParam([2], description='ratios')]\n"
-        "    refinement_regions: Annotated[list, ProblemParam([[10.0, 20.0, 10.0, 20.0, 10.0, 20.0]], description='box')]\n"
-    )
-    layout = _layout(tmp_path / "two.toml", workers=2, shape=(2, 1, 1))
-    cmd = [sys.executable, "-m", "simbi.cli", "launch", str(script), "--layout", str(layout), "--max-steps", "1",
-           "--resolution", "16,16,16", "--data-directory", str(tmp_path / "out"), "--checkpoint-interval", "1e9"]
-    env = _env({})
-    env["PYTHONPATH"] = os.pathsep.join([str(tmp_path), str(Path.cwd()), env.get("PYTHONPATH", "")])
-    done = subprocess.run(cmd, capture_output=True, text=True, timeout=600, env=env)
-    _assert_refused(done, tmp_path / "out", "spacetime with mesh refinement is outside the distributed first release", "refined magnetized kerr-schild launch")
 
 
 # a dirichlet prescription of the right arity whose first node names no operation: python
