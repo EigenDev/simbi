@@ -1132,6 +1132,26 @@ where
         );
     }
 
+    fn excision_radius(&self) -> Option<f64> {
+        (self.excision_radius > 0.0).then_some(self.excision_radius)
+    }
+
+    /// the diagnostic-shell flux of the magnetized gas, through the same shell kernels as the
+    /// relativistic gas: the densitized rest-mass and energy face fluxes the godunov consumed
+    fn horizon_accretion(
+        &self,
+        sim: &FieldStore<D, 3, Mem, Sc>,
+        diagnostic_radius: f64,
+    ) -> Option<symbi_sim::driver::HorizonPartial> {
+        if !matches!(sim.geom.spacetime, symbi_geometry::Spacetime::SchwarzschildKS | symbi_geometry::Spacetime::KerrKS)
+            || sim.geom.coords != symbi_geometry::Geometry::Cartesian
+        {
+            return None;
+        }
+        let pre = sim.fields.prim.pre_field().expect("the relativistic magnetized gas carries prim.pre");
+        Some(crate::regimes::substrate_kernels::shell_accretion_rates(sim, pre, &self.cfl_scratch, diagnostic_radius))
+    }
+
     // horizon excision as the sweep/finalize pieces (see the RHD set): the gas
     // primitives freeze at the vacuum floor; the magnetized p2c folds the cell B into
     // the conserved rebuild; the staggered faces are never written. inert at

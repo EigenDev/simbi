@@ -290,6 +290,55 @@ where
     })
 }
 
+/// the outward flux through the diagnostic shell that one store's interior holds, as exact sums of
+/// the per-face densitized rest-mass and covariant-energy fluxes: the partials of every tile merge
+/// into the same totals the whole grid holds, and `rates` rounds each once
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct HorizonPartial {
+    pub mass: symbi_algebra::ExactSum,
+    pub nrg: symbi_algebra::ExactSum,
+}
+
+impl HorizonPartial {
+    /// the partial of a store whose outward shell fluxes total `-mdot` and `-edot`
+    pub fn from_rates(mdot: f64, edot: f64) -> Self {
+        let mut partial = Self::default();
+        partial.mass.add(-mdot);
+        partial.nrg.add(-edot);
+        partial
+    }
+
+    pub fn merge(&mut self, other: &HorizonPartial) {
+        self.mass.merge(&other.mass);
+        self.nrg.merge(&other.nrg);
+    }
+
+    /// `(mdot, edot)` into the hole: the inward fluxes, the negated outward totals
+    pub fn rates(&self) -> (f64, f64) {
+        (-self.mass.value(), -self.nrg.value())
+    }
+}
+
+/// the partial of a horizon-bearing store from its kernel set, which books the shell flux of every
+/// excising chart it builds
+pub fn horizon_partial_of<const D: usize, const DOF: usize, Mem, K>(
+    kernels: &K,
+    state: &FieldStore<D, DOF, Mem, f64>,
+    diagnostic_radius: f64,
+) -> HorizonPartial
+where
+    Mem: MemorySpace,
+    K: crate::substrate_seam::KernelSet<D, DOF, Mem, f64>,
+{
+    prof("horizon_accretion", || kernels.horizon_accretion(state, diagnostic_radius)).unwrap_or_else(|| {
+        panic!(
+            "a horizon body is attached to a store whose kernel set books no diagnostic-shell flux \
+             ({:?} spacetime, {:?} chart); its horizon ledger would read zero",
+            state.geom.spacetime, state.geom.coords
+        )
+    })
+}
+
 /// book one accepted diagnostic-shell flux receipt onto a horizon body.
 pub fn book_horizon_receipt<const D: usize, const DOF: usize, Mem>(
     state: &mut FieldStore<D, DOF, Mem, f64>,

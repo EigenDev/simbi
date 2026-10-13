@@ -334,9 +334,7 @@ where
         // diagnostic shell gives (mdot, edot) into the hole, booked onto the horizon body's ledger.
         if let Some((index, diagnostic_radius)) = horizon_request(sim) {
             let dt = sim.dt;
-            let (mdot, edot) = prof("horizon_accretion", || {
-                kernels.horizon_accretion(sim, diagnostic_radius)
-            });
+            let (mdot, edot) = symbi_sim::driver::horizon_partial_of(kernels, sim, diagnostic_radius).rates();
             book_horizon_receipt(sim, index, mdot, edot, dt);
         }
 

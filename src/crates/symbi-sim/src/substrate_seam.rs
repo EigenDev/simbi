@@ -526,17 +526,18 @@ where
     /// accreted-mass from the fluid into the side-car diagnostics, once per step. default: no-op.
     fn body_feedback(&self, _store: &FieldStore<NDIM, DOF, Mem, Sc>, _dt: f64) {}
 
-    /// the GR horizon shell-flux accretion diagnostic: the rest-mass and covariant (killing) energy
-    /// rates `(mdot, edot)` crossing a coordinate sphere at `diagnostic_radius`, measured by a
-    /// GPU Add-reduction of the per-cell outward boundary flux of `Omega = { r_ks < diagnostic_radius }`
-    /// (divergence-theorem-consistent with the godunov; `edot` is `diagnostic_radius`-invariant at
-    /// steady state). default `(0, 0)`: flat backgrounds / regimes without the baked shell kernels.
+    /// the GR horizon shell-flux accretion diagnostic: the exact sums of the per-cell outward
+    /// boundary flux of `Omega = { r_ks < diagnostic_radius }` this store's interior holds, rest
+    /// mass and covariant (killing) energy (divergence-theorem-consistent with the godunov; `edot`
+    /// is `diagnostic_radius`-invariant at steady state). the partials of every tile merge into
+    /// the whole grid's totals. `None` on a kernel set without the baked shell kernels (flat
+    /// backgrounds), where a horizon body has no ledger to book.
     fn horizon_accretion(
         &self,
         _store: &FieldStore<NDIM, DOF, Mem, Sc>,
         _diagnostic_radius: f64,
-    ) -> (f64, f64) {
-        (0.0, 0.0)
+    ) -> Option<crate::driver::HorizonPartial> {
+        None
     }
 
     /// the immersed-boundary penalization: the property-
@@ -591,6 +592,12 @@ where
     }
 
     /// the number of fill passes the excision region needs (0 = excision inert).
+    /// the radius of the kerr-schild core this kernel set excises, when it excises one: the cells
+    /// inside it hold the excision fill, not gas
+    fn excision_radius(&self) -> Option<f64> {
+        None
+    }
+
     fn excise_pass_count(&self, _store: &FieldStore<NDIM, DOF, Mem, Sc>) -> usize {
         0
     }

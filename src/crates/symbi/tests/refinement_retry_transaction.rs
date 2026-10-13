@@ -94,8 +94,8 @@ impl KernelSet<1, 1, HostMemory, f64> for RejectOnce {
         &self,
         _store: &FieldStore<1, 1, HostMemory>,
         _diagnostic_radius: f64,
-    ) -> (f64, f64) {
-        (1.0, 2.0)
+    ) -> Option<symbi_sim::driver::HorizonPartial> {
+        Some(symbi_sim::driver::HorizonPartial::from_rates(1.0, 2.0))
     }
 }
 
@@ -148,8 +148,9 @@ fn rejected_second_fine_substep_does_not_double_book_horizon_receipts() {
     else {
         unreachable!()
     };
-    // The rejected dt=0.1 attempt books 0.05 on its first fine substep before the second rejects.
-    // The accepted replay uses dt=0.05 and must contain exactly its two 0.025 receipts.
+    // the root owns the horizon ledger: the rejected dt = 0.1 attempt books 0.1 at its root tail
+    // before the second fine substep rejects, and the accepted replay at dt = 0.05 books its one
+    // root receipt of 0.05 alone, on every level's copy of the body
     assert_eq!(hierarchy.levels[0].state.dt, 0.05);
     assert!((total_accreted_mass - 0.05).abs() < 8.0 * f64::EPSILON);
     assert!((total_accreted_energy - 0.10).abs() < 8.0 * f64::EPSILON);
@@ -229,10 +230,11 @@ fn decomposed_rejection_rolls_every_tile_back_collectively() {
     for hierarchy in &tiles {
         assert_eq!(hierarchy.levels[0].state.iteration, 2, "the root did not replay the rejected step at half the timestep");
     }
-    // the run's finest level owns the horizon's receipts: the refined tile's fine level holds the
-    // accepted steps' receipts alone, the other tile (its root below the run's finest level) none
+    // the root owns the horizon's receipts: each tile's root contributes its partial (rate one),
+    // the merged rate two is booked once per accepted root step on every tile, so the accepted
+    // steps' receipts total 2 x 0.05 on every level of every tile and the rejected attempt's none
     for (tile, hierarchy) in tiles.iter().enumerate() {
-        let want = if tile == 0 { 0.05 } else { 0.0 };
+        let want = 0.1;
         let body = hierarchy.levels[hierarchy.levels.len() - 1]
             .state
             .immersed
@@ -312,8 +314,8 @@ impl KernelSet<1, 1, HostMemory, f64> for Accumulate {
         }
         self.c2p(store);
     }
-    fn horizon_accretion(&self, _store: &FieldStore<1, 1, HostMemory>, _diagnostic_radius: f64) -> (f64, f64) {
-        (0.0, 0.0)
+    fn horizon_accretion(&self, _store: &FieldStore<1, 1, HostMemory>, _diagnostic_radius: f64) -> Option<symbi_sim::driver::HorizonPartial> {
+        Some(symbi_sim::driver::HorizonPartial::from_rates(0.0, 0.0))
     }
 }
 

@@ -20,7 +20,7 @@
 // =============================================================================
 
 use crate::atlas::FieldLayout;
-use crate::driver::{advance_state_clock, book_horizon_receipt, horizon_request, prof};
+use crate::driver::{advance_state_clock, book_horizon_receipt, horizon_request};
 use crate::state::{Boundaries, BoundaryType, FieldStore, PartitionGeometry, Timestepping};
 use crate::substrate_seam::KernelSet;
 use std::ops::ControlFlow;
@@ -3433,17 +3433,15 @@ where
                 .unwrap_or_else(|e| panic!("{e}"));
             let horizon = sh.first().and_then(|store| horizon_request(*store));
             if let Some((index, diagnostic_radius)) = horizon {
-                let (mdot, edot) = (0..n)
-                    .map(|ii| {
-                        symbi_xpu::with_device(devices[ii], || {
-                            prof("horizon_accretion", || {
-                                kernels[ii].horizon_accretion(sh[ii], diagnostic_radius)
-                            })
-                        })
-                    })
-                    .fold((0.0, 0.0), |(mass, energy), (local_mass, local_energy)| {
-                        (mass + local_mass, energy + local_energy)
+                // every tile's exact partial merges into the whole grid's shell flux, rounded once
+                let mut total = crate::driver::HorizonPartial::default();
+                for ii in 0..n {
+                    let partial = symbi_xpu::with_device(devices[ii], || {
+                        crate::driver::horizon_partial_of(kernels[ii], sh[ii], diagnostic_radius)
                     });
+                    total.merge(&partial);
+                }
+                let (mdot, edot) = total.rates();
                 horizon_receipt = Some((index, mdot, edot));
             }
         }

@@ -160,9 +160,9 @@ impl KernelSet<2, 2, HostMemory, f64> for Recorder {
     fn body_feedback(&self, _s: &Store, _dt: f64) {
         self.push("body_feedback");
     }
-    fn horizon_accretion(&self, _s: &Store, _r: f64) -> (f64, f64) {
+    fn horizon_accretion(&self, _s: &Store, _r: f64) -> Option<symbi_sim::driver::HorizonPartial> {
         self.push("horizon_accretion");
-        (0.0, 0.0)
+        Some(symbi_sim::driver::HorizonPartial::from_rates(0.0, 0.0))
     }
     fn excise_sweep(&self, _s: &Store) {
         self.push("excise_sweep");

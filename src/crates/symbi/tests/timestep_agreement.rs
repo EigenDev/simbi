@@ -90,8 +90,8 @@ impl KernelSet<1, 1, HostMemory, f64> for FixedCfl {
         &self,
         _store: &FieldStore<1, 1, HostMemory>,
         _diagnostic_radius: f64,
-    ) -> (f64, f64) {
-        (0.0, 0.0)
+    ) -> Option<symbi_sim::driver::HorizonPartial> {
+        Some(symbi_sim::driver::HorizonPartial::from_rates(0.0, 0.0))
     }
 }
 

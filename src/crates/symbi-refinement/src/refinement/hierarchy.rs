@@ -129,7 +129,7 @@ use symbi_sim::collective_stage::StageCollective;
 use symbi_sim::step_transaction::{RootAttempt, RootStep, StepHalt, take_root_step};
 use symbi_sim::driver::{
     TimestepFailure, advance_clock, advance_state_clock, agree_timestep, book_horizon_receipt, evolve_bodies,
-    horizon_request, needs_step_snapshot, prof, stage_time_fractions,
+    horizon_partial_of, horizon_request, needs_step_snapshot, prof, stage_time_fractions,
 };
 use symbi_sim::hydro_ops::scan_c2p_errors;
 use symbi_sim::stage::{HookPoint, StageArgs, fold_stage};
@@ -3761,6 +3761,17 @@ where
     /// post-step (viscous transport on the run's finest level), excision, the horizon ledger and
     /// the surface stack on the run's finest level, rigid walls on every level, and the Ito
     /// coefficients of the continuous tracers.
+    /// book a root step's diagnostic-shell flux onto the horizon body of every level: each level
+    /// carries its own copy of the run's bodies, and the checkpoint publishes the finest level's
+    pub fn book_horizon_on_every_level(&mut self, partial: &symbi_sim::driver::HorizonPartial, dt: f64) {
+        let (mdot, edot) = partial.rates();
+        for level in self.levels.iter_mut() {
+            if let Some((index, _)) = horizon_request(&level.state) {
+                book_horizon_receipt(&mut level.state, index, mdot, edot, dt);
+            }
+        }
+    }
+
     pub fn level_tail_pre(&mut self, level: usize, dt: f64) {
         let has_finer = level + 1 < self.run_levels();
         if self.levels[level].state.continuous_tracers.is_some() {
@@ -3816,13 +3827,13 @@ where
         // restriction below because the excised region stays outside every covered (finer-patch)
         // region.
         self.level_tail_excise(level);
-        if !has_finer {
-            if let Some((index, diagnostic_radius)) = horizon_request(&self.levels[level].state) {
-                let l = &self.levels[level];
-                let (mdot, edot) = prof("horizon_accretion", || {
-                    l.kernels.horizon_accretion(&l.state, diagnostic_radius)
-                });
-                book_horizon_receipt(&mut self.levels[level].state, index, mdot, edot, dt);
+        // the horizon ledger is the root's: the root books its diagnostic-shell flux once per
+        // accepted root step, the refinement request gate keeping every finer patch clear of the
+        // shell and its stencil band, so the root's faces there are the flux the scheme applied
+        if level == 0 {
+            if let Some((_, diagnostic_radius)) = horizon_request(&self.levels[0].state) {
+                let partial = horizon_partial_of(&self.levels[0].kernels, &self.levels[0].state, diagnostic_radius);
+                self.book_horizon_on_every_level(&partial, dt);
             }
         }
         // rigid surfaces act on every level: a wall may cross a coarse-fine boundary, and its
@@ -7548,6 +7559,21 @@ where
             // owns its core.
             for i in 0..n {
                 symbi_xpu::with_device(devices[i], || tiles[i].level_tail_excise(0));
+            }
+            // the root's horizon ledger: every tile's exact partial of the diagnostic-shell flux
+            // merged into the whole root's, booked once per accepted root step on every tile
+            if let Some((_, diagnostic_radius)) = horizon_request(&tiles[0].levels[0].state) {
+                let mut total = symbi_sim::driver::HorizonPartial::default();
+                for i in 0..n {
+                    let root = &tiles[i].levels[0];
+                    let partial = symbi_xpu::with_device(devices[i], || {
+                        horizon_partial_of(&root.kernels, &root.state, diagnostic_radius)
+                    });
+                    total.merge(&partial);
+                }
+                for tile in tiles.iter_mut() {
+                    tile.book_horizon_on_every_level(&total, dt);
+                }
             }
             // rigid walls also act on uncovered root cells when their shape crosses the refined
             // patch boundary. covered root writes are replaced by restriction after the fine

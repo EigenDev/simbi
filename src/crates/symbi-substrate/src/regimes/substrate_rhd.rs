@@ -473,20 +473,24 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize, const
         )
     }
 
+    fn excision_radius(&self) -> Option<f64> {
+        (self.excision_radius > 0.0).then_some(self.excision_radius)
+    }
+
     fn horizon_accretion(
         &self,
         sim: &FieldStore<D, DOF, Mem, Sc>,
         diagnostic_radius: f64,
-    ) -> (f64, f64) {
-        // the shell-flux kernels are baked for the cartesian kerr-schild chart (the only chart that
-        // excises). reuse the (already-consumed) cfl scratch for the per-quantity Add-reduction.
-        if sim.geom.spacetime != Spacetime::SchwarzschildKS
+    ) -> Option<symbi_sim::driver::HorizonPartial> {
+        // the shell-flux kernels are baked for the cartesian kerr-schild charts, either spin (the
+        // charts a horizon body excises). reuse the (already-consumed) cfl scratch for the sums.
+        if !matches!(sim.geom.spacetime, Spacetime::SchwarzschildKS | Spacetime::KerrKS)
             || sim.geom.coords != symbi_geometry::Geometry::Cartesian
         {
-            return (0.0, 0.0);
+            return None;
         }
         let pre = sim.fields.prim.pre_field().expect("Rhd requires prim.pre");
-        shell_accretion_rates(sim, pre, &self.cfl_scratch, diagnostic_radius)
+        Some(shell_accretion_rates(sim, pre, &self.cfl_scratch, diagnostic_radius))
     }
 
     fn flip_polar_band(

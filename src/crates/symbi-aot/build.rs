@@ -3102,27 +3102,30 @@ fn main() {
         let program = symbi_discretize::fofc_flag_unexcised_sph_2d_gv();
         emit_gv(&out_dir, "fofc_flag_unexcised_sph_2d", 2, &program);
         // the horizon shell-flux accretion diagnostic: the per-cell outward boundary flux of
-        // Omega = { r_ks < diagnostic_radius }, reduced (field_reduce Add) per quantity into the
-        // accretion ledger. cartesian kerr-schild (a = 0); the mass + covariant-energy fluxes.
-        for (base, tag) in [("mass_flux", "mass"), ("nrg_flux", "nrg")] {
-            let program = symbi_discretize::shell_flux_map_gv(
-                Coords::Cartesian,
-                Spacetime::SchwarzschildKS,
-                &[Spacing::Uniform; 2],
-                &[0, 1],
-                2,
-                base,
-            );
-            emit_gv(&out_dir, &format!("shell_{tag}_flux_2d"), 2, &program);
-            let program = symbi_discretize::shell_flux_map_gv(
-                Coords::Cartesian,
-                Spacetime::SchwarzschildKS,
-                &[Spacing::Uniform; 3],
-                &[0, 1, 2],
-                3,
-                base,
-            );
-            emit_gv(&out_dir, &format!("shell_{tag}_flux_3d"), 3, &program);
+        // Omega = { r_ks < diagnostic_radius }, summed exactly per quantity into the accretion
+        // ledger. cartesian kerr-schild, a = 0 and spinning (the oblate shell); the mass +
+        // covariant-energy fluxes.
+        for (spacetime, chart) in [(Spacetime::SchwarzschildKS, ""), (Spacetime::KerrKS, "_kerr")] {
+            for (base, tag) in [("mass_flux", "mass"), ("nrg_flux", "nrg")] {
+                let program = symbi_discretize::shell_flux_map_gv(
+                    Coords::Cartesian,
+                    spacetime,
+                    &[Spacing::Uniform; 2],
+                    &[0, 1],
+                    2,
+                    base,
+                );
+                emit_gv(&out_dir, &format!("shell_{tag}_flux{chart}_2d"), 2, &program);
+                let program = symbi_discretize::shell_flux_map_gv(
+                    Coords::Cartesian,
+                    spacetime,
+                    &[Spacing::Uniform; 3],
+                    &[0, 1, 2],
+                    3,
+                    base,
+                );
+                emit_gv(&out_dir, &format!("shell_{tag}_flux{chart}_3d"), 3, &program);
+            }
         }
     }
     gen_scalar_ghost_fill(&out_dir);

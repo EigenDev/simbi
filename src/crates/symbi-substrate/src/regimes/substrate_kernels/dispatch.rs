@@ -767,19 +767,19 @@ pub fn fofc_exterior_mask<const D: usize, const DOF: usize, Mem, Sc>(
     );
 }
 
-/// the GR horizon accretion diagnostic: run the shell-flux emit `shell_{quantity}_flux_{D}d` over
-/// the per-cell outward boundary flux of `Omega = { r_ks < diagnostic_radius }`, reduce by add (the
-/// GPU-native block reduction), and negate for the accretion rate (into the hole). returns
-/// `(mdot, edot)`: rest mass + covariant (killing) energy per unit time crossing the diagnostic
-/// shell. the `mass_flux` / `nrg_flux` fields are the ones the godunov just consumed, so the
-/// diagnostic is divergence-theorem-consistent with the flow the scheme applied -- and with the
-/// covariant energy, `edot` is `diagnostic_radius`-invariant at steady state. cartesian kerr-schild.
+/// the GR horizon accretion diagnostic: run the shell-flux emit `shell_{quantity}_flux[_kerr]_{D}d`
+/// over the per-cell outward boundary flux of `Omega = { r_ks < diagnostic_radius }` and add the
+/// interior's contributions exactly. returns the partial of rest mass and covariant (killing)
+/// energy per unit time leaving through the diagnostic shell; the accretion rate is its negation.
+/// the `mass_flux` / `nrg_flux` fields are the ones the godunov just consumed, so the diagnostic is
+/// divergence-theorem-consistent with the flow the scheme applied -- and with the covariant energy,
+/// `edot` is `diagnostic_radius`-invariant at steady state. cartesian kerr-schild, either spin.
 pub fn shell_accretion_rates<const D: usize, const DOF: usize, Mem, Sc>(
     sim: &FieldStore<D, DOF, Mem, Sc>,
     pre: &Field<Sc, D, Mem>,
     scratch: &Field<Sc, D, Mem>,
     diagnostic_radius: f64,
-) -> (f64, f64)
+) -> symbi_sim::driver::HorizonPartial
 where
     Mem: MemorySpace + Sync,
     Sc: Scalar + OrderedNumeric,
@@ -805,9 +805,10 @@ where
             other => panic!("shell_accretion: unexpected spec scalar {other:?}"),
         }
     };
-    let mut rates = [0.0f64; 2];
-    for (i, quantity) in ["mass", "nrg"].iter().enumerate() {
-        let name = format!("shell_{quantity}_flux_{D}d");
+    let chart = if sim.geom.spacetime == symbi_geometry::Spacetime::KerrKS { "_kerr" } else { "" };
+    let mut partial = symbi_sim::driver::HorizonPartial::default();
+    for quantity in ["mass", "nrg"] {
+        let name = format!("shell_{quantity}_flux{chart}_{D}d");
         let scalars = scalars_for(&name, &resolve);
         dispatch_named(
             sim,
@@ -819,11 +820,15 @@ where
             &[],
             &scalars,
         );
-        // the emit writes the outward contribution; Add telescopes to the net outward flux through
-        // the shell, and the hole accretes the inward flux = its negation.
-        rates[i] = -field_reduce(scratch, &geom.interior, ReductionOp::Add);
+        // the emit writes the outward contribution; the exact sum telescopes to the net outward
+        // flux through the shell, the same for every partition of the interior
+        let sum = symbi_exec::engine::field_sum_exact(scratch, &geom.interior);
+        match quantity {
+            "mass" => partial.mass = sum,
+            _ => partial.nrg = sum,
+        }
     }
-    (rates[0], rates[1])
+    partial
 }
 
 /// probe the density finiteness over the allocated domain (interior + ghosts) via the

@@ -6,11 +6,9 @@
 // measures, so the body's per-step deltas are the sum of four tile partials:
 // - the fluid, the clock and the timestep equal the single grid's bit for bit
 //   (the tiles carry the whole grid's origin and the index of their first cell);
-// - the accreted mass and the accreted energy equal the single grid's within
-//   the reassociation bound of a sum of four partials against one sum over the
-//   same terms: 4 * n * u * sum|terms| with n the shell cells and u = 2^-53,
-//   stated as a relative 1e-12 of the accumulated total, which the bound sits
-//   below for the 24 x 24 grid.
+// - the accreted mass and the accreted energy equal the single grid's bit for
+//   bit: each tile adds its shell terms into an exact sum, and the four
+//   partials merge into the integer the whole grid's sum holds, rounded once.
 // the horizon shell spans all four tiles, so the ledger each tile books is the
 // cross-tile sum of the four shell partials.
 // =============================================================================
@@ -122,10 +120,7 @@ fn four_tiles_meeting_at_the_horizon_book_the_single_grid_ledger() {
     assert!(mass.abs() > 1e-12 && energy.abs() > 1e-12, "the horizon booked nothing; the gate is vacuous");
     for (flat, (tile, _)) in tiles.iter().enumerate() {
         let (tile_mass, tile_energy) = ledger(tile);
-        assert!((tile_mass - mass).abs() <= 1e-12 * mass.abs(), "tile {flat}: accreted mass {tile_mass:e} against {mass:e}");
-        assert!(
-            (tile_energy - energy).abs() <= 1e-12 * energy.abs(),
-            "tile {flat}: accreted energy {tile_energy:e} against {energy:e}"
-        );
+        assert_eq!(tile_mass.to_bits(), mass.to_bits(), "tile {flat}: accreted mass {tile_mass:e} against {mass:e}");
+        assert_eq!(tile_energy.to_bits(), energy.to_bits(), "tile {flat}: accreted energy {tile_energy:e} against {energy:e}");
     }
 }

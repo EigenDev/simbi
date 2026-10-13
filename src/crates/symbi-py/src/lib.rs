@@ -4172,35 +4172,118 @@ fn builds_horizon_body(cfg: &Config) -> bool {
     cfg.spacetime != "minkowski" && cfg.coord_system == "cartesian" && cfg.excision_radius > 0.0
 }
 
-/// the horizon ledger under mesh refinement: a refined run attaches its bodies, the horizon body
-/// among them, when it carries immersed bodies, and then books the horizon flux through the shell
-/// faces of its finest level alone, which hold part of the shell or none of it; the run is refused
-/// by name rather than publish that partial ledger
-fn refined_horizon_ledger(refinement: bool, horizon: bool, has_bodies: bool) -> Result<(), String> {
-    if refinement && horizon && has_bodies {
-        return Err("an excised run with immersed bodies and mesh refinement books the horizon \
-                    accretion through its finest level's share of the diagnostic shell alone; run \
-                    it unrefined, or without immersed bodies, whose horizon ledger it then omits"
-            .to_string());
+/// the radius of the horizon ledger's diagnostic shell: 1.5 r_+ of the schwarzschild hole, outside
+/// the horizon and the excised core
+fn horizon_diagnostic_radius(cfg: &Config) -> f64 {
+    3.0 * cfg.schwarzschild_mass
+}
+
+/// whether the run books a horizon ledger: the horizon body rides with the run's immersed bodies,
+/// so an excised run carrying none excises its core and books no ledger
+fn carries_horizon_ledger(cfg: &Config) -> bool {
+    builds_horizon_body(cfg) && (!cfg.bodies.is_empty() || cfg.bonded_assembly.is_some())
+}
+
+/// the horizon ledger is the root's (single owning level): the root books the flux through the
+/// diagnostic shell once per accepted root step, as an unrefined grid does, and every refinement
+/// region keeps clear of the shell and the band of root cells whose state the shell faces read. a
+/// patch over that band would replace the root's evolution there with restricted and refluxed fine
+/// data, so the ledger would book a flux the root never applied. the shell stays where the horizon
+/// sets it; a patch that needs to cross it is refused, and a composite ledger booking each level's
+/// share of the shell is the alternative this restriction defers.
+///
+/// the band reaches `(reach + 1) dx + diagonal / 2` either side of the oblate kerr-schild shell
+/// `r_ks = r_diag`: a shell face reads root cells up to `reach` along its normal from a cell whose
+/// centroid lies within half a root-cell diagonal of the shell, and a covered cell beside one of
+/// those cells would have the reflux correct it, so a box farther than that from the shell covers
+/// no cell the shell faces read. a region box meets the band when it reaches inside the outer
+/// spheroid and does not lie wholly inside the inner one; the spheroid's quadratic form is
+/// separable, so its least and greatest values over a box are exact
+fn check_horizon_shell_clearance(cfg: &Config) -> Result<(), String> {
+    if !(cfg.refinement_enabled && carries_horizon_ledger(cfg)) {
+        return Ok(());
+    }
+    let reach = match cfg.reconstruction_name.as_str() {
+        "pcm" => 1.0,
+        "ppm" => 3.0,
+        _ => 2.0,
+    };
+    horizon_shell_clearance(&cfg.refinement_regions, &cfg.dx[..cfg.dims], reach, horizon_diagnostic_radius(cfg), cfg.kerr_spin)
+}
+
+/// the band test of `check_horizon_shell_clearance` over the regions' boxes on a root of spacing
+/// `dx` (one entry per axis), a stencil of `reach` cells, the shell `r_diag` and the spin
+fn horizon_shell_clearance(regions: &[Vec<f64>], dx: &[f64], reach: f64, r_diag: f64, spin: f64) -> Result<(), String> {
+    let dims = dx.len();
+    let diagonal = dx.iter().map(|d| d * d).sum::<f64>().sqrt();
+    let widest = dx.iter().copied().fold(0.0, f64::max);
+    let width = (reach + 1.0) * widest + 0.5 * diagonal;
+    let (r_out, r_in) = (r_diag + width, r_diag - width);
+    let a2 = spin * spin;
+    // the spheroid r_ks = r: (x^2 + y^2) / (r^2 + a^2) + z^2 / r^2 = 1; the polar axis is z in 3d
+    let weights = |r: f64| -> Vec<f64> {
+        (0..dims).map(|ax| if dims == 3 && ax == 2 { 1.0 / (r * r) } else { 1.0 / (r * r + a2) }).collect()
+    };
+    let least_square = |lo: f64, hi: f64| if lo > 0.0 { lo * lo } else if hi < 0.0 { hi * hi } else { 0.0 };
+    for region in regions.iter().filter(|r| r.len() >= 2 * dims) {
+        let w_out = weights(r_out);
+        let least: f64 = (0..dims).map(|ax| w_out[ax] * least_square(region[2 * ax], region[2 * ax + 1])).sum();
+        let inside_inner = r_in > 0.0 && {
+            let w_in = weights(r_in);
+            let greatest: f64 = (0..dims)
+                .map(|ax| w_in[ax] * region[2 * ax].powi(2).max(region[2 * ax + 1].powi(2)))
+                .sum();
+            greatest < 1.0
+        };
+        if least <= 1.0 && !inside_inner {
+            return Err(format!(
+                "refinement region {region:?} meets the horizon ledger's diagnostic shell (r_ks = \
+                 {r_diag:.3}) or its band of {width:.3} either side, the root cells the shell faces \
+                 read; the root books the horizon ledger and a patch there would replace the flux it \
+                 applies. keep the refinement region outside r_ks = {r_out:.3} or inside r_ks = \
+                 {:.3}",
+                r_in.max(0.0)
+            ));
+        }
     }
     Ok(())
 }
 
 #[cfg(test)]
-mod refined_horizon_ledger_tests {
-    use super::refined_horizon_ledger;
+mod horizon_shell_clearance_tests {
+    use super::horizon_shell_clearance;
 
-    #[test]
-    fn a_refined_excised_run_with_bodies_is_refused_by_name() {
-        let err = refined_horizon_ledger(true, true, true).expect_err("the partial horizon ledger was admitted");
-        assert!(err.contains("books the horizon accretion through its finest level's share"), "{err}");
+    /// a plm root of spacing 0.1 around a unit-mass hole, the shell at r = 3: the band reaches
+    /// 3 cells and half a diagonal, 0.3 + 0.087 = 0.387, either side
+    fn check(region: [f64; 6], spin: f64) -> Result<(), String> {
+        horizon_shell_clearance(&[region.to_vec()], &[0.1; 3], 2.0, 3.0, spin)
     }
 
     #[test]
-    fn the_horizon_ledger_runs_unrefined_or_unattached() {
-        for (refinement, horizon, has_bodies) in [(false, true, true), (true, false, true), (true, true, false)] {
-            assert!(refined_horizon_ledger(refinement, horizon, has_bodies).is_ok(), "{refinement} {horizon} {has_bodies}");
-        }
+    fn a_region_across_the_shell_is_refused_by_name() {
+        let err = check([2.5, 4.0, -0.2, 0.2, -0.2, 0.2], 0.0).expect_err("admitted");
+        assert!(err.contains("meets the horizon ledger's diagnostic shell"), "{err}");
+    }
+
+    #[test]
+    fn a_region_inside_the_band_is_refused_and_one_clear_of_it_admitted() {
+        assert!(check([3.3, 4.5, -0.1, 0.1, -0.1, 0.1], 0.0).is_err());
+        assert!(check([3.45, 4.5, -0.1, 0.1, -0.1, 0.1], 0.0).is_ok());
+    }
+
+    #[test]
+    fn a_region_inside_the_inner_spheroid_is_admitted() {
+        // wholly inside r_ks = 3 - 0.387 = 2.61, and refused when it reaches into the band
+        assert!(check([1.5, 2.0, -0.3, 0.3, -0.3, 0.3], 0.0).is_ok());
+        assert!(check([1.5, 2.7, -0.3, 0.3, -0.3, 0.3], 0.0).is_err());
+    }
+
+    #[test]
+    fn the_shell_is_the_oblate_spheroid_of_the_spin() {
+        // a = 0.9 widens the equator to sqrt(r^2 + a^2): a box clear of the a = 0 band at x = 3.45
+        // meets the spinning shell, and along the spin axis the same box stays clear
+        assert!(check([3.45, 4.5, -0.1, 0.1, -0.1, 0.1], 0.9).is_err());
+        assert!(check([-0.1, 0.1, -0.1, 0.1, 3.45, 4.5], 0.9).is_ok());
     }
 }
 
@@ -4217,7 +4300,7 @@ fn build_body_shapes_and_horizon(cfg: &Config) -> Vec<Option<symbi_ib::sdf::SdfE
 fn build_bodies_and_horizon<const D: usize>(cfg: &Config) -> BodyCollection<f64, D> {
     let mut coll = build_bodies::<D>(&cfg.bodies, cfg.binary.as_ref());
     if builds_horizon_body(cfg) {
-        let diagnostic_radius = 3.0 * cfg.schwarzschild_mass; // 1.5 r_+, outside the horizon
+        let diagnostic_radius = horizon_diagnostic_radius(cfg);
         let idx = coll.len();
         coll = coll.add(symbi_ib::Body::horizon(
             idx,
@@ -9053,7 +9136,7 @@ fn validate_run(cfg: &Config) -> Result<(), String> {
         cfg.locally_isothermal,
     )?;
     validate_magnetized_drain_bodies(&cfg.bodies, &cfg.regime, cfg.dims, &cfg.coord_system)?;
-    refined_horizon_ledger(cfg.refinement_enabled, builds_horizon_body(cfg), !cfg.bodies.is_empty())?;
+    check_horizon_shell_clearance(cfg)?;
     // static mesh refinement is wired for hydro (incl. globally-isothermal). the two cases
     // refused below need fine-level prolongation the transfer set does not carry:
     if cfg.refinement_enabled

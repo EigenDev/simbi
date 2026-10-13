@@ -1561,6 +1561,7 @@ fn restore_bodies<const D: usize>(bodies_g: &TreeBuf, im: &mut ImmersedBodies<D>
         bodies_g.find_dataset(name).and_then(|d| d.data.as_f64().map(|v| v.to_vec()))
     };
     let heat = optional("magnetic_slip_heating").or_else(|| optional("exported_slip_heat"));
+    let (accreted_energy, energy_rate) = (optional("total_accreted_energy"), optional("accretion_energy_rate"));
     let heat_rate = optional("magnetic_slip_heating_rate").or_else(|| optional("exported_slip_heat_rate"));
     for b in 0..nb {
         let body = im.bodies.get_mut(b);
@@ -1587,6 +1588,25 @@ fn restore_bodies<const D: usize>(bodies_g: &TreeBuf, im: &mut ImmersedBodies<D>
         {
             *total_accreted_mass = accreted[b];
             *accretion_rate = rate[b];
+        }
+        // the horizon's ledger continues across a restart: its accreted rest mass and covariant
+        // energy and the last step's rates, as the file holds them
+        if let symbi_ib::BodyKind::Horizon {
+            total_accreted_mass,
+            total_accreted_energy,
+            mdot,
+            edot,
+            ..
+        } = &mut body.kind
+        {
+            *total_accreted_mass = accreted[b];
+            *mdot = rate[b];
+            if let Some(e) = accreted_energy.as_ref() {
+                *total_accreted_energy = e[b];
+            }
+            if let Some(e) = energy_rate.as_ref() {
+                *edot = e[b];
+            }
         }
     }
     // restore the evolved rigid-body rotation (orientation matrix + angular velocity) so a
