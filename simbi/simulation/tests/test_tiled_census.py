@@ -19,7 +19,11 @@
 #   name before any output;
 # - a rigid wall cut by the tiles leaves its interior out of every tile's and
 #   every worker's census: the counted cells equal an independent count of the
-#   leaf cells whose centroid lies outside the wall, unrefined and refined.
+#   leaf cells whose centroid lies outside the wall, unrefined and refined;
+# - the excised core of a kerr-schild box cut by two launched workers stays out
+#   of the census: the counted cells equal an independent count of the cells
+#   whose centroid lies outside the excision sphere, by the excision kernels'
+#   own predicate.
 # the censuses vary over the run and the sampling interval skips steps, so the
 # comparisons exercise the merge and the schedule.
 #
@@ -264,4 +268,62 @@ def test_a_wall_cut_by_tiles_leaves_its_interior_out_of_the_census(tmp_path: Pat
         counts = gas.values.reshape(len(gas.time), -1)[:, 0]
         np.testing.assert_array_equal(counts, np.full(STEPS, float(want)), err_msg=f"{label}: counted gas cells")
         np.testing.assert_array_equal(gas.dropped, 0, err_msg=f"{label}: a masked cell was reported out of the bins")
+
+
+EXCISED = '''
+import simbi.expression as expr
+from simbi_configs.examples.grhd.gr_bondi_cartesian import GrBondiCartesian
+
+
+class CensusedBondi(GrBondiCartesian):
+    """the excised kerr-schild bondi box counting its gas cells"""
+
+    @property
+    def census_expressions(self):
+        g = expr.ExprGraph()
+        return [expr.Census(name="gas", axes=[], values={"cells": expr.constant(1.0, g)}).serialize()]
+'''
+GR_RES = 24
+GR_STEPS = 3
+GR_FLAGS = ["--domain-radius", "0.4", "--excision-radius", "1.6"]
+
+
+def _outside_excision(half_width: float, r_exc: float) -> int:
+    """the cells whose centroid lies outside the excision sphere, by the kernels' predicate at zero
+    spin: r_ks^2 = d + sqrt(d^2) with d = |x|^2 / 2, excised below r_exc^2"""
+    c = -half_width + (np.arange(GR_RES) + 0.5) * (2.0 * half_width / GR_RES)
+    x, y, z = np.meshgrid(c, c, c, indexing="ij")
+    rr2 = x * x + y * y + z * z
+    d = 0.5 * rr2
+    return int(np.count_nonzero(~(d + np.sqrt(d * d) < r_exc * r_exc)))
+
+
+def test_an_excised_core_cut_by_workers_stays_out_of_the_census(tmp_path: Path) -> None:
+    (tmp_path / "censused_bondi.py").write_text(EXCISED)
+    env = dict(os.environ, PYTHONPATH=os.pathsep.join([str(tmp_path), os.getcwd(), os.environ.get("PYTHONPATH", "")]))
+    env.pop("SIMBI_LAUNCH_EXPERIMENTAL", None)
+    single = subprocess.run(
+        [sys.executable, "-c",
+         "import sys\nfrom simbi.simulation import runner\nfrom censused_bondi import CensusedBondi\n"
+         f"p = CensusedBondi(resolution=({GR_RES},) * 3, domain_radius=0.4, excision_radius=1.6, data_directory=sys.argv[1], checkpoint_interval=1e9)\n"
+         f"runner.run(p, compute_mode='cpu', max_steps={GR_STEPS})\n"
+         "p.setup()\nprint('HALF', p.bounds[0][1])\n", str(tmp_path / "single")],
+        capture_output=True, text=True, timeout=900, env=env)
+    assert single.returncode == 0, single.stderr[-3000:]
+    half = float(next(line.split()[1] for line in single.stdout.splitlines() if line.startswith("HALF")))
+    want = _outside_excision(half, 1.6)
+    assert 0 < want < GR_RES**3 - 20, f"the core excises {GR_RES**3 - want} cells; the gate is vacuous"
+    script = tmp_path / "launched_bondi.py"
+    script.write_text("from censused_bondi import CensusedBondi as Base\n\n\nclass LaunchedBondi(Base):\n    pass\n")
+    layout = _layout(tmp_path / "two.toml", workers=2, cuts=[[GR_RES // 2], [], []])
+    cmd = [sys.executable, "-m", "simbi.cli", "launch", str(script), "--layout", str(layout), "--max-steps", str(GR_STEPS),
+           "--resolution", ",".join([str(GR_RES)] * 3), *GR_FLAGS, "--data-directory", str(tmp_path / "launched"), "--checkpoint-interval", "1e9"]
+    done = subprocess.run(cmd, capture_output=True, text=True, timeout=900, env=env)
+    assert done.returncode == 0, done.stderr[-3000:]
+    for label, out in (("one device", tmp_path / "single"), ("two workers", tmp_path / "launched")):
+        gas = read_census(str(_final(out)), "gas")
+        assert len(gas.time) == GR_STEPS, f"{label}: {len(gas.time)} rows"
+        counts = gas.values.reshape(len(gas.time), -1)[:, 0]
+        np.testing.assert_array_equal(counts, np.full(GR_STEPS, float(want)), err_msg=f"{label}: counted gas cells")
+        np.testing.assert_array_equal(gas.dropped, 0, err_msg=f"{label}: an excised cell was reported out of the bins")
 
