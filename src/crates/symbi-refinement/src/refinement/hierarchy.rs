@@ -7700,7 +7700,8 @@ where
             let states: Vec<&FieldStore<NDIM, DOF, Mem, f64>> = holders.iter().map(|&i| &*self.tiles[i].levels[lf].state).collect();
             let schedule = schedule_of_tiles(&states, counts, &level_topology(self.tiles, lf, &holders));
             let cuts = symbi_sim::decomp::TileCuts { schedule: &schedule, devices: &devices, transport: self.transport };
-            if !self.tiles[holders[0]].levels[lf].kernels.magnetic_slip_step_tiles(&states, dt, &cuts, true) {
+            let reference = &*self.tiles[holders[0]].levels[lf].state;
+            if !self.tiles[holders[0]].levels[lf].kernels.magnetic_slip_step_tiles(&states, reference, dt, &cuts, true) {
                 return false;
             }
         }

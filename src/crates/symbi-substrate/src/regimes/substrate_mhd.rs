@@ -983,21 +983,23 @@ where
     fn magnetic_slip_step_tiles(
         &self,
         stores: &[&FieldStore<D, 3, Mem, f64>],
+        reference: &FieldStore<D, 3, Mem, f64>,
         dt: f64,
         cuts: &dyn symbi_sim::substrate_seam::SlipCuts<D, 3, Mem>,
         books: bool,
     ) -> bool {
-        if stores.is_empty() || !stores.iter().any(|sim| crate::regimes::mhd_substrate::store_has_magnetic_slip(*sim)) {
+        let shape = crate::regimes::mhd_substrate::SlipShape::of(reference);
+        if shape.bodies.is_empty() {
             return true;
         }
         let closure = self.eos_param.value();
         let halo = crate::regimes::mhd_substrate::CutHalo { cuts };
         let receipt = symbi_sim::driver::prof("magnetic_slip_solve", || {
-            crate::regimes::mhd_substrate::magnetic_slip_solve_tiles::<D, 3, Mem, f64>(stores, dt, closure, 1e-10, 500, &halo)
+            crate::regimes::mhd_substrate::magnetic_slip_solve_tiles::<D, 3, Mem, f64>(stores, &shape, dt, closure, 1e-10, 500, &halo)
         });
         if receipt.converged {
             symbi_sim::driver::prof("magnetic_slip_commit", || {
-                crate::regimes::mhd_substrate::magnetic_slip_commit_tiles::<D, 3, Mem, f64>(stores, dt, closure, &halo, books)
+                crate::regimes::mhd_substrate::magnetic_slip_commit_tiles::<D, 3, Mem, f64>(stores, &shape, dt, closure, &halo, books)
             });
         }
         receipt.converged

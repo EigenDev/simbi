@@ -3213,7 +3213,7 @@ where
         let converged = {
             let sh: Vec<&FieldStore<D, DOF, M, f64>> = self.stores.iter().map(|s| &**s).collect();
             let cuts = TileCuts { schedule: self.schedule, devices: self.devices, transport: self.transport };
-            self.kernels[0].magnetic_slip_step_tiles(&sh, dt, &cuts, true)
+            self.kernels[0].magnetic_slip_step_tiles(&sh, sh[0], dt, &cuts, true)
         };
         if converged {
             self.rebuild();

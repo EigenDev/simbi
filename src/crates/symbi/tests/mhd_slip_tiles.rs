@@ -8,7 +8,9 @@
 // iteration count and residual, and after the commit every face each tile
 // owns, every closing face it shares at a cut, the cell field and the energy
 // of every interior cell equal the whole grid's, and the heat receipt booked
-// once equals the whole grid's.
+// once equals the whole grid's. a worker holding no tile of the level performs
+// the same sequence of face refreshes, cell exchanges and sums as the worker
+// holding them, given the same global sums, so the two stay in lockstep.
 //
 // run: cargo test -p symbi --test mhd_slip_tiles
 // =============================================================================
@@ -24,7 +26,7 @@ use symbi_hydro::quantity::{Density, Pressure};
 use symbi_hydro::state::Prim;
 use symbi_ib::{Body, BodyCollection, MagneticSpec, SurfaceSpec};
 use symbi_substrate::regimes::mhd_substrate::{
-    CutHalo, magnetic_slip_commit, magnetic_slip_commit_tiles, magnetic_slip_solve, magnetic_slip_solve_tiles,
+    CutHalo, SlipHalo, SlipShape, magnetic_slip_commit, magnetic_slip_commit_tiles, magnetic_slip_solve, magnetic_slip_solve_tiles,
 };
 use symbi_xpu::{CpuSpace, HostMemory};
 
@@ -144,10 +146,11 @@ fn assert_tiles_match_whole<const D: usize>(n: usize, cuts: [Vec<usize>; D], who
     exchange_grid(&stores, &schedule, &devices, &LocalCopy);
     let tile_cuts = TileCuts { schedule: &schedule, devices: &devices, transport: &LocalCopy };
     let halo = CutHalo { cuts: &tile_cuts };
-    let tiled = magnetic_slip_solve_tiles(&stores, DT, GAMMA, 1e-10, 500, &halo);
+    let shape = SlipShape::of(stores[0]);
+    let tiled = magnetic_slip_solve_tiles(&stores, &shape, DT, GAMMA, 1e-10, 500, &halo);
     assert_eq!(tiled.iterations, receipt.iterations, "{cuts:?}: iterations");
     assert_eq!(tiled.final_residual_norm.to_bits(), receipt.final_residual_norm.to_bits(), "{cuts:?}: final residual");
-    magnetic_slip_commit_tiles(&stores, DT, GAMMA, &halo, true);
+    magnetic_slip_commit_tiles(&stores, &shape, DT, GAMMA, &halo, true);
     assert_eq!(heat(stores[0]), whole_heat, "{cuts:?}: the booked heat");
     for s in &stores[1..] {
         assert!(heat(*s).iter().all(|h| *h == 0.0f64.to_bits()), "{cuts:?}: a second tile booked heat");
@@ -200,3 +203,71 @@ fn three_dimensional_tiles_cut_through_the_slip_shell_solve_and_commit_as_the_wh
         assert_tiles_match_whole::<3>(N3, cuts, &whole.store, |c, o, b| build3(c, o, b).store);
     }
 }
+
+/// a halo that logs every operation in order, delegating to `inner` and keeping the global sums
+struct Recording<'a> {
+    inner: &'a dyn SlipHalo<2, 3, HostMemory, f64>,
+    log: std::cell::RefCell<Vec<char>>,
+    sums: std::cell::RefCell<Vec<symbi_algebra::ExactSum>>,
+}
+
+impl SlipHalo<2, 3, HostMemory, f64> for Recording<'_> {
+    fn faces(&self, stores: &[&Store<2>]) {
+        self.log.borrow_mut().push('F');
+        self.inner.faces(stores);
+    }
+    fn cells(&self, stores: &[&Store<2>], fields: &[&symbi_grid::Field<f64, 2, HostMemory>]) {
+        self.log.borrow_mut().push('C');
+        self.inner.cells(stores, fields);
+    }
+    fn sum(&self, local: symbi_algebra::ExactSum) -> symbi_algebra::ExactSum {
+        self.log.borrow_mut().push('S');
+        let global = self.inner.sum(local);
+        self.sums.borrow_mut().push(global.clone());
+        global
+    }
+}
+
+/// a halo standing for a worker that holds none of the level's tiles: it logs every operation
+/// and answers each sum with the global one the full worker saw
+struct Replay {
+    log: std::cell::RefCell<Vec<char>>,
+    sums: std::cell::RefCell<std::collections::VecDeque<symbi_algebra::ExactSum>>,
+}
+
+impl SlipHalo<2, 3, HostMemory, f64> for Replay {
+    fn faces(&self, stores: &[&Store<2>]) {
+        assert!(stores.is_empty());
+        self.log.borrow_mut().push('F');
+    }
+    fn cells(&self, stores: &[&Store<2>], _fields: &[&symbi_grid::Field<f64, 2, HostMemory>]) {
+        assert!(stores.is_empty());
+        self.log.borrow_mut().push('C');
+    }
+    fn sum(&self, local: symbi_algebra::ExactSum) -> symbi_algebra::ExactSum {
+        assert_eq!(local.value().to_bits(), 0.0f64.to_bits(), "a worker without tiles contributes zero");
+        self.log.borrow_mut().push('S');
+        self.sums.borrow_mut().pop_front().expect("the empty worker asks for more sums than the full one")
+    }
+}
+
+#[test]
+fn a_worker_holding_no_tile_of_the_level_performs_the_same_exchanges_and_sums() {
+    let whole = build([N; 2], [0; 2], Boundaries::uniform(BoundaryType::Periodic));
+    let stores = [&whole.store];
+    let shape = SlipShape::of(stores[0]);
+    let own = symbi_substrate::regimes::mhd_substrate::OwnHalo;
+    let full = Recording { inner: &own, log: Default::default(), sums: Default::default() };
+    let receipt = magnetic_slip_solve_tiles(&stores, &shape, DT, GAMMA, 1e-10, 500, &full);
+    assert!(receipt.converged && receipt.iterations > 2, "the solve took {} iterations; the gate is weak", receipt.iterations);
+    magnetic_slip_commit_tiles(&stores, &shape, DT, GAMMA, &full, true);
+    let empty = Replay { log: Default::default(), sums: std::cell::RefCell::new(full.sums.borrow().clone().into()) };
+    let replayed = magnetic_slip_solve_tiles::<2, 3, HostMemory, f64>(&[], &shape, DT, GAMMA, 1e-10, 500, &empty);
+    magnetic_slip_commit_tiles::<2, 3, HostMemory, f64>(&[], &shape, DT, GAMMA, &empty, true);
+    assert_eq!(replayed.iterations, receipt.iterations, "the empty worker stopped after another pass");
+    assert_eq!(*empty.log.borrow(), *full.log.borrow(), "the empty worker's exchanges and sums differ");
+    assert!(empty.sums.borrow().is_empty(), "the empty worker asked for fewer sums");
+    let log: String = full.log.borrow().iter().collect();
+    assert!(log.matches('S').count() >= 2 * receipt.iterations && log.contains('F') && log.contains('C'), "{log}");
+}
+

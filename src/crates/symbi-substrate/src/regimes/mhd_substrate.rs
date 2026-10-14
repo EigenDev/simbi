@@ -2364,6 +2364,28 @@ pub fn store_has_magnetic_slip<const D: usize, const DOF: usize, Mem: MemorySpac
         .is_some_and(|im| (0..im.bodies.len()).any(|b| matches!(im.bodies.get(b).spec.magnetic, symbi_ib::MagneticSpec::Slip { .. })))
 }
 
+/// what the slip operator of a run is, whichever tiles a worker holds: whether the grid is 2.5D
+/// (the solve carries the cell B_z member), whether the gas carries energy, and the slip bodies.
+/// every worker reads it alike, so every worker performs the same exchanges and sums, a worker
+/// holding no tile of the slip level included
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SlipShape {
+    pub mixed: bool,
+    pub has_energy: bool,
+    pub bodies: Vec<usize>,
+}
+
+impl SlipShape {
+    /// the shape of the run a store of any level belongs to: the bodies are replicated on every
+    /// level and tile
+    pub fn of<const D: usize, const DOF: usize, Mem: MemorySpace, Sc: Scalar + OrderedNumeric>(sim: &FieldStore<D, DOF, Mem, Sc>) -> Self {
+        let bodies = sim.immersed.as_ref().map_or(Vec::new(), |im| {
+            (0..im.bodies.len()).filter(|&b| matches!(im.bodies.get(b).spec.magnetic, symbi_ib::MagneticSpec::Slip { .. })).collect()
+        });
+        Self { mixed: D == 2, has_energy: sim.fields.cons.nrg_field().is_some(), bodies }
+    }
+}
+
 /// what one store's slip pass reads beyond the production state: on a 2.5D grid the operand's cell
 /// B_z and the cell B_z it advances, and a heat request
 pub struct SlipPass<'a, const D: usize, Mem: MemorySpace, Sc: Scalar + OrderedNumeric> {
@@ -2372,49 +2394,41 @@ pub struct SlipPass<'a, const D: usize, Mem: MemorySpace, Sc: Scalar + OrderedNu
 }
 
 /// the slip operator over the tiles of one level: every store's cell pass, the quadrature halo, then
-/// every store's edge pass. returns per slip body the exact sum over every store's interior of its
-/// dissipation rate; empty on stores without a slip body
+/// every store's edge pass. with `heat`, returns per slip body the exact sum over the whole level of
+/// its dissipation rate, every worker's share merged; `heat` is the caller's, so a worker holding no
+/// tile of the level sums as the others do. empty on a run without a slip body
 pub fn slip_emf_tiles<const D: usize, const DOF: usize, Mem, Sc>(
     stores: &[&FieldStore<D, DOF, Mem, Sc>],
+    shape: &SlipShape,
     gamma: f64,
     dt: f64,
     passes: &[SlipPass<'_, D, Mem, Sc>],
+    heat: bool,
     halo: &dyn SlipHalo<D, DOF, Mem, Sc>,
 ) -> Vec<(usize, ExactSum)>
 where
     Mem: MemorySpace + Sync,
     Sc: Scalar + OrderedNumeric,
 {
-    let mut totals: Option<Vec<(usize, ExactSum)>> = None;
-    let mut slipping = 0;
+    if shape.bodies.is_empty() {
+        return Vec::new();
+    }
+    assert!(passes.iter().all(|p| p.heat.is_some() == heat), "every store's pass requests the heat the level sums");
+    let mut totals: Vec<(usize, ExactSum)> = shape.bodies.iter().map(|&b| (b, ExactSum::new())).collect();
     for (sim, pass) in stores.iter().zip(passes) {
         let sums = match pass.bz {
             Some((operand, _)) => slip_cells_2p5d(*sim, gamma, dt, operand, pass.heat),
             None => slip_cells_3d(*sim, gamma, pass.heat),
-        };
-        let Some(sums) = sums else {
-            continue;
-        };
-        slipping += 1;
-        match totals.as_mut() {
-            None => totals = Some(sums),
-            Some(totals) => {
-                for ((b, total), (bb, part)) in totals.iter_mut().zip(&sums) {
-                    assert_eq!(b, bb, "the tiles of one level carry the same slip bodies");
-                    total.merge(part);
-                }
-            }
+        }
+        .expect("a store of the slip level carries the run's slip bodies");
+        for (b, part) in sums {
+            let (_, total) = totals.iter_mut().find(|(bb, _)| *bb == b).expect("the run's slip bodies name every store's");
+            total.merge(&part);
         }
     }
-    let Some(totals) = totals else {
-        return Vec::new();
-    };
-    assert_eq!(slipping, stores.len(), "the tiles of one level carry the same slip bodies");
-    let totals: Vec<(usize, ExactSum)> = if passes.first().is_some_and(|p| p.heat.is_some()) {
-        totals.into_iter().map(|(b, sum)| (b, halo.sum(sum))).collect()
-    } else {
-        totals
-    };
+    if heat {
+        totals = totals.into_iter().map(|(b, sum)| (b, halo.sum(sum))).collect();
+    }
     for c in 0..3 {
         let quadrature: Vec<&Field<Sc, D, Mem>> = stores
             .iter()
@@ -2449,7 +2463,8 @@ where
     Mem: MemorySpace + Sync,
     Sc: Scalar + OrderedNumeric,
 {
-    slip_emf_tiles(&[sim], gamma, 0.0, &[SlipPass { bz: None, heat }], &OwnHalo)
+    let request = heat.is_some();
+    slip_emf_tiles(&[sim], &SlipShape::of(sim), gamma, 0.0, &[SlipPass { bz: None, heat }], request, &OwnHalo)
         .into_iter()
         .map(|(b, sum)| (b, sum.value()))
         .collect()
@@ -2477,7 +2492,8 @@ where
     Mem: MemorySpace + Sync,
     Sc: Scalar + OrderedNumeric,
 {
-    slip_emf_tiles(&[sim], gamma, dt, &[SlipPass { bz: Some((bz_operand, bz_out)), heat }], &OwnHalo)
+    let request = heat.is_some();
+    slip_emf_tiles(&[sim], &SlipShape::of(sim), gamma, dt, &[SlipPass { bz: Some((bz_operand, bz_out)), heat }], request, &OwnHalo)
         .into_iter()
         .map(|(b, sum)| (b, sum.value()))
         .collect()
@@ -2950,12 +2966,13 @@ fn apply_operator_mixed<const D: usize, const DOF: usize, Mem, Sc>(
     Mem: MemorySpace + Sync,
     Sc: Scalar + OrderedNumeric,
 {
-    apply_operator_tiles(&[sim], gamma, &[p], &[out], &OwnHalo);
+    apply_operator_tiles(&[sim], &SlipShape::of(sim), gamma, &[p], &[out], &OwnHalo);
 }
 
 /// `apply_operator_mixed` over the tiles of one level, the halos regenerated between the passes
 fn apply_operator_tiles<const D: usize, const DOF: usize, Mem, Sc>(
     stores: &[&FieldStore<D, DOF, Mem, Sc>],
+    shape: &SlipShape,
     gamma: f64,
     p: &[Mixed<'_, D, Mem, Sc>],
     out: &[Mixed<'_, D, Mem, Sc>],
@@ -2971,7 +2988,7 @@ fn apply_operator_tiles<const D: usize, const DOF: usize, Mem, Sc>(
     for sim in stores {
         zero_efield(*sim);
     }
-    let mixed = p.iter().zip(out).all(|(p, o)| p.z.is_some() && o.z.is_some());
+    let mixed = shape.mixed;
     if mixed {
         let operands: Vec<&Field<Sc, D, Mem>> = p.iter().map(|p| p.z.expect("a 2.5D operand")).collect();
         halo.cells(stores, &operands);
@@ -2985,7 +3002,7 @@ fn apply_operator_tiles<const D: usize, const DOF: usize, Mem, Sc>(
         .zip(out)
         .map(|(pk, ok)| SlipPass { bz: if mixed { Some((pk.z.expect("operand"), ok.z.expect("output"))) } else { None }, heat: None })
         .collect();
-    slip_emf_tiles(stores, gamma, if mixed { 1.0 } else { 0.0 }, &passes, halo);
+    slip_emf_tiles(stores, shape, gamma, if mixed { 1.0 } else { 0.0 }, &passes, false, halo);
     for (k, sim) in stores.iter().enumerate() {
         ct_curl::<D, DOF, Mem, Sc>(*sim, 1.0);
         let mhd = sim.fields.mhd.as_ref().expect("MHD fields");
@@ -3049,7 +3066,7 @@ where
     Mem: MemorySpace + Sync,
     Sc: Scalar + OrderedNumeric,
 {
-    magnetic_slip_solve_tiles(&[sim], dt, gamma, tol, max_iter, &OwnHalo)
+    magnetic_slip_solve_tiles(&[sim], &SlipShape::of(sim), dt, gamma, tol, max_iter, &OwnHalo)
 }
 
 /// the vectors of the slip workspace, each a face group with its cell B_z member on a 2.5D grid
@@ -3119,6 +3136,7 @@ where
 /// stops at the whole level's residual
 pub fn magnetic_slip_solve_tiles<const D: usize, const DOF: usize, Mem, Sc>(
     stores: &[&FieldStore<D, DOF, Mem, Sc>],
+    shape: &SlipShape,
     dt: f64,
     gamma: f64,
     tol: f64,
@@ -3137,8 +3155,7 @@ where
             sim.geom.coords
         );
     }
-    let has_energy = stores[0].fields.cons.nrg_field().is_some();
-    let mixed = slip_workspace(stores[0]).z.is_some();
+    let (has_energy, mixed) = (shape.has_energy, shape.mixed);
     let dim = if D == 2 { "2d" } else { "3d" };
     let oop = D; // the out-of-plane cell component of a 2.5D grid
     let mhd = slip_mhd::<D, DOF, Mem, Sc>;
@@ -3191,7 +3208,7 @@ where
             }
         })
         .collect();
-    slip_emf_tiles(stores, gamma, if mixed { 0.5 * dt } else { 0.0 }, &passes, halo);
+    slip_emf_tiles(stores, shape, gamma, if mixed { 0.5 * dt } else { 0.0 }, &passes, true, halo);
     each(&|sim| ct_curl::<D, DOF, Mem, Sc>(sim, 0.5 * dt)); // bface <- B*
 
     // e_g* = e_g^0 + (dt/2) qdot^0, frozen in `slip_ge` for the solve and the commit.
@@ -3226,7 +3243,7 @@ where
     });
 
     // rhs = (I - dt/2 L*) B^0.
-    apply_operator_tiles(stores, gamma, &vectors(SlipVector::Input), &vectors(SlipVector::OperatorDirection), halo);
+    apply_operator_tiles(stores, shape, gamma, &vectors(SlipVector::Input), &vectors(SlipVector::OperatorDirection), halo);
     each(&|sim| mixed_lincomb(sim, 1.0, slip_vector(sim, SlipVector::Rhs), -0.5 * dt, slip_vector(sim, SlipVector::OperatorDirection)));
 
     // conjugate gradient on (I + dt/2 L*) x = rhs over the mixed complex, from x_0 = B^0: the
@@ -3248,7 +3265,7 @@ where
         if final_res <= target {
             break;
         }
-        apply_operator_tiles(stores, gamma, &vectors(SlipVector::Direction), &vectors(SlipVector::OperatorDirection), halo);
+        apply_operator_tiles(stores, shape, gamma, &vectors(SlipVector::Direction), &vectors(SlipVector::OperatorDirection), halo);
         each(&|sim| mixed_lincomb(sim, 0.5 * dt, slip_vector(sim, SlipVector::OperatorDirection), 1.0, slip_vector(sim, SlipVector::Direction)));
         let alpha = rs / dot(SlipVector::Direction, SlipVector::OperatorDirection);
         each(&|sim| {
@@ -3310,7 +3327,7 @@ pub fn magnetic_slip_commit<const D: usize, const DOF: usize, Mem, Sc>(
     Mem: MemorySpace + Sync,
     Sc: Scalar + OrderedNumeric,
 {
-    magnetic_slip_commit_tiles(&[sim], dt, gamma, &OwnHalo, true);
+    magnetic_slip_commit_tiles(&[sim], &SlipShape::of(sim), dt, gamma, &OwnHalo, true);
 }
 
 /// `magnetic_slip_commit` over the tiles of one level in lockstep. each body's heat adds the
@@ -3318,6 +3335,7 @@ pub fn magnetic_slip_commit<const D: usize, const DOF: usize, Mem, Sc>(
 /// receipt, so a sum of the stores' body deltas holds it once
 pub fn magnetic_slip_commit_tiles<const D: usize, const DOF: usize, Mem, Sc>(
     stores: &[&FieldStore<D, DOF, Mem, Sc>],
+    shape: &SlipShape,
     dt: f64,
     gamma: f64,
     halo: &dyn SlipHalo<D, DOF, Mem, Sc>,
@@ -3326,8 +3344,7 @@ pub fn magnetic_slip_commit_tiles<const D: usize, const DOF: usize, Mem, Sc>(
     Mem: MemorySpace + Sync,
     Sc: Scalar + OrderedNumeric,
 {
-    let has_energy = stores[0].fields.cons.nrg_field().is_some();
-    let mixed = slip_workspace(stores[0]).z.is_some();
+    let (has_energy, mixed) = (shape.has_energy, shape.mixed);
     let oop = D;
     let mhd = slip_mhd::<D, DOF, Mem, Sc>;
     let each = |f: &dyn Fn(&FieldStore<D, DOF, Mem, Sc>)| {
@@ -3373,12 +3390,12 @@ pub fn magnetic_slip_commit_tiles<const D: usize, const DOF: usize, Mem, Sc>(
             }
         })
         .collect();
-    let sums = slip_emf_tiles(stores, gamma, if mixed { dt } else { 0.0 }, &passes, halo);
+    let sums = slip_emf_tiles(stores, shape, gamma, if mixed { dt } else { 0.0 }, &passes, true, halo);
 
     // the per-body heat receipt, Q_b = dt dV sum_c qdot_c^b, booked with the step's body deltas.
-    if books {
-        if let Some(im) = stores[0].immersed.as_ref() {
-            let vol: f64 = stores[0].geom.dx.iter().product();
+    if let (true, Some(first)) = (books, stores.first()) {
+        if let Some(im) = first.immersed.as_ref() {
+            let vol: f64 = first.geom.dx.iter().product();
             for (b, qdot_sum) in sums {
                 let mut delta = symbi_ib::BodyDelta::<f64, D>::new(b);
                 delta.slip_heat_delta = dt * vol * qdot_sum.value();

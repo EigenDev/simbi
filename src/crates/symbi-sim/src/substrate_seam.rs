@@ -580,12 +580,14 @@ where
     }
 
     /// the magnetic-slip midpoint M(dt) over the stores of one level in lockstep: `cuts` carries
-    /// what crosses between the stores and beyond this process, and with `books` the first store
-    /// books the level's heat receipt. returns whether the solve converged; a kernel set without
-    /// the slip operator converges at once
+    /// what crosses between the stores and beyond this process, `reference` is any store of the
+    /// run this process holds (it names the run's slip bodies when `stores` is empty), and with
+    /// `books` the first store books the level's heat receipt. returns whether the solve
+    /// converged; a kernel set without the slip operator converges at once
     fn magnetic_slip_step_tiles(
         &self,
         _stores: &[&FieldStore<NDIM, DOF, Mem, f64>],
+        _reference: &FieldStore<NDIM, DOF, Mem, f64>,
         _dt: f64,
         _cuts: &dyn SlipCuts<NDIM, DOF, Mem>,
         _books: bool,
