@@ -1,7 +1,7 @@
 // =============================================================================
 // frame.rs
 //
-// the wire frame: a fixed 36-byte little-endian header followed by a payload
+// the wire frame: a fixed 44-byte little-endian header followed by a payload
 // whose length the header states. the header carries the session, the epoch,
 // and a kind-specific id, so every frame is validated against the receiver's
 // expectations before its payload is touched.
@@ -15,9 +15,12 @@
 //  16  step         u64
 //  24  attempt      u16
 //  26  point        u8
-//  27  axis         u8
-//  28  id           u32
-//  32  payload_len  u32
+//  27  op           u8
+//  28  round        u32
+//  32  axis         u8
+//  33  reserved     3 bytes (zero)
+//  36  id           u32
+//  40  payload_len  u32
 //
 // usage:
 //  let mut bytes = [0u8; HEADER_LEN];
@@ -34,9 +37,11 @@ pub const MAGIC: [u8; 4] = *b"SFAB";
 /// first frame, before any simulation traffic. version 3 orders the exchange-point bytes by
 /// occurrence with an audit after each exchange (prime 0, its audit 1, then per stage k from
 /// 2 + 3k: flag exchange, halos, audit); version 2 had no audit points and version 1
-/// numbered stage k's halos 1 + k.
-pub const VERSION: u16 = 6;
-pub const HEADER_LEN: usize = 36;
+/// numbered stage k's halos 1 + k. version 7 adds the iterative pass (`round`) and the
+/// exchange within it (`op`) to the epoch, so a solve's repeated exchanges each have their own
+/// phase.
+pub const VERSION: u16 = 7;
+pub const HEADER_LEN: usize = 44;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u8)]
@@ -86,6 +91,7 @@ pub enum FrameError {
     Version(u16),
     Kind(u8),
     Flags(u8),
+    Reserved([u8; 3]),
 }
 
 impl std::fmt::Display for FrameError {
@@ -95,6 +101,7 @@ impl std::fmt::Display for FrameError {
             FrameError::Version(v) => write!(f, "unsupported version {v}"),
             FrameError::Kind(k) => write!(f, "unknown frame kind {k}"),
             FrameError::Flags(x) => write!(f, "nonzero flags {x:#x}"),
+            FrameError::Reserved(r) => write!(f, "nonzero reserved bytes {r:?}"),
         }
     }
 }
@@ -109,9 +116,12 @@ impl Header {
         out[16..24].copy_from_slice(&self.epoch.step.to_le_bytes());
         out[24..26].copy_from_slice(&self.epoch.attempt.to_le_bytes());
         out[26] = self.epoch.point;
-        out[27] = self.epoch.axis;
-        out[28..32].copy_from_slice(&self.id.to_le_bytes());
-        out[32..36].copy_from_slice(&self.payload_len.to_le_bytes());
+        out[27] = self.epoch.op;
+        out[28..32].copy_from_slice(&self.epoch.round.to_le_bytes());
+        out[32] = self.epoch.axis;
+        out[33..36].copy_from_slice(&[0; 3]);
+        out[36..40].copy_from_slice(&self.id.to_le_bytes());
+        out[40..44].copy_from_slice(&self.payload_len.to_le_bytes());
     }
 
     pub fn decode(bytes: &[u8; HEADER_LEN]) -> Result<Self, FrameError> {
@@ -127,6 +137,10 @@ impl Header {
         if bytes[7] != 0 {
             return Err(FrameError::Flags(bytes[7]));
         }
+        let reserved: [u8; 3] = bytes[33..36].try_into().expect("three bytes");
+        if reserved != [0; 3] {
+            return Err(FrameError::Reserved(reserved));
+        }
         let u64_at =
             |o: usize| u64::from_le_bytes(bytes[o..o + 8].try_into().expect("eight bytes"));
         let u32_at = |o: usize| u32::from_le_bytes(bytes[o..o + 4].try_into().expect("four bytes"));
@@ -137,10 +151,12 @@ impl Header {
                 step: u64_at(16),
                 attempt: u16::from_le_bytes([bytes[24], bytes[25]]),
                 point: bytes[26],
-                axis: bytes[27],
+                op: bytes[27],
+                round: u32_at(28),
+                axis: bytes[32],
             },
-            id: u32_at(28),
-            payload_len: u32_at(32),
+            id: u32_at(36),
+            payload_len: u32_at(40),
         })
     }
 }
@@ -173,6 +189,8 @@ mod tests {
                 step: 7,
                 attempt: 2,
                 point: 1,
+                round: 0x0102_0304,
+                op: 5,
                 axis: 0,
             },
             id: 42,
@@ -206,18 +224,37 @@ mod tests {
         v[4] = 9;
         assert!(matches!(Header::decode(&v), Err(FrameError::Version(_))));
         // the previous protocol versions, whose exchange-point bytes mean different points
-        for previous in [1u16, 2, 3, 4] {
+        for previous in [1u16, 2, 3, 4, 5, 6] {
             let mut old = bytes;
             old[4..6].copy_from_slice(&previous.to_le_bytes());
             assert!(matches!(Header::decode(&old), Err(FrameError::Version(v)) if v == previous));
         }
-        assert_eq!(VERSION, 6, "a change of wire meaning takes a new version and a new pin");
+        assert_eq!(VERSION, 7, "a change of wire meaning takes a new version and a new pin");
         let mut k = bytes;
         k[6] = 200;
         assert!(matches!(Header::decode(&k), Err(FrameError::Kind(200))));
         let mut f = bytes;
         f[7] = 1;
         assert!(matches!(Header::decode(&f), Err(FrameError::Flags(1))));
+    }
+
+    #[test]
+    fn the_pass_and_the_exchange_round_trip_at_their_bytes() {
+        let mut bytes = [0u8; HEADER_LEN];
+        sample().encode(&mut bytes);
+        assert_eq!(bytes[27], 5, "op");
+        assert_eq!(&bytes[28..32], &0x0102_0304u32.to_le_bytes(), "round");
+        assert_eq!(bytes[32], 0, "axis");
+        let back = Header::decode(&bytes).unwrap();
+        assert_eq!((back.epoch.round, back.epoch.op), (0x0102_0304, 5));
+    }
+
+    #[test]
+    fn nonzero_reserved_bytes_are_refused() {
+        let mut bytes = [0u8; HEADER_LEN];
+        sample().encode(&mut bytes);
+        bytes[34] = 1;
+        assert_eq!(Header::decode(&bytes), Err(FrameError::Reserved([0, 1, 0])));
     }
 
     #[test]

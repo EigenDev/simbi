@@ -375,6 +375,14 @@ pub enum ExchangePoint {
     RootCoefficients,
 }
 
+impl ExchangePoint {
+    /// whether the point's exchanges repeat inside one attempt, each numbered by its pass and its
+    /// place in the pass
+    pub fn is_iterative(&self) -> bool {
+        false
+    }
+}
+
 /// the points of one fine substep, in order
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum FinePoint {

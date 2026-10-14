@@ -32,6 +32,8 @@ const T3: TransferId = TransferId(3);
 
 fn epoch(attempt: u16, point: u8, axis: u8) -> Epoch {
     Epoch {
+        round: 0,
+        op: 0,
         step: 3,
         attempt,
         point,
@@ -442,6 +444,8 @@ fn an_abort_frame_surfaces_as_peer_aborted() {
             kind: Kind::Abort,
             session: S,
             epoch: Epoch {
+                round: 0,
+                op: 0,
                 step: 0,
                 attempt: 0,
                 point: Epoch::NO_POINT,
@@ -515,6 +519,8 @@ fn done_from_a_peer_still_owed_a_halo_rejected() {
             kind: Kind::Done,
             session: S,
             epoch: Epoch {
+                round: 0,
+                op: 0,
                 step: 0,
                 attempt: 0,
                 point: Epoch::NO_POINT,
@@ -547,6 +553,8 @@ fn done_from_an_uninvolved_peer_is_tabled_and_bars_later_phases() {
             kind: Kind::Done,
             session: S,
             epoch: Epoch {
+                round: 0,
+                op: 0,
                 step: 0,
                 attempt: 0,
                 point: Epoch::NO_POINT,
@@ -639,6 +647,8 @@ fn finish_waits_for_outbound_drain() {
             kind: Kind::Done,
             session: S,
             epoch: Epoch {
+                round: 0,
+                op: 0,
                 step: 0,
                 attempt: 0,
                 point: Epoch::NO_POINT,
@@ -762,6 +772,8 @@ fn a_result_for_an_unexpected_op_is_rejected() {
             kind: Kind::Result,
             session: S,
             epoch: Epoch {
+                round: 0,
+                op: 0,
                 step: 0,
                 attempt: 0,
                 point: Epoch::NO_POINT,
@@ -785,6 +797,8 @@ fn a_contribution_two_ops_ahead_is_rejected() {
         kind: Kind::Contribute,
         session: S,
         epoch: Epoch {
+            round: 0,
+            op: 0,
             step: 0,
             attempt: 0,
             point: Epoch::NO_POINT,
@@ -1055,4 +1069,89 @@ fn a_windowed_assembly_reproduces_every_word_through_small_frames() {
         assert_eq!(da, want, "worker a's vector ({len_a} + {len_b} words, frame {frame})");
         assert_eq!(db, want, "worker b's vector ({len_a} + {len_b} words, frame {frame})");
     }
+}
+
+/// a table whose phase 1 repeats: prime 0, the iterative solve 1, the stage 2 (the accept point),
+/// post-step 3, rollback 4, its audit 5, the checkpoint audit 6
+fn iterative_rules() -> symbi_fabric::PhaseRules {
+    let mut init_only = vec![false; 7];
+    init_only[0] = true;
+    let mut iterative = vec![false; 7];
+    iterative[1] = true;
+    symbi_fabric::PhaseRules {
+        skippable: vec![false, true, false, true, true, true, true],
+        init_only,
+        iterative,
+        accept: 2,
+        post_step: 3,
+        rollback: 4,
+        rollback_audit: 5,
+        checkpoint_audit: 6,
+    }
+}
+
+fn pass(round: u32, op: u8, axis: u8) -> Epoch {
+    Epoch { step: 3, attempt: 0, point: 1, round, op, axis }
+}
+
+/// one exchange of both axes at `e0` (its axis-0 epoch): the values name the pass and the exchange,
+/// so a payload left over from another one would show
+fn exchange_both_axes(a: &mut Fabric<Loopback>, b: &mut Fabric<Loopback>, e0: Epoch) {
+    let tag = f64::from(e0.round) * 10.0 + f64::from(e0.op);
+    for (axis, (ta, tb), len) in [(0u8, (T0, T1), 3usize), (1, (T2, T3), 2)] {
+        let e = Epoch { axis, ..e0 };
+        let va: Vec<f64> = (0..len).map(|i| tag + i as f64 * 0.1).collect();
+        let vb: Vec<f64> = va.iter().map(|v| -v).collect();
+        a.pack(ta, |buf| buf.copy_from_slice(&va)).unwrap();
+        b.pack(tb, |buf| buf.copy_from_slice(&vb)).unwrap();
+        a.open(PhaseSpec { epoch: e, sends: &[(ta, B)], receives: &[(tb, B)] }).unwrap();
+        b.open(PhaseSpec { epoch: e, sends: &[(tb, A)], receives: &[(ta, A)] }).unwrap();
+        drive(&mut [a, b]).unwrap();
+        assert_eq!(a.payload(tb).unwrap(), &vb[..], "{e:?}");
+        assert_eq!(b.payload(ta).unwrap(), &va[..], "{e:?}");
+        a.mark_unpacked(tb).unwrap();
+        b.mark_unpacked(ta).unwrap();
+        a.close().unwrap();
+        b.close().unwrap();
+    }
+}
+
+#[test]
+fn an_iterative_point_carries_more_exchanges_than_the_point_bytes_could_name() {
+    let link = Loopback::new();
+    let (a, b) = pair(&link);
+    let (mut a, mut b) = (a.with_phase_rules(iterative_rules()), b.with_phase_rules(iterative_rules()));
+    // 300 passes of two exchanges: 600 exchanges inside one point, past the 255 point bytes
+    for round in 0..300u32 {
+        for op in 0..2u8 {
+            exchange_both_axes(&mut a, &mut b, pass(round, op, 0));
+        }
+    }
+    exchange_both_axes(&mut a, &mut b, Epoch::at(3, 0, 2, 0));
+    assert_eq!(link.queued(), 0);
+    a.shutdown().unwrap();
+    b.shutdown().unwrap();
+}
+
+#[test]
+fn a_halo_of_the_previous_exchange_of_an_iterative_point_is_refused() {
+    let link = Loopback::new();
+    let (a, b) = pair(&link);
+    let (mut a, mut b) = (a.with_phase_rules(iterative_rules()), b.with_phase_rules(iterative_rules()));
+    exchange_both_axes(&mut a, &mut b, pass(7, 0, 0));
+    open_axis0(&mut a, &mut b, pass(7, 1, 0));
+    let (h, p) = halo(pass(7, 0, 0), T0, &[1.0, 2.0, 3.0]);
+    link.inject(A, B, h, &p);
+    assert!(b.service().unwrap_err().is_protocol(), "a stale exchange's halo was accepted");
+}
+
+#[test]
+fn a_pass_at_a_point_that_does_not_repeat_is_refused_at_open() {
+    let link = Loopback::new();
+    let (a, _) = pair(&link);
+    let mut a = a.with_phase_rules(iterative_rules());
+    a.pack(T0, |buf| buf.copy_from_slice(&[1.0, 2.0, 3.0])).unwrap();
+    let opened = a.open(PhaseSpec { epoch: Epoch { round: 1, ..Epoch::at(3, 0, 2, 0) }, sends: &[(T0, B)], receives: &[(T1, B)] });
+    let err = opened.expect_err("a stage opened with a pass");
+    assert!(format!("{err:?}").contains("does not repeat"), "{err:?}");
 }

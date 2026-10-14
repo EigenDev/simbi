@@ -127,7 +127,7 @@ impl March {
     fn open_phase(&mut self, point: ExchangePoint, step: u64, attempt: u16) -> Result<(), FabricError> {
         let byte = self.table.byte_of(point).expect("a point of the table");
         for axis in 0..AXES as u8 {
-            let epoch = Epoch { step, attempt, point: byte, axis };
+            let epoch = Epoch { round: 0, op: 0, step, attempt, point: byte, axis };
             let mut sends = Vec::new();
             let mut receives = Vec::new();
             for (id, from, to, ax) in moving(point) {
@@ -194,7 +194,7 @@ impl March {
                         self.early_grant_seen = self
                             .fabric
                             .grants()
-                            .is_tabled(B, Epoch { step, attempt, point: stage, axis: 1 });
+                            .is_tabled(B, Epoch { round: 0, op: 0, step, attempt, point: stage, axis: 1 });
                     }
                     self.open_phase(ExchangePoint::Stage(k), step, attempt)?;
                     self.open_phase(ExchangePoint::Audit(AuditAt::Stage(k)), step, attempt)?;

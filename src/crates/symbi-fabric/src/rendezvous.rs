@@ -155,12 +155,7 @@ fn announced(
 }
 
 fn none_epoch() -> Epoch {
-    Epoch {
-        step: 0,
-        attempt: 0,
-        point: Epoch::NO_POINT,
-        axis: Epoch::NO_AXIS,
-    }
+    Epoch::at(0, 0, Epoch::NO_POINT, Epoch::NO_AXIS)
 }
 
 fn put_u16(out: &mut Vec<u8>, v: u16) {
@@ -704,12 +699,13 @@ mod tests {
             host: "127.0.0.1".into(),
             byte_order: LITTLE_ENDIAN,
         };
+        // a worker built before the iterative pass entered the epoch is refused at the handshake
         let mut previous = mine.clone();
-        previous.protocol = 1;
+        previous.protocol = 6;
         assert!(
             disagreement(&mine, &previous, WorkerId(1))
                 .unwrap()
-                .contains("protocol 1 against 6")
+                .contains("protocol 6 against 7")
         );
         let mut table = mine.clone();
         table.identity.phase_table_digest = Digest(11);

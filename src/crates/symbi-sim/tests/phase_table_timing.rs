@@ -104,7 +104,7 @@ fn endpoint(link: &Loopback, me: WorkerId, table: &PhaseTable) -> Fabric<Loopbac
 fn attempt(table: &PhaseTable, step: u64, attempt: u16, troubled: &[u8], reject: Option<u8>) -> Vec<Epoch> {
     let mut out = Vec::new();
     let mut push = |point: ExchangePoint| {
-        out.push(Epoch { step, attempt, point: table.byte_of(point).unwrap(), axis: 0 });
+        out.push(Epoch { round: 0, op: 0, step, attempt, point: table.byte_of(point).unwrap(), axis: 0 });
     };
     if (step, attempt) == (0, 0) {
         push(ExchangePoint::Prime);
@@ -262,7 +262,7 @@ fn a_worker_without_fine_tiles_runs_ahead_through_its_empty_phases() {
         let held = walkers[1]
             .fabric
             .grants()
-            .is_tabled(C, Epoch { step: 0, attempt: 0, point: restrict, axis: 0 });
+            .is_tabled(C, Epoch { round: 0, op: 0, step: 0, attempt: 0, point: restrict, axis: 0 });
         if held && b_open.is_some_and(|e| e.step == 0 && e.point >= first_fine && e.point < restrict) {
             c_ran_ahead = true;
         }
@@ -326,14 +326,14 @@ fn a_peer_that_passes_an_owed_phase_is_refused_on_receipt() {
     // phases; then b's grant for the first fine prolongation arrives, passing stage 1
     let walk = |a: &mut Fabric<Loopback>| -> Result<(), FabricError> {
         for byte in [table.byte_of(ExchangePoint::Prime).unwrap(), stage0] {
-            let epoch = Epoch { step: 0, attempt: 0, point: byte, axis: 0 };
+            let epoch = Epoch { round: 0, op: 0, step: 0, attempt: 0, point: byte, axis: 0 };
             link.inject(B, A, grant(epoch), &[]);
             a.pack(t(0), |buf| buf.fill(1.0))?;
             a.open(PhaseSpec { epoch, sends: &[(t(0), B)], receives: &[] })?;
             while a.progress()? == Progress::Pending {}
             a.close()?;
         }
-        link.inject(B, A, grant(Epoch { step: 0, attempt: 0, point: prolong, axis: 0 }), &[]);
+        link.inject(B, A, grant(Epoch { round: 0, op: 0, step: 0, attempt: 0, point: prolong, axis: 0 }), &[]);
         a.service()
     };
     let mut ruled = endpoint(&link, A, &table);
@@ -353,7 +353,7 @@ fn a_peer_that_passes_an_owed_phase_is_refused_on_receipt() {
 fn a_worker_is_refused_at_its_own_open_for_every_illegal_transition() {
     let table = table();
     let byte = |p| table.byte_of(p).unwrap();
-    let e = |attempt: u16, point: u8, axis: u8| Epoch { step: 0, attempt, point, axis };
+    let e = |attempt: u16, point: u8, axis: u8| Epoch { round: 0, op: 0, step: 0, attempt, point, axis };
     let prolong = byte(ExchangePoint::Fine { substep: 0, point: FinePoint::Prolong });
     let stage = |k, axis| e(0, byte(ExchangePoint::Stage(k)), axis);
     let cases: [(&str, Vec<Epoch>, &str); 8] = [
@@ -362,7 +362,7 @@ fn a_worker_is_refused_at_its_own_open_for_every_illegal_transition() {
         ("a backward phase", vec![stage(0, 0), stage(0, 1), stage(1, 0), stage(1, 1), stage(0, 0)], "moves backward"),
         ("a phase left before its last axis", vec![stage(0, 0), stage(1, 0)], "leaves"),
         ("a phase opened past its first axis", vec![stage(0, 0), stage(0, 1), stage(1, 1)], "past its first axis"),
-        ("step zero skipped from the prime", vec![e(0, byte(ExchangePoint::Prime), 0), e(0, byte(ExchangePoint::Prime), 1), Epoch { step: 1, attempt: 0, point: byte(ExchangePoint::Stage(0)), axis: 0 }], "leaves the primed state"),
+        ("step zero skipped from the prime", vec![e(0, byte(ExchangePoint::Prime), 0), e(0, byte(ExchangePoint::Prime), 1), Epoch { round: 0, op: 0, step: 1, attempt: 0, point: byte(ExchangePoint::Stage(0)), axis: 0 }], "leaves the primed state"),
         ("a checkpoint audit inside the subcycle", vec![stage(0, 0), stage(0, 1), stage(1, 0), stage(1, 1), e(0, prolong, 0), e(0, prolong, 1), e(symbi_fabric::CHECKPOINT_ATTEMPT, byte(ExchangePoint::Audit(AuditAt::Checkpoint)), 0)], "passes the phase"),
         ("a rollback audit without a rollback", vec![stage(0, 0), stage(0, 1), e(0, byte(ExchangePoint::Audit(AuditAt::Rollback)), 0)], "audits a rollback"),
     ];
@@ -399,12 +399,12 @@ fn a_grant_beyond_the_table_and_a_late_prime_are_refused() {
     let table = table();
     let mut a = endpoint(&link, A, &table);
     let grant = |epoch: Epoch| Header { kind: Kind::Grant, session: S, epoch, id: 1, payload_len: 0 };
-    link.inject(B, A, grant(Epoch { step: 0, attempt: 0, point: table.len() as u8, axis: 0 }), &[]);
+    link.inject(B, A, grant(Epoch { round: 0, op: 0, step: 0, attempt: 0, point: table.len() as u8, axis: 0 }), &[]);
     let err = a.service().unwrap_err().to_string();
     assert!(err.contains("outside the table"), "another refusal: {err}");
     let mut a = endpoint(&link, A, &table);
     let prime = table.byte_of(ExchangePoint::Prime).unwrap();
-    link.inject(B, A, grant(Epoch { step: 1, attempt: 0, point: prime, axis: 0 }), &[]);
+    link.inject(B, A, grant(Epoch { round: 0, op: 0, step: 1, attempt: 0, point: prime, axis: 0 }), &[]);
     let err = a.service().unwrap_err().to_string();
     assert!(err.contains("first attempt alone"), "another refusal: {err}");
 }

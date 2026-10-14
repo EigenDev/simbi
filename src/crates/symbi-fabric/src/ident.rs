@@ -34,21 +34,35 @@ pub struct TransferId(pub u32);
 pub struct OpId(pub u32);
 
 /// the version a transfer belongs to. `point` is the exchange point's wire
-/// byte (0 prime, 1 + k stage k, 0xF0 rollback, 0xFF none) and `axis` the
-/// closing axis phase (0xFF for frames outside an exchange). the derived
-/// ordering is the total order of phases: step, then attempt, then point,
-/// then axis, which the wire bytes preserve by construction.
+/// byte (its place in the run's phase table, 0xFF none); inside an iterative
+/// point (a slip solve) `round` numbers the pass (0 the prologue, r the r-th
+/// iteration) and `op` the exchange within the pass, both zero elsewhere;
+/// `axis` is the closing axis phase (0xFF for frames outside an exchange). the
+/// derived ordering is the total order of phases: step, attempt, point, round,
+/// op, axis, which the wire bytes preserve by construction.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct Epoch {
     pub step: u64,
     pub attempt: u16,
     pub point: u8,
+    pub round: u32,
+    pub op: u8,
     pub axis: u8,
 }
 
 impl Epoch {
     pub const NO_POINT: u8 = 0xFF;
     pub const NO_AXIS: u8 = 0xFF;
+
+    /// the epoch of an exchange at a point that is not iterative
+    pub const fn at(step: u64, attempt: u16, point: u8, axis: u8) -> Self {
+        Self { step, attempt, point, round: 0, op: 0, axis }
+    }
+
+    /// whether `other` lies in the same exchange: the same point, pass and operation
+    pub fn same_exchange(&self, other: &Epoch) -> bool {
+        (self.step, self.attempt, self.point, self.round, self.op) == (other.step, other.attempt, other.point, other.round, other.op)
+    }
 }
 
 /// a 64-bit FNV-1a digest of a canonical encoding.
@@ -140,6 +154,8 @@ mod tests {
     #[test]
     fn epochs_order_by_step_attempt_point_axis() {
         let e = |step, attempt, point, axis| Epoch {
+            round: 0,
+            op: 0,
             step,
             attempt,
             point,

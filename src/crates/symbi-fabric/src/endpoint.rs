@@ -404,12 +404,7 @@ struct Blocks {
 const POLL_PAUSE: Duration = Duration::from_micros(50);
 
 fn none_epoch() -> Epoch {
-    Epoch {
-        step: 0,
-        attempt: 0,
-        point: Epoch::NO_POINT,
-        axis: Epoch::NO_AXIS,
-    }
+    Epoch::at(0, 0, Epoch::NO_POINT, Epoch::NO_AXIS)
 }
 
 impl<L: Link> Fabric<L> {

@@ -244,6 +244,7 @@ impl PhaseTable {
         PhaseRules {
             skippable: self.phases.iter().map(|p| p.skippable).collect(),
             init_only: self.phases.iter().map(|p| p.init_only).collect(),
+            iterative: self.phases.iter().map(|p| p.point.is_iterative()).collect(),
             accept,
             post_step: byte(ExchangePoint::PostStep),
             rollback: byte(ExchangePoint::Rollback),

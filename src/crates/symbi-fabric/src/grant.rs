@@ -29,6 +29,9 @@ use crate::ident::{Epoch, WorkerId};
 pub struct PhaseRules {
     pub skippable: Vec<bool>,
     pub init_only: Vec<bool>,
+    /// the points whose exchanges repeat: each carries its pass (`round`) and the exchange within
+    /// the pass (`op`), which rise through the point; every other point carries zero in both
+    pub iterative: Vec<bool>,
     pub accept: usize,
     pub post_step: usize,
     pub rollback: usize,
@@ -92,6 +95,9 @@ impl PhaseRules {
         if byte >= self.len() {
             return Err(format!("phase byte {} outside the table of {} phases", next.point, self.len()));
         }
+        if !self.iterative[byte] && (next.round, next.op) != (0, 0) {
+            return Err(format!("{next:?} carries a pass at a point that does not repeat"));
+        }
         if self.init_only[byte] && (next.step, next.attempt) != (0, 0) {
             return Err(format!("{next:?} names a phase of the first attempt alone"));
         }
@@ -115,7 +121,7 @@ impl PhaseRules {
             self.no_owed_phase_passed(0..upto, owed, next)
         };
         if let Some(axes) = strict_axes {
-            let same_phase = last.is_some_and(|l| (l.step, l.attempt, l.point) == (next.step, next.attempt, next.point));
+            let same_phase = last.is_some_and(|l| l.same_exchange(&next));
             if same_phase {
                 let l = last.unwrap();
                 if next.axis != l.axis + 1 {
@@ -138,10 +144,11 @@ impl PhaseRules {
         let lb = l.point as usize;
         let same_attempt = (l.step, l.attempt) == (next.step, next.attempt);
         if same_attempt && lb == byte {
-            return if next.axis > l.axis {
-                Ok(())
-            } else {
-                Err(format!("{next:?} repeats or reverses the axis of {l:?}"))
+            // inside one point the exchanges rise by pass, then by exchange, then by axis
+            return match (next.round, next.op, next.axis).cmp(&(l.round, l.op, l.axis)) {
+                std::cmp::Ordering::Greater => Ok(()),
+                _ if l.same_exchange(&next) => Err(format!("{next:?} repeats or reverses the axis of {l:?}")),
+                _ => Err(format!("{next:?} moves backward from {l:?} inside its point")),
             };
         }
         // the previous attempt ended in acceptance: it left the primed state, nothing owed
@@ -235,7 +242,7 @@ pub struct GrantTable {
 }
 
 fn same_point(a: &Epoch, b: &Epoch) -> bool {
-    a.step == b.step && a.attempt == b.attempt && a.point == b.point
+    a.same_exchange(b)
 }
 
 impl GrantTable {
@@ -386,6 +393,8 @@ mod tests {
 
     fn e(step: u64, attempt: u16, point: u8, axis: u8) -> Epoch {
         Epoch {
+            round: 0,
+            op: 0,
             step,
             attempt,
             point,
@@ -401,11 +410,77 @@ mod tests {
         let mut init_only = vec![false; 12];
         init_only[0] = true;
         init_only[1] = true;
-        PhaseRules { skippable, init_only, accept: 6, post_step: 8, rollback: 9, rollback_audit: 10, checkpoint_audit: 11 }
+        let iterative = vec![false; 12];
+        PhaseRules { skippable, init_only, iterative, accept: 6, post_step: 8, rollback: 9, rollback_audit: 10, checkpoint_audit: 11 }
     }
 
     fn all(_: usize) -> bool {
         true
+    }
+
+    /// the flat table with the troubled phase 5 repeating
+    fn iterative_rules() -> PhaseRules {
+        let mut r = flat_rules();
+        r.iterative[5] = true;
+        r
+    }
+
+    fn pass(attempt: u16, point: u8, round: u32, op: u8, axis: u8) -> Epoch {
+        Epoch { step: 0, attempt, point, round, op, axis }
+    }
+
+    #[test]
+    fn an_iterative_point_rises_by_pass_then_exchange_then_axis_past_the_old_point_count() {
+        let r = iterative_rules();
+        // one worker's own sequence: 300 passes of three two-axis exchanges inside phase 5, more
+        // phases than the 255 point bytes could name, then the stage after it
+        let mut last = pass(0, 3, 0, 0, 1);
+        for round in 0..300u32 {
+            for op in 0..3u8 {
+                for axis in 0..2u8 {
+                    let next = pass(0, 5, round, op, axis);
+                    r.allows(Some(last), next, all, Some(2)).unwrap_or_else(|e| panic!("{e}"));
+                    last = next;
+                }
+            }
+        }
+        assert!(r.allows(Some(last), pass(0, 6, 0, 0, 0), all, Some(2)).is_ok(), "the stage after the solve");
+        assert!(r.allows(Some(last), pass(0, 9, 0, 0, 0), all, Some(2)).is_ok(), "a rollback from inside the solve");
+    }
+
+    #[test]
+    fn an_iterative_point_refuses_repeats_backward_steps_and_skipped_axes() {
+        let r = iterative_rules();
+        let at = pass(0, 5, 4, 2, 1);
+        assert!(r.allows(Some(at), at, all, Some(2)).is_err(), "a repeated exchange");
+        assert!(r.allows(Some(at), pass(0, 5, 4, 1, 0), all, Some(2)).is_err(), "an earlier exchange of the pass");
+        assert!(r.allows(Some(at), pass(0, 5, 3, 7, 0), all, Some(2)).is_err(), "an earlier pass");
+        assert!(r.allows(Some(pass(0, 5, 4, 2, 0)), pass(0, 5, 4, 3, 0), all, Some(2)).is_err(), "an exchange left before its last axis");
+        assert!(r.allows(Some(at), pass(0, 5, 4, 3, 1), all, Some(2)).is_err(), "an exchange opened past its first axis");
+        assert!(r.allows(Some(at), pass(0, 5, 5, 0, 0), all, Some(2)).is_ok(), "the next pass");
+        // a peer's grants name only the exchanges it owes this observer: passes may be skipped
+        assert!(r.allows(Some(at), pass(0, 5, 9, 0, 1), all, None).is_ok(), "a peer several passes on");
+        assert!(r.allows(Some(at), pass(0, 5, 4, 0, 1), all, None).is_err(), "a peer moving backward");
+    }
+
+    #[test]
+    fn a_point_that_does_not_repeat_refuses_a_pass() {
+        let r = iterative_rules();
+        assert!(r.allows(Some(pass(0, 3, 0, 0, 1)), pass(0, 6, 1, 0, 0), all, Some(2)).is_err(), "a round at a stage");
+        assert!(r.allows(Some(pass(0, 3, 0, 0, 1)), pass(0, 6, 0, 1, 0), all, Some(2)).is_err(), "an op at a stage");
+    }
+
+    #[test]
+    fn grants_of_another_exchange_of_the_same_point_are_told_apart() {
+        let mut t = GrantTable::new(2, 2);
+        let peer = WorkerId(1);
+        t.table(peer, pass(0, 5, 7, 1, 0), 3).unwrap();
+        assert!(t.open(pass(0, 5, 7, 1, 0), |_| true).is_ok(), "the same exchange");
+        assert!(t.open(pass(0, 5, 7, 2, 0), |_| true).is_err(), "a grant of the previous exchange while this worker opens the next");
+        assert_eq!(t.consume(peer, pass(0, 5, 7, 1, 0)), Some(3));
+        assert!(t.table(peer, pass(0, 5, 7, 1, 0), 3).is_err(), "a stale grant at the consumed exchange");
+        assert!(t.table(peer, pass(0, 5, 6, 9, 1), 3).is_err(), "a grant of an earlier pass");
+        assert!(t.table(peer, pass(0, 5, 8, 0, 0), 3).is_ok(), "the next pass");
     }
 
     #[test]

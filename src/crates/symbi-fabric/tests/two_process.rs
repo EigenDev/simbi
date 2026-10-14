@@ -66,6 +66,8 @@ fn value(worker: u32, transfer: u32, i: usize) -> f64 {
 
 fn epoch(point: u8, axis: u8) -> Epoch {
     Epoch {
+        round: 0,
+        op: 0,
         step: 1,
         attempt: 0,
         point,
@@ -340,12 +342,7 @@ fn run_exchange(s: &Scenario, r: &Rendezvous) -> Result<(), FabricError> {
     let result = (|| {
         let start = Instant::now();
         for round in 0..EXCHANGE_ROUNDS {
-            let e = Epoch {
-                step: u64::from(round),
-                attempt: 0,
-                point: 1,
-                axis: 0,
-            };
+            let e = Epoch::at(u64::from(round), 0, 1, 0);
             for &(id, _) in &sends {
                 fabric.pack(id, |buf| {
                     for (i, v) in buf.iter_mut().enumerate() {

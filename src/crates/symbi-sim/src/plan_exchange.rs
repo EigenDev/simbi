@@ -244,6 +244,8 @@ impl<'p, const D: usize> PlanExchange<'p, D> {
             .byte_of(point)
             .unwrap_or_else(|| panic!("exchange point {point:?} outside the session's phase table"));
         Epoch {
+            round: 0,
+            op: 0,
             step,
             attempt,
             point: byte,

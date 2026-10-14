@@ -585,12 +585,7 @@ mod tests {
         Header {
             kind,
             session: SessionId(5),
-            epoch: Epoch {
-                step: 1,
-                attempt: 0,
-                point: 1,
-                axis: 0,
-            },
+            epoch: Epoch::at(1, 0, 1, 0),
             id,
             payload_len,
         }
