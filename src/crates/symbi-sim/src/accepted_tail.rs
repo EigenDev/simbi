@@ -86,9 +86,14 @@ where
         } else {
             Vec::new()
         };
-        // the bodies are the same on every tile, so every participant takes the same branch
-        let penalizes = held.stores.iter().any(|s| s.immersed.as_ref().is_some_and(|im| im.bodies.penalizes()));
+        // the bodies are the same on every tile, so every participant takes the same branch. a slip
+        // body's drain ran inside the step's palindrome, so the accepted tail drains nothing
+        let slipping = held.stores.iter().zip(held.kernels.iter()).any(|(s, k)| k.has_magnetic_slip(&**s));
+        let penalizes = !slipping && held.stores.iter().any(|s| s.immersed.as_ref().is_some_and(|im| im.bodies.penalizes()));
         for k in 0..held.stores.len() {
+            if slipping {
+                break;
+            }
             let (store, kernel) = (&*held.stores[k], held.kernels[k]);
             symbi_xpu::with_device(held.devices[k], || {
                 crate::driver::prof("penalize", || kernel.penalize(store, dt));

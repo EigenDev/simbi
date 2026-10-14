@@ -1,18 +1,18 @@
 # =============================================================================
 # test_tiled_slip.py
 #
-# a magnetic slip sink on refined host tiles steps the single hierarchy's
-# palindrome D M H M D across the tiles: the drain and the slip act on the
-# finest level, the slip solve runs in lockstep over the finest level's tiles
-# with every inner product and the heat merged exactly, and H is the collective
-# root step with the drain withheld. so, on the refined 2.5D disk under both
+# a magnetic slip sink on host tiles steps the single grid's palindrome
+# D M H M D across the tiles: the drain and the slip act on the finest level,
+# the slip solve runs in lockstep over the finest level's tiles with every inner
+# product and the heat merged exactly, and H is the collective root step with
+# the drain withheld. so, on the 2.5D disk unrefined and refined under both
 # closures, with the cuts through the sink and its slip shell:
 # - two and three uneven host tiles publish every dataset of every level, the
-#   body state and the body history of the single hierarchy bit for bit;
+#   body state and the body history of the single grid bit for bit;
 # - a run resumed onto another partition continues the uninterrupted one, its
 #   body history the one a single hierarchy resumed from the same file records;
 # - the slip acts (the field departs from a magnetically transparent sink).
-# a slip body on launched workers and on unrefined tiles is refused by name.
+# a slip body on launched workers is refused by name.
 #
 # run: pytest -m simulation simbi/simulation/tests/test_tiled_slip.py
 # =============================================================================
@@ -49,19 +49,19 @@ def host_tiles(monkeypatch):
     monkeypatch.setenv("SYMBI_GPU_OVERSUBSCRIBE", "1")
 
 
-def _refined(cls, directory: Path, closure: str, **kw):
+def _disk(cls, directory: Path, closure: str, refined: bool = True, **kw):
     # the finest level covers the central seven eighths; the sink of two fine cells with a one-cell
     # shell sits at the center, where the cut at root cell 16 passes
     probe = cls(resolution=(RES, RES, 1), data_directory=directory)
     probe.setup()
     half = 0.875 * probe.domain_radius * probe.bondi_radius
-    return cls(resolution=(RES, RES, 1), r_acc_scale=2.0, shell_cells=1.0, thermal_closure=closure, refinement_enabled=True,
-               refinement_max_levels=2, refinement_ratios=[2], refinement_regions=[[-half, half, -half, half]],
-               data_directory=directory, checkpoint_interval=1e9, **kw)
+    refinement = dict(refinement_enabled=True, refinement_max_levels=2, refinement_ratios=[2], refinement_regions=[[-half, half, -half, half]]) if refined else {}
+    return cls(resolution=(RES, RES, 1), r_acc_scale=2.0, shell_cells=1.0, thermal_closure=closure, data_directory=directory,
+               checkpoint_interval=1e9, **refinement, **kw)
 
 
-def _run(cls, out: Path, closure: str, gpus: int = 1, steps: int = STEPS, **kw) -> Path:
-    runner.run(_refined(cls, out, closure, gpus=gpus, **kw), compute_mode="cpu", max_steps=steps)
+def _run(cls, out: Path, closure: str, refined: bool, gpus: int = 1, steps: int = STEPS, **kw) -> Path:
+    runner.run(_disk(cls, out, closure, refined, gpus=gpus, **kw), compute_mode="cpu", max_steps=steps)
     (final,) = sorted(out.glob("*final*.h5"))
     return final
 
@@ -78,37 +78,43 @@ def _datasets(path: Path, history: bool = True) -> dict[str, np.ndarray]:
 
 def _assert_same(got: Path, want: Path, label: str, history: bool = True) -> None:
     xs, ys = _datasets(got, history), _datasets(want, history)
-    assert any(n.startswith("level_1/") for n in ys) and any(n.startswith("bodies/") for n in ys), f"{label}: the reference lacks a level or the bodies"
+    assert any(n.startswith("bodies/") for n in ys), f"{label}: the reference carries no bodies"
     assert xs.keys() == ys.keys(), f"{label}: datasets {sorted(set(xs) ^ set(ys))} differ"
     for name, x in xs.items():
         np.testing.assert_array_equal(x, ys[name], err_msg=f"{label}: {name}")
 
 
-@pytest.mark.parametrize("closure", ["adiabatic", "isothermal"])
-def test_a_refined_slip_sink_on_host_tiles_steps_as_the_single_hierarchy(tmp_path: Path, host_tiles, closure: str) -> None:
-    want = _run(MagneticSlipDisk2p5d, tmp_path / "single", closure)
-    transparent = _datasets(_run(TransparentDisk, tmp_path / "transparent", closure))
-    assert not np.array_equal(_datasets(want)["level_1/partition_0/hydro/primitives/b3"], transparent["level_1/partition_0/hydro/primitives/b3"]), \
+ARMS = [(closure, refined) for refined in (False, True) for closure in ("adiabatic", "isothermal")]
+
+
+@pytest.mark.parametrize(("closure", "refined"), ARMS)
+def test_a_slip_sink_on_host_tiles_steps_as_the_single_grid(tmp_path: Path, host_tiles, closure: str, refined: bool) -> None:
+    want = _run(MagneticSlipDisk2p5d, tmp_path / "single", closure, refined)
+    level = "level_1" if refined else "level_0"
+    assert level + "/partition_0/hydro/primitives/b3" in _datasets(want), f"{closure}: the reference lacks {level}"
+    transparent = _datasets(_run(TransparentDisk, tmp_path / "transparent", closure, refined))
+    assert not np.array_equal(_datasets(want)[f"{level}/partition_0/hydro/primitives/b3"], transparent[f"{level}/partition_0/hydro/primitives/b3"]), \
         f"{closure}: the slip left the field unchanged; the gate is vacuous"
-    _assert_same(_run(MagneticSlipDisk2p5d, tmp_path / "two", closure, gpus=2), want, f"{closure} on two host tiles")
-    _assert_same(_run(MagneticSlipDisk2p5d, tmp_path / "three", closure, gpus=3, decompose=[[12, 17], []]), want, f"{closure} on three uneven host tiles")
+    label = f"{closure}{' refined' if refined else ''}"
+    _assert_same(_run(MagneticSlipDisk2p5d, tmp_path / "two", closure, refined, gpus=2), want, f"{label} on two host tiles")
+    _assert_same(_run(MagneticSlipDisk2p5d, tmp_path / "three", closure, refined, gpus=3, decompose=[[12, 17], []]), want, f"{label} on three uneven host tiles")
 
 
-@pytest.mark.parametrize("closure", ["adiabatic", "isothermal"])
-def test_a_refined_slip_sink_resumed_onto_other_tiles_continues_the_single_hierarchy(tmp_path: Path, host_tiles, closure: str) -> None:
-    want = _run(MagneticSlipDisk2p5d, tmp_path / "single", closure)
-    first = _run(MagneticSlipDisk2p5d, tmp_path / "first", closure, gpus=2, steps=STEPS // 2)
-    resumed = _run(MagneticSlipDisk2p5d, tmp_path / "resumed", closure, gpus=3, decompose=[[12, 17], []], checkpoint_file=str(first))
+@pytest.mark.parametrize(("closure", "refined"), ARMS)
+def test_a_slip_sink_resumed_onto_other_tiles_continues_the_single_grid(tmp_path: Path, host_tiles, closure: str, refined: bool) -> None:
+    want = _run(MagneticSlipDisk2p5d, tmp_path / "single", closure, refined)
+    first = _run(MagneticSlipDisk2p5d, tmp_path / "first", closure, refined, gpus=2, steps=STEPS // 2)
+    resumed = _run(MagneticSlipDisk2p5d, tmp_path / "resumed", closure, refined, gpus=3, decompose=[[12, 17], []], checkpoint_file=str(first))
     # every level and the body state continue the uninterrupted run; the body history a resumed run
-    # records covers its own steps, as a resumed single hierarchy's does
+    # records covers its own steps, as a resumed single grid's does
     _assert_same(resumed, want, f"{closure} resumed onto three uneven host tiles", history=False)
-    single_resumed = _run(MagneticSlipDisk2p5d, tmp_path / "single_resumed", closure, checkpoint_file=str(first))
+    single_resumed = _run(MagneticSlipDisk2p5d, tmp_path / "single_resumed", closure, refined, checkpoint_file=str(first))
     _assert_same(resumed, single_resumed, f"{closure} resumed onto three uneven host tiles against one device resumed")
 
 
 def test_a_refined_slip_sink_on_launched_workers_is_refused_by_name(tmp_path: Path) -> None:
     script = tmp_path / "refined_disk.py"
-    probe = _refined(MagneticSlipDisk2p5d, tmp_path, "adiabatic")
+    probe = _disk(MagneticSlipDisk2p5d, tmp_path, "adiabatic")
     half = probe.refinement_regions[0][1]
     script.write_text(
         "from typing import Annotated\n\n"

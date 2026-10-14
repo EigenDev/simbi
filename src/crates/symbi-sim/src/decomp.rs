@@ -1889,6 +1889,29 @@ pub fn copy_shared_faces<const D: usize, const DOF: usize, M: MemorySpace, T: Ha
     }
 }
 
+/// the cuts of a level split into host tiles: the shared faces and the halos cross between the
+/// tiles of this process, which holds the whole level, so every sum is already the level's
+pub struct TileCuts<'a, const D: usize, T> {
+    pub schedule: &'a Schedule<D>,
+    pub devices: &'a [i32],
+    pub transport: &'a T,
+}
+
+impl<const D: usize, const DOF: usize, M: MemorySpace, T: HaloTransport> crate::substrate_seam::SlipCuts<D, DOF, M> for TileCuts<'_, D, T> {
+    fn faces(&self, stores: &[&FieldStore<D, DOF, M, f64>]) {
+        copy_shared_faces(stores, self.schedule, self.devices, self.transport);
+        exchange_grid(stores, self.schedule, self.devices, self.transport);
+    }
+
+    fn cells(&self, stores: &[&FieldStore<D, DOF, M, f64>], fields: &[&Field<f64, D, M>]) {
+        exchange_cell_field(stores, fields, self.schedule, self.devices, self.transport);
+    }
+
+    fn sum(&self, local: symbi_algebra::ExactSum) -> symbi_algebra::ExactSum {
+        local
+    }
+}
+
 /// exchange the conserved-field cut halos. construction-time only: the evolve loop never reads
 /// cons ghosts, but seeding a fine level whose coverage touches a cut prolongs the conserved
 /// components through them. see [`ExchangeSet`].
@@ -3050,49 +3073,15 @@ where
     tracer_entry: Option<Vec<crate::tracers::TileTracerSnapshot<D>>>,
 }
 
-impl<const D: usize, const DOF: usize, M, K, T> crate::step_transaction::RootAttempt for FlatRootAttempt<'_, '_, '_, D, DOF, M, K, T>
+impl<const D: usize, const DOF: usize, M, K, T> FlatRootAttempt<'_, '_, '_, D, DOF, M, K, T>
 where
     M: MemorySpace,
     K: KernelSet<D, DOF, M, f64>,
     T: HaloTransport,
     symbi_geometry::Cartesian: symbi_geometry::Metric<f64, D>,
 {
-    type Error = std::convert::Infallible;
-
-    fn rejectable(&mut self) -> bool {
-        self.kernels.iter().any(|k| k.fofc_active())
-    }
-
-    fn capture(&mut self, dt: f64, restorable: bool) -> Result<(), Self::Error> {
-        self.restorable = restorable;
-        if restorable && (self.has_discrete_tracers || self.has_continuous_tracers) && self.tracer_entry.is_none() {
-            let entry = self.stores.iter().map(|s| crate::tracers::TileTracerSnapshot::of(&**s)).collect::<Result<Vec<_>, _>>();
-            self.tracer_entry = Some(entry.unwrap_or_else(|err| panic!("tracer retry snapshot: {err}")));
-        }
-        for ii in 0..self.stores.len() {
-            let (store, kernel) = (&*self.stores[ii], self.kernels[ii]);
-            if restorable {
-                symbi_xpu::with_device(self.devices[ii], || kernel.snapshot_retry(store));
-            }
-            if self.multistage {
-                symbi_xpu::with_device(self.devices[ii], || kernel.snapshot(store));
-            }
-        }
-        for s in self.stores.iter_mut() {
-            s.dt = dt;
-            if self.has_discrete_tracers {
-                crate::tracers::snapshot_transport_state(&mut **s);
-            }
-            if self.has_continuous_tracers {
-                let geometry = s.geom.block_geometry(symbi_geometry::Cartesian);
-                crate::tracers::begin_ito_transport_store(&mut **s, &geometry)
-                    .unwrap_or_else(|err| panic!("ito transport initialization failed: {err}"));
-            }
-        }
-        Ok(())
-    }
-
-    fn run(&mut self, dt: f64) -> Result<bool, Self::Error> {
+    /// the collective stages of the root step across the cuts. returns whether a tile rejected it
+    fn stages(&mut self, dt: f64) -> bool {
         let (stores, kernels, devices, transport, stages) = (&mut *self.stores, self.kernels, self.devices, self.transport, self.stages);
         let (schedule, stage_hook) = (self.schedule, &mut *self.stage_hook);
         let (has_axis_rings, has_discrete_tracers, has_continuous_tracers) =
@@ -3181,7 +3170,132 @@ where
             let Ok::<_, std::convert::Infallible>(()) = crate::stage_tail::flat_stage_tail(&mut tail, &stage);
         }
         self.injection_ledgers = injection_ledgers;
-        Ok(!retry)
+        retry
+    }
+
+    /// whether a tile carries a magnetic-slip body
+    fn slip_runs(&self) -> bool {
+        self.stores.iter().zip(self.kernels).any(|(s, k)| k.has_magnetic_slip(&**s))
+    }
+
+    /// every tile's primitives recovered from its conserved state, then the cut and physical halos
+    fn rebuild(&mut self) {
+        for (ii, store) in self.stores.iter().enumerate() {
+            symbi_xpu::with_device(self.devices[ii], || self.kernels[ii].c2p(&**store));
+        }
+        drain_devices::<M>(self.devices);
+        let sh: Vec<&FieldStore<D, DOF, M, f64>> = self.stores.iter().map(|s| &**s).collect();
+        exchange_grid(&sh, self.schedule, self.devices, self.transport);
+        flip_polar_bands(&sh, self.kernels, self.schedule, self.devices);
+        for ii in 0..sh.len() {
+            symbi_xpu::with_device(self.devices[ii], || self.kernels[ii].ghost_fill(sh[ii]));
+        }
+    }
+
+    /// the material drain D(dt) on every tile at the whole grid's Alfven stiffness, then the rebuild
+    fn drain(&mut self, dt: f64) {
+        let c_a2 = self.stores.iter().map(|s| crate::state::local_c_a2_max(&**s)).fold(0.0f64, f64::max);
+        for store in self.stores.iter() {
+            if let Some(im) = store.immersed.as_ref() {
+                im.set_c_a2_override(c_a2);
+            }
+        }
+        for (ii, store) in self.stores.iter().enumerate() {
+            symbi_xpu::with_device(self.devices[ii], || self.kernels[ii].penalize(&**store, dt));
+        }
+        self.rebuild();
+    }
+
+    /// the magnetic-slip midpoint M(dt) over the tiles in lockstep, its heat booked once, then the
+    /// rebuild. returns whether the solve converged
+    fn slip(&mut self, dt: f64) -> bool {
+        drain_devices::<M>(self.devices);
+        let converged = {
+            let sh: Vec<&FieldStore<D, DOF, M, f64>> = self.stores.iter().map(|s| &**s).collect();
+            let cuts = TileCuts { schedule: self.schedule, devices: self.devices, transport: self.transport };
+            self.kernels[0].magnetic_slip_step_tiles(&sh, dt, &cuts, true)
+        };
+        if converged {
+            self.rebuild();
+        }
+        converged
+    }
+
+    /// the palindromic coupled step of a slip-enabled draining body across the tiles,
+    /// D(dt/2) M(dt/2) H(dt) M(dt/2) D(dt/2), as the single grid composes it: H is the stages
+    /// alone, every post-step operator withheld. returns whether the step failed (a nonconverged
+    /// solve or a rejected stage)
+    fn slip_palindrome(&mut self, dt: f64) -> bool {
+        let half = 0.5 * dt;
+        self.drain(half);
+        if !self.slip(half) {
+            return true;
+        }
+        // H starts from the drained and slipped state: its stages combine against that state
+        if self.multistage {
+            for (ii, store) in self.stores.iter().enumerate() {
+                symbi_xpu::with_device(self.devices[ii], || self.kernels[ii].snapshot(&**store));
+            }
+        }
+        if self.stages(dt) {
+            return true;
+        }
+        self.rebuild();
+        if !self.slip(half) {
+            return true;
+        }
+        self.drain(half);
+        false
+    }
+}
+
+impl<const D: usize, const DOF: usize, M, K, T> crate::step_transaction::RootAttempt for FlatRootAttempt<'_, '_, '_, D, DOF, M, K, T>
+where
+    M: MemorySpace,
+    K: KernelSet<D, DOF, M, f64>,
+    T: HaloTransport,
+    symbi_geometry::Cartesian: symbi_geometry::Metric<f64, D>,
+{
+    type Error = std::convert::Infallible;
+
+    fn rejectable(&mut self) -> bool {
+        self.kernels.iter().any(|k| k.fofc_active()) || self.slip_runs()
+    }
+
+    fn capture(&mut self, dt: f64, restorable: bool) -> Result<(), Self::Error> {
+        self.restorable = restorable;
+        if restorable && (self.has_discrete_tracers || self.has_continuous_tracers) && self.tracer_entry.is_none() {
+            let entry = self.stores.iter().map(|s| crate::tracers::TileTracerSnapshot::of(&**s)).collect::<Result<Vec<_>, _>>();
+            self.tracer_entry = Some(entry.unwrap_or_else(|err| panic!("tracer retry snapshot: {err}")));
+        }
+        for ii in 0..self.stores.len() {
+            let (store, kernel) = (&*self.stores[ii], self.kernels[ii]);
+            if restorable {
+                symbi_xpu::with_device(self.devices[ii], || kernel.snapshot_retry(store));
+            }
+            if self.multistage {
+                symbi_xpu::with_device(self.devices[ii], || kernel.snapshot(store));
+            }
+        }
+        for s in self.stores.iter_mut() {
+            s.dt = dt;
+            if self.has_discrete_tracers {
+                crate::tracers::snapshot_transport_state(&mut **s);
+            }
+            if self.has_continuous_tracers {
+                let geometry = s.geom.block_geometry(symbi_geometry::Cartesian);
+                crate::tracers::begin_ito_transport_store(&mut **s, &geometry)
+                    .unwrap_or_else(|err| panic!("ito transport initialization failed: {err}"));
+            }
+        }
+        Ok(())
+    }
+
+    fn run(&mut self, dt: f64) -> Result<bool, Self::Error> {
+        if self.slip_runs() {
+            return Ok(!self.slip_palindrome(dt));
+        }
+        Ok(!self.stages(dt))
     }
 
     fn evidence(&mut self, rejections: u32) -> Vec<String> {
@@ -3204,6 +3318,11 @@ where
             store.motion = self.motion_n[ii];
             // the tile stands at its step entry again, the clock its ghost refills read
             store.reset_state_clock();
+            // the drain and slip halves of a rejected palindrome booked body deltas the attempt
+            // no longer owns
+            if let Some(im) = store.immersed.as_ref() {
+                im.diagnostics.reset();
+            }
         }
         drain_devices::<M>(self.devices);
         let sh: Vec<&FieldStore<D, DOF, M, f64>> = self.stores.iter().map(|s| &**s).collect();
@@ -3263,6 +3382,7 @@ where
     // bodies are replicated identically on every tile; the per-step backward feedback + prescribed
     // advance run once per step when any tile carries them.
     let has_bodies = stores.iter().any(|s| s.immersed.is_some());
+    let slip_runs = stores.iter().zip(kernels).any(|(s, k)| k.has_magnetic_slip(&**s));
     let has_discrete_tracers = stores.iter().any(|s| s.tracers.is_some());
     let has_continuous_tracers = stores.iter().any(|s| s.continuous_tracers.is_some());
     let tracer_bounds: [(f64, f64); D] = std::array::from_fn(|dd| {
@@ -3460,9 +3580,13 @@ where
             // count is the largest any tile needs, so every tile runs the same number and the
             // tiled sequence stays bit-identical to the monolithic one.
             drain_devices::<M>(devices);
-            let mut step = ScheduledStep { schedule: &schedule, devices, transport, kernels };
-            crate::stage::fold_post_step(&sh, kernels, dt, &mut step, |_| true)
-                .unwrap_or_else(|e| panic!("{e}"));
+            // a slip run's drain belongs to its palindrome, which the single grid closes without
+            // the post-step operators
+            if !slip_runs {
+                let mut step = ScheduledStep { schedule: &schedule, devices, transport, kernels };
+                crate::stage::fold_post_step(&sh, kernels, dt, &mut step, |_| true)
+                    .unwrap_or_else(|e| panic!("{e}"));
+            }
             let horizon = sh.first().and_then(|store| horizon_request(*store));
             if let Some((index, diagnostic_radius)) = horizon {
                 // every tile's exact partial merges into the whole grid's shell flux, rounded once

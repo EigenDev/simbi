@@ -13,7 +13,7 @@
 // run: cargo test -p symbi --test mhd_slip_tiles
 // =============================================================================
 
-use symbi::sim::decomp::{LocalCopy, Partition, Schedule, Topology, exchange_grid, unflatten};
+use symbi::sim::decomp::{LocalCopy, Partition, Schedule, TileCuts, Topology, exchange_grid, unflatten};
 use symbi::sim::state::*;
 use symbi_algebra::Tensor;
 use symbi_geometry::Cartesian;
@@ -24,7 +24,7 @@ use symbi_hydro::quantity::{Density, Pressure};
 use symbi_hydro::state::Prim;
 use symbi_ib::{Body, BodyCollection, MagneticSpec, SurfaceSpec};
 use symbi_substrate::regimes::mhd_substrate::{
-    TileHalo, magnetic_slip_commit, magnetic_slip_commit_tiles, magnetic_slip_solve, magnetic_slip_solve_tiles,
+    CutHalo, magnetic_slip_commit, magnetic_slip_commit_tiles, magnetic_slip_solve, magnetic_slip_solve_tiles,
 };
 use symbi_xpu::{CpuSpace, HostMemory};
 
@@ -142,7 +142,8 @@ fn assert_tiles_match_whole<const D: usize>(n: usize, cuts: [Vec<usize>; D], who
     let schedule = Schedule::derive(counts, stores[0].geom.ng, &Topology::wrapping([true; D]));
     let devices = vec![0i32; n_tiles];
     exchange_grid(&stores, &schedule, &devices, &LocalCopy);
-    let halo = TileHalo { schedule: &schedule, devices: &devices, transport: &LocalCopy };
+    let tile_cuts = TileCuts { schedule: &schedule, devices: &devices, transport: &LocalCopy };
+    let halo = CutHalo { cuts: &tile_cuts };
     let tiled = magnetic_slip_solve_tiles(&stores, DT, GAMMA, 1e-10, 500, &halo);
     assert_eq!(tiled.iterations, receipt.iterations, "{cuts:?}: iterations");
     assert_eq!(tiled.final_residual_norm.to_bits(), receipt.final_residual_norm.to_bits(), "{cuts:?}: final residual");

@@ -9604,11 +9604,6 @@ fn validate_tiled_march(cfg: &Config) -> Result<(), String> {
             cfg.regime
         ));
     }
-    // the refined tiles step a magnetic slip body through the lockstep palindrome; the unrefined
-    // tiles march without it
-    if !cfg.refinement_enabled && cfg.bodies.iter().any(|b| b.magnetic_slip.is_some()) {
-        return Err("a magnetic slip body on unrefined tiles awaits its tiled slip step; refine the sink or run it on one device".to_string());
-    }
     // the tiles wrap a periodic axis cut into them on the root and on a first patch spanning that
     // axis; a nested level wraps within its own tile, so a nested patch keeps clear of the
     // periodic faces of a cut axis

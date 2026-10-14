@@ -4,7 +4,8 @@
 # one semantic admission for every driver. a setting the dispatched kernels
 # never apply is refused by name, before any output, on the single grid, on host
 # tiles and through `simbi launch` alike:
-# - a magnetic slip body on several tiles (the tiled marches step no slip);
+# - a magnetic slip body on launched workers (the workers carry no cross-worker
+#   slip solve);
 # - a bonded fragment assembly outside newtonian/isothermal hydro;
 # - resistivity on a hydro regime;
 # - tracer cohorts on a refined hierarchy;
@@ -218,11 +219,11 @@ def test_a_setting_no_kernel_applies_is_refused_by_name_on_every_driver(tmp_path
     _assert_refused(_launch(probe, settings, tmp_path / "launched", _layout_for(tmp_path, settings)), tmp_path / "launched", reason, f"{case} launched")
 
 
-def test_an_unrefined_magnetic_slip_body_is_refused_on_launched_workers_as_on_host_tiles(tmp_path: Path, probe: Path) -> None:
+def test_a_magnetic_slip_body_is_refused_on_launched_workers(tmp_path: Path, probe: Path) -> None:
     from simbi_configs.examples.ibm.magnetic_slip_disk_2p5d import MagneticSlipDisk2p5d
 
     script = Path(MagneticSlipDisk2p5d.__module__.replace(".", "/") + ".py")
-    reason = "a magnetic slip body on unrefined tiles awaits its tiled slip step"
+    reason = "a magnetic slip body is outside the distributed first release"
     for workers, shape in ((1, (1, 1)), (2, (2, 1))):
         layout = _layout(tmp_path / f"w{workers}.toml", workers=workers, shape=shape)
         cmd = [sys.executable, "-m", "simbi.cli", "launch", str(script), "--layout", str(layout), "--max-steps", "1",

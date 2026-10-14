@@ -287,6 +287,29 @@ impl FofcReport {
 // `eos_param` at construction — it does not read them off the sim). this is the keystone
 // decoupling: 4 params, and the energy/schema bounds off `R` stay local to
 // `FieldStore`. impls name the `&FieldStore` argument `sim`.
+/// what a level's magnetic-slip solve exchanges beyond each store's own halos: the faces and cells
+/// at the cuts between the stores, and the sums over every process holding a share of the level
+pub trait SlipCuts<const NDIM: usize, const DOF: usize, Mem: MemorySpace> {
+    /// every store's production faces hold new values on its own faces: carry the faces a cut
+    /// shares from their owner and the halo faces across every cut
+    fn faces(&self, stores: &[&FieldStore<NDIM, DOF, Mem, f64>]);
+    /// `fields[k]` of store `k` holds new interior cells: carry its halo across every cut
+    fn cells(&self, stores: &[&FieldStore<NDIM, DOF, Mem, f64>], fields: &[&symbi_grid::Field<f64, NDIM, Mem>]);
+    /// the level's exact sum from this process's share
+    fn sum(&self, local: symbi_algebra::ExactSum) -> symbi_algebra::ExactSum;
+}
+
+/// the cuts of a level held whole: nothing crosses
+pub struct NoCuts;
+
+impl<const NDIM: usize, const DOF: usize, Mem: MemorySpace> SlipCuts<NDIM, DOF, Mem> for NoCuts {
+    fn faces(&self, _stores: &[&FieldStore<NDIM, DOF, Mem, f64>]) {}
+    fn cells(&self, _stores: &[&FieldStore<NDIM, DOF, Mem, f64>], _fields: &[&symbi_grid::Field<f64, NDIM, Mem>]) {}
+    fn sum(&self, local: symbi_algebra::ExactSum) -> symbi_algebra::ExactSum {
+        local
+    }
+}
+
 pub trait KernelSet<const NDIM: usize, const DOF: usize, Mem, Sc>
 where
     Mem: MemorySpace,
@@ -556,10 +579,18 @@ where
         None
     }
 
-    /// the closure parameter the magnetic-slip solve reads: the adiabatic index of a gamma-law gas,
-    /// the sound speed of an isothermal one. `None` on a kernel set without the slip operator
-    fn slip_closure(&self) -> Option<f64> {
-        None
+    /// the magnetic-slip midpoint M(dt) over the stores of one level in lockstep: `cuts` carries
+    /// what crosses between the stores and beyond this process, and with `books` the first store
+    /// books the level's heat receipt. returns whether the solve converged; a kernel set without
+    /// the slip operator converges at once
+    fn magnetic_slip_step_tiles(
+        &self,
+        _stores: &[&FieldStore<NDIM, DOF, Mem, f64>],
+        _dt: f64,
+        _cuts: &dyn SlipCuts<NDIM, DOF, Mem>,
+        _books: bool,
+    ) -> bool {
+        true
     }
 
     /// the immersed-boundary penalization: the property-

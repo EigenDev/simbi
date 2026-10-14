@@ -7699,17 +7699,10 @@ where
         {
             let states: Vec<&FieldStore<NDIM, DOF, Mem, f64>> = holders.iter().map(|&i| &*self.tiles[i].levels[lf].state).collect();
             let schedule = schedule_of_tiles(&states, counts, &level_topology(self.tiles, lf, &holders));
-            let halo = symbi_substrate::regimes::mhd_substrate::TileHalo { schedule: &schedule, devices: &devices, transport: self.transport };
-            let closure = self.tiles[holders[0]].levels[lf].kernels.slip_closure().expect("a slip body runs on a magnetized kernel set");
-            let receipt = prof("magnetic_slip_solve", || {
-                symbi_substrate::regimes::mhd_substrate::magnetic_slip_solve_tiles(&states, dt, closure, 1e-10, 500, &halo)
-            });
-            if !receipt.converged {
+            let cuts = symbi_sim::decomp::TileCuts { schedule: &schedule, devices: &devices, transport: self.transport };
+            if !self.tiles[holders[0]].levels[lf].kernels.magnetic_slip_step_tiles(&states, dt, &cuts, true) {
                 return false;
             }
-            prof("magnetic_slip_commit", || {
-                symbi_substrate::regimes::mhd_substrate::magnetic_slip_commit_tiles(&states, dt, closure, &halo, true)
-            });
         }
         self.rebuild_finest();
         true

@@ -2303,6 +2303,10 @@ pub trait SlipHalo<const D: usize, const DOF: usize, Mem: MemorySpace, Sc: Scala
     fn faces(&self, stores: &[&FieldStore<D, DOF, Mem, Sc>]);
     /// `fields[k]` of store `k` holds new interior cells: regenerate its halo
     fn cells(&self, stores: &[&FieldStore<D, DOF, Mem, Sc>], fields: &[&Field<Sc, D, Mem>]);
+    /// the level's exact sum from the stores' share
+    fn sum(&self, local: ExactSum) -> ExactSum {
+        local
+    }
 }
 
 /// the halo rule of a grid held whole: each store regenerates its periodic images and boundary
@@ -2323,35 +2327,41 @@ impl<const D: usize, const DOF: usize, Mem: MemorySpace + Sync, Sc: Scalar + Ord
     }
 }
 
-/// the halo rule of a level cut into tiles: each tile regenerates its own periodic and boundary
-/// images, takes the faces it shares at a cut from their owner, and exchanges its halos across
-/// every cut and periodic seam, so every halo a pass reads holds the value the whole level holds
-/// there
-pub struct TileHalo<'a, const D: usize, T> {
-    pub schedule: &'a symbi_sim::decomp::Schedule<D>,
-    pub devices: &'a [i32],
-    pub transport: &'a T,
+/// the halo rule of a level cut into tiles or spread over processes: each store regenerates its own
+/// periodic and boundary images, then `cuts` carries the shared faces, the halos and the sums across
+/// the cuts, so every halo a pass reads holds the value the whole level holds there
+pub struct CutHalo<'a, const D: usize, const DOF: usize, Mem: MemorySpace> {
+    pub cuts: &'a dyn symbi_sim::substrate_seam::SlipCuts<D, DOF, Mem>,
 }
 
-impl<const D: usize, const DOF: usize, Mem, T> SlipHalo<D, DOF, Mem, f64> for TileHalo<'_, D, T>
+impl<const D: usize, const DOF: usize, Mem> SlipHalo<D, DOF, Mem, f64> for CutHalo<'_, D, DOF, Mem>
 where
     Mem: MemorySpace + Sync,
-    T: symbi_sim::decomp::HaloTransport,
 {
     fn faces(&self, stores: &[&FieldStore<D, DOF, Mem, f64>]) {
         for sim in stores {
             extend_bface_periodic(*sim);
         }
-        symbi_sim::decomp::copy_shared_faces(stores, self.schedule, self.devices, self.transport);
-        symbi_sim::decomp::exchange_grid(stores, self.schedule, self.devices, self.transport);
+        self.cuts.faces(stores);
     }
 
     fn cells(&self, stores: &[&FieldStore<D, DOF, Mem, f64>], fields: &[&Field<f64, D, Mem>]) {
         for (sim, field) in stores.iter().zip(fields) {
             cell_halo_fill(*sim, field);
         }
-        symbi_sim::decomp::exchange_cell_field(stores, fields, self.schedule, self.devices, self.transport);
+        self.cuts.cells(stores, fields);
     }
+
+    fn sum(&self, local: ExactSum) -> ExactSum {
+        self.cuts.sum(local)
+    }
+}
+
+/// whether a store carries a magnetic-slip body
+pub fn store_has_magnetic_slip<const D: usize, const DOF: usize, Mem: MemorySpace, Sc: Scalar + OrderedNumeric>(sim: &FieldStore<D, DOF, Mem, Sc>) -> bool {
+    sim.immersed
+        .as_ref()
+        .is_some_and(|im| (0..im.bodies.len()).any(|b| matches!(im.bodies.get(b).spec.magnetic, symbi_ib::MagneticSpec::Slip { .. })))
 }
 
 /// what one store's slip pass reads beyond the production state: on a 2.5D grid the operand's cell
@@ -2400,6 +2410,11 @@ where
         return Vec::new();
     };
     assert_eq!(slipping, stores.len(), "the tiles of one level carry the same slip bodies");
+    let totals: Vec<(usize, ExactSum)> = if passes.first().is_some_and(|p| p.heat.is_some()) {
+        totals.into_iter().map(|(b, sum)| (b, halo.sum(sum))).collect()
+    } else {
+        totals
+    };
     for c in 0..3 {
         let quadrature: Vec<&Field<Sc, D, Mem>> = stores
             .iter()
@@ -2848,7 +2863,7 @@ where
     Mem: MemorySpace,
     Sc: Scalar + OrderedNumeric,
 {
-    mixed_dot_tiles(&[sim], &[a], &[b], &[product])
+    mixed_dot_tiles(&[sim], &[a], &[b], &[product], &OwnHalo)
 }
 
 /// the mixed inner product over the tiles of one level: every store's interior faces and cells,
@@ -2858,9 +2873,10 @@ fn mixed_dot_tiles<const D: usize, const DOF: usize, Mem, Sc>(
     a: &[Mixed<'_, D, Mem, Sc>],
     b: &[Mixed<'_, D, Mem, Sc>],
     product: &[Mixed<'_, D, Mem, Sc>],
+    halo: &dyn SlipHalo<D, DOF, Mem, Sc>,
 ) -> f64
 where
-    Mem: MemorySpace,
+    Mem: MemorySpace + Sync,
     Sc: Scalar + OrderedNumeric,
 {
     let mut s = ExactSum::new();
@@ -2878,7 +2894,7 @@ where
             s.merge(&field_sum_exact(pz, &sim.geom.interior));
         }
     }
-    s.value()
+    halo.sum(s).value()
 }
 
 /// the mixed inner product of two solve vectors through the workspace scratch: `a` and `b` are
@@ -3221,7 +3237,7 @@ where
         mixed_lincomb(sim, 0.0, slip_vector(sim, SlipVector::Residual), -dt, slip_vector(sim, SlipVector::OperatorDirection));
         mixed_copy_interior(sim, slip_vector(sim, SlipVector::Residual), slip_vector(sim, SlipVector::Direction));
     });
-    let dot = |a: SlipVector, b: SlipVector| mixed_dot_tiles(stores, &vectors(a), &vectors(b), &vectors(SlipVector::Product));
+    let dot = |a: SlipVector, b: SlipVector| mixed_dot_tiles(stores, &vectors(a), &vectors(b), &vectors(SlipVector::Product), halo);
     let rhs_norm = dot(SlipVector::Rhs, SlipVector::Rhs).sqrt();
     let r0 = dot(SlipVector::Residual, SlipVector::Residual).sqrt();
     let target = tol * rhs_norm.max(1e-300);
