@@ -994,10 +994,12 @@ where
         }
         let closure = self.eos_param.value();
         let halo = crate::regimes::mhd_substrate::CutHalo { cuts };
+        cuts.enter(symbi_sim::substrate_seam::SlipPart::Solve);
         let receipt = symbi_sim::driver::prof("magnetic_slip_solve", || {
             crate::regimes::mhd_substrate::magnetic_slip_solve_tiles::<D, 3, Mem, f64>(stores, &shape, dt, closure, 1e-10, 500, &halo)
         });
         if receipt.converged {
+            cuts.enter(symbi_sim::substrate_seam::SlipPart::Commit);
             symbi_sim::driver::prof("magnetic_slip_commit", || {
                 crate::regimes::mhd_substrate::magnetic_slip_commit_tiles::<D, 3, Mem, f64>(stores, &shape, dt, closure, &halo, books)
             });

@@ -193,6 +193,33 @@ impl PhaseTable {
         Ok(Self { phases, stages, substeps, fine_stages, depth })
     }
 
+    /// the table of a run carrying a magnetic-slip body: the opening half's drain, solve,
+    /// commit, rebuild (and, refined, sync) before the root stages, and the closing half's solve,
+    /// commit, rebuild, drain (and sync) after the stages, the fine subcycle and the restriction,
+    /// before the post-step. the solve and commit points repeat
+    pub fn with_slip(mut self) -> Result<Self, PhaseTableError> {
+        let refined = self.depth > 1;
+        let half = |h: u8| -> Vec<Phase> {
+            let mut points = if h == 0 {
+                vec![ExchangePoint::SlipDrain { half: 0 }, ExchangePoint::SlipSolve { half: 0 }, ExchangePoint::SlipCommit { half: 0 }, ExchangePoint::SlipRebuild { half: 0 }]
+            } else {
+                vec![ExchangePoint::SlipSolve { half: 1 }, ExchangePoint::SlipCommit { half: 1 }, ExchangePoint::SlipRebuild { half: 1 }, ExchangePoint::SlipDrain { half: 1 }]
+            };
+            if refined {
+                points.push(ExchangePoint::SlipSync { half: h });
+            }
+            points.into_iter().map(|point| Phase { point, skippable: true, init_only: false }).collect()
+        };
+        let first_stage = self.phases.iter().position(|p| p.point == ExchangePoint::Troubled(0)).expect("every table holds its first stage");
+        self.phases.splice(first_stage..first_stage, half(0));
+        let post = self.phases.iter().position(|p| p.point == ExchangePoint::TracerCoefficients).expect("every table holds its post-step points");
+        self.phases.splice(post..post, half(1));
+        if self.phases.len() > Self::CAPACITY {
+            return Err(PhaseTableError::Overflow { phases: self.phases.len() });
+        }
+        Ok(self)
+    }
+
     pub fn depth(&self) -> u8 {
         self.depth
     }
@@ -335,6 +362,38 @@ fn nested_phases(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_slip_table_places_the_palindrome_around_the_stages_and_repeats_its_solve_alone() {
+        use crate::atlas::ExchangePoint as P;
+        for (plain, refined) in [(PhaseTable::flat(2).unwrap(), false), (PhaseTable::nested(2, 2, 2).unwrap(), true)] {
+            assert!(plain.phases().iter().all(|p| !p.point.is_slip()), "a table without a slip body carries a slip point");
+            let digest = plain.digest();
+            let slip = plain.clone().with_slip().unwrap();
+            assert_eq!(plain.digest(), digest);
+            assert_ne!(slip.digest(), digest, "the slip points enter the digest");
+            let order: Vec<P> = slip.phases().iter().map(|p| p.point).filter(|p| p.is_slip() || *p == P::Troubled(0) || *p == P::PostStep).collect();
+            let mut want = vec![P::SlipDrain { half: 0 }, P::SlipSolve { half: 0 }, P::SlipCommit { half: 0 }, P::SlipRebuild { half: 0 }];
+            if refined {
+                want.push(P::SlipSync { half: 0 });
+            }
+            want.push(P::Troubled(0));
+            want.extend([P::SlipSolve { half: 1 }, P::SlipCommit { half: 1 }, P::SlipRebuild { half: 1 }, P::SlipDrain { half: 1 }]);
+            if refined {
+                want.push(P::SlipSync { half: 1 });
+            }
+            want.push(P::PostStep);
+            assert_eq!(order, want, "refined {refined}");
+            let rules = slip.rules();
+            for (byte, phase) in slip.phases().iter().enumerate() {
+                let repeats = matches!(phase.point, P::SlipSolve { .. } | P::SlipCommit { .. });
+                assert_eq!(rules.iterative[byte], repeats, "{:?}", phase.point);
+            }
+            // every slip point lies before the post-step, so a rollback opens from any of them
+            let post = slip.byte_of(P::PostStep).unwrap();
+            assert!(slip.phases().iter().enumerate().filter(|(_, p)| p.point.is_slip()).all(|(b, _)| (b as u8) < post));
+        }
+    }
 
     #[test]
     fn a_flat_table_lists_the_points_in_execution_order_with_dense_bytes() {

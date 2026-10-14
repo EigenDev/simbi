@@ -406,6 +406,10 @@ struct Blocks {
 /// the pause after a waiting pass that advanced nothing.
 const POLL_PAUSE: Duration = Duration::from_micros(50);
 
+/// the kinds of exchange an iterative point carries, in the low two bits of an epoch's `op`; its
+/// high six bits number the exchange within the pass
+pub const PASS_KINDS: u8 = 4;
+
 fn none_epoch() -> Epoch {
     Epoch::at(0, 0, Epoch::NO_POINT, Epoch::NO_AXIS)
 }
@@ -492,21 +496,18 @@ impl<L: Link> Fabric<L> {
     /// the send counts, `[peer][axis]`, of the exchanges of kind `kind` at the iterative point
     /// `byte`. an exchange's kind is the low two bits of its epoch's `op`
     pub fn with_pass_counts(mut self, byte: usize, kind: u8, counts: Vec<Vec<u32>>) -> Self {
-        assert!(kind < Self::PASS_KINDS, "an exchange kind fits two bits");
+        assert!(kind < PASS_KINDS, "an exchange kind fits two bits");
         assert!(counts.len() == self.workers && counts.iter().all(|p| p.len() == self.axes));
         self.pass_counts.insert((byte, kind), counts);
         self
     }
-
-    /// the kinds of exchange an iterative point carries, in the low bits of `op`
-    pub const PASS_KINDS: u8 = 4;
 
     /// the send counts a grant for `epoch` must carry, `[peer][axis]`
     fn counts_at(&self, epoch: Epoch) -> Option<&Vec<Vec<u32>>> {
         let byte = epoch.point as usize;
         let iterative = self.phase_rules.as_ref().is_some_and(|r| r.iterative.get(byte).copied().unwrap_or(false));
         if iterative {
-            return self.pass_counts.get(&(byte, epoch.op % Self::PASS_KINDS));
+            return self.pass_counts.get(&(byte, epoch.op % PASS_KINDS));
         }
         match self.phase_counts.as_ref() {
             Some(table) => table.get(byte),
@@ -524,7 +525,7 @@ impl<L: Link> Fabric<L> {
     /// something there
     fn owed_by(&self, peer: WorkerId, byte: usize) -> bool {
         let owed_in = |counts: &Vec<Vec<u32>>| counts.get(peer.0 as usize).is_some_and(|per_axis| per_axis.iter().any(|&c| c > 0));
-        if self.pass_counts.range((byte, 0)..(byte, Self::PASS_KINDS)).any(|(_, c)| owed_in(c)) {
+        if self.pass_counts.range((byte, 0)..(byte, PASS_KINDS)).any(|(_, c)| owed_in(c)) {
             return true;
         }
         let counts = match self.phase_counts.as_ref() {

@@ -297,6 +297,17 @@ pub trait SlipCuts<const NDIM: usize, const DOF: usize, Mem: MemorySpace> {
     fn cells(&self, stores: &[&FieldStore<NDIM, DOF, Mem, f64>], fields: &[&symbi_grid::Field<f64, NDIM, Mem>]);
     /// the level's exact sum from this process's share
     fn sum(&self, local: symbi_algebra::ExactSum) -> symbi_algebra::ExactSum;
+    /// the solve or the commit begins: the exchanges that follow belong to that part
+    fn enter(&self, _part: SlipPart) {}
+    /// pass `round` of the current part begins (0 the prologue, r the r-th iteration)
+    fn pass(&self, _round: u32) {}
+}
+
+/// the two parts of a slip midpoint, each its own run of exchanges
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SlipPart {
+    Solve,
+    Commit,
 }
 
 /// the cuts of a level held whole: nothing crosses

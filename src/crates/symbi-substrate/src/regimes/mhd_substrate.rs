@@ -2307,6 +2307,8 @@ pub trait SlipHalo<const D: usize, const DOF: usize, Mem: MemorySpace, Sc: Scala
     fn sum(&self, local: ExactSum) -> ExactSum {
         local
     }
+    /// pass `round` of the solve or the commit begins (0 the prologue, r the r-th iteration)
+    fn pass(&self, _round: u32) {}
 }
 
 /// the halo rule of a grid held whole: each store regenerates its periodic images and boundary
@@ -2354,6 +2356,10 @@ where
 
     fn sum(&self, local: ExactSum) -> ExactSum {
         self.cuts.sum(local)
+    }
+
+    fn pass(&self, round: u32) {
+        self.cuts.pass(round);
     }
 }
 
@@ -3166,6 +3172,7 @@ where
         }
     };
 
+    halo.pass(0);
     // the substep input B^0: every stored face and, on a 2.5D grid, the cell B_z with its halo
     // regenerated so the current gather reads its wrapped image.
     each(&|sim| snapshot_bface(sim, &slip_workspace(sim).input));
@@ -3265,6 +3272,7 @@ where
         if final_res <= target {
             break;
         }
+        halo.pass(u32::try_from(it + 1).expect("the iteration count fits the pass counter"));
         apply_operator_tiles(stores, shape, gamma, &vectors(SlipVector::Direction), &vectors(SlipVector::OperatorDirection), halo);
         each(&|sim| mixed_lincomb(sim, 0.5 * dt, slip_vector(sim, SlipVector::OperatorDirection), 1.0, slip_vector(sim, SlipVector::Direction)));
         let alpha = rs / dot(SlipVector::Direction, SlipVector::OperatorDirection);
@@ -3353,6 +3361,7 @@ pub fn magnetic_slip_commit_tiles<const D: usize, const DOF: usize, Mem, Sc>(
         }
     };
 
+    halo.pass(0);
     // B^{1/2} into ws.rhs; freeze bcell = B*; cell pass fills F_q = A(B*)(R B^{1/2}); qdot = R B . F_q.
     each(&|sim| {
         let ws = slip_workspace(sim);

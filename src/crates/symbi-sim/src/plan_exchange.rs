@@ -20,7 +20,7 @@
 //  exchange.finish_axis(&fields, &mut fabric, axis)?;
 // =============================================================================
 
-use crate::atlas::{AuditAt, ExchangePlan, ExchangePoint, FinePoint, Placement, Span, TileId, domain_of};
+use crate::atlas::{AuditAt, ExchangePlan, ExchangePoint, FinePoint, Placement, SLIP_CELLS, SLIP_SHARED_FACES, SLIP_STATE, Span, TileId, domain_of};
 use crate::decomp::HaloTransport;
 use crate::phase_table::PhaseTable;
 
@@ -65,6 +65,10 @@ pub enum PlanRole {
     /// moves at the band points of the restriction into level `level` (the coarse side of the
     /// band) and into level `level - 1` (the fine side)
     BandSeam { level: u8 },
+    /// the faces each cut shares, from their owner to the tile below, at the slip points
+    SlipSharedFaces,
+    /// one cell field of the slip level at the slip points
+    SlipCells,
 }
 
 /// a fault injected into one plan's staging at one point, for the gates of the
@@ -125,9 +129,47 @@ impl<'p, const D: usize> PlanExchange<'p, D> {
         TransferId(t.id.0 + self.id_offset)
     }
 
+    /// whether `t` moves in the exchange of kind `kind` at `point` under this plan's role. a slip
+    /// point moves the slip level's state (the run's finest), its shared faces or one of its cell
+    /// fields by the exchange's kind, and every coarser level's state at the sync; every other
+    /// point has the one kind of its own exchange
+    pub fn moves_in(&self, t: &crate::atlas::Transfer<D>, point: ExchangePoint, kind: u8) -> bool {
+        if !point.is_slip() {
+            return kind == SLIP_STATE && self.moves(t, point);
+        }
+        let slip_level = self.table.depth().saturating_sub(1);
+        let state_level = match self.role {
+            PlanRole::RootState => Some(0),
+            PlanRole::Fine => Some(1),
+            PlanRole::Nested { level } => Some(level),
+            _ => None,
+        };
+        let state = || self.plan.moves_at(t, ExchangePoint::Stage(0));
+        match point {
+            ExchangePoint::SlipDrain { .. } | ExchangePoint::SlipRebuild { .. } => kind == SLIP_STATE && state_level == Some(slip_level) && state(),
+            ExchangePoint::SlipSync { .. } => kind == SLIP_STATE && state_level.is_some_and(|l| l < slip_level) && state(),
+            ExchangePoint::SlipSolve { .. } | ExchangePoint::SlipCommit { .. } => match kind {
+                SLIP_STATE => state_level == Some(slip_level) && state(),
+                SLIP_SHARED_FACES => self.role == PlanRole::SlipSharedFaces,
+                SLIP_CELLS => self.role == PlanRole::SlipCells && state(),
+                _ => false,
+            },
+            _ => false,
+        }
+    }
+
+    /// the kind of the exchange `epoch` names: its `op`'s low bits at an iterative point
+    fn kind_of(point: ExchangePoint, op: u8) -> u8 {
+        if point.is_iterative() { op % symbi_fabric::PASS_KINDS } else { SLIP_STATE }
+    }
+
     /// whether `t` moves at `point` under this plan's role
     pub fn moves(&self, t: &crate::atlas::Transfer<D>, point: ExchangePoint) -> bool {
+        if point.is_slip() {
+            return !point.is_iterative() && self.moves_in(t, point, SLIP_STATE);
+        }
         match self.role {
+            PlanRole::SlipSharedFaces | PlanRole::SlipCells => false,
             PlanRole::RootState => match point {
                 ExchangePoint::EquilibriumLevel { level, .. } => level == 0 && self.plan.moves_at(t, point),
                 _ => self.plan.moves_at(t, point),
@@ -288,6 +330,24 @@ impl<'p, const D: usize> PlanExchange<'p, D> {
             .iter()
             .map(|phase| self.sends_at(phase.point))
             .collect()
+    }
+
+    /// the send counts of every exchange kind of every iterative point, `(byte, kind, [peer][axis])`
+    pub fn pass_counts(&self) -> Vec<(usize, u8, Vec<Vec<u32>>)> {
+        let mut out = Vec::new();
+        for (byte, phase) in self.table.phases().iter().enumerate() {
+            if phase.point.is_iterative() {
+                for kind in [SLIP_STATE, SLIP_SHARED_FACES, SLIP_CELLS] {
+                    out.push((byte, kind, self.sends_in(phase.point, kind)));
+                }
+            }
+        }
+        out
+    }
+
+    /// the epoch of the exchange `op` of pass `round` at the iterative `point`, on `axis`
+    pub fn pass_epoch(&self, point: ExchangePoint, round: u32, op: u8, step: u64, attempt: u16, axis: usize) -> Epoch {
+        Epoch { round, op, ..self.epoch(point, step, attempt, axis) }
     }
 
     /// the fabric endpoint for this plan alone: every transfer's buffer, the send counts of
@@ -452,8 +512,13 @@ impl<'p, const D: usize> PlanExchange<'p, D> {
     }
 
     fn sends_at(&self, point: ExchangePoint) -> Vec<Vec<u32>> {
+        self.sends_in(point, SLIP_STATE)
+    }
+
+    /// the transfers this worker sends to `[peer][axis]` in the exchange of kind `kind` at `point`
+    fn sends_in(&self, point: ExchangePoint, kind: u8) -> Vec<Vec<u32>> {
         let mut counts = vec![vec![0u32; D]; self.placement.workers as usize];
-        for t in self.plan.transfers().filter(|t| self.moves(t, point)) {
+        for t in self.plan.transfers().filter(|t| self.moves_in(t, point, kind)) {
             if self.owns(t.src) && !self.owns(t.dst) {
                 counts[self.placement.owner_of(t.dst).0 as usize][t.axis as usize] += 1;
             }
@@ -525,9 +590,10 @@ impl<'p, const D: usize> PlanExchange<'p, D> {
             .table
             .point_of(epoch.point)
             .expect("an exchange epoch names a point of the session's phase table");
+        let kind = Self::kind_of(point, epoch.op);
         let mut sends = Vec::new();
         let mut receives = Vec::new();
-        for t in phase.transfers.iter().filter(|t| self.moves(t, point)) {
+        for t in phase.transfers.iter().filter(|t| self.moves_in(t, point, kind)) {
             let (src, dst) = (t.src.0 as usize, t.dst.0 as usize);
             let f = t.field as usize;
             match (self.owns(t.src), self.owns(t.dst)) {
@@ -588,10 +654,11 @@ impl<'p, const D: usize> PlanExchange<'p, D> {
         axis: usize,
         point: ExchangePoint,
     ) -> Result<(), FabricError> {
+        let kind = Self::kind_of(point, fabric.phase_epoch().map_or(0, |e| e.op));
         let moved = self.plan.axes[axis]
             .transfers
             .iter()
-            .filter(|t| self.moves(t, point));
+            .filter(|t| self.moves_in(t, point, kind));
         for t in moved {
             if self.owns(t.dst) && !self.owns(t.src) {
                 let field = fields[t.dst.0 as usize][t.field as usize];
@@ -635,11 +702,23 @@ pub fn fabric_for<const D: usize, L: Link>(
             }
         }
     }
+    let mut passes: std::collections::BTreeMap<(usize, u8), Vec<Vec<u32>>> = std::collections::BTreeMap::new();
+    for plan in plans {
+        for (byte, kind, per_peer) in plan.pass_counts() {
+            let entry = passes.entry((byte, kind)).or_insert_with(|| vec![vec![0u32; D]; first.placement.workers as usize]);
+            for (peer, per_axis) in per_peer.into_iter().enumerate() {
+                for (axis, c) in per_axis.into_iter().enumerate() {
+                    entry[peer][axis] += c;
+                }
+            }
+        }
+    }
     let prime = first.table.byte_of(ExchangePoint::Prime).expect("every table holds the prime") as usize;
     let default = counts[prime].clone();
-    Fabric::new(link, first.me, session, first.placement.workers as usize, D, &lens, default)
+    let fabric = Fabric::new(link, first.me, session, first.placement.workers as usize, D, &lens, default)
         .with_phase_counts(counts)
-        .with_phase_rules(first.table.rules())
+        .with_phase_rules(first.table.rules());
+    passes.into_iter().fold(fabric, |f, ((byte, kind), c)| f.with_pass_counts(byte, kind, c))
 }
 
 /// what one interface audit cost this worker.

@@ -373,13 +373,45 @@ pub enum ExchangePoint {
     /// after the root stages of a refined run carrying continuous tracers: the root's accepted ito
     /// coefficients cross the cuts before the fine level prolongs them
     RootCoefficients,
+    /// a magnetic-slip run's material drain over half the root step `half` (0 opening, 1
+    /// closing): the slip level's halos after its recovery
+    SlipDrain { half: u8 },
+    /// the implicit slip solve of half `half`, iterative: each pass (0 the prologue, r the r-th
+    /// iteration) refreshes the slip level's faces and cell fields across the cuts
+    SlipSolve { half: u8 },
+    /// the slip commit of half `half`, iterative in one pass: the midpoint faces and cells, then
+    /// the committed faces and cells
+    SlipCommit { half: u8 },
+    /// the slip level's halos after the recovery that follows a slip half
+    SlipRebuild { half: u8 },
+    /// on a refined run, every coarser level's halos after the finest state synced onto it
+    SlipSync { half: u8 },
 }
+
+/// the kinds of exchange inside a pass of an iterative slip point, in the low two bits of its
+/// `op`: the slip level's production halos, the faces each cut shares carried from their owner,
+/// one cell field
+pub const SLIP_STATE: u8 = 0;
+pub const SLIP_SHARED_FACES: u8 = 1;
+pub const SLIP_CELLS: u8 = 2;
 
 impl ExchangePoint {
     /// whether the point's exchanges repeat inside one attempt, each numbered by its pass and its
     /// place in the pass
     pub fn is_iterative(&self) -> bool {
-        false
+        matches!(self, ExchangePoint::SlipSolve { .. } | ExchangePoint::SlipCommit { .. })
+    }
+
+    /// whether the point belongs to a magnetic-slip root step
+    pub fn is_slip(&self) -> bool {
+        matches!(
+            self,
+            ExchangePoint::SlipDrain { .. }
+                | ExchangePoint::SlipSolve { .. }
+                | ExchangePoint::SlipCommit { .. }
+                | ExchangePoint::SlipRebuild { .. }
+                | ExchangePoint::SlipSync { .. }
+        )
     }
 }
 
@@ -489,6 +521,11 @@ impl ExchangePoint {
             ExchangePoint::ExciseRebuild(k) => (32, k as u32, 0),
             ExchangePoint::EquilibriumLevel { level, troubled } => (33, level as u32, troubled as u32),
             ExchangePoint::RootCoefficients => (36, 0, 0),
+            ExchangePoint::SlipDrain { half } => (38, half as u32, 0),
+            ExchangePoint::SlipSolve { half } => (39, half as u32, 0),
+            ExchangePoint::SlipCommit { half } => (40, half as u32, 0),
+            ExchangePoint::SlipRebuild { half } => (41, half as u32, 0),
+            ExchangePoint::SlipSync { half } => (42, half as u32, 0),
             ExchangePoint::BandSeam { level, path, axis, high, hop } => {
                 (37, (level as u32) << 5 | path as u32, (hop as u32) << 3 | (axis as u32) << 1 | high as u32)
             }
@@ -976,9 +1013,22 @@ impl<const D: usize> ExchangePlan<D> {
         let empty = FieldLayout { interior: [Span { lo: 0, hi: 0 }; D], allocated: [Span { lo: 0, hi: 0 }; D], halo: [0; D] };
         let mut fields: Vec<Vec<FieldLayout<D>>> = vec![vec![empty; schema.len()]; n_tiles];
         let mut axes: Vec<AxisPhase<D>> = (0..D).map(|ax| AxisPhase { axis: ax as u8, transfers: Vec::new() }).collect();
+        // a tile's field covers every slab it sources or receives: the bounding box of those slabs
+        let mut covered: Vec<Vec<bool>> = vec![vec![false; schema.len()]; n_tiles];
+        let mut cover = |fields: &mut Vec<Vec<FieldLayout<D>>>, tile: TileId, f: usize, region: [Span; D]| {
+            let (t, seen) = (tile.0 as usize, &mut covered[tile.0 as usize][f]);
+            let grown = if *seen {
+                let old = fields[t][f].allocated;
+                std::array::from_fn(|a| Span { lo: old[a].lo.min(region[a].lo), hi: old[a].hi.max(region[a].hi) })
+            } else {
+                region
+            };
+            *seen = true;
+            fields[t][f] = FieldLayout { interior: grown, allocated: grown, halo: [0; D] };
+        };
         for (f, src, src_region, dst, dst_region) in slabs {
-            fields[src.0 as usize][f] = FieldLayout { interior: src_region, allocated: src_region, halo: [0; D] };
-            fields[dst.0 as usize][f] = FieldLayout { interior: dst_region, allocated: dst_region, halo: [0; D] };
+            cover(&mut fields, src, f, src_region);
+            cover(&mut fields, dst, f, dst_region);
             // the axis whose extent is one: the plane's normal
             let ax = (0..D).find(|&a| src_region[a].size() == 1 && dst_region[a].size() == 1).unwrap_or(0);
             axes[ax].transfers.push(Transfer {
@@ -1053,6 +1103,61 @@ impl<const D: usize> ExchangePlan<D> {
                 };
                 let f = (2 * bb + face.side) * families.len() + family;
                 slabs.push((f, face.src, region(face.src_ext), face.dst, region(face.dst_ext)));
+            }
+        }
+        Self::slab_plan(partition, topology, ng, schema, slabs)
+    }
+
+    /// the plan carrying every face a cut shares from its owner to the tile below: on each cut
+    /// axis, and across the seam of a periodic cut axis, the upper tile's first face layer of the
+    /// face field normal to the cut (its lower face 0) over the tile's interior transverse span,
+    /// into the lower tile's closing face layer; the transverse halo rows follow with the state's
+    /// exchange. the fields are the face fields, one per axis, in each tile's index space
+    pub fn shared_faces(partition: &Partition<D>, topology: &Topology<D>, ng: usize) -> Result<Self, PlanError> {
+        Self::shared_faces_shifted(partition, topology, ng, &|_| [0; D])
+    }
+
+    /// `shared_faces` for tiles whose stores index their cells from `interior_lo(tile)` in place
+    /// of zero: a refined level, whose tiles live in their parents' index frames
+    pub fn shared_faces_shifted(
+        partition: &Partition<D>,
+        topology: &Topology<D>,
+        ng: usize,
+        interior_lo: &dyn Fn(TileId) -> [isize; D],
+    ) -> Result<Self, PlanError> {
+        let counts = partition.counts();
+        let mut schema = FieldSchema::new();
+        for ax in 0..D {
+            schema = schema.face(&format!("bface{ax}"), ax as u8);
+        }
+        let mut slabs = Vec::new();
+        for tile in 0..partition.n_tiles() {
+            let tc = unflatten(tile, counts);
+            let ext = partition.tile_extents(tc);
+            for ax in 0..D {
+                if counts[ax] < 2 {
+                    continue;
+                }
+                let last = tc[ax] + 1 == counts[ax];
+                if last && !topology.is_periodic(ax) {
+                    continue;
+                }
+                let mut uc = tc;
+                uc[ax] = if last { 0 } else { tc[ax] + 1 };
+                let upper = flatten(uc, counts);
+                let region = |t: TileId, e: [(usize, usize); D], at: isize| -> [Span; D] {
+                    let lo = interior_lo(t);
+                    std::array::from_fn(|axis| {
+                        if axis == ax {
+                            Span { lo: lo[axis] + at, hi: lo[axis] + at + 1 }
+                        } else {
+                            Span { lo: lo[axis], hi: lo[axis] + e[axis].1 as isize }
+                        }
+                    })
+                };
+                let (upper, lower) = (TileId(upper as u32), TileId(tile as u32));
+                let uext = partition.tile_extents(uc);
+                slabs.push((ax, upper, region(upper, uext, 0), lower, region(lower, ext, ext[ax].1 as isize)));
             }
         }
         Self::slab_plan(partition, topology, ng, schema, slabs)
@@ -1305,6 +1410,12 @@ impl<const D: usize> ExchangePlan<D> {
             | ExchangePoint::TracerCoefficients
             | ExchangePoint::RootCoefficients
             | ExchangePoint::BandSeam { .. } => false,
+            // a slip point moves what the plan's role names there
+            ExchangePoint::SlipDrain { .. }
+            | ExchangePoint::SlipSolve { .. }
+            | ExchangePoint::SlipCommit { .. }
+            | ExchangePoint::SlipRebuild { .. }
+            | ExchangePoint::SlipSync { .. } => false,
             ExchangePoint::Audit(_) => transfer.audit,
             ExchangePoint::Troubled(_)
             | ExchangePoint::EquilibriumTroubled

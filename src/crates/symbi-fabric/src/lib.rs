@@ -26,7 +26,7 @@ pub mod rendezvous;
 pub mod tcp;
 
 pub use endpoint::{
-    ABSENT,
+    ABSENT, PASS_KINDS,
     Fabric, Link, Loopback, OpKind, PhaseSpec, Progress, RecvState, SendState, Stats,
     assemble_windows, window_entries,
 };
