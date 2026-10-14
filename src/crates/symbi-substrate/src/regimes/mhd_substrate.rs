@@ -1945,6 +1945,15 @@ pub struct SlipHeat<'a, const D: usize, Mem: MemorySpace, Sc: Scalar + OrderedNu
     pub bz_source: Option<&'a Field<Sc, D, Mem>>,
 }
 
+// a set of references is copied freely regardless of the memory space's own traits.
+impl<const D: usize, Mem: MemorySpace, Sc: Scalar + OrderedNumeric> Clone for SlipHeat<'_, D, Mem, Sc> {
+    fn clone(&self) -> Self {
+        *self
+    }
+}
+
+impl<const D: usize, Mem: MemorySpace, Sc: Scalar + OrderedNumeric> Copy for SlipHeat<'_, D, Mem, Sc> {}
+
 /// the body-independent scalars of a scatter pass: the substep and the grid.
 fn scatter_scalar<const D: usize, const DOF: usize, Mem, Sc>(
     sim: &FieldStore<D, DOF, Mem, Sc>,
@@ -1965,20 +1974,15 @@ where
     })
 }
 
-/// the 3D cartesian magnetic-slip operator on the staggered complex. for every slip body the cell
-/// pass forms its quadrature vector F_q^b = A_b(B_q) (R J)_q into the slip-quadrature scratch and
-/// the vectors sum in the workspace; one edge pass then scatters the sum to the oriented edge EMF,
-/// efield += R^* sum_b F_q^b, so the operator is the sum of the bodies' operators and the
-/// weighted-adjoint scatter stays the exact transpose of the gather. the coefficient of each body
-/// reads its drain clock from the cell's own local Alfven term, the identical `local_drain_rate`
-/// the material drain integrates. with a heat request each body's dissipation rate is staged on
-/// its own vector and summed into the workspace total; the return lists (body index, sum over the
-/// interior of qdot) per slip body. a store without a slip body returns empty and touches nothing.
-pub fn body_slip_emf<const D: usize, const DOF: usize, Mem, Sc>(
+/// the cell pass of the 3D slip operator: every slip body's F_q = A_b(B_q) R J summed into the
+/// slip-quadrature scratch over the interior, and with a heat request each body's dissipation rate
+/// staged and summed into the workspace total. returns per slip body the exact sum over the interior
+/// of its rate, `None` on a store without a slip body
+fn slip_cells_3d<const D: usize, const DOF: usize, Mem, Sc>(
     sim: &FieldStore<D, DOF, Mem, Sc>,
     gamma: f64,
     heat: Option<SlipHeat<'_, D, Mem, Sc>>,
-) -> Vec<(usize, f64)>
+) -> Option<Vec<(usize, ExactSum)>>
 where
     Mem: MemorySpace + Sync,
     Sc: Scalar + OrderedNumeric,
@@ -1986,11 +1990,11 @@ where
     use symbi_ir::{FieldRef, ScalarBind, StateComp, StateSlot};
     let mut sums = Vec::new();
     let Some(im) = sim.immersed.as_ref() else {
-        return sums;
+        return None;
     };
     let bodies = &im.bodies;
     let Some(slip_q) = sim.fields.mhd.as_ref().and_then(|m| m.slip_quadrature.as_ref()) else {
-        return sums;
+        return None;
     };
     let mhd = sim.fields.mhd.as_ref().expect("MHD requires mhd fields");
     let ws = mhd
@@ -2077,28 +2081,31 @@ where
         if let Some(h) = heat.as_ref() {
             slip_cell_pass(sim, "slip_dissipation_3d", h.dt, h.bface_source, h.bz_source, &ws.dissipation_body);
             field_lincomb_over(interior, 1.0, &ws.dissipation, 1.0, &ws.dissipation_body);
-            sums.push((b, field_sum_exact(&ws.dissipation_body, interior).value()));
+            sums.push((b, field_sum_exact(&ws.dissipation_body, interior)));
         }
         for c in 0..3 {
             field_lincomb_over(interior, 1.0, &ws.quadrature.b[c], 1.0, &slip_q[c]);
         }
     }
     if !any {
-        return sums;
+        return None;
     }
     for c in 0..3 {
         field_copy_over(interior, &ws.quadrature.b[c], &slip_q[c]);
     }
+    Some(sums)
+}
 
-    // fill the quadrature halo before the scatter reads it: the edge pass gathers F_q from the
-    // neighboring cells, so a boundary edge reads the wrapped (periodic) or BC image. this makes
-    // R^* the exact transpose of R across the domain seam, so <J, R^* F>_e = <R J, F>_q closes
-    // to roundoff on the whole periodic domain, not merely the interior.
-    let bc = crate::kernels::support::to_bc_array_scalar::<D>(&sim.boundaries);
-    for c in 0..3 {
-        flag_ghost_fill::<D, DOF, Mem, Sc>(sim, &slip_q[c], bc);
-    }
-
+/// the edge pass of the 3D slip operator: `efield[dir] += (R^* F)_dir` from the slip-quadrature
+/// scratch, its halo regenerated
+fn slip_edges_3d<const D: usize, const DOF: usize, Mem, Sc>(sim: &FieldStore<D, DOF, Mem, Sc>)
+where
+    Mem: MemorySpace + Sync,
+    Sc: Scalar + OrderedNumeric,
+{
+    use symbi_ir::ScalarBind;
+    let mhd = sim.fields.mhd.as_ref().expect("MHD requires mhd fields");
+    let slip_q = mhd.slip_quadrature.as_ref().expect("slip quadrature scratch");
     // edge pass: efield[dir] += (R^* F)_dir, one kernel per edge direction.
     for dir in 0..3 {
         let name = format!("body_slip_emf_3d_{dir}");
@@ -2113,27 +2120,20 @@ where
         let (inputs, outputs) = bind_by_manifest(&name, edge_slot);
         dispatch_fields_each::<Sc, Mem, D>(&name, mhd.efield[dir].domain(), &inputs, &outputs, &[], &scalars);
     }
-    sums
 }
 
-/// the 2.5D magnetic-slip operator on the mixed complex F_x + F_y + C_z, for the slip bodies of a
-/// cartesian x-y run with three vector components. for every slip body the cell pass forms
-/// F_q^b = A_b(B_q) R B with the current gathered from the production faces and from `bz_operand`
-/// (the operand's cell `B_z`), and the vectors sum; the edge pass then scatters the summed F_q,z to
-/// the corner z-edge EMF the CT curl consumes, and the out-of-plane pass advances `bz_out` by
-/// `-dt (D_x F_y - D_y F_x)` of the sum. `bz_out` holds the operand's `B_z` on entry; the explicit
-/// operator binds both to the production cell field, and the frozen operator on a Krylov iterate
-/// binds workspace vectors. the coefficient is frozen on production `bcell`. with a heat request
-/// each body's dissipation rate is staged on its own vector and summed into the workspace total;
-/// the return lists (body index, sum over the interior of qdot) per slip body.
-pub fn body_slip_emf_2p5d<const D: usize, const DOF: usize, Mem, Sc>(
+/// the cell pass of the 2.5D slip operator: every slip body's F_q = A_b(B_q) R B, the current from
+/// the production faces and `bz_operand`, summed into the slip-quadrature scratch over the
+/// interior, with a heat request each body's dissipation rate staged and summed into the workspace
+/// total. returns per slip body the exact sum over the interior of its rate, `None` on a store
+/// without a slip body
+fn slip_cells_2p5d<const D: usize, const DOF: usize, Mem, Sc>(
     sim: &FieldStore<D, DOF, Mem, Sc>,
     gamma: f64,
     dt: f64,
     bz_operand: &Field<Sc, D, Mem>,
-    bz_out: &Field<Sc, D, Mem>,
     heat: Option<SlipHeat<'_, D, Mem, Sc>>,
-) -> Vec<(usize, f64)>
+) -> Option<Vec<(usize, ExactSum)>>
 where
     Mem: MemorySpace + Sync,
     Sc: Scalar + OrderedNumeric,
@@ -2141,11 +2141,11 @@ where
     use symbi_ir::{FieldRef, ScalarBind, StateComp, StateSlot};
     let mut sums = Vec::new();
     let Some(im) = sim.immersed.as_ref() else {
-        return sums;
+        return None;
     };
     let bodies = &im.bodies;
     let Some(slip_q) = sim.fields.mhd.as_ref().and_then(|m| m.slip_quadrature.as_ref()) else {
-        return sums;
+        return None;
     };
     let mhd = sim.fields.mhd.as_ref().expect("MHD requires mhd fields");
     let ws = mhd
@@ -2235,26 +2235,32 @@ where
         if let Some(h) = heat.as_ref() {
             slip_cell_pass(sim, "slip_dissipation_2d", h.dt, h.bface_source, h.bz_source, &ws.dissipation_body);
             field_lincomb_over(interior, 1.0, &ws.dissipation, 1.0, &ws.dissipation_body);
-            sums.push((b, field_sum_exact(&ws.dissipation_body, interior).value()));
+            sums.push((b, field_sum_exact(&ws.dissipation_body, interior)));
         }
         for c in 0..3 {
             field_lincomb_over(interior, 1.0, &ws.quadrature.b[c], 1.0, &slip_q[c]);
         }
     }
     if !any {
-        return sums;
+        return None;
     }
     for c in 0..3 {
         field_copy_over(interior, &ws.quadrature.b[c], &slip_q[c]);
     }
+    Some(sums)
+}
 
-    // the quadrature halo, so the corner scatter and the central differences read the wrapped
-    // or boundary image and both transposes close across the domain seam.
-    let bc = crate::kernels::support::to_bc_array_scalar::<D>(&sim.boundaries);
-    for c in 0..3 {
-        flag_ghost_fill::<D, DOF, Mem, Sc>(sim, &slip_q[c], bc);
-    }
-
+/// the edge and out-of-plane passes of the 2.5D slip operator from the slip-quadrature scratch, its
+/// halo regenerated: the corner z-edge EMF, and `bz_out -= dt (D_x F_y - D_y F_x)`
+fn slip_edges_2p5d<const D: usize, const DOF: usize, Mem, Sc>(sim: &FieldStore<D, DOF, Mem, Sc>, dt: f64, bz_out: &Field<Sc, D, Mem>)
+where
+    Mem: MemorySpace + Sync,
+    Sc: Scalar + OrderedNumeric,
+{
+    use symbi_ir::ScalarBind;
+    let mhd = sim.fields.mhd.as_ref().expect("MHD requires mhd fields");
+    let slip_q = mhd.slip_quadrature.as_ref().expect("slip quadrature scratch");
+    let interior = &sim.geom.interior;
     // edge pass: the corner z-edge EMF the 2D CT curl consumes.
     let edge = CtEdgeMap::<D>::grid_ordered(&sim.geom.axes)
         .unwrap_or_else(|e| panic!("body_slip_emf_2p5d: {e}"));
@@ -2282,7 +2288,184 @@ where
     };
     let (inputs, outputs) = bind_by_manifest(bz_name, bz_slot);
     dispatch_fields_each::<Sc, Mem, D>(bz_name, interior, &inputs, &outputs, &[], &bz_scalars);
-    sums
+}
+
+// =============================================================================
+// the slip operator over the tiles of one level, in lockstep. a single grid is the one-tile case
+// with its own halo rule; tiles regenerate their halos and exchange them across their cuts between
+// the passes, and the exact sums of every tile merge into the whole level's before rounding.
+// =============================================================================
+
+/// the halo refreshes between the passes of the slip operator
+pub trait SlipHalo<const D: usize, const DOF: usize, Mem: MemorySpace, Sc: Scalar + OrderedNumeric> {
+    /// every store's production faces hold new values on its physical faces: regenerate the faces
+    /// a gather reads beyond them
+    fn faces(&self, stores: &[&FieldStore<D, DOF, Mem, Sc>]);
+    /// `fields[k]` of store `k` holds new interior cells: regenerate its halo
+    fn cells(&self, stores: &[&FieldStore<D, DOF, Mem, Sc>], fields: &[&Field<Sc, D, Mem>]);
+}
+
+/// the halo rule of a grid held whole: each store regenerates its periodic images and boundary
+/// images by its own boundary conditions
+pub struct OwnHalo;
+
+impl<const D: usize, const DOF: usize, Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric> SlipHalo<D, DOF, Mem, Sc> for OwnHalo {
+    fn faces(&self, stores: &[&FieldStore<D, DOF, Mem, Sc>]) {
+        for sim in stores {
+            extend_bface_periodic(*sim);
+        }
+    }
+
+    fn cells(&self, stores: &[&FieldStore<D, DOF, Mem, Sc>], fields: &[&Field<Sc, D, Mem>]) {
+        for (sim, field) in stores.iter().zip(fields) {
+            cell_halo_fill(*sim, field);
+        }
+    }
+}
+
+/// the halo rule of a level cut into tiles: each tile regenerates its own periodic and boundary
+/// images, takes the faces it shares at a cut from their owner, and exchanges its halos across
+/// every cut and periodic seam, so every halo a pass reads holds the value the whole level holds
+/// there
+pub struct TileHalo<'a, const D: usize, T> {
+    pub schedule: &'a symbi_sim::decomp::Schedule<D>,
+    pub devices: &'a [i32],
+    pub transport: &'a T,
+}
+
+impl<const D: usize, const DOF: usize, Mem, T> SlipHalo<D, DOF, Mem, f64> for TileHalo<'_, D, T>
+where
+    Mem: MemorySpace + Sync,
+    T: symbi_sim::decomp::HaloTransport,
+{
+    fn faces(&self, stores: &[&FieldStore<D, DOF, Mem, f64>]) {
+        for sim in stores {
+            extend_bface_periodic(*sim);
+        }
+        symbi_sim::decomp::copy_shared_faces(stores, self.schedule, self.devices, self.transport);
+        symbi_sim::decomp::exchange_grid(stores, self.schedule, self.devices, self.transport);
+    }
+
+    fn cells(&self, stores: &[&FieldStore<D, DOF, Mem, f64>], fields: &[&Field<f64, D, Mem>]) {
+        for (sim, field) in stores.iter().zip(fields) {
+            cell_halo_fill(*sim, field);
+        }
+        symbi_sim::decomp::exchange_cell_field(stores, fields, self.schedule, self.devices, self.transport);
+    }
+}
+
+/// what one store's slip pass reads beyond the production state: on a 2.5D grid the operand's cell
+/// B_z and the cell B_z it advances, and a heat request
+pub struct SlipPass<'a, const D: usize, Mem: MemorySpace, Sc: Scalar + OrderedNumeric> {
+    pub bz: Option<(&'a Field<Sc, D, Mem>, &'a Field<Sc, D, Mem>)>,
+    pub heat: Option<SlipHeat<'a, D, Mem, Sc>>,
+}
+
+/// the slip operator over the tiles of one level: every store's cell pass, the quadrature halo, then
+/// every store's edge pass. returns per slip body the exact sum over every store's interior of its
+/// dissipation rate; empty on stores without a slip body
+pub fn slip_emf_tiles<const D: usize, const DOF: usize, Mem, Sc>(
+    stores: &[&FieldStore<D, DOF, Mem, Sc>],
+    gamma: f64,
+    dt: f64,
+    passes: &[SlipPass<'_, D, Mem, Sc>],
+    halo: &dyn SlipHalo<D, DOF, Mem, Sc>,
+) -> Vec<(usize, ExactSum)>
+where
+    Mem: MemorySpace + Sync,
+    Sc: Scalar + OrderedNumeric,
+{
+    let mut totals: Option<Vec<(usize, ExactSum)>> = None;
+    let mut slipping = 0;
+    for (sim, pass) in stores.iter().zip(passes) {
+        let sums = match pass.bz {
+            Some((operand, _)) => slip_cells_2p5d(*sim, gamma, dt, operand, pass.heat),
+            None => slip_cells_3d(*sim, gamma, pass.heat),
+        };
+        let Some(sums) = sums else {
+            continue;
+        };
+        slipping += 1;
+        match totals.as_mut() {
+            None => totals = Some(sums),
+            Some(totals) => {
+                for ((b, total), (bb, part)) in totals.iter_mut().zip(&sums) {
+                    assert_eq!(b, bb, "the tiles of one level carry the same slip bodies");
+                    total.merge(part);
+                }
+            }
+        }
+    }
+    let Some(totals) = totals else {
+        return Vec::new();
+    };
+    assert_eq!(slipping, stores.len(), "the tiles of one level carry the same slip bodies");
+    for c in 0..3 {
+        let quadrature: Vec<&Field<Sc, D, Mem>> = stores
+            .iter()
+            .map(|sim| &sim.fields.mhd.as_ref().expect("MHD fields").slip_quadrature.as_ref().expect("slip quadrature scratch")[c])
+            .collect();
+        halo.cells(stores, &quadrature);
+    }
+    for (sim, pass) in stores.iter().zip(passes) {
+        match pass.bz {
+            Some((_, out)) => slip_edges_2p5d(*sim, dt, out),
+            None => slip_edges_3d(*sim),
+        }
+    }
+    totals
+}
+
+/// the 3D cartesian magnetic-slip operator on the staggered complex. for every slip body the cell
+/// pass forms its quadrature vector F_q^b = A_b(B_q) (R J)_q into the slip-quadrature scratch and
+/// the vectors sum in the workspace; one edge pass then scatters the sum to the oriented edge EMF,
+/// efield += R^* sum_b F_q^b, so the operator is the sum of the bodies' operators and the
+/// weighted-adjoint scatter stays the exact transpose of the gather. the coefficient of each body
+/// reads its drain clock from the cell's own local Alfven term, the identical `local_drain_rate`
+/// the material drain integrates. with a heat request each body's dissipation rate is staged on
+/// its own vector and summed into the workspace total; the return lists (body index, sum over the
+/// interior of qdot) per slip body. a store without a slip body returns empty and touches nothing.
+pub fn body_slip_emf<const D: usize, const DOF: usize, Mem, Sc>(
+    sim: &FieldStore<D, DOF, Mem, Sc>,
+    gamma: f64,
+    heat: Option<SlipHeat<'_, D, Mem, Sc>>,
+) -> Vec<(usize, f64)>
+where
+    Mem: MemorySpace + Sync,
+    Sc: Scalar + OrderedNumeric,
+{
+    slip_emf_tiles(&[sim], gamma, 0.0, &[SlipPass { bz: None, heat }], &OwnHalo)
+        .into_iter()
+        .map(|(b, sum)| (b, sum.value()))
+        .collect()
+}
+
+/// the 2.5D magnetic-slip operator on the mixed complex F_x + F_y + C_z, for the slip bodies of a
+/// cartesian x-y run with three vector components. for every slip body the cell pass forms
+/// F_q^b = A_b(B_q) R B with the current gathered from the production faces and from `bz_operand`
+/// (the operand's cell `B_z`), and the vectors sum; the edge pass then scatters the summed F_q,z to
+/// the corner z-edge EMF the CT curl consumes, and the out-of-plane pass advances `bz_out` by
+/// `-dt (D_x F_y - D_y F_x)` of the sum. `bz_out` holds the operand's `B_z` on entry; the explicit
+/// operator binds both to the production cell field, and the frozen operator on a Krylov iterate
+/// binds workspace vectors. the coefficient is frozen on production `bcell`. with a heat request
+/// each body's dissipation rate is staged on its own vector and summed into the workspace total;
+/// the return lists (body index, sum over the interior of qdot) per slip body.
+pub fn body_slip_emf_2p5d<const D: usize, const DOF: usize, Mem, Sc>(
+    sim: &FieldStore<D, DOF, Mem, Sc>,
+    gamma: f64,
+    dt: f64,
+    bz_operand: &Field<Sc, D, Mem>,
+    bz_out: &Field<Sc, D, Mem>,
+    heat: Option<SlipHeat<'_, D, Mem, Sc>>,
+) -> Vec<(usize, f64)>
+where
+    Mem: MemorySpace + Sync,
+    Sc: Scalar + OrderedNumeric,
+{
+    slip_emf_tiles(&[sim], gamma, dt, &[SlipPass { bz: Some((bz_operand, bz_out)), heat }], &OwnHalo)
+        .into_iter()
+        .map(|(b, sum)| (b, sum.value()))
+        .collect()
 }
 
 // =============================================================================
@@ -2665,17 +2848,35 @@ where
     Mem: MemorySpace,
     Sc: Scalar + OrderedNumeric,
 {
-    let mut s = face_dot(sim, a.faces, b.faces, product.faces);
-    if let (Some(az), Some(bz), Some(pz)) = (a.z, b.z, product.z) {
-        dispatch_fields_each::<Sc, Mem, D>(
-            KernelId::FieldProduct { ndim: D as u8 }.name(),
-            &sim.geom.interior,
-            &[az, bz],
-            &[pz],
-            &[],
-            &[],
-        );
-        s.merge(&field_sum_exact(pz, &sim.geom.interior));
+    mixed_dot_tiles(&[sim], &[a], &[b], &[product])
+}
+
+/// the mixed inner product over the tiles of one level: every store's interior faces and cells,
+/// their products added exactly across the stores and the total rounded once
+fn mixed_dot_tiles<const D: usize, const DOF: usize, Mem, Sc>(
+    stores: &[&FieldStore<D, DOF, Mem, Sc>],
+    a: &[Mixed<'_, D, Mem, Sc>],
+    b: &[Mixed<'_, D, Mem, Sc>],
+    product: &[Mixed<'_, D, Mem, Sc>],
+) -> f64
+where
+    Mem: MemorySpace,
+    Sc: Scalar + OrderedNumeric,
+{
+    let mut s = ExactSum::new();
+    for (k, sim) in stores.iter().enumerate() {
+        s.merge(&face_dot(*sim, a[k].faces, b[k].faces, product[k].faces));
+        if let (Some(az), Some(bz), Some(pz)) = (a[k].z, b[k].z, product[k].z) {
+            dispatch_fields_each::<Sc, Mem, D>(
+                KernelId::FieldProduct { ndim: D as u8 }.name(),
+                &sim.geom.interior,
+                &[az, bz],
+                &[pz],
+                &[],
+                &[],
+            );
+            s.merge(&field_sum_exact(pz, &sim.geom.interior));
+        }
     }
     s.value()
 }
@@ -2733,27 +2934,52 @@ fn apply_operator_mixed<const D: usize, const DOF: usize, Mem, Sc>(
     Mem: MemorySpace + Sync,
     Sc: Scalar + OrderedNumeric,
 {
-    restore_bface(sim, p.faces);
-    extend_bface_periodic(sim);
-    zero_efield(sim);
-    match (p.z, out.z) {
-        (Some(pz), Some(oz)) => {
-            cell_halo_fill(sim, pz);
+    apply_operator_tiles(&[sim], gamma, &[p], &[out], &OwnHalo);
+}
+
+/// `apply_operator_mixed` over the tiles of one level, the halos regenerated between the passes
+fn apply_operator_tiles<const D: usize, const DOF: usize, Mem, Sc>(
+    stores: &[&FieldStore<D, DOF, Mem, Sc>],
+    gamma: f64,
+    p: &[Mixed<'_, D, Mem, Sc>],
+    out: &[Mixed<'_, D, Mem, Sc>],
+    halo: &dyn SlipHalo<D, DOF, Mem, Sc>,
+) where
+    Mem: MemorySpace + Sync,
+    Sc: Scalar + OrderedNumeric,
+{
+    for (k, sim) in stores.iter().enumerate() {
+        restore_bface(*sim, p[k].faces);
+    }
+    halo.faces(stores);
+    for sim in stores {
+        zero_efield(*sim);
+    }
+    let mixed = p.iter().zip(out).all(|(p, o)| p.z.is_some() && o.z.is_some());
+    if mixed {
+        let operands: Vec<&Field<Sc, D, Mem>> = p.iter().map(|p| p.z.expect("a 2.5D operand")).collect();
+        halo.cells(stores, &operands);
+        for (pk, ok) in p.iter().zip(out) {
+            let (pz, oz) = (pk.z.expect("a 2.5D operand"), ok.z.expect("a 2.5D output"));
             field_copy_over(pz.domain(), pz, oz);
-            body_slip_emf_2p5d::<D, DOF, Mem, Sc>(sim, gamma, 1.0, pz, oz, None);
-        }
-        _ => {
-            body_slip_emf::<D, DOF, Mem, Sc>(sim, gamma, None);
         }
     }
-    ct_curl::<D, DOF, Mem, Sc>(sim, 1.0);
-    let mhd = sim.fields.mhd.as_ref().expect("MHD fields");
-    for d in 0..D {
-        field_copy_over(&sim.geom.interior, &p.faces.b[d], &out.faces.b[d]);
-        field_lincomb_over(&sim.geom.interior, 1.0, &out.faces.b[d], -1.0, &mhd.bface[d]);
-    }
-    if let (Some(pz), Some(oz)) = (p.z, out.z) {
-        field_lincomb_over(&sim.geom.interior, -1.0, oz, 1.0, pz);
+    let passes: Vec<SlipPass<'_, D, Mem, Sc>> = p
+        .iter()
+        .zip(out)
+        .map(|(pk, ok)| SlipPass { bz: if mixed { Some((pk.z.expect("operand"), ok.z.expect("output"))) } else { None }, heat: None })
+        .collect();
+    slip_emf_tiles(stores, gamma, if mixed { 1.0 } else { 0.0 }, &passes, halo);
+    for (k, sim) in stores.iter().enumerate() {
+        ct_curl::<D, DOF, Mem, Sc>(*sim, 1.0);
+        let mhd = sim.fields.mhd.as_ref().expect("MHD fields");
+        for d in 0..D {
+            field_copy_over(&sim.geom.interior, &p[k].faces.b[d], &out[k].faces.b[d]);
+            field_lincomb_over(&sim.geom.interior, 1.0, &out[k].faces.b[d], -1.0, &mhd.bface[d]);
+        }
+        if let (Some(pz), Some(oz)) = (p[k].z, out[k].z) {
+            field_lincomb_over(&sim.geom.interior, -1.0, oz, 1.0, pz);
+        }
     }
 }
 
@@ -2807,107 +3033,197 @@ where
     Mem: MemorySpace + Sync,
     Sc: Scalar + OrderedNumeric,
 {
-    assert!(
-        sim.geom.coords == symbi_geometry::Geometry::Cartesian && DOF == 3 && (D == 3 || D == 2),
-        "the implicit magnetic-slip solve is a cartesian operator on a 3D grid or a 2.5D x-y grid; \
-         the {:?} chart in {D}D DOF {DOF} is not implemented",
-        sim.geom.coords
-    );
-    let has_energy = sim.fields.cons.nrg_field().is_some();
-    let mhd = sim.fields.mhd.as_ref().expect("MHD fields");
-    let ws = mhd
+    magnetic_slip_solve_tiles(&[sim], dt, gamma, tol, max_iter, &OwnHalo)
+}
+
+/// the vectors of the slip workspace, each a face group with its cell B_z member on a 2.5D grid
+#[derive(Clone, Copy)]
+enum SlipVector {
+    Input,
+    Rhs,
+    Iterate,
+    Residual,
+    Direction,
+    OperatorDirection,
+    Candidate,
+    Product,
+}
+
+fn slip_vector<const D: usize, const DOF: usize, Mem, Sc>(sim: &FieldStore<D, DOF, Mem, Sc>, which: SlipVector) -> Mixed<'_, D, Mem, Sc>
+where
+    Mem: MemorySpace,
+    Sc: Scalar + OrderedNumeric,
+{
+    let ws = sim
+        .fields
+        .mhd
+        .as_ref()
+        .expect("MHD fields")
         .magnetic_slip
         .as_ref()
         .expect("magnetic-slip midpoint workspace (allocated at attach_bodies)");
-    let interior = &sim.geom.interior;
     let zc = ws.z.as_ref();
+    match which {
+        SlipVector::Input => Mixed { faces: &ws.input, z: zc.map(|z| &z.input) },
+        SlipVector::Rhs => Mixed { faces: &ws.rhs, z: zc.map(|z| &z.rhs) },
+        SlipVector::Iterate => Mixed { faces: &ws.iterate, z: zc.map(|z| &z.iterate) },
+        SlipVector::Residual => Mixed { faces: &ws.residual, z: zc.map(|z| &z.residual) },
+        SlipVector::Direction => Mixed { faces: &ws.direction, z: zc.map(|z| &z.direction) },
+        SlipVector::OperatorDirection => Mixed { faces: &ws.operator_direction, z: zc.map(|z| &z.operator_direction) },
+        SlipVector::Candidate => Mixed { faces: &ws.candidate, z: zc.map(|z| &z.candidate) },
+        SlipVector::Product => Mixed { faces: &ws.product, z: zc.map(|z| &z.product) },
+    }
+}
+
+fn slip_mhd<const D: usize, const DOF: usize, Mem, Sc>(sim: &FieldStore<D, DOF, Mem, Sc>) -> &symbi_sim::state::MhdStaggeredFields<D, DOF, Mem, Sc>
+where
+    Mem: MemorySpace,
+    Sc: Scalar + OrderedNumeric,
+{
+    sim.fields.mhd.as_ref().expect("MHD fields")
+}
+
+fn slip_workspace<const D: usize, const DOF: usize, Mem, Sc>(sim: &FieldStore<D, DOF, Mem, Sc>) -> &symbi_sim::state::MagneticSlipWorkspace<D, DOF, Mem, Sc>
+where
+    Mem: MemorySpace,
+    Sc: Scalar + OrderedNumeric,
+{
+    sim.fields
+        .mhd
+        .as_ref()
+        .expect("MHD fields")
+        .magnetic_slip
+        .as_ref()
+        .expect("magnetic-slip midpoint workspace (allocated at attach_bodies)")
+}
+
+/// `magnetic_slip_solve` over the tiles of one level in lockstep: every field operation runs on
+/// every store, the halos are regenerated and exchanged between the passes, and every inner product
+/// adds the stores' exact partials, so the recurrence takes the whole level's step lengths and
+/// stops at the whole level's residual
+pub fn magnetic_slip_solve_tiles<const D: usize, const DOF: usize, Mem, Sc>(
+    stores: &[&FieldStore<D, DOF, Mem, Sc>],
+    dt: f64,
+    gamma: f64,
+    tol: f64,
+    max_iter: usize,
+    halo: &dyn SlipHalo<D, DOF, Mem, Sc>,
+) -> MagneticSlipSolveReceipt
+where
+    Mem: MemorySpace + Sync,
+    Sc: Scalar + OrderedNumeric,
+{
+    for sim in stores {
+        assert!(
+            sim.geom.coords == symbi_geometry::Geometry::Cartesian && DOF == 3 && (D == 3 || D == 2),
+            "the implicit magnetic-slip solve is a cartesian operator on a 3D grid or a 2.5D x-y grid; \
+             the {:?} chart in {D}D DOF {DOF} is not implemented",
+            sim.geom.coords
+        );
+    }
+    let has_energy = stores[0].fields.cons.nrg_field().is_some();
+    let mixed = slip_workspace(stores[0]).z.is_some();
     let dim = if D == 2 { "2d" } else { "3d" };
     let oop = D; // the out-of-plane cell component of a 2.5D grid
+    let mhd = slip_mhd::<D, DOF, Mem, Sc>;
+    let vectors = |which: SlipVector| -> Vec<Mixed<'_, D, Mem, Sc>> { stores.iter().map(|sim| slip_vector(*sim, which)).collect() };
+    let each = |f: &dyn Fn(&FieldStore<D, DOF, Mem, Sc>)| {
+        for sim in stores {
+            f(*sim);
+        }
+    };
 
     // the substep input B^0: every stored face and, on a 2.5D grid, the cell B_z with its halo
     // regenerated so the current gather reads its wrapped image.
-    snapshot_bface(sim, &ws.input);
-    if let Some(z) = zc {
-        cell_halo_fill(sim, &mhd.bcell[oop]);
-        field_copy_over(mhd.bcell[oop].domain(), &mhd.bcell[oop], &z.input);
+    each(&|sim| snapshot_bface(sim, &slip_workspace(sim).input));
+    if mixed {
+        let bz: Vec<&Field<Sc, D, Mem>> = stores.iter().map(|sim| &mhd(*sim).bcell[oop]).collect();
+        halo.cells(stores, &bz);
+        each(&|sim| {
+            let z = slip_workspace(sim).z.as_ref().expect("2.5D member");
+            field_copy_over(mhd(sim).bcell[oop].domain(), &mhd(sim).bcell[oop], &z.input);
+        });
     }
-    let input = Mixed { faces: &ws.input, z: zc.map(|z| &z.input) };
-    let rhs = Mixed { faces: &ws.rhs, z: zc.map(|z| &z.rhs) };
-    let iterate = Mixed { faces: &ws.iterate, z: zc.map(|z| &z.iterate) };
-    let residual = Mixed { faces: &ws.residual, z: zc.map(|z| &z.residual) };
-    let direction = Mixed { faces: &ws.direction, z: zc.map(|z| &z.direction) };
-    let op_dir = Mixed { faces: &ws.operator_direction, z: zc.map(|z| &z.operator_direction) };
-    let candidate = Mixed { faces: &ws.candidate, z: zc.map(|z| &z.candidate) };
-    let product = Mixed { faces: &ws.product, z: zc.map(|z| &z.product) };
 
     // predictor B* = B^0 - dt/2 L(B^0) B^0, A(B^0) nonlinear (bcell = interp(B^0), B_z^0).
-    extend_bface_periodic(sim);
-    interp_bcell(sim);
+    halo.faces(stores);
+    each(&|sim| interp_bcell(sim));
 
     // the frozen coefficient's gas state on an adiabatic closure is an explicit midpoint
-    // prediction, not a magnetic-energy subtraction: e_g^0 = E^0 - KE^0 - M_cell(B^0) is the
-    // entering gas internal energy, with the kinetic energy of all three momentum components and
-    // M_cell over all three cell components; the predictor A(B^0) reads it via `slip_ge`, and
-    // after the half-step it is lifted by the predicted dissipative heat (dt/2) qdot^0 to the
-    // midpoint e_g*, so A* is frozen at the midpoint gas state while the exact commit still
-    // reconciles the endpoint total energy. an isothermal closure prescribes the sound speed, so
-    // the coefficient has no gas state to predict.
+    // prediction: e_g^0 = E^0 - KE^0 - M_cell(B^0) is the entering gas internal energy, with the
+    // kinetic energy of all three momentum components and M_cell over all three cell components;
+    // the predictor A(B^0) reads it via `slip_ge`, and after the half-step it is lifted by the
+    // predicted dissipative heat (dt/2) qdot^0 to the midpoint e_g*, so A* is frozen at the
+    // midpoint gas state while the exact commit still reconciles the endpoint total energy. an
+    // isothermal closure prescribes the sound speed, so the coefficient has no gas state to predict.
     if has_energy {
-        slip_cell_pass(sim, &format!("slip_gas_energy_{dim}"), dt, &mhd.bface.b, None, &ws.dissipation);
+        each(&|sim| slip_cell_pass(sim, &format!("slip_gas_energy_{dim}"), dt, &mhd(sim).bface.b, None, &slip_workspace(sim).dissipation));
     }
 
-    zero_efield(sim);
-    match zc {
-        // the 2.5D pass forms F_q^0 = A(B^0) R B^0, scatters its z-component to the corner EMF, and
-        // advances the cell B_z to the predictor in place; the dissipation reads the faces (still
-        // B^0, the curl not yet applied) and the saved B_z^0.
-        Some(z) => {
-            let heat = SlipHeat { dt, bface_source: &mhd.bface.b, bz_source: Some(&z.input) };
-            body_slip_emf_2p5d::<D, DOF, Mem, Sc>(sim, gamma, 0.5 * dt, &mhd.bcell[oop], &mhd.bcell[oop], Some(heat));
-        }
-        None => {
-            // F_q^0 = A(B^0) R J^0 into slip_quadrature, qdot^0 into the workspace total.
-            let heat = SlipHeat { dt, bface_source: &mhd.bface.b, bz_source: None };
-            body_slip_emf::<D, DOF, Mem, Sc>(sim, gamma, Some(heat));
-        }
-    }
-    ct_curl::<D, DOF, Mem, Sc>(sim, 0.5 * dt); // bface <- B*
+    each(&|sim| zero_efield(sim));
+    // the 2.5D pass forms F_q^0 = A(B^0) R B^0, scatters its z-component to the corner EMF, and
+    // advances the cell B_z to the predictor in place; the dissipation reads the faces (still B^0,
+    // the curl not yet applied) and the saved B_z^0. the 3D pass forms F_q^0 = A(B^0) R J^0 into
+    // slip_quadrature and qdot^0 into the workspace total.
+    let passes: Vec<SlipPass<'_, D, Mem, Sc>> = stores
+        .iter()
+        .map(|sim| {
+            let z = slip_workspace(*sim).z.as_ref();
+            SlipPass {
+                bz: z.map(|_| (&mhd(*sim).bcell[oop], &mhd(*sim).bcell[oop])),
+                heat: Some(SlipHeat { dt, bface_source: &mhd(*sim).bface.b, bz_source: z.map(|z| &z.input) }),
+            }
+        })
+        .collect();
+    slip_emf_tiles(stores, gamma, if mixed { 0.5 * dt } else { 0.0 }, &passes, halo);
+    each(&|sim| ct_curl::<D, DOF, Mem, Sc>(sim, 0.5 * dt)); // bface <- B*
 
     // e_g* = e_g^0 + (dt/2) qdot^0, frozen in `slip_ge` for the solve and the commit.
-    if let Some(gas_energy) = ws.gas_energy.as_ref() {
-        dispatch_fields_each::<Sc, Mem, D>(
-            KernelId::FieldAxpyShift { ndim: D as u8 }.name(),
-            interior,
-            &[&ws.dissipation],
-            &[gas_energy],
-            &[0i32; 3][..D],
-            &[Sc::from_f64(0.5 * dt)],
-        );
-    }
-    interp_bcell(sim); // production in-plane bcell <- interp(B*) (bface holds B*): freeze A*
-    // capture the frozen predictor cell field after the interpolation, so it is interp(B*) with B_z*.
-    for d in 0..DOF {
-        field_copy_over(interior, &mhd.bcell[d], &ws.frozen_bcell.b[d]);
-    }
+    each(&|sim| {
+        let ws = slip_workspace(sim);
+        if let Some(gas_energy) = ws.gas_energy.as_ref() {
+            dispatch_fields_each::<Sc, Mem, D>(
+                KernelId::FieldAxpyShift { ndim: D as u8 }.name(),
+                &sim.geom.interior,
+                &[&ws.dissipation],
+                &[gas_energy],
+                &[0i32; 3][..D],
+                &[Sc::from_f64(0.5 * dt)],
+            );
+        }
+    });
+    // production in-plane bcell <- interp(B*) (bface holds B*): freeze A*, and capture the frozen
+    // predictor cell field after the interpolation, so it is interp(B*) with B_z*.
+    each(&|sim| {
+        interp_bcell(sim);
+        for d in 0..DOF {
+            field_copy_over(&sim.geom.interior, &mhd(sim).bcell[d], &slip_workspace(sim).frozen_bcell.b[d]);
+        }
+    });
 
     // the Krylov vectors start as complete copies of B^0, so a closing face on a non-periodic
     // boundary and every halo carry the substep input through to the candidate untouched; the
     // recurrence then acts on the interior faces and cells alone.
-    mixed_copy_all(input, iterate);
-    mixed_copy_all(input, rhs);
+    each(&|sim| {
+        mixed_copy_all(slip_vector(sim, SlipVector::Input), slip_vector(sim, SlipVector::Iterate));
+        mixed_copy_all(slip_vector(sim, SlipVector::Input), slip_vector(sim, SlipVector::Rhs));
+    });
 
     // rhs = (I - dt/2 L*) B^0.
-    apply_operator_mixed(sim, gamma, input, op_dir);
-    mixed_lincomb(sim, 1.0, rhs, -0.5 * dt, op_dir);
+    apply_operator_tiles(stores, gamma, &vectors(SlipVector::Input), &vectors(SlipVector::OperatorDirection), halo);
+    each(&|sim| mixed_lincomb(sim, 1.0, slip_vector(sim, SlipVector::Rhs), -0.5 * dt, slip_vector(sim, SlipVector::OperatorDirection)));
 
     // conjugate gradient on (I + dt/2 L*) x = rhs over the mixed complex, from x_0 = B^0: the
     // initial residual is then rhs - (I + dt/2 L*) B^0 = -dt L* B^0, the operator's action already
     // in hand, so a force-free field starts converged and the candidate is the input bit for bit.
     // the convergence target is the residual relative to the right-hand side's norm.
-    mixed_lincomb(sim, 0.0, residual, -dt, op_dir);
-    mixed_copy_interior(sim, residual, direction);
-    let rhs_norm = mixed_dot(sim, rhs, rhs, product).sqrt();
-    let r0 = mixed_dot(sim, residual, residual, product).sqrt();
+    each(&|sim| {
+        mixed_lincomb(sim, 0.0, slip_vector(sim, SlipVector::Residual), -dt, slip_vector(sim, SlipVector::OperatorDirection));
+        mixed_copy_interior(sim, slip_vector(sim, SlipVector::Residual), slip_vector(sim, SlipVector::Direction));
+    });
+    let dot = |a: SlipVector, b: SlipVector| mixed_dot_tiles(stores, &vectors(a), &vectors(b), &vectors(SlipVector::Product));
+    let rhs_norm = dot(SlipVector::Rhs, SlipVector::Rhs).sqrt();
+    let r0 = dot(SlipVector::Residual, SlipVector::Residual).sqrt();
     let target = tol * rhs_norm.max(1e-300);
     let mut rs = r0 * r0;
     let mut iterations = 0;
@@ -2916,33 +3232,38 @@ where
         if final_res <= target {
             break;
         }
-        apply_operator_mixed(sim, gamma, direction, op_dir);
-        mixed_lincomb(sim, 0.5 * dt, op_dir, 1.0, direction);
-        let alpha = rs / mixed_dot(sim, direction, op_dir, product);
-        mixed_lincomb(sim, 1.0, iterate, alpha, direction);
-        mixed_lincomb(sim, 1.0, residual, -alpha, op_dir);
-        let rs_new = mixed_dot(sim, residual, residual, product);
+        apply_operator_tiles(stores, gamma, &vectors(SlipVector::Direction), &vectors(SlipVector::OperatorDirection), halo);
+        each(&|sim| mixed_lincomb(sim, 0.5 * dt, slip_vector(sim, SlipVector::OperatorDirection), 1.0, slip_vector(sim, SlipVector::Direction)));
+        let alpha = rs / dot(SlipVector::Direction, SlipVector::OperatorDirection);
+        each(&|sim| {
+            mixed_lincomb(sim, 1.0, slip_vector(sim, SlipVector::Iterate), alpha, slip_vector(sim, SlipVector::Direction));
+            mixed_lincomb(sim, 1.0, slip_vector(sim, SlipVector::Residual), -alpha, slip_vector(sim, SlipVector::OperatorDirection));
+        });
+        let rs_new = dot(SlipVector::Residual, SlipVector::Residual);
         final_res = rs_new.sqrt();
         iterations = it + 1;
         if final_res <= target {
             break;
         }
         let beta = rs_new / rs;
-        mixed_lincomb(sim, beta, direction, 1.0, residual);
+        each(&|sim| mixed_lincomb(sim, beta, slip_vector(sim, SlipVector::Direction), 1.0, slip_vector(sim, SlipVector::Residual)));
         rs = rs_new;
     }
     let converged = final_res <= target;
 
-    if converged {
-        mixed_copy_all(iterate, candidate);
-    }
     // restore production state: every stored face (and cell B_z) returns to B^0 and the in-plane
     // bcell is reinterpolated. the solve mutates neither bface, bcell, nor cons.nrg.
-    restore_bface(sim, &ws.input);
-    if let Some(z) = zc {
-        field_copy_over(z.input.domain(), &z.input, &mhd.bcell[oop]);
-    }
-    interp_bcell(sim);
+    each(&|sim| {
+        if converged {
+            mixed_copy_all(slip_vector(sim, SlipVector::Iterate), slip_vector(sim, SlipVector::Candidate));
+        }
+        let ws = slip_workspace(sim);
+        restore_bface(sim, &ws.input);
+        if let Some(z) = ws.z.as_ref() {
+            field_copy_over(z.input.domain(), &z.input, &mhd(sim).bcell[oop]);
+        }
+        interp_bcell(sim);
+    });
 
     MagneticSlipSolveReceipt {
         iterations,
@@ -2973,68 +3294,106 @@ pub fn magnetic_slip_commit<const D: usize, const DOF: usize, Mem, Sc>(
     Mem: MemorySpace + Sync,
     Sc: Scalar + OrderedNumeric,
 {
-    let has_energy = sim.fields.cons.nrg_field().is_some();
-    let mhd = sim.fields.mhd.as_ref().expect("MHD fields");
-    let ws = mhd.magnetic_slip.as_ref().expect("magnetic-slip workspace");
-    let interior = &sim.geom.interior;
-    let zc = ws.z.as_ref();
-    let oop = D;
+    magnetic_slip_commit_tiles(&[sim], dt, gamma, &OwnHalo, true);
+}
 
-    // B^{1/2} into ws.rhs; freeze bcell = B*; cell pass fills F_q = A(B*)(R B^{1/2}); qdot = R B . F_q.
-    face_copy_all(&ws.candidate, &ws.rhs);
-    for d in 0..D {
-        field_lincomb_over(&physical_faces(interior, d), 0.5, &ws.rhs.b[d], 0.5, &ws.input.b[d]);
-    }
-    if let Some(z) = zc {
-        field_copy_over(z.candidate.domain(), &z.candidate, &z.rhs);
-        field_lincomb_over(interior, 0.5, &z.rhs, 0.5, &z.input);
-        cell_halo_fill(sim, &z.rhs);
-    }
-    for d in 0..DOF {
-        field_copy_over(interior, &ws.frozen_bcell.b[d], &mhd.bcell[d]);
-    }
-    restore_bface(sim, &ws.rhs);
-    extend_bface_periodic(sim);
-    zero_efield(sim);
-    let sums = match zc {
-        Some(z) => {
-            // the B_z pass output lands in the scratch member; the commit reads F_q and the
-            // dissipation alone here.
-            let heat = SlipHeat { dt, bface_source: &mhd.bface.b, bz_source: Some(&z.rhs) };
-            body_slip_emf_2p5d::<D, DOF, Mem, Sc>(sim, gamma, dt, &z.rhs, &z.product, Some(heat))
-        }
-        None => {
-            let heat = SlipHeat { dt, bface_source: &mhd.bface.b, bz_source: None };
-            body_slip_emf::<D, DOF, Mem, Sc>(sim, gamma, Some(heat))
+/// `magnetic_slip_commit` over the tiles of one level in lockstep. each body's heat adds the
+/// stores' exact partials and rounds once; with `books` the first store books the whole level's
+/// receipt, so a sum of the stores' body deltas holds it once
+pub fn magnetic_slip_commit_tiles<const D: usize, const DOF: usize, Mem, Sc>(
+    stores: &[&FieldStore<D, DOF, Mem, Sc>],
+    dt: f64,
+    gamma: f64,
+    halo: &dyn SlipHalo<D, DOF, Mem, Sc>,
+    books: bool,
+) where
+    Mem: MemorySpace + Sync,
+    Sc: Scalar + OrderedNumeric,
+{
+    let has_energy = stores[0].fields.cons.nrg_field().is_some();
+    let mixed = slip_workspace(stores[0]).z.is_some();
+    let oop = D;
+    let mhd = slip_mhd::<D, DOF, Mem, Sc>;
+    let each = |f: &dyn Fn(&FieldStore<D, DOF, Mem, Sc>)| {
+        for sim in stores {
+            f(*sim);
         }
     };
 
+    // B^{1/2} into ws.rhs; freeze bcell = B*; cell pass fills F_q = A(B*)(R B^{1/2}); qdot = R B . F_q.
+    each(&|sim| {
+        let ws = slip_workspace(sim);
+        face_copy_all(&ws.candidate, &ws.rhs);
+        for d in 0..D {
+            field_lincomb_over(&physical_faces(&sim.geom.interior, d), 0.5, &ws.rhs.b[d], 0.5, &ws.input.b[d]);
+        }
+        if let Some(z) = ws.z.as_ref() {
+            field_copy_over(z.candidate.domain(), &z.candidate, &z.rhs);
+            field_lincomb_over(&sim.geom.interior, 0.5, &z.rhs, 0.5, &z.input);
+        }
+    });
+    if mixed {
+        let rhs: Vec<&Field<Sc, D, Mem>> = stores.iter().map(|sim| &slip_workspace(*sim).z.as_ref().expect("2.5D member").rhs).collect();
+        halo.cells(stores, &rhs);
+    }
+    each(&|sim| {
+        let ws = slip_workspace(sim);
+        for d in 0..DOF {
+            field_copy_over(&sim.geom.interior, &ws.frozen_bcell.b[d], &mhd(sim).bcell[d]);
+        }
+        restore_bface(sim, &ws.rhs);
+    });
+    halo.faces(stores);
+    each(&|sim| zero_efield(sim));
+    // on a 2.5D grid the B_z pass output lands in the scratch member; the commit reads F_q and the
+    // dissipation alone here.
+    let passes: Vec<SlipPass<'_, D, Mem, Sc>> = stores
+        .iter()
+        .map(|sim| {
+            let z = slip_workspace(*sim).z.as_ref();
+            SlipPass {
+                bz: z.map(|z| (&z.rhs, &z.product)),
+                heat: Some(SlipHeat { dt, bface_source: &mhd(*sim).bface.b, bz_source: z.map(|z| &z.rhs) }),
+            }
+        })
+        .collect();
+    let sums = slip_emf_tiles(stores, gamma, if mixed { dt } else { 0.0 }, &passes, halo);
+
     // the per-body heat receipt, Q_b = dt dV sum_c qdot_c^b, booked with the step's body deltas.
-    if let Some(im) = sim.immersed.as_ref() {
-        let vol: f64 = sim.geom.dx.iter().product();
-        for (b, qdot_sum) in sums {
-            let mut delta = symbi_ib::BodyDelta::<f64, D>::new(b);
-            delta.slip_heat_delta = dt * vol * qdot_sum;
-            im.diagnostics.accumulate(delta);
+    if books {
+        if let Some(im) = stores[0].immersed.as_ref() {
+            let vol: f64 = stores[0].geom.dx.iter().product();
+            for (b, qdot_sum) in sums {
+                let mut delta = symbi_ib::BodyDelta::<f64, D>::new(b);
+                delta.slip_heat_delta = dt * vol * qdot_sum.value();
+                im.diagnostics.accumulate(delta);
+            }
         }
     }
 
     // set the physical field to the candidate B^1 (its periodic images regenerated) and
     // reinterpolate the in-plane bcell; on an adiabatic closure deposit E_c += dM_cc + dt qdot
     // with M_cc^0 read from the input.
-    restore_bface(sim, &ws.candidate);
-    extend_bface_periodic(sim);
-    if let Some(z) = zc {
-        field_copy_over(z.candidate.domain(), &z.candidate, &mhd.bcell[oop]);
-        cell_halo_fill(sim, &mhd.bcell[oop]);
+    each(&|sim| restore_bface(sim, &slip_workspace(sim).candidate));
+    halo.faces(stores);
+    if mixed {
+        each(&|sim| {
+            let z = slip_workspace(sim).z.as_ref().expect("2.5D member");
+            field_copy_over(z.candidate.domain(), &z.candidate, &mhd(sim).bcell[oop]);
+        });
+        let bz: Vec<&Field<Sc, D, Mem>> = stores.iter().map(|sim| &mhd(*sim).bcell[oop]).collect();
+        halo.cells(stores, &bz);
     }
-    interp_bcell(sim);
-    if has_energy {
-        match zc {
-            Some(z) => slip_cell_pass(sim, "slip_commit_energy_2d", dt, &ws.input.b, Some(&z.input), &ws.dissipation),
-            None => slip_cell_pass(sim, "slip_commit_energy_3d", dt, &ws.input.b, None, &ws.dissipation),
+    each(&|sim| {
+        interp_bcell(sim);
+        if has_energy {
+            let ws = slip_workspace(sim);
+            match ws.z.as_ref() {
+                Some(z) => slip_cell_pass(sim, "slip_commit_energy_2d", dt, &ws.input.b, Some(&z.input), &ws.dissipation),
+                None => slip_cell_pass(sim, "slip_commit_energy_3d", dt, &ws.input.b, None, &ws.dissipation),
+            }
         }
-    }
+    });
 }
 
 /// add the 2.5D Cartesian Ohmic resistive edge EMF `eta * J_z` to the out-of-plane edge EMF (the

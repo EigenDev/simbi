@@ -1856,6 +1856,39 @@ fn exchange_grid_set<const D: usize, const DOF: usize, M: MemorySpace, T: HaloTr
     }
 }
 
+/// carry the normal face every cut shares into the tile below it: the lower face of the upper
+/// tile's first interior cell, which that tile owns, becomes the closing face of the lower tile's
+/// last interior cell, over the full transverse extent; a wrap leg carries the domain's first face
+/// into the last tile's closing face. the evolve loop computes both copies by identical curls; a
+/// field the lower tile updates on its own faces alone (a Krylov vector of the slip solve) takes
+/// its closing face from the owner this way
+pub fn copy_shared_faces<const D: usize, const DOF: usize, M: MemorySpace, T: HaloTransport>(
+    tiles: &[&FieldStore<D, DOF, M>],
+    schedule: &Schedule<D>,
+    devices: &[i32],
+    transport: &T,
+) {
+    for leg in schedule.legs() {
+        let (lo, hi) = (tiles[leg.lo], tiles[leg.hi]);
+        let (Some(lo_mhd), Some(hi_mhd)) = (lo.fields.mhd.as_ref(), hi.fields.mhd.as_ref()) else {
+            continue;
+        };
+        let a = leg.axis;
+        let (dst, src) = (&lo_mhd.bface[a], &hi_mhd.bface[a]);
+        let mut dst_region = dst.domain().clone();
+        dst_region.spaces[a].lo = lo.geom.interior.spaces[a].hi;
+        dst_region.spaces[a].hi = dst_region.spaces[a].lo + 1;
+        let mut src_region = src.domain().clone();
+        src_region.spaces[a].lo = hi.geom.interior.spaces[a].lo;
+        src_region.spaces[a].hi = src_region.spaces[a].lo + 1;
+        debug_assert!(
+            (0..D).all(|ax| dst_region.spaces[ax].size() == src_region.spaces[ax].size()),
+            "the tiles across a leg share their transverse extent"
+        );
+        transport.copy_region(src, &src_region, dst, &dst_region, devices[leg.hi], devices[leg.lo]);
+    }
+}
+
 /// exchange the conserved-field cut halos. construction-time only: the evolve loop never reads
 /// cons ghosts, but seeding a fine level whose coverage touches a cut prolongs the conserved
 /// components through them. see [`ExchangeSet`].
