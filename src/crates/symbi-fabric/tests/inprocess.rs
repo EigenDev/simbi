@@ -1090,6 +1090,16 @@ fn iterative_rules() -> symbi_fabric::PhaseRules {
     }
 }
 
+/// the pair under the iterative rules, the solve's exchanges of kinds 0 and 1 each sending one
+/// transfer per axis to the peer
+fn iterative_pair(link: &Loopback) -> (Fabric<Loopback>, Fabric<Loopback>) {
+    let (a, b) = pair(link);
+    let to = |peer: usize| -> Vec<Vec<u32>> { (0..3).map(|p| if p == peer { vec![1, 1] } else { vec![0, 0] }).collect() };
+    let a = (0..2u8).fold(a.with_phase_rules(iterative_rules()), |f, kind| f.with_pass_counts(1, kind, to(1)));
+    let b = (0..2u8).fold(b.with_phase_rules(iterative_rules()), |f, kind| f.with_pass_counts(1, kind, to(0)));
+    (a, b)
+}
+
 fn pass(round: u32, op: u8, axis: u8) -> Epoch {
     Epoch { step: 3, attempt: 0, point: 1, round, op, axis }
 }
@@ -1119,8 +1129,7 @@ fn exchange_both_axes(a: &mut Fabric<Loopback>, b: &mut Fabric<Loopback>, e0: Ep
 #[test]
 fn an_iterative_point_carries_more_exchanges_than_the_point_bytes_could_name() {
     let link = Loopback::new();
-    let (a, b) = pair(&link);
-    let (mut a, mut b) = (a.with_phase_rules(iterative_rules()), b.with_phase_rules(iterative_rules()));
+    let (mut a, mut b) = iterative_pair(&link);
     // 300 passes of two exchanges: 600 exchanges inside one point, past the 255 point bytes
     for round in 0..300u32 {
         for op in 0..2u8 {
@@ -1136,8 +1145,7 @@ fn an_iterative_point_carries_more_exchanges_than_the_point_bytes_could_name() {
 #[test]
 fn a_halo_of_the_previous_exchange_of_an_iterative_point_is_refused() {
     let link = Loopback::new();
-    let (a, b) = pair(&link);
-    let (mut a, mut b) = (a.with_phase_rules(iterative_rules()), b.with_phase_rules(iterative_rules()));
+    let (mut a, mut b) = iterative_pair(&link);
     exchange_both_axes(&mut a, &mut b, pass(7, 0, 0));
     open_axis0(&mut a, &mut b, pass(7, 1, 0));
     let (h, p) = halo(pass(7, 0, 0), T0, &[1.0, 2.0, 3.0]);
@@ -1155,3 +1163,14 @@ fn a_pass_at_a_point_that_does_not_repeat_is_refused_at_open() {
     let err = opened.expect_err("a stage opened with a pass");
     assert!(format!("{err:?}").contains("does not repeat"), "{err:?}");
 }
+
+#[test]
+fn a_grant_for_an_exchange_kind_the_point_does_not_carry_is_refused() {
+    let link = Loopback::new();
+    let (_, mut b) = iterative_pair(&link);
+    // kind 3 (op 3) is no exchange of the solve
+    link.inject(A, B, grant(pass(0, 3, 0), 1), &[]);
+    let err = b.service().unwrap_err();
+    assert!(err.is_protocol() && format!("{err:?}").contains("exchange kind outside the table"), "{err:?}");
+}
+

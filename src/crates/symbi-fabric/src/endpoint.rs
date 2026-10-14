@@ -365,6 +365,9 @@ pub struct Fabric<L: Link> {
     /// the send counts of every phase of the table, `[byte][peer][axis]`; absent, every
     /// phase carries `sends_per_peer_axis`
     phase_counts: Option<Vec<Vec<Vec<u32>>>>,
+    /// the send counts of the exchanges of an iterative point, by (point byte, exchange kind):
+    /// `[peer][axis]`
+    pass_counts: std::collections::BTreeMap<(usize, u8), Vec<Vec<u32>>>,
     /// the last phase this worker opened, the position of its own sequence
     last_opened: Option<Epoch>,
     /// the phase table's sequence rules, enforced on every peer's grants and on this
@@ -441,6 +444,7 @@ impl<L: Link> Fabric<L> {
                 .collect(),
             sends_per_peer_axis,
             phase_counts: None,
+            pass_counts: std::collections::BTreeMap::new(),
             last_opened: None,
             phase_rules: None,
             phase: Phase {
@@ -485,6 +489,31 @@ impl<L: Link> Fabric<L> {
         self
     }
 
+    /// the send counts, `[peer][axis]`, of the exchanges of kind `kind` at the iterative point
+    /// `byte`. an exchange's kind is the low two bits of its epoch's `op`
+    pub fn with_pass_counts(mut self, byte: usize, kind: u8, counts: Vec<Vec<u32>>) -> Self {
+        assert!(kind < Self::PASS_KINDS, "an exchange kind fits two bits");
+        assert!(counts.len() == self.workers && counts.iter().all(|p| p.len() == self.axes));
+        self.pass_counts.insert((byte, kind), counts);
+        self
+    }
+
+    /// the kinds of exchange an iterative point carries, in the low bits of `op`
+    pub const PASS_KINDS: u8 = 4;
+
+    /// the send counts a grant for `epoch` must carry, `[peer][axis]`
+    fn counts_at(&self, epoch: Epoch) -> Option<&Vec<Vec<u32>>> {
+        let byte = epoch.point as usize;
+        let iterative = self.phase_rules.as_ref().is_some_and(|r| r.iterative.get(byte).copied().unwrap_or(false));
+        if iterative {
+            return self.pass_counts.get(&(byte, epoch.op % Self::PASS_KINDS));
+        }
+        match self.phase_counts.as_ref() {
+            Some(table) => table.get(byte),
+            None => Some(&self.sends_per_peer_axis),
+        }
+    }
+
     /// enforce the phase table's sequence on every peer's grants and on this worker's opens
     pub fn with_phase_rules(mut self, rules: crate::grant::PhaseRules) -> Self {
         self.phase_rules = Some(rules);
@@ -494,6 +523,10 @@ impl<L: Link> Fabric<L> {
     /// whether `peer` owes this worker a grant at phase `byte`: this worker sends it
     /// something there
     fn owed_by(&self, peer: WorkerId, byte: usize) -> bool {
+        let owed_in = |counts: &Vec<Vec<u32>>| counts.get(peer.0 as usize).is_some_and(|per_axis| per_axis.iter().any(|&c| c > 0));
+        if self.pass_counts.range((byte, 0)..(byte, Self::PASS_KINDS)).any(|(_, c)| owed_in(c)) {
+            return true;
+        }
         let counts = match self.phase_counts.as_ref() {
             Some(table) => match table.get(byte) {
                 Some(c) => c,
@@ -793,16 +826,9 @@ impl<L: Link> Fabric<L> {
         match header.kind {
             Kind::Grant => {
                 let axis = header.epoch.axis as usize;
-                let point = header.epoch.point as usize;
-                let counts = match self.phase_counts.as_ref() {
-                    Some(table) => table.get(point).ok_or_else(|| {
-                        FabricError::protocol(
-                            from,
-                            format!("grant for {:?}, a phase outside the table of {} phases", header.epoch, table.len()),
-                        )
-                    })?,
-                    None => &self.sends_per_peer_axis,
-                };
+                let counts = self.counts_at(header.epoch).ok_or_else(|| {
+                    FabricError::protocol(from, format!("grant for {:?}, a phase or exchange kind outside the table", header.epoch))
+                })?;
                 let expected = counts
                     .get(from.0 as usize)
                     .and_then(|p| p.get(axis))
