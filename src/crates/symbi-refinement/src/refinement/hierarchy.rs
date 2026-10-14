@@ -4220,6 +4220,11 @@ where
         false
     }
 
+    /// withhold (or restore) the drain in every level tail: a slip palindrome's H runs without it
+    pub(crate) fn set_drain_suppressed(&mut self, on: bool) {
+        self.drain_suppressed = on;
+    }
+
     /// whether the finest level carries a magnetic-slip body. the finest level is the sole owner
     /// of every sink coupling on a refined hierarchy (coarser levels hold gravity-only proxies), so
     /// the coupled-step decision reads the owner; on a single grid the finest is the root.

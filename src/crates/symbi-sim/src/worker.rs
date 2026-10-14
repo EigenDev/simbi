@@ -232,6 +232,237 @@ pub fn combine_census_partials<L: Link>(
     Ok(total)
 }
 
+/// the level's exact sum from every worker's share: each worker supplies its accumulator's words at
+/// its own window, every worker receives every share and merges them exactly
+pub fn combine_exact_sum<L: Link>(
+    fabric: &mut Fabric<L>,
+    workers: usize,
+    local: &symbi_algebra::ExactSum,
+    deadline: Duration,
+) -> Result<symbi_algebra::ExactSum, WorkerError> {
+    use symbi_algebra::ExactSum;
+    let words = ExactSum::WORDS;
+    let base = fabric.me().0 as u64 * words as u64;
+    let entries: Vec<(u64, u64)> = local.to_words().into_iter().enumerate().map(|(i, w)| (base + i as u64, w)).collect();
+    let assembled = fabric.assemble_windowed((workers * words) as u64, &entries, deadline).map_err(|e| fail(fabric, e.into()))?;
+    let mut total = ExactSum::new();
+    for w in 0..workers {
+        let share = ExactSum::from_words(&assembled[w * words..(w + 1) * words])
+            .map_err(|e| fail(fabric, WorkerError::Numerics(format!("worker {w}'s slip sum is missing or malformed: {e}"))))?;
+        total.merge(&share);
+    }
+    Ok(total)
+}
+
+/// one exchange `op` of pass `round` at the iterative `point`: every axis phase of the plans,
+/// each waited to completion; the exchange's kind is `op`'s low bits
+#[allow(clippy::too_many_arguments)]
+pub fn exchange_pass<const D: usize, M, T, L>(
+    parts: &[PlanPart<'_, D, M>],
+    transport: &T,
+    fabric: &mut Fabric<L>,
+    point: ExchangePoint,
+    round: u32,
+    op: u8,
+    step: u64,
+    attempt: u16,
+    deadline: Duration,
+    spent: &mut Duration,
+) -> Result<(), FabricError>
+where
+    M: MemorySpace,
+    T: HaloTransport,
+    L: Link,
+{
+    let clock = Instant::now();
+    let first = parts.first().expect("at least one plan");
+    let mut run = || -> Result<(), FabricError> {
+        for axis in 0..D {
+            let epoch = first.plan.pass_epoch(point, round, op, step, attempt, axis);
+            let mut sends = Vec::new();
+            let mut receives = Vec::new();
+            for part in parts {
+                let dst = part.dst_fields.unwrap_or(part.fields);
+                let (s, r) = part.plan.stage_axis_into(part.fields, dst, part.devices, transport, fabric, epoch, part.fault)?;
+                sends.extend(s);
+                receives.extend(r);
+            }
+            fabric.open(symbi_fabric::PhaseSpec { epoch, sends: &sends, receives: &receives })?;
+            fabric.wait(deadline)?;
+            for part in parts {
+                part.plan.unpack_axis_at(part.dst_fields.unwrap_or(part.fields), fabric, axis, point)?;
+            }
+            fabric.close()?;
+        }
+        Ok(())
+    };
+    let result = run();
+    *spent += clock.elapsed();
+    result
+}
+
+/// the cuts of a slip level spread over launched workers: the faces each cut shares and the halos
+/// cross between the workers at the exchanges of the current slip point, numbered by pass and by
+/// their order in the pass, and every sum merges the workers' exact shares. `ids` names this
+/// worker's tiles of the level in the order the solve lists their stores. a failure is kept, every
+/// later operation skipped, and the driver reports it after the step
+pub struct WorkerSlipCuts<'a, const D: usize, T, L: Link> {
+    pub state: &'a PlanExchange<'a, D>,
+    pub shared: &'a PlanExchange<'a, D>,
+    pub cells: &'a PlanExchange<'a, D>,
+    pub ids: &'a [TileId],
+    pub devices: &'a [i32],
+    pub transport: &'a T,
+    pub fabric: std::cell::RefCell<&'a mut Fabric<L>>,
+    pub workers: usize,
+    pub half: u8,
+    pub step: u64,
+    pub attempt: u16,
+    pub deadline: Duration,
+    point: std::cell::Cell<ExchangePoint>,
+    round: std::cell::Cell<u32>,
+    seq: std::cell::Cell<u8>,
+    failure: std::cell::RefCell<Option<WorkerError>>,
+    spent: std::cell::Cell<Duration>,
+}
+
+impl<'a, const D: usize, T: HaloTransport, L: Link> WorkerSlipCuts<'a, D, T, L> {
+    /// the exchanges an iterative pass may hold: the sequence number fills `op`'s high six bits
+    pub const PASS_CAPACITY: u8 = 64;
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn new(
+        state: &'a PlanExchange<'a, D>,
+        shared: &'a PlanExchange<'a, D>,
+        cells: &'a PlanExchange<'a, D>,
+        ids: &'a [TileId],
+        devices: &'a [i32],
+        transport: &'a T,
+        fabric: &'a mut Fabric<L>,
+        half: u8,
+        step: u64,
+        attempt: u16,
+        deadline: Duration,
+    ) -> Self {
+        let workers = state.placement().workers as usize;
+        Self {
+            state,
+            shared,
+            cells,
+            ids,
+            devices,
+            transport,
+            fabric: std::cell::RefCell::new(fabric),
+            workers,
+            half,
+            step,
+            attempt,
+            deadline,
+            point: std::cell::Cell::new(ExchangePoint::SlipSolve { half }),
+            round: std::cell::Cell::new(0),
+            seq: std::cell::Cell::new(0),
+            failure: std::cell::RefCell::new(None),
+            spent: std::cell::Cell::new(Duration::ZERO),
+        }
+    }
+
+    /// the time the exchanges took, or the first failure
+    pub fn finish(self) -> Result<Duration, WorkerError> {
+        match self.failure.into_inner() {
+            Some(e) => Err(e),
+            None => Ok(self.spent.get()),
+        }
+    }
+
+    fn failed(&self) -> bool {
+        self.failure.borrow().is_some()
+    }
+
+    fn keep(&self, e: WorkerError) {
+        self.failure.borrow_mut().get_or_insert(e);
+    }
+
+    /// field lists over every tile of the plan, this worker's tiles filled by `of`
+    fn lists<'s, M: MemorySpace, const DOF: usize>(
+        &self,
+        plan: &PlanExchange<'_, D>,
+        stores: &[&'s FieldStore<D, DOF, M, f64>],
+        of: impl Fn(usize, &'s FieldStore<D, DOF, M, f64>) -> Vec<&'s Field<f64, D, M>>,
+    ) -> Vec<Vec<&'s Field<f64, D, M>>> {
+        let mut lists: Vec<Vec<&Field<f64, D, M>>> = (0..plan.plan().n_tiles()).map(|_| Vec::new()).collect();
+        for (k, (id, store)) in self.ids.iter().zip(stores).enumerate() {
+            lists[id.0 as usize] = of(k, store);
+        }
+        lists
+    }
+
+    fn exchange<M: MemorySpace>(&self, plan: &PlanExchange<'_, D>, fields: &[Vec<&Field<f64, D, M>>], kind: u8) {
+        if self.failed() {
+            return;
+        }
+        let seq = self.seq.get();
+        if seq >= Self::PASS_CAPACITY {
+            self.keep(WorkerError::Numerics(format!("pass {} of {:?} holds more than {} exchanges", self.round.get(), self.point.get(), Self::PASS_CAPACITY)));
+            return;
+        }
+        self.seq.set(seq + 1);
+        let op = seq * symbi_fabric::PASS_KINDS + kind;
+        let part = PlanPart { plan, fields, devices: self.devices, fault: None, dst_fields: None };
+        let mut spent = self.spent.get();
+        let mut fabric = self.fabric.borrow_mut();
+        let result = exchange_pass(&[part], self.transport, &mut **fabric, self.point.get(), self.round.get(), op, self.step, self.attempt, self.deadline, &mut spent);
+        self.spent.set(spent);
+        if let Err(e) = result {
+            let error = fail(&mut **fabric, e.into());
+            drop(fabric);
+            self.keep(error);
+        }
+    }
+}
+
+impl<const D: usize, const DOF: usize, M: MemorySpace, T: HaloTransport, L: Link> crate::substrate_seam::SlipCuts<D, DOF, M> for WorkerSlipCuts<'_, D, T, L> {
+    fn faces(&self, stores: &[&FieldStore<D, DOF, M, f64>]) {
+        let faces = self.lists(self.shared, stores, |_, s| s.fields.mhd.as_ref().expect("MHD fields").bface.b.iter().collect());
+        self.exchange(self.shared, &faces, crate::atlas::SLIP_SHARED_FACES);
+        let state = self.lists(self.state, stores, |_, s| plan_fields(s));
+        self.exchange(self.state, &state, crate::atlas::SLIP_STATE);
+    }
+
+    fn cells(&self, stores: &[&FieldStore<D, DOF, M, f64>], fields: &[&Field<f64, D, M>]) {
+        let cells = self.lists(self.cells, stores, |k, _| vec![fields[k]]);
+        self.exchange(self.cells, &cells, crate::atlas::SLIP_CELLS);
+    }
+
+    fn sum(&self, local: symbi_algebra::ExactSum) -> symbi_algebra::ExactSum {
+        if self.failed() {
+            return local;
+        }
+        let mut fabric = self.fabric.borrow_mut();
+        match combine_exact_sum(&mut **fabric, self.workers, &local, self.deadline) {
+            Ok(total) => total,
+            Err(e) => {
+                drop(fabric);
+                self.keep(e);
+                local
+            }
+        }
+    }
+
+    fn enter(&self, part: crate::substrate_seam::SlipPart) {
+        self.point.set(match part {
+            crate::substrate_seam::SlipPart::Solve => ExchangePoint::SlipSolve { half: self.half },
+            crate::substrate_seam::SlipPart::Commit => ExchangePoint::SlipCommit { half: self.half },
+        });
+        self.round.set(0);
+        self.seq.set(0);
+    }
+
+    fn pass(&self, round: u32) {
+        self.round.set(round);
+        self.seq.set(0);
+    }
+}
+
 /// the launched worker's scope: 1D to 3D grids in host memory, a curved spacetime only where
 /// `curved` admits it (the relativistic gas and magnetized gas), a horizon body where the kernel
 /// set books its diagnostic shell, and tracers on the cartesian chart of a flat spacetime alone. the charts and settings a launch admits are decided
@@ -1191,10 +1422,11 @@ where
     /// the workers, and every worker restoring its own tiles' entry populations returns each record
     /// to the tile that held it
     tracer_entry: Option<Vec<crate::tracers::TileTracerSnapshot<D>>>,
+    /// the slip run's plans beyond the state, on a run carrying a magnetic-slip body
+    slip: Option<&'a SlipPlans<'a, D>>,
 }
 
-impl<const D: usize, const DOF: usize, M, K, T, L> crate::step_transaction::RootAttempt
-    for WorkerRootAttempt<'_, '_, '_, '_, D, DOF, M, K, T, L>
+impl<const D: usize, const DOF: usize, M, K, T, L> WorkerRootAttempt<'_, '_, '_, '_, D, DOF, M, K, T, L>
 where
     M: MemorySpace,
     K: KernelSet<D, DOF, M, f64>,
@@ -1202,44 +1434,8 @@ where
     L: Link,
     symbi_geometry::Cartesian: symbi_geometry::Metric<f64, D>,
 {
-    type Error = WorkerError;
-
-    fn rejectable(&mut self) -> bool {
-        self.kernels.iter().any(|k| k.fofc_active()) || !self.cfg.injection.reject_at.is_empty()
-    }
-
-    fn capture(&mut self, dt: f64, restorable: bool) -> Result<(), WorkerError> {
-        self.restorable = restorable;
-        if restorable && (self.has_tracers || self.has_continuous) && self.tracer_entry.is_none() {
-            let entry = self.stores.iter().map(|s| crate::tracers::TileTracerSnapshot::of(&**s)).collect::<Result<Vec<_>, _>>();
-            self.tracer_entry = Some(entry.map_err(|e| fail(self.fabric, WorkerError::Numerics(format!("tracer retry snapshot: {e}"))))?);
-        }
-        let (tiles, devices) = (self.tiles, self.devices);
-        let dev = |k: usize| devices[tiles[k].0 as usize];
-        for k in 0..self.stores.len() {
-            let (store, kernel) = (&*self.stores[k], self.kernels[k]);
-            if restorable {
-                with_device(dev(k), || kernel.snapshot_retry(store));
-            }
-            if self.multistage {
-                with_device(dev(k), || kernel.snapshot(store));
-            }
-        }
-        for s in self.stores.iter_mut() {
-            s.dt = dt;
-            if self.has_tracers {
-                crate::tracers::snapshot_transport_state(&mut **s);
-            }
-            if self.has_continuous {
-                let geometry = s.geom.block_geometry(symbi_geometry::Cartesian);
-                crate::tracers::begin_ito_transport_store(&mut **s, &geometry)
-                    .map_err(|e| fail(self.fabric, WorkerError::Numerics(format!("ito transport initialization: {e}"))))?;
-            }
-        }
-        Ok(())
-    }
-
-    fn run(&mut self, dt: f64) -> Result<bool, WorkerError> {
+    /// the stages of the root step across the workers. returns whether the step stands
+    fn stages(&mut self, dt: f64) -> Result<bool, WorkerError> {
         let (tiles, kernels, devices, exchange, transport, cfg) =
             (self.tiles, self.kernels, self.devices, self.exchange, self.transport, self.cfg);
         let (schedule, stages, tracer_layouts) = (self.schedule, self.stages, self.tracer_layouts);
@@ -1344,6 +1540,164 @@ where
         Ok(!rejected)
     }
 
+
+    /// every held tile's primitives recovered, then the slip level's halos across the cuts at
+    /// `point`, the polar bands and the physical fill, as the single grid rebuilds after a split
+    /// operator
+    fn slip_rebuild(&mut self, point: ExchangePoint) -> Result<(), WorkerError> {
+        let (tiles, devices, kernels) = (self.tiles, self.devices, self.kernels);
+        let dev = |k: usize| devices[tiles[k].0 as usize];
+        let sh: Vec<&FieldStore<D, DOF, M, f64>> = self.stores.iter().map(|s| &**s).collect();
+        for k in 0..sh.len() {
+            with_device(dev(k), || kernels[k].c2p(sh[k]));
+        }
+        exchange_point(self.exchange, tiles, &sh, devices.len(), devices, self.transport, self.fabric, point, self.iter, self.attempt, self.cfg.deadline, &mut self.timing.exchange)
+            .map_err(|e| fail(self.fabric, e.into()))?;
+        flip_polar_bands(self.exchange, tiles, &sh, kernels, devices);
+        for k in 0..sh.len() {
+            with_device(dev(k), || kernels[k].ghost_fill(sh[k]));
+        }
+        Ok(())
+    }
+
+    /// the material drain D(dt) of half `half` on every held tile at the whole run's Alfven
+    /// stiffness (a maximum over every worker's tiles), then the rebuild
+    fn slip_drain(&mut self, dt: f64, half: u8) -> Result<(), WorkerError> {
+        let n_tiles = self.devices.len();
+        let local: Vec<(u64, u64)> =
+            self.stores.iter().zip(self.tiles).map(|(s, t)| (t.0 as u64, crate::state::local_c_a2_max(&**s).to_bits())).collect();
+        let assembled = self.fabric.assemble_windowed(n_tiles as u64, &local, self.cfg.deadline).map_err(|e| fail(self.fabric, e.into()))?;
+        let mut c_a2 = 0.0_f64;
+        for (tile, bits) in assembled.iter().enumerate() {
+            if *bits == symbi_fabric::ABSENT {
+                return Err(fail(self.fabric, WorkerError::Numerics(format!("no worker supplied tile {tile}'s Alfven stiffness"))));
+            }
+            c_a2 = c_a2.max(f64::from_bits(*bits));
+        }
+        let (tiles, devices, kernels) = (self.tiles, self.devices, self.kernels);
+        for (k, store) in self.stores.iter().enumerate() {
+            if let Some(im) = store.immersed.as_ref() {
+                im.set_c_a2_override(c_a2);
+            }
+            with_device(devices[tiles[k].0 as usize], || kernels[k].penalize(&**store, dt));
+        }
+        self.slip_rebuild(ExchangePoint::SlipDrain { half })
+    }
+
+    /// the magnetic-slip midpoint M(dt) of half `half` over every worker's tiles in lockstep,
+    /// its heat booked once (by the owner of the first tile), then the rebuild. returns whether it
+    /// converged
+    fn slip_midpoint(&mut self, dt: f64, half: u8) -> Result<bool, WorkerError> {
+        let plans = self.slip.expect("a slip run carries its plans");
+        let books = self.exchange.placement().owner_of(TileId(0)) == self.fabric.me();
+        let converged = {
+            let sh: Vec<&FieldStore<D, DOF, M, f64>> = self.stores.iter().map(|s| &**s).collect();
+            let cuts = WorkerSlipCuts::new(
+                self.exchange,
+                plans.shared,
+                plans.cells,
+                self.tiles,
+                self.devices,
+                self.transport,
+                &mut *self.fabric,
+                half,
+                self.iter,
+                self.attempt,
+                self.cfg.deadline,
+            );
+            let converged = self.kernels[0].magnetic_slip_step_tiles(&sh, sh[0], dt, &cuts, books);
+            self.timing.exchange += cuts.finish()?;
+            converged
+        };
+        if converged {
+            self.slip_rebuild(ExchangePoint::SlipRebuild { half })?;
+        }
+        Ok(converged)
+    }
+
+    /// the palindromic coupled step of a slip-enabled draining body across the workers,
+    /// D(dt/2) M(dt/2) H(dt) M(dt/2) D(dt/2), as the single grid composes it: H is the stages
+    /// alone from a snapshot taken after the opening half. returns whether the step stands (a
+    /// nonconverged solve, decided from the global sums on every worker alike, or a rejected
+    /// stage rejects it)
+    fn slip_palindrome(&mut self, dt: f64) -> Result<bool, WorkerError> {
+        let half = 0.5 * dt;
+        self.slip_drain(half, 0)?;
+        if !self.slip_midpoint(half, 0)? {
+            self.report.rejections += 1;
+            return Ok(false);
+        }
+        if self.multistage {
+            let (tiles, devices, kernels) = (self.tiles, self.devices, self.kernels);
+            for (k, store) in self.stores.iter().enumerate() {
+                with_device(devices[tiles[k].0 as usize], || kernels[k].snapshot(&**store));
+            }
+        }
+        if !self.stages(dt)? {
+            return Ok(false);
+        }
+        if !self.slip_midpoint(half, 1)? {
+            self.report.rejections += 1;
+            return Ok(false);
+        }
+        self.slip_drain(half, 1)?;
+        Ok(true)
+    }
+}
+
+impl<const D: usize, const DOF: usize, M, K, T, L> crate::step_transaction::RootAttempt
+    for WorkerRootAttempt<'_, '_, '_, '_, D, DOF, M, K, T, L>
+where
+    M: MemorySpace,
+    K: KernelSet<D, DOF, M, f64>,
+    T: HaloTransport,
+    L: Link,
+    symbi_geometry::Cartesian: symbi_geometry::Metric<f64, D>,
+{
+    type Error = WorkerError;
+
+    fn rejectable(&mut self) -> bool {
+        self.kernels.iter().any(|k| k.fofc_active()) || !self.cfg.injection.reject_at.is_empty() || self.slip.is_some()
+    }
+
+    fn capture(&mut self, dt: f64, restorable: bool) -> Result<(), WorkerError> {
+        self.restorable = restorable;
+        if restorable && (self.has_tracers || self.has_continuous) && self.tracer_entry.is_none() {
+            let entry = self.stores.iter().map(|s| crate::tracers::TileTracerSnapshot::of(&**s)).collect::<Result<Vec<_>, _>>();
+            self.tracer_entry = Some(entry.map_err(|e| fail(self.fabric, WorkerError::Numerics(format!("tracer retry snapshot: {e}"))))?);
+        }
+        let (tiles, devices) = (self.tiles, self.devices);
+        let dev = |k: usize| devices[tiles[k].0 as usize];
+        for k in 0..self.stores.len() {
+            let (store, kernel) = (&*self.stores[k], self.kernels[k]);
+            if restorable {
+                with_device(dev(k), || kernel.snapshot_retry(store));
+            }
+            if self.multistage {
+                with_device(dev(k), || kernel.snapshot(store));
+            }
+        }
+        for s in self.stores.iter_mut() {
+            s.dt = dt;
+            if self.has_tracers {
+                crate::tracers::snapshot_transport_state(&mut **s);
+            }
+            if self.has_continuous {
+                let geometry = s.geom.block_geometry(symbi_geometry::Cartesian);
+                crate::tracers::begin_ito_transport_store(&mut **s, &geometry)
+                    .map_err(|e| fail(self.fabric, WorkerError::Numerics(format!("ito transport initialization: {e}"))))?;
+            }
+        }
+        Ok(())
+    }
+
+    fn run(&mut self, dt: f64) -> Result<bool, WorkerError> {
+        if self.slip.is_some() {
+            return self.slip_palindrome(dt);
+        }
+        self.stages(dt)
+    }
+
     fn evidence(&mut self, rejections: u32) -> Vec<String> {
         // every worker books the agreed rejection with the evidence its own tiles hold, so every
         // worker reaches the guard's decision at the same attempt
@@ -1374,7 +1728,9 @@ where
             // itself; the kernel set restores the fields. the bodies of a run carrying a horizon
             // change after acceptance alone (the ledger, the feedback and the motion), so its
             // replay starts from the entry bodies; other immersed bodies have no restore here
-            if !kernels[k].field_rollback_is_complete(sh[k]) || bodies_without_horizon(sh[k]) {
+            // a slip run's bodies change inside the attempt by the deltas its drain and slip booked
+            // alone, which the reset below discards
+            if !kernels[k].field_rollback_is_complete(sh[k]) || (bodies_without_horizon(sh[k]) && self.slip.is_none()) {
                 return Err(fail(
                     self.fabric,
                     WorkerError::Numerics(
@@ -1387,6 +1743,11 @@ where
             with_device(dev(k), || kernels[k].restore_step(sh[k]));
             // the tile stands at its step entry again, the clock its ghost refills read
             sh[k].reset_state_clock();
+            if self.slip.is_some() {
+                if let Some(im) = sh[k].immersed.as_ref() {
+                    im.diagnostics.reset();
+                }
+            }
         }
         let deadline = self.cfg.deadline;
         exchange_point(
@@ -1584,7 +1945,7 @@ where
         &mut Fabric<L>,
     ) -> Result<ControlFlow<()>, WorkerError>,
 {
-    evolve_worker_traced(tiles, stores, kernels, devices, exchange, transport, fabric, cfg, None, &mut |_, _, _, _| {}, on_step)
+    evolve_worker_traced(tiles, stores, kernels, devices, exchange, transport, fabric, cfg, None, None, &mut |_, _, _, _| {}, on_step)
 }
 
 /// what a continuous-tracer population needs beyond the state plan: the plan that carries its
@@ -1594,6 +1955,13 @@ pub struct ContinuousTracerContext<'a, const D: usize> {
     pub coefficients: &'a PlanExchange<'a, D>,
     pub bounds: [(f64, f64); D],
     pub boundaries: crate::state::Boundaries<D>,
+}
+
+/// the plans a magnetic-slip run's lockstep solve moves beyond the state: the faces each cut
+/// shares, carried from their owner, and one cell field
+pub struct SlipPlans<'a, const D: usize> {
+    pub shared: &'a PlanExchange<'a, D>,
+    pub cells: &'a PlanExchange<'a, D>,
 }
 
 /// `evolve_worker` with the context a continuous-tracer population rides
@@ -1608,6 +1976,7 @@ pub fn evolve_worker_traced<const D: usize, const DOF: usize, M, K, T, L, F>(
     fabric: &mut Fabric<L>,
     cfg: &WorkerConfig,
     continuous: Option<&ContinuousTracerContext<'_, D>>,
+    slip: Option<&SlipPlans<'_, D>>,
     stage_hook: &mut crate::decomp::TileStageHook<'_, D, DOF, M>,
     mut on_step: F,
 ) -> Result<WorkerReport, WorkerError>
@@ -1640,10 +2009,11 @@ where
         // the relativistic gas and the relativistic magnetized gas carry a curved spacetime
         let curved = matches!(cfg.regime, crate::substrate_seam::RegimeKind::Rhd | crate::substrate_seam::RegimeKind::Rmhd);
         refuse(&sh, kernels, curved).map_err(|e| fail(fabric, e))?;
-        // a rejection replays the step from its entry, which needs the whole entry state kept
+        // a rejection replays the step from its entry, which needs the whole entry state kept; a
+        // slip run's bodies change inside the attempt by the deltas its rollback discards
         if !cfg.injection.reject_at.is_empty() {
             for (store, kernel) in sh.iter().zip(kernels) {
-                if !kernel.field_rollback_is_complete(store) || bodies_without_horizon(store) {
+                if !kernel.field_rollback_is_complete(store) || (bodies_without_horizon(store) && slip.is_none()) {
                     return Err(fail(
                         fabric,
                         WorkerError::Refused(
@@ -1912,6 +2282,7 @@ where
             restorable: false,
             injection_ledgers: Vec::new(),
             tracer_entry: None,
+            slip,
         };
         let step = crate::step_transaction::take_root_step(&mut root, &guard, dt, t)?;
         injection_ledgers = std::mem::take(&mut root.injection_ledgers);
@@ -1982,7 +2353,9 @@ where
                 excise_at: exchange.table().stages(),
                 excise_passes,
             };
-            let folded = crate::stage::fold_post_step(&sh, kernels, dt, &mut step, |_| true);
+            // a slip run's drain belongs to its palindrome, which the single grid closes without the
+            // post-step operators
+            let folded = if slip.is_some() { Ok(()) } else { crate::stage::fold_post_step(&sh, kernels, dt, &mut step, |_| true) };
             let failure = step.failure.take();
             if let Some(e) = failure {
                 return Err(fail(fabric, e.into()));

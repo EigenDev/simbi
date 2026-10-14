@@ -88,6 +88,11 @@ pub struct RefinedPlans<'p, const D: usize> {
     /// the seams whose balanced band a cut runs inside, with the cuts' distances from the seam, in
     /// the order the restriction rewrites them
     pub band_seams: Vec<symbi_sim::phase_table::BandHops>,
+    /// the faces each cut of the finest level shares, from their owner, at the slip points: present
+    /// on a run carrying a magnetic-slip body
+    pub slip_shared: Option<PlanExchange<'p, D>>,
+    /// one cell field of the finest level at the slip points, present with `slip_shared`
+    pub slip_cells: Option<PlanExchange<'p, D>>,
 }
 
 /// the plans of one nested refined level (two or deeper): its patch faces lie off every cut,
@@ -560,6 +565,123 @@ where
             }
         }};
     }
+    // the magnetic-slip palindrome on the run's finest level: that level's state plan, the tiles
+    // of it this worker holds, and the level's halos after each split operator
+    let slip_level = depth - 1;
+    macro_rules! slip_plan {
+        () => {
+            if slip_level == 1 { &plans.fine } else { &plans.nested[slip_level - 2].state }
+        };
+    }
+    let slip_holders: Vec<usize> = (0..n).filter(|&k| tiles[k].levels.len() > slip_level).collect();
+    // the finest level's primitives recovered, then its halos across the cuts at `$point` and its
+    // physical fill, as the single hierarchy rebuilds after a split operator
+    macro_rules! slip_rebuild {
+        ($point:expr, $step:expr, $attempt:expr) => {{
+            for &k in &slip_holders {
+                let level = &tiles[k].levels[slip_level];
+                with_device(root_dev(k), || level.kernels.c2p(&level.state));
+            }
+            let fields = level_fields!(slip_level, plan_fields);
+            let part = PlanPart { plan: slip_plan!(), fields: &fields, devices: held.level_devices(slip_level), fault: None, dst_fields: None };
+            exchange_point_plans(&[part], transport, fabric, $point, $step, $attempt, deadline, &mut timing.exchange)
+                .map_err(|e| fail(fabric, e.into()))?;
+            for &k in &slip_holders {
+                let h = &tiles[k];
+                with_device(root_dev(k), || h.fill_physical_ghosts(slip_level));
+            }
+        }};
+    }
+    // the material drain of half `$half` on the finest level at the whole level's Alfven stiffness
+    // (a maximum over every worker's tiles of it), then the rebuild
+    macro_rules! slip_drain {
+        ($dt:expr, $half:expr, $step:expr, $attempt:expr) => {{
+            let ids = held.level_ids(slip_level);
+            let local: Vec<(u64, u64)> = slip_holders
+                .iter()
+                .map(|&k| (ids[k].expect("a holder holds the level").0 as u64, symbi_sim::state::local_c_a2_max(&tiles[k].levels[slip_level].state).to_bits()))
+                .collect();
+            let assembled = fabric.assemble_windowed(held.level_tiles(slip_level) as u64, &local, deadline).map_err(|e| fail(fabric, e.into()))?;
+            let mut c_a2 = 0.0_f64;
+            for (tile, bits) in assembled.iter().enumerate() {
+                if *bits == symbi_fabric::ABSENT {
+                    return Err(fail(fabric, WorkerError::Numerics(format!("no worker supplied level {slip_level} tile {tile}'s Alfven stiffness"))));
+                }
+                c_a2 = c_a2.max(f64::from_bits(*bits));
+            }
+            for &k in &slip_holders {
+                let level = &tiles[k].levels[slip_level];
+                if let Some(im) = level.state.immersed.as_ref() {
+                    im.set_c_a2_override(c_a2);
+                }
+                with_device(root_dev(k), || level.kernels.penalize(&level.state, $dt));
+            }
+            slip_rebuild!(ExchangePoint::SlipDrain { half: $half }, $step, $attempt);
+        }};
+    }
+    // the slip midpoint of half `$half` over every worker's tiles of the finest level in lockstep,
+    // a worker holding none of them joining every exchange and sum; its heat booked once, by the
+    // owner of the level's first tile. evaluates to whether the solve converged
+    macro_rules! slip_mid {
+        ($dt:expr, $half:expr, $step:expr, $attempt:expr) => {{
+            let level_ids = held.level_ids(slip_level);
+            let ids: Vec<TileId> = slip_holders.iter().map(|&k| level_ids[k].expect("a holder holds the level")).collect();
+            let books = slip_plan!().placement().owner_of(TileId(0)) == fabric.me();
+            let converged = {
+                let stores: Vec<&FieldStore<D, DOF, Mem, f64>> = slip_holders.iter().map(|&k| &*tiles[k].levels[slip_level].state).collect();
+                let (reference, kernels) = match slip_holders.first() {
+                    Some(&k) => (&*tiles[k].levels[slip_level].state, &tiles[k].levels[slip_level].kernels),
+                    None => (&*tiles[0].levels[0].state, &tiles[0].levels[0].kernels),
+                };
+                let cuts = symbi_sim::worker::WorkerSlipCuts::new(
+                    slip_plan!(),
+                    plans.slip_shared.as_ref().expect("a slip run carries its shared-face plan"),
+                    plans.slip_cells.as_ref().expect("a slip run carries its cell plan"),
+                    &ids,
+                    held.level_devices(slip_level),
+                    transport,
+                    &mut *fabric,
+                    $half,
+                    $step,
+                    $attempt,
+                    deadline,
+                );
+                let converged = kernels.magnetic_slip_step_tiles(&stores, reference, $dt, &cuts, books);
+                timing.exchange += cuts.finish()?;
+                converged
+            };
+            if converged {
+                slip_rebuild!(ExchangePoint::SlipRebuild { half: $half }, $step, $attempt);
+            }
+            converged
+        }};
+    }
+    // every tile's covered coarser cells take the finest state, then every coarser level's halos
+    // cross the cuts and its physical ghosts fill
+    macro_rules! slip_sync {
+        ($half:expr, $step:expr, $attempt:expr) => {{
+            for (k, h) in tiles.iter().enumerate() {
+                with_device(root_dev(k), || h.sync_all_fine_to_coarse());
+            }
+            let root = root_fields!();
+            let coarser: Vec<Vec<Vec<&Field<f64, D, Mem>>>> = (1..slip_level).map(|level| level_fields!(level, plan_fields)).collect();
+            let mut parts = vec![PlanPart { plan: &plans.root, fields: &root, devices: held.root_devices, fault: None, dst_fields: None }];
+            for (i, level) in (1..slip_level).enumerate() {
+                let plan = if level == 1 { &plans.fine } else { &plans.nested[level - 2].state };
+                parts.push(PlanPart { plan, fields: &coarser[i], devices: held.level_devices(level), fault: None, dst_fields: None });
+            }
+            exchange_point_plans(&parts, transport, fabric, ExchangePoint::SlipSync { half: $half }, $step, $attempt, deadline, &mut timing.exchange)
+                .map_err(|e| fail(fabric, e.into()))?;
+            for (k, h) in tiles.iter().enumerate() {
+                with_device(root_dev(k), || {
+                    h.levels[0].kernels.ghost_fill(&h.levels[0].state);
+                    for level in 1..slip_level.min(h.levels.len()) {
+                        h.fill_physical_ghosts(level);
+                    }
+                });
+            }
+        }};
+    }
     // the register slabs of the contributions plan, per root tile: a tile without a
     // register lists nothing, since the plan references none of its slots
     macro_rules! flux_fields {
@@ -966,9 +1088,9 @@ where
         let mut restorable = false;
         let mut scoped = ScopedAttempt(|op: AttemptOp| -> Result<AttemptReply, WorkerError> {
             match op {
-                AttemptOp::Rejectable => {
-                    Ok(AttemptReply::Flag(tiles.iter().any(Hierarchy::root_step_rejectable) || !base.injection.reject_at.is_empty()))
-                }
+                AttemptOp::Rejectable => Ok(AttemptReply::Flag(
+                    tiles.iter().any(Hierarchy::root_step_rejectable) || !base.injection.reject_at.is_empty() || plans.slip_shared.is_some(),
+                )),
                 AttemptOp::Capture { restorable: complete, .. } => {
                     // the root-attempt snapshot of every level and its sidecars
                     restorable = complete;
@@ -987,6 +1109,21 @@ where
                     Ok(AttemptReply::Done)
                 }
                 AttemptOp::Run { dt } => {
+                    // a slip run opens its palindrome on the finest level before the root step,
+                    // whose drains it then withholds
+                    let slipping = plans.slip_shared.is_some();
+                    let half_dt = 0.5 * dt;
+                    if slipping {
+                        slip_drain!(half_dt, 0u8, iter, attempt);
+                        if !slip_mid!(half_dt, 0u8, iter, attempt) {
+                            report.rejections += 1;
+                            return Ok(AttemptReply::Flag(false));
+                        }
+                        slip_sync!(0u8, iter, attempt);
+                        for h in tiles.iter_mut() {
+                            h.set_drain_suppressed(true);
+                        }
+                    }
                     for (k, h) in tiles.iter_mut().enumerate() {
                         with_device(root_dev(k), || h.level_step_begin(0, dt));
                     }
@@ -1291,6 +1428,21 @@ where
                                 let s = &mut h.levels[0].state;
                                 (s.time, s.iteration) = advance_clock(s.time, s.iteration, dt);
                             });
+                        }
+                    }
+                    // the closing half: the slip midpoint and the drain on the finest level, then the
+                    // coarser levels take the finest state
+                    if slipping {
+                        for h in tiles.iter_mut() {
+                            h.set_drain_suppressed(false);
+                        }
+                        if !rejected {
+                            if slip_mid!(half_dt, 1u8, iter, attempt) {
+                                slip_drain!(half_dt, 1u8, iter, attempt);
+                                slip_sync!(1u8, iter, attempt);
+                            } else {
+                                rejected = true;
+                            }
                         }
                     }
                     if rejected {

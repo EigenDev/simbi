@@ -11324,10 +11324,6 @@ fn axis_maps_any(cfg: &Config) -> bool {
 
 fn validate_launch_scope(cfg: &Config) -> Result<(), String> {
     let refused = |what: &str| Err(format!("{what} is outside the distributed first release"));
-    // the launched workers carry no cross-worker slip solve
-    if cfg.bodies.iter().any(|b| b.magnetic_slip.is_some()) {
-        return refused("a magnetic slip body");
-    }
     if !matches!(cfg.regime.as_str(), "newtonian" | "rhd" | "isothermal" | "nmhd" | "imhd" | "rmhd") {
         return refused(&format!("the {} regime", cfg.regime));
     }
@@ -12306,6 +12302,21 @@ where
     }
     let stages = cfg.timestepping.stages().len() as u8;
     let table = PhaseTable::nested_banded(stages, 2, depth as u8, &band_seams).map_err(|e| format!("{depth} refinement levels: {e}"))?;
+    // a magnetic-slip run's table carries the palindrome's points; its solve moves the finest
+    // level's shared faces and one cell field through their own plans, in that level's frames
+    let slipping = cfg.bodies.iter().any(|b| b.magnetic_slip.is_some());
+    let table = if slipping { table.with_slip().map_err(|e| format!("{depth} refinement levels with a slip body: {e}"))? } else { table };
+    let slip_compiled = if slipping {
+        let (part, frames, topology): (&symbi::sim::decomp::Partition<D>, &Vec<[isize; D]>, &symbi::sim::decomp::Topology<D>) =
+            if depth == 2 { (&fine_partition.partition, &fine_frames, &fine_topology) } else { (&nested_parts[depth - 3].partition, &nested_frames[depth - 3], &open) };
+        let shared = symbi_sim::atlas::ExchangePlan::shared_faces_shifted(part, topology, ng + 1, &|t: TileId| frames[t.0 as usize]).map_err(|e| e.to_string())?;
+        let schema = symbi_sim::atlas::FieldSchema::new().cell("slip");
+        let cells = ExchangePlan::compile_shifted(part, topology, &schema, ng + 1, &|t: TileId| frames[t.0 as usize]).map_err(|e| e.to_string())?;
+        digests.extend([shared.digest, cells.digest]);
+        Some((shared, cells))
+    } else {
+        None
+    };
     // each plan takes the fabric ids after the last one's
     fn placed<'a, const D2: usize>(
         plan: &'a ExchangePlan<D2>,
@@ -12378,6 +12389,10 @@ where
             next(plan, placement, PlanRole::BandSeam { level: level as u8 })
         })
         .collect();
+    // the slip plans take the ids after the band plans, on the finest level's placement
+    let slip_placement = if depth == 2 { &fine_placement } else { &nested_placements[depth - 3] };
+    let slip_shared = slip_compiled.as_ref().map(|(shared, _)| next(shared, slip_placement, PlanRole::SlipSharedFaces));
+    let slip_cells = slip_compiled.as_ref().map(|(_, cells)| next(cells, slip_placement, PlanRole::SlipCells));
     let plan_digest = {
         let mut h = Fnv::new();
         for d in digests {
@@ -12425,6 +12440,8 @@ where
     }
     all.extend(coefficients.iter());
     all.extend(bands.iter());
+    all.extend(slip_shared.iter());
+    all.extend(slip_cells.iter());
     let max_payload = (all.iter().flat_map(|p| p.lens()).max().unwrap_or(0) * 8).max(credit as usize);
     let built = build_clock.elapsed();
     let connect_clock = std::time::Instant::now();
@@ -12442,7 +12459,7 @@ where
         let _ = std::io::stderr().write_all(line.as_bytes());
     }
     let mut fabric = fabric_for(&all, link, session).with_block_credit(credit);
-    let plans = RefinedPlans { root, seed, fine, flux, emf, faces, corrected, stencil, nested: nested_plans, coefficients, bands, band_seams };
+    let plans = RefinedPlans { root, seed, fine, flux, emf, faces, corrected, stencil, nested: nested_plans, coefficients, bands, band_seams, slip_shared, slip_cells };
     let root_devices = vec![0i32; n_root];
     let fine_devices = vec![0i32; n_fine];
     let nested_held: Vec<NestedHeld> = nested_ids
@@ -13381,7 +13398,10 @@ where
     let schema = plan_schema(&*tiles[0].0);
     let seam = polar_seam::<D>(&cfg.coord_system, &boundaries_nd::<D>(&cfg.boundaries), topology, partition.counts(), |az, i| partition.tile_range(az, i).1);
     let plan = ExchangePlan::compile_with_seam(partition, topology, &schema, ng, seam).map_err(|e| e.to_string())?;
+    // a magnetic-slip run's table carries the palindrome's points, its solve and commit repeating
+    let slipping = cfg.bodies.iter().any(|b| b.magnetic_slip.is_some());
     let table = PhaseTable::flat(cfg.timestepping.stages().len() as u8).map_err(|e| e.to_string())?;
+    let table = if slipping { table.with_slip().map_err(|e| e.to_string())? } else { table };
     let exchange = PlanExchange::new(&plan, &placement, me, table.clone());
     // a continuous-tracer population's coefficients cross the cuts through their own plan, its
     // fabric ids after the state plan's
@@ -13396,6 +13416,25 @@ where
     let coefficients = coefficient_plan.as_ref().map(|p| {
         PlanExchange::new(p, &placement, me, table.clone())
             .with_role(symbi_sim::plan_exchange::PlanRole::TracerCoefficients, exchange.lens().len() as u32)
+    });
+    // the slip solve's shared faces and its cell field cross the cuts through their own plans,
+    // their fabric ids after the state's and the coefficients'
+    let slip_plans = if slipping {
+        let shared = symbi_sim::atlas::ExchangePlan::shared_faces(partition, topology, ng).map_err(|e| e.to_string())?;
+        let schema = symbi_sim::atlas::FieldSchema::new().cell("slip");
+        let seam = polar_seam::<D>(&cfg.coord_system, &boundaries_nd::<D>(&cfg.boundaries), topology, partition.counts(), |az, i| partition.tile_range(az, i).1);
+        let cells = ExchangePlan::compile_with_seam(partition, topology, &schema, ng, seam).map_err(|e| e.to_string())?;
+        Some((shared, cells))
+    } else {
+        None
+    };
+    let slip_offset = exchange.lens().len() + coefficients.as_ref().map_or(0, |c| c.lens().len());
+    let slip_shared = slip_plans.as_ref().map(|(shared, _)| {
+        PlanExchange::new(shared, &placement, me, table.clone()).with_role(symbi_sim::plan_exchange::PlanRole::SlipSharedFaces, slip_offset as u32)
+    });
+    let slip_cells = slip_plans.as_ref().map(|(_, cells)| {
+        let offset = slip_offset + slip_shared.as_ref().map_or(0, |p| p.lens().len());
+        PlanExchange::new(cells, &placement, me, table.clone()).with_role(symbi_sim::plan_exchange::PlanRole::SlipCells, offset as u32)
     });
     let budget = launch.staging_cells.max(1);
     let credit = block_credit_for(budget, D);
@@ -13427,6 +13466,9 @@ where
     if let Some(c) = coefficients.as_ref() {
         lens.extend(c.lens().iter().copied());
     }
+    for p in slip_shared.iter().chain(slip_cells.iter()) {
+        lens.extend(p.lens().iter().copied());
+    }
     let max_payload = (lens.iter().max().copied().unwrap_or(0) * 8).max(credit as usize);
     let connect_clock = std::time::Instant::now();
     let (link, session) = connect(&rendezvous, max_payload).map_err(|e| e.to_string())?;
@@ -13446,11 +13488,18 @@ where
         let _ = std::io::stderr().write_all(line.as_bytes());
     }
     let sends_per_peer_axis = exchange.sends_per_peer_axis();
-    let mut fabric = match coefficients.as_ref() {
-        Some(c) => symbi_sim::plan_exchange::fabric_for(&[&exchange, c], link, session),
-        None => exchange.fabric(link, session),
+    let mut fabric = {
+        let mut plans: Vec<&PlanExchange<'_, D>> = vec![&exchange];
+        plans.extend(coefficients.iter());
+        plans.extend(slip_shared.iter());
+        plans.extend(slip_cells.iter());
+        symbi_sim::plan_exchange::fabric_for(&plans, link, session)
     }
     .with_block_credit(credit);
+    let slip_context = match (slip_shared.as_ref(), slip_cells.as_ref()) {
+        (Some(shared), Some(cells)) => Some(symbi_sim::worker::SlipPlans { shared, cells }),
+        _ => None,
+    };
     // the whole domain's faces and boundary conditions the continuous tracers meet
     let continuous_context = coefficients.as_ref().map(|c| symbi_sim::worker::ContinuousTracerContext {
         coefficients: c,
@@ -13746,6 +13795,7 @@ where
             &mut fabric,
             &worker_cfg,
             continuous_context.as_ref(),
+            slip_context.as_ref(),
             // the declared target's residual, added back before the recovery of every stage
             &mut |tile: usize,
                   store: &symbi_sim::state::FieldStore<D, DOF, DefaultMemory, f64>,

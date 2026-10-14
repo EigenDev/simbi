@@ -12,7 +12,14 @@
 # - a run resumed onto another partition continues the uninterrupted one, its
 #   body history the one a single hierarchy resumed from the same file records;
 # - the slip acts (the field departs from a magnetically transparent sink).
-# a slip body on launched workers is refused by name.
+# on launched workers the unrefined disk under both closures steps as the single
+# grid on two and three uneven workers, through the versioned fabric whose
+# repeating slip points carry every pass of the solve; a run resumed onto three
+# workers continues it, and a stage rejected on one worker replays as the run
+# capped at the accepted timestep. the refined disk under both closures steps as
+# the single hierarchy on two workers and continues it resumed onto three; on a
+# 64^2 root with a patch clear of one worker's tiles, that worker holds no tile
+# of the finest level and still joins every exchange and sum of the solve.
 #
 # run: pytest -m simulation simbi/simulation/tests/test_tiled_slip.py
 # =============================================================================
@@ -49,19 +56,19 @@ def host_tiles(monkeypatch):
     monkeypatch.setenv("SYMBI_GPU_OVERSUBSCRIBE", "1")
 
 
-def _disk(cls, directory: Path, closure: str, refined: bool = True, **kw):
+def _disk(cls, directory: Path, closure: str, refined: bool = True, fraction: float = 0.875, res: int = RES, **kw):
     # the finest level covers the central seven eighths; the sink of two fine cells with a one-cell
     # shell sits at the center, where the cut at root cell 16 passes
-    probe = cls(resolution=(RES, RES, 1), data_directory=directory)
+    probe = cls(resolution=(res, res, 1), data_directory=directory)
     probe.setup()
-    half = 0.875 * probe.domain_radius * probe.bondi_radius
+    half = fraction * probe.domain_radius * probe.bondi_radius
     refinement = dict(refinement_enabled=True, refinement_max_levels=2, refinement_ratios=[2], refinement_regions=[[-half, half, -half, half]]) if refined else {}
-    return cls(resolution=(RES, RES, 1), r_acc_scale=2.0, shell_cells=1.0, thermal_closure=closure, data_directory=directory,
+    return cls(resolution=(res, res, 1), r_acc_scale=2.0, shell_cells=1.0, thermal_closure=closure, data_directory=directory,
                checkpoint_interval=1e9, **refinement, **kw)
 
 
-def _run(cls, out: Path, closure: str, refined: bool, gpus: int = 1, steps: int = STEPS, **kw) -> Path:
-    runner.run(_disk(cls, out, closure, refined, gpus=gpus, **kw), compute_mode="cpu", max_steps=steps)
+def _run(cls, out: Path, closure: str, refined: bool, gpus: int = 1, steps: int = STEPS, fraction: float = 0.875, res: int = RES, **kw) -> Path:
+    runner.run(_disk(cls, out, closure, refined, fraction, res, gpus=gpus, **kw), compute_mode="cpu", max_steps=steps)
     (final,) = sorted(out.glob("*final*.h5"))
     return final
 
@@ -112,10 +119,64 @@ def test_a_slip_sink_resumed_onto_other_tiles_continues_the_single_grid(tmp_path
     _assert_same(resumed, single_resumed, f"{closure} resumed onto three uneven host tiles against one device resumed")
 
 
-def test_a_refined_slip_sink_on_launched_workers_is_refused_by_name(tmp_path: Path) -> None:
-    script = tmp_path / "refined_disk.py"
-    probe = _disk(MagneticSlipDisk2p5d, tmp_path, "adiabatic")
+import re
+import subprocess as _subprocess
+
+REJECTIONS = re.compile(r"SIMBI launch: worker=\d+/\d+ steps=\d+ rejections=(\d+)")
+LAUNCH_SCRIPT = "from simbi_configs.examples.ibm.magnetic_slip_disk_2p5d import MagneticSlipDisk2p5d as Base\n\n\nclass LaunchedDisk(Base):\n    pass\n"
+
+
+def _launch_disk(tmp_path: Path, out: Path, layout: Path, closure: str, steps: int = STEPS, checkpoint: Path | None = None,
+                 inject: str | None = None) -> tuple[Path, set[int]]:
+    script = tmp_path / "launched_disk.py"
+    script.write_text(LAUNCH_SCRIPT)
+    cmd = [sys.executable, "-m", "simbi.cli", "launch", str(script), "--layout", str(layout), "--max-steps", str(steps),
+           "--resolution", f"{RES},{RES},1", "--r-acc-scale", "2.0", "--shell-cells", "1.0", "--thermal-closure", closure,
+           "--data-directory", str(out), "--checkpoint-interval", "1e9"]
+    if checkpoint is not None:
+        cmd += ["--checkpoint", str(checkpoint)]
+    env = dict(os.environ, PYTHONPATH=os.pathsep.join([os.getcwd(), os.environ.get("PYTHONPATH", "")]))
+    env.pop("SIMBI_LAUNCH_EXPERIMENTAL", None)
+    if inject is not None:
+        env["SIMBI_FABRIC_INJECT"] = inject
+    done = _subprocess.run(cmd, capture_output=True, text=True, timeout=900, env=env)
+    assert done.returncode == 0, f"the launch failed:\nstdout:\n{done.stdout[-1500:]}\nstderr:\n{done.stderr[-3000:]}"
+    (final,) = sorted(out.glob("*final*.h5"))
+    return final, {int(r) for r in REJECTIONS.findall(done.stderr)}
+
+
+@pytest.mark.parametrize("closure", ["adiabatic", "isothermal"])
+def test_an_unrefined_slip_sink_on_launched_workers_steps_as_the_single_grid(tmp_path: Path, closure: str) -> None:
+    want = _run(MagneticSlipDisk2p5d, tmp_path / "single", closure, False)
+    for tag, workers, kwargs in (("two", 2, {"shape": (2, 1)}), ("three", 3, {"cuts": [[12, 17], []]})):
+        got, _ = _launch_disk(tmp_path, tmp_path / tag, _layout(tmp_path / f"{tag}.toml", workers=workers, **kwargs), closure)
+        _assert_same(got, want, f"{closure} on {workers} launched workers")
+
+
+@pytest.mark.parametrize("closure", ["adiabatic", "isothermal"])
+def test_an_unrefined_slip_sink_resumed_onto_other_workers_continues_the_single_grid(tmp_path: Path, closure: str) -> None:
+    want = _run(MagneticSlipDisk2p5d, tmp_path / "single", closure, False)
+    first, _ = _launch_disk(tmp_path, tmp_path / "first", _layout(tmp_path / "two.toml", workers=2, shape=(2, 1)), closure, steps=STEPS // 2)
+    resumed, _ = _launch_disk(tmp_path, tmp_path / "resumed", _layout(tmp_path / "three.toml", workers=3, cuts=[[12, 17], []]), closure, checkpoint=first)
+    _assert_same(resumed, want, f"{closure} resumed onto three launched workers", history=False)
+    single_resumed = _run(MagneticSlipDisk2p5d, tmp_path / "single_resumed", closure, False, checkpoint_file=str(first))
+    _assert_same(resumed, single_resumed, f"{closure} resumed onto three launched workers against one device resumed")
+
+
+def test_a_slip_step_rejected_on_one_worker_replays_as_the_capped_run(tmp_path: Path) -> None:
+    two = _layout(tmp_path / "two.toml", workers=2, shape=(2, 1))
+    rejecting, counts = _launch_disk(tmp_path, tmp_path / "rejecting", two, "adiabatic", inject="reject:1:2:1")
+    assert counts == {1}, f"the rejection was not counted once on every worker: {counts}"
+    with h5py.File(rejecting, "r") as f:
+        accepted = float(f["body_diagnostics/dt"][2])
+    capped, _ = _launch_disk(tmp_path, tmp_path / "capped", two, "adiabatic", inject=f"cap:2:{int(np.float64(accepted).view(np.uint64))}")
+    _assert_same(rejecting, capped, "a rejected slip step against the capped control")
+
+
+def _refined_script(tmp_path: Path, fraction: float, res: int = RES) -> Path:
+    probe = _disk(MagneticSlipDisk2p5d, tmp_path, "adiabatic", fraction=fraction, res=res)
     half = probe.refinement_regions[0][1]
+    script = tmp_path / f"refined_disk_{int(round(fraction * 1000))}.py"
     script.write_text(
         "from typing import Annotated\n\n"
         "from simbi import ProblemParam\n"
@@ -126,12 +187,45 @@ def test_a_refined_slip_sink_on_launched_workers_is_refused_by_name(tmp_path: Pa
         "    refinement_ratios: Annotated[list[int], ProblemParam([2], description='ratio')]\n"
         f"    refinement_regions: Annotated[list[list[float]], ProblemParam([[{-half!r}, {half!r}, {-half!r}, {half!r}]], description='patch')]\n"
     )
-    layout = _layout(tmp_path / "two.toml", workers=2, shape=(2, 1))
-    cmd = [sys.executable, "-m", "simbi.cli", "launch", str(script), "--layout", str(layout), "--max-steps", "1",
-           "--resolution", f"{RES},{RES},1", "--data-directory", str(tmp_path / "out"), "--checkpoint-interval", "1e9"]
+    return script
+
+
+def _launch_refined(tmp_path: Path, script: Path, out: Path, layout: Path, closure: str, steps: int = STEPS, checkpoint: Path | None = None,
+                    res: int = RES) -> Path:
+    cmd = [sys.executable, "-m", "simbi.cli", "launch", str(script), "--layout", str(layout), "--max-steps", str(steps),
+           "--resolution", f"{res},{res},1", "--r-acc-scale", "2.0", "--shell-cells", "1.0", "--thermal-closure", closure,
+           "--data-directory", str(out), "--checkpoint-interval", "1e9"]
+    if checkpoint is not None:
+        cmd += ["--checkpoint", str(checkpoint)]
     env = dict(os.environ, PYTHONPATH=os.pathsep.join([os.getcwd(), os.environ.get("PYTHONPATH", "")]))
     env.pop("SIMBI_LAUNCH_EXPERIMENTAL", None)
-    done = subprocess.run(cmd, capture_output=True, text=True, timeout=600, env=env)
-    assert done.returncode != 0, f"the launch ran:\n{done.stdout[-1500:]}"
-    assert "a magnetic slip body is outside the distributed first release" in " ".join(done.stderr.split()), done.stderr[-2000:]
-    assert not list((tmp_path / "out").glob("*.h5")), "a refused launch published a checkpoint"
+    done = _subprocess.run(cmd, capture_output=True, text=True, timeout=900, env=env)
+    assert done.returncode == 0, f"the launch failed:\nstdout:\n{done.stdout[-1500:]}\nstderr:\n{done.stderr[-3000:]}"
+    (final,) = sorted(out.glob("*final*.h5"))
+    return final
+
+
+@pytest.mark.parametrize("closure", ["adiabatic", "isothermal"])
+def test_a_refined_slip_sink_on_launched_workers_steps_as_the_single_hierarchy(tmp_path: Path, closure: str) -> None:
+    want = _run(MagneticSlipDisk2p5d, tmp_path / "single", closure, True)
+    script = _refined_script(tmp_path, 0.875)
+    two = _layout(tmp_path / "two.toml", workers=2, shape=(2, 1))
+    _assert_same(_launch_refined(tmp_path, script, tmp_path / "two", two, closure), want, f"refined {closure} on two launched workers")
+    first = _launch_refined(tmp_path, script, tmp_path / "first", two, closure, steps=STEPS // 2)
+    three = _layout(tmp_path / "three.toml", workers=3, cuts=[[12, 17], []])
+    resumed = _launch_refined(tmp_path, script, tmp_path / "resumed", three, closure, checkpoint=first)
+    _assert_same(resumed, want, f"refined {closure} resumed onto three launched workers", history=False)
+    single_resumed = _run(MagneticSlipDisk2p5d, tmp_path / "single_resumed", closure, True, checkpoint_file=str(first))
+    _assert_same(resumed, single_resumed, f"refined {closure} resumed against one device resumed")
+
+
+def test_a_worker_holding_no_tile_of_the_finest_level_joins_the_slip_solve(tmp_path: Path) -> None:
+    # on a 64^2 root the patch covers root cells 16..48 along x; the cuts at x = 12 and 32 leave
+    # worker 0 the tile [0, 12), clear of the patch, and split the patch between the other two
+    want = _run(MagneticSlipDisk2p5d, tmp_path / "single", "adiabatic", True, fraction=0.5, res=64)
+    with h5py.File(want, "r") as f:
+        assert "level_1" in f, "the reference has no finest level"
+    script = _refined_script(tmp_path, 0.5, res=64)
+    three = _layout(tmp_path / "three.toml", workers=3, cuts=[[12, 32], []])
+    got = _launch_refined(tmp_path, script, tmp_path / "three", three, "adiabatic", res=64)
+    _assert_same(got, want, "refined disk with a worker holding no finest tile")
