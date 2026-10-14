@@ -556,6 +556,12 @@ where
         None
     }
 
+    /// the closure parameter the magnetic-slip solve reads: the adiabatic index of a gamma-law gas,
+    /// the sound speed of an isothermal one. `None` on a kernel set without the slip operator
+    fn slip_closure(&self) -> Option<f64> {
+        None
+    }
+
     /// the immersed-boundary penalization: the property-
     /// algebra surface physics (drain, walls, porosity, thermal surfaces),
     /// applied post-source each substage — the one body

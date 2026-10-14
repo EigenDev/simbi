@@ -9604,9 +9604,10 @@ fn validate_tiled_march(cfg: &Config) -> Result<(), String> {
             cfg.regime
         ));
     }
-    // the tiled marches step no magnetic slip body
-    if cfg.bodies.iter().any(|b| b.magnetic_slip.is_some()) {
-        return Err("a magnetic slip body with several tiles awaits its tiled slip step; run it on one device".to_string());
+    // the refined tiles step a magnetic slip body through the lockstep palindrome; the unrefined
+    // tiles march without it
+    if !cfg.refinement_enabled && cfg.bodies.iter().any(|b| b.magnetic_slip.is_some()) {
+        return Err("a magnetic slip body on unrefined tiles awaits its tiled slip step; refine the sink or run it on one device".to_string());
     }
     // the tiles wrap a periodic axis cut into them on the root and on a first patch spanning that
     // axis; a nested level wraps within its own tile, so a nested patch keeps clear of the
@@ -11328,6 +11329,10 @@ fn axis_maps_any(cfg: &Config) -> bool {
 
 fn validate_launch_scope(cfg: &Config) -> Result<(), String> {
     let refused = |what: &str| Err(format!("{what} is outside the distributed first release"));
+    // the launched workers carry no cross-worker slip solve
+    if cfg.bodies.iter().any(|b| b.magnetic_slip.is_some()) {
+        return refused("a magnetic slip body");
+    }
     if !matches!(cfg.regime.as_str(), "newtonian" | "rhd" | "isothermal" | "nmhd" | "imhd" | "rmhd") {
         return refused(&format!("the {} regime", cfg.regime));
     }

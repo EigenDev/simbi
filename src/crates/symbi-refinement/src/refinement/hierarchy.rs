@@ -2118,14 +2118,14 @@ where
         }
     }
 
-    /// drain this tile's finest-level body-delta partials (consolidated diagnostics),
-    /// resetting the accumulator. empty when the tile carries no bodies.
-    pub fn take_body_deltas(&mut self) -> Vec<symbi_ib::BodyDelta<f64, NDIM>> {
+    /// drain this tile's finest-level body-delta partials (the exact diagnostics), resetting the
+    /// accumulator. empty when the tile carries no bodies.
+    pub fn take_body_deltas(&mut self) -> Vec<symbi_ib::ExactBodyDelta<NDIM>> {
         let fi = self.levels.len() - 1;
         let Some(im) = self.levels[fi].state.immersed.as_mut() else {
             return Vec::new();
         };
-        let deltas = im.diagnostics.consolidate();
+        let deltas = im.diagnostics.exact_totals();
         im.diagnostics.reset();
         deltas
     }
@@ -7502,7 +7502,7 @@ where
     sidecars: Option<Vec<HierarchyRetrySidecars<NDIM>>>,
 }
 
-impl<R, const NDIM: usize, const DOF: usize, M, E, S, Mem, K, T> RootAttempt for TiledRootAttempt<'_, R, NDIM, DOF, M, E, S, Mem, K, T>
+impl<R, const NDIM: usize, const DOF: usize, M, E, S, Mem, K, T> TiledRootAttempt<'_, R, NDIM, DOF, M, E, S, Mem, K, T>
 where
     R: Regime<f64, NDIM> + Copy,
     M: Metric<f64, NDIM> + Copy + Send + Sync,
@@ -7512,31 +7512,10 @@ where
     K: KernelSet<NDIM, DOF, Mem, f64>,
     T: HaloTransport,
 {
-    type Error = std::convert::Infallible;
-
-    fn rejectable(&mut self) -> bool {
-        self.tiles.iter().any(Hierarchy::root_step_rejectable)
-    }
-
-    fn capture(&mut self, _dt: f64, restorable: bool) -> Result<(), Self::Error> {
-        if self.sidecars.is_none() {
-            self.sidecars = Some(self.tiles.iter().map(Hierarchy::snapshot_retry_sidecars).collect());
-        }
-        self.restorable = restorable;
-        for (i, tile) in self.tiles.iter().enumerate() {
-            symbi_xpu::with_device(self.devices[i], || {
-                if restorable {
-                    for level in &tile.levels {
-                        level.kernels.snapshot_retry(&level.state);
-                    }
-                }
-                tile.snapshot_attempt_entry();
-            });
-        }
-        Ok(())
-    }
-
-    fn run(&mut self, dt: f64) -> Result<bool, Self::Error> {
+    /// the collective root step: the root stages across the cuts, the root tail, the refined
+    /// levels subcycled across their tiles with their restriction and reflux, and the root clock.
+    /// returns whether some tile rejected the step
+    fn root_step(&mut self, dt: f64) -> bool {
         let (tiles, counts, devices, transport, fine, root_order, nstages) =
             (&mut *self.tiles, self.counts, self.devices, self.transport, self.fine, self.root_order, self.nstages);
         let n = tiles.len();
@@ -7674,6 +7653,147 @@ where
                 }
             }
         }
+        retry
+    }
+
+    /// the run's finest level: its index, the tiles holding it, their devices and its tile grid
+    fn finest(&self) -> (usize, Vec<usize>, Vec<i32>, [usize; NDIM]) {
+        match self.fine.last() {
+            Some(fg) => (self.fine.len(), fg.order.clone(), fg.devices.clone(), fg.counts),
+            None => (0, self.root_order.to_vec(), self.devices.to_vec(), self.counts),
+        }
+    }
+
+    /// whether the finest level carries a magnetic-slip body
+    fn slip_runs(&self) -> bool {
+        let (lf, holders, _, _) = self.finest();
+        holders.iter().any(|&i| self.tiles[i].finest_has_magnetic_slip() && self.tiles[i].levels.len() == lf + 1)
+    }
+
+    /// the finest level's primitives recovered on every tile holding it, then its cut and physical
+    /// halos, as the single hierarchy rebuilds its finest level after a split operator
+    fn rebuild_finest(&mut self) {
+        let (lf, holders, devices, counts) = self.finest();
+        for (k, &i) in holders.iter().enumerate() {
+            let level = &self.tiles[i].levels[lf];
+            symbi_xpu::with_device(devices[k], || level.kernels.c2p(&level.state));
+        }
+        exchange_level_halos(self.tiles, lf, &holders, counts, &devices, self.transport);
+    }
+
+    /// the material drain D(dt) on the finest level of every tile holding it, then its rebuild
+    fn drain(&mut self, dt: f64) {
+        let (lf, holders, devices, _) = self.finest();
+        for (k, &i) in holders.iter().enumerate() {
+            let level = &self.tiles[i].levels[lf];
+            symbi_xpu::with_device(devices[k], || level.kernels.penalize(&level.state, dt));
+        }
+        self.rebuild_finest();
+    }
+
+    /// the implicit magnetic-slip midpoint M(dt) over the finest level's tiles in lockstep, its
+    /// heat booked once, then the rebuild. returns whether the solve converged
+    fn slip(&mut self, dt: f64) -> bool {
+        let (lf, holders, devices, counts) = self.finest();
+        drain_devices::<Mem>(&devices);
+        {
+            let states: Vec<&FieldStore<NDIM, DOF, Mem, f64>> = holders.iter().map(|&i| &*self.tiles[i].levels[lf].state).collect();
+            let schedule = schedule_of_tiles(&states, counts, &level_topology(self.tiles, lf, &holders));
+            let halo = symbi_substrate::regimes::mhd_substrate::TileHalo { schedule: &schedule, devices: &devices, transport: self.transport };
+            let closure = self.tiles[holders[0]].levels[lf].kernels.slip_closure().expect("a slip body runs on a magnetized kernel set");
+            let receipt = prof("magnetic_slip_solve", || {
+                symbi_substrate::regimes::mhd_substrate::magnetic_slip_solve_tiles(&states, dt, closure, 1e-10, 500, &halo)
+            });
+            if !receipt.converged {
+                return false;
+            }
+            prof("magnetic_slip_commit", || {
+                symbi_substrate::regimes::mhd_substrate::magnetic_slip_commit_tiles(&states, dt, closure, &halo, true)
+            });
+        }
+        self.rebuild_finest();
+        true
+    }
+
+    /// the covered cells of every coarser level become the finest state on every tile, then every
+    /// coarser level's cut halos carry it
+    fn sync_fine_to_coarse(&mut self) {
+        let (lf, _, _, _) = self.finest();
+        if lf == 0 {
+            return;
+        }
+        for (i, tile) in self.tiles.iter().enumerate() {
+            symbi_xpu::with_device(self.devices[i], || tile.sync_all_fine_to_coarse());
+        }
+        exchange_level_halos(self.tiles, 0, self.root_order, self.counts, self.devices, self.transport);
+        for (k, fg) in self.fine.iter().enumerate().take(lf - 1) {
+            exchange_level_halos(self.tiles, k + 1, &fg.order, fg.counts, &fg.devices, self.transport);
+        }
+    }
+
+    /// the palindromic coupled step of a slip-enabled draining body across the tiles,
+    /// D(dt/2) M(dt/2) H(dt) M(dt/2) D(dt/2), as the single hierarchy composes it: the drain and
+    /// the slip act on the finest level, H is the collective root step with every drain withheld.
+    /// returns whether the step failed (a nonconverged solve or a rejected stage)
+    fn slip_palindrome(&mut self, dt: f64) -> bool {
+        let half = 0.5 * dt;
+        self.drain(half);
+        if !self.slip(half) {
+            return true;
+        }
+        self.sync_fine_to_coarse();
+        for tile in self.tiles.iter_mut() {
+            tile.drain_suppressed = true;
+        }
+        let retry = self.root_step(dt);
+        for tile in self.tiles.iter_mut() {
+            tile.drain_suppressed = false;
+        }
+        if retry || !self.slip(half) {
+            return true;
+        }
+        self.drain(half);
+        self.sync_fine_to_coarse();
+        false
+    }
+}
+
+impl<R, const NDIM: usize, const DOF: usize, M, E, S, Mem, K, T> RootAttempt for TiledRootAttempt<'_, R, NDIM, DOF, M, E, S, Mem, K, T>
+where
+    R: Regime<f64, NDIM> + Copy,
+    M: Metric<f64, NDIM> + Copy + Send + Sync,
+    E: symbi_hydro::eos::EosFor<f64, <R as Regime<f64, NDIM>>::Energy> + Copy + Send + Sync,
+    S: ExecutionSpace,
+    Mem: MemorySpace + Sync,
+    K: KernelSet<NDIM, DOF, Mem, f64>,
+    T: HaloTransport,
+{
+    type Error = std::convert::Infallible;
+
+    fn rejectable(&mut self) -> bool {
+        self.tiles.iter().any(Hierarchy::root_step_rejectable)
+    }
+
+    fn capture(&mut self, _dt: f64, restorable: bool) -> Result<(), Self::Error> {
+        if self.sidecars.is_none() {
+            self.sidecars = Some(self.tiles.iter().map(Hierarchy::snapshot_retry_sidecars).collect());
+        }
+        self.restorable = restorable;
+        for (i, tile) in self.tiles.iter().enumerate() {
+            symbi_xpu::with_device(self.devices[i], || {
+                if restorable {
+                    for level in &tile.levels {
+                        level.kernels.snapshot_retry(&level.state);
+                    }
+                }
+                tile.snapshot_attempt_entry();
+            });
+        }
+        Ok(())
+    }
+
+    fn run(&mut self, dt: f64) -> Result<bool, Self::Error> {
+        let retry = if self.slip_runs() { self.slip_palindrome(dt) } else { self.root_step(dt) };
         Ok(!retry)
     }
 
@@ -7764,11 +7884,6 @@ where
     Some(dt)
 }
 
-/// the accepted-step tail of the decomposed march: the per-step immersed-body bookkeeping
-/// (each tile's finest level reduces its local feedback partials — the tile finest interiors
-/// partition the sink region — the deltas sum across tiles into the true global reaction,
-/// and the identical global delta + prescribed advance applies to every tile's bodies, so
-/// all tiles stay in lockstep), then the root halo refresh for the next step's stage 0.
 /// the root-step census partials of a set of tiles at their root's clock: every level's tiles
 /// reduce their leaf cells against the first tile root's registrations, on `device(tile)`, and the
 /// exact partials of every level and tile merge
@@ -7803,6 +7918,11 @@ where
     total
 }
 
+/// the accepted-step tail of the decomposed march: the per-step immersed-body bookkeeping
+/// (each tile's finest level reduces its local feedback partials — the tile finest interiors
+/// partition the sink region — the deltas sum across tiles into the true global reaction,
+/// and the identical global delta + prescribed advance applies to every tile's bodies, so
+/// all tiles stay in lockstep), then the root halo refresh for the next step's stage 0.
 fn decomposed_root_post<R, const NDIM: usize, const DOF: usize, M, E, S, Mem, K, T>(
     tiles: &mut [Hierarchy<R, NDIM, DOF, M, E, S, Mem, K>],
     counts: [usize; NDIM],
@@ -7844,15 +7964,7 @@ where
                 symbi_xpu::with_device(devices[i], || tiles[i].finest_body_feedback(gdt));
             }
             drain_devices::<Mem>(devices);
-            let mut global: Vec<symbi_ib::BodyDelta<f64, NDIM>> = Vec::new();
-            for i in 0..n {
-                for d in tiles[i].take_body_deltas() {
-                    match global.iter_mut().find(|g| g.idx == d.idx) {
-                        Some(g) => *g += d,
-                        None => global.push(d),
-                    }
-                }
-            }
+            let global = symbi_sim::decomp::merge_body_deltas(tiles.iter_mut().map(|tile| tile.take_body_deltas()));
             // the run's finest clock, advanced through its own substeps: the clock the single
             // hierarchy books its body history at, identical on every tile carrying that level
             let depth = tiles.iter().map(|h| h.levels.len()).max().unwrap_or(1);

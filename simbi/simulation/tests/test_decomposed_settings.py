@@ -133,11 +133,11 @@ def test_a_patch_face_on_the_device_cut_is_refused_by_name(tmp_path: Path) -> No
     ("script", "flags", "reason"),
     [
         ("simbi_configs/examples/ibm/magnetic_slip_sink.py", ["--resolution", "16,16,16", "--end-time", "1e-6"],
-         "a magnetic slip body with several tiles awaits its tiled slip step"),
+         "a magnetic slip body on unrefined tiles awaits its tiled slip step"),
     ],
 )
 def test_a_setting_the_tiles_do_not_carry_is_refused_by_name(tmp_path: Path, script: str, flags: list[str], reason: str) -> None:
-    """the tiled drivers step no magnetic slip body: a run asking for one on several devices is
+    """the unrefined tiled drivers step no magnetic slip body: a run asking for one on several devices is
     refused by name and publishes nothing, where it ran without it before."""
     env = dict(os.environ, SYMBI_GPU_OVERSUBSCRIBE="1")
     done = subprocess.run(_command(script, tmp_path / "out", 2, flags), capture_output=True, text=True, timeout=900, env=env)

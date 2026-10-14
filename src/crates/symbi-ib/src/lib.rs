@@ -29,7 +29,7 @@ pub mod sdf;
 pub mod shell_flux;
 
 pub use body::{Body, BodyKind, BodySpec, MagneticSpec, SofteningKind, SurfaceSpec};
-pub use body_delta::BodyDelta;
+pub use body_delta::{BodyDelta, ExactBodyDelta};
 pub use bond::{
     Bond, BondMaterial, ExternalLoad, FragmentPhysics, advance_bonded, bond_potential_energy,
 };

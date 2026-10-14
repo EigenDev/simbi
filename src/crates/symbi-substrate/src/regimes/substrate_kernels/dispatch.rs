@@ -1710,6 +1710,22 @@ pub fn dispatch_viscous_alpha<const D: usize, const DOF: usize, Mem, Sc>(
     );
 }
 
+/// the exact sum of a body-feedback field over `domain`: a long accumulator on host memory, so the
+/// partials of a split grid merge into the whole grid's sum; the device reduction's total otherwise
+fn feedback_sum<const D: usize, Mem, Sc>(field: &Field<Sc, D, Mem>, domain: &Domain<D>) -> symbi_algebra::ExactSum
+where
+    Mem: MemorySpace,
+    Sc: Scalar + OrderedNumeric,
+{
+    if Mem::IS_DEVICE_ACCESSIBLE {
+        let mut sum = symbi_algebra::ExactSum::new();
+        sum.add(field_reduce(field, domain, ReductionOp::Add));
+        sum
+    } else {
+        symbi_exec::engine::field_sum_exact(field, domain)
+    }
+}
+
 /// dispatch the backward body feedback (`body_feedback_2d`): run the per-cell per-body
 /// force[ndim]/torque[3]/mass/energy kernel into MAX_SOURCE_BODIES*(D+5) scratch fields, reduce each
 /// (device sum over the interior), assemble each body's BodyDelta (the drag force, accretion
@@ -1766,32 +1782,21 @@ pub fn dispatch_body_feedback<const D: usize, const DOF: usize, Mem, Sc>(
     );
 
     // sum each scratch field over the interior -> the per-body force[ndim] / torque[3] / mass.
-    let sums: Vec<f64> = scratch
-        .iter()
-        .map(|s| field_reduce(s, &geom.interior, ReductionOp::Add))
-        .collect();
+    let sums: Vec<symbi_algebra::ExactSum> = scratch.iter().map(|s| feedback_sum(s, &geom.interior)).collect();
     if let Some(ref im) = sim.immersed {
         for b in 0..symbi_ib::MAX_SOURCE_BODIES {
             let base = b * per_body;
-            let mut force = symbi_algebra::Tensor::<f64, D>::zeros();
+            // a bare drain/gravity sink has no wall surface, so no form-drag (normal) split.
+            let mut delta = symbi_ib::ExactBodyDelta::<D>::new(b);
             for g in 0..D {
-                force[g] = sums[base + g];
+                delta.force[g] = sums[base + g].clone();
             }
-            let mut torque = symbi_algebra::Tensor::<f64, 3>::zeros();
             for t in 0..3 {
-                torque[t] = sums[base + D + t];
+                delta.torque[t] = sums[base + D + t].clone();
             }
-            im.diagnostics.accumulate(symbi_ib::BodyDelta {
-                idx: b,
-                force_delta: force,
-                // a bare drain/gravity sink has no wall surface, so no form-drag (normal) split.
-                force_normal_delta: symbi_algebra::Tensor::zeros(),
-                torque_delta: torque,
-                mass_delta: sums[base + D + 3],
-                prev_mass_delta: 0.0,
-                energy_delta: sums[base + D + 4],
-        slip_heat_delta: 0.0,
-            });
+            delta.mass = sums[base + D + 3].clone();
+            delta.energy = sums[base + D + 4].clone();
+            im.diagnostics.accumulate_exact(&delta);
         }
     }
 }
@@ -1911,7 +1916,7 @@ fn dispatch_body_feedback_split<const D: usize, const DOF: usize, Mem, Sc>(
         if !body.has_gravity() && !body.has_accretion() {
             continue;
         }
-        let mut force = symbi_algebra::Tensor::<f64, D>::zeros();
+        let mut delta = symbi_ib::ExactBodyDelta::<D>::new(b);
         if body.has_gravity() {
             // gravity reaction: global support, reads cons.den only.
             let g_scalars = resolve(&grav_name, b);
@@ -1925,7 +1930,7 @@ fn dispatch_body_feedback_split<const D: usize, const DOF: usize, Mem, Sc>(
                 &g_scalars,
             );
             for g in 0..D {
-                force[g] = field_reduce(&scratch[g], &geom.interior, ReductionOp::Add);
+                delta.force[g] = feedback_sum(&scratch[g], &geom.interior);
             }
         }
 
@@ -1972,9 +1977,6 @@ fn dispatch_body_feedback_split<const D: usize, const DOF: usize, Mem, Sc>(
                 .all(|sp| sp.lo < sp.hi)
                 .then(|| Domain::new(spaces))
         });
-        let mut drag = symbi_algebra::Tensor::<f64, D>::zeros();
-        let mut torque = symbi_algebra::Tensor::<f64, 3>::zeros();
-        let (mut mass, mut energy) = (0.0f64, 0.0f64);
         if let Some(bbox) = bbox {
             let d_scalars = resolve(&drain_name, b);
             dispatch_fields::<Sc, Mem, D>(
@@ -1986,30 +1988,18 @@ fn dispatch_body_feedback_split<const D: usize, const DOF: usize, Mem, Sc>(
                 &[],
                 &d_scalars,
             );
+            // the drag adds to the gravity reaction exactly
             for g in 0..D {
-                drag[g] = field_reduce(&scratch[g], &bbox, ReductionOp::Add);
+                delta.force[g].merge(&feedback_sum(&scratch[g], &bbox));
             }
             for t in 0..3 {
-                torque[t] = field_reduce(&scratch[D + t], &bbox, ReductionOp::Add);
+                delta.torque[t] = feedback_sum(&scratch[D + t], &bbox);
             }
-            mass = field_reduce(&scratch[D + 3], &bbox, ReductionOp::Add);
-            energy = field_reduce(&scratch[D + 4], &bbox, ReductionOp::Add);
+            delta.mass = feedback_sum(&scratch[D + 3], &bbox);
+            delta.energy = feedback_sum(&scratch[D + 4], &bbox);
         }
-
-        for g in 0..D {
-            force[g] += drag[g];
-        }
-        im.diagnostics.accumulate(symbi_ib::BodyDelta {
-            idx: b,
-            force_delta: force,
-            // a bare drain/gravity sink has no wall surface, so no form-drag (normal) split.
-            force_normal_delta: symbi_algebra::Tensor::zeros(),
-            torque_delta: torque,
-            mass_delta: mass,
-            prev_mass_delta: 0.0,
-            energy_delta: energy,
-        slip_heat_delta: 0.0,
-        });
+        // a bare drain/gravity sink has no wall surface, so no form-drag (normal) split.
+        im.diagnostics.accumulate_exact(&delta);
     }
 }
 
@@ -2412,8 +2402,9 @@ fn dispatch_penalize_shaped_body<const D: usize, const DOF: usize, Mem, Sc>(
         }
     }
 
-    // reduce the per-body deltas over the bbox and book them, exactly as the AOT path does.
-    let mass = field_reduce(&scratch[0], &bbox, ReductionOp::Add);
+    // reduce the per-body deltas over the bbox exactly and book them, as the AOT path does.
+    let mut delta = symbi_ib::ExactBodyDelta::<D>::new(b);
+    delta.mass = feedback_sum(&scratch[0], &bbox);
     if sim.has_tracers() && body.has_accretion() {
         crate::regimes::substrate_gpu::device_sync::<Mem>();
         im.record_accretion_receipt(
@@ -2427,35 +2418,21 @@ fn dispatch_penalize_shaped_body<const D: usize, const DOF: usize, Mem, Sc>(
             }),
         );
     }
-    let mut force = symbi_algebra::Tensor::<f64, D>::zeros();
     for a in 0..D {
-        force[a] = field_reduce(&scratch[1 + a], &bbox, ReductionOp::Add);
+        delta.force[a] = feedback_sum(&scratch[1 + a], &bbox);
     }
-    let energy = if has_energy {
-        field_reduce(&scratch[D + 1], &bbox, ReductionOp::Add)
-    } else {
-        0.0
-    };
-    let mut torque = symbi_algebra::Tensor::<f64, 3>::zeros();
+    if has_energy {
+        delta.energy = feedback_sum(&scratch[D + 1], &bbox);
+    }
     for k in 0..n_torque {
         let axis = if n_torque == 1 { 2 } else { k };
-        torque[axis] = field_reduce(&scratch[n_delta + k], &bbox, ReductionOp::Add);
+        delta.torque[axis] = feedback_sum(&scratch[n_delta + k], &bbox);
     }
     // the appended form-drag (normal-projected) force from the shaped wall's SDF-gradient normal.
-    let mut force_normal = symbi_algebra::Tensor::<f64, D>::zeros();
     for a in 0..D {
-        force_normal[a] = field_reduce(&scratch[n_delta + n_torque + a], &bbox, ReductionOp::Add);
+        delta.force_normal[a] = feedback_sum(&scratch[n_delta + n_torque + a], &bbox);
     }
-    im.diagnostics.accumulate(symbi_ib::BodyDelta {
-        idx: b,
-        force_delta: force,
-        force_normal_delta: force_normal,
-        torque_delta: torque,
-        mass_delta: mass,
-        prev_mass_delta: 0.0,
-        energy_delta: energy,
-        slip_heat_delta: 0.0,
-    });
+    im.diagnostics.accumulate_exact(&delta);
 }
 
 fn dispatch_penalize_inner<const D: usize, const DOF: usize, Mem, Sc>(
@@ -2725,8 +2702,8 @@ fn dispatch_penalize_inner<const D: usize, const DOF: usize, Mem, Sc>(
             &scalars,
         );
 
-        let mut force = symbi_algebra::Tensor::<f64, D>::zeros();
-        let mass = field_reduce(&scratch[0], &bbox, ReductionOp::Add);
+        let mut delta = symbi_ib::ExactBodyDelta::<D>::new(b);
+        delta.mass = feedback_sum(&scratch[0], &bbox);
         if sim.has_tracers() && bodies.get(b).has_accretion() {
             crate::regimes::substrate_gpu::device_sync::<Mem>();
             im.record_accretion_receipt(
@@ -2741,35 +2718,21 @@ fn dispatch_penalize_inner<const D: usize, const DOF: usize, Mem, Sc>(
             );
         }
         for a in 0..D {
-            force[a] = field_reduce(&scratch[1 + a], &bbox, ReductionOp::Add);
+            delta.force[a] = feedback_sum(&scratch[1 + a], &bbox);
         }
-        let energy = if nrg.is_some() {
-            field_reduce(&scratch[D + 1], &bbox, ReductionOp::Add)
-        } else {
-            0.0
-        };
+        if nrg.is_some() {
+            delta.energy = feedback_sum(&scratch[D + 1], &bbox);
+        }
         // torque: the 3d slots are (x, y, z); the single 2d slot is the z moment.
-        let mut torque = symbi_algebra::Tensor::<f64, 3>::zeros();
         for k in 0..n_torque {
             let axis = if n_torque == 1 { 2 } else { k };
-            torque[axis] = field_reduce(&scratch[n_delta + k], &bbox, ReductionOp::Add);
+            delta.torque[axis] = feedback_sum(&scratch[n_delta + k], &bbox);
         }
         // the appended form-drag (normal-projected) force: D slots after the torque block.
-        let mut force_normal = symbi_algebra::Tensor::<f64, D>::zeros();
         for a in 0..D {
-            force_normal[a] =
-                field_reduce(&scratch[n_delta + n_torque + a], &bbox, ReductionOp::Add);
+            delta.force_normal[a] = feedback_sum(&scratch[n_delta + n_torque + a], &bbox);
         }
-        im.diagnostics.accumulate(symbi_ib::BodyDelta {
-            idx: b,
-            force_delta: force,
-            force_normal_delta: force_normal,
-            torque_delta: torque,
-            mass_delta: mass,
-            prev_mass_delta: 0.0,
-            energy_delta: energy,
-        slip_heat_delta: 0.0,
-        });
+        im.diagnostics.accumulate_exact(&delta);
     }
 }
 
@@ -2832,32 +2795,20 @@ pub fn dispatch_body_feedback_iso<const D: usize, const DOF: usize, Mem, Sc>(
         &scalars,
     );
 
-    let sums: Vec<f64> = scratch
-        .iter()
-        .map(|s| field_reduce(s, &geom.interior, ReductionOp::Add))
-        .collect();
+    let sums: Vec<symbi_algebra::ExactSum> = scratch.iter().map(|s| feedback_sum(s, &geom.interior)).collect();
     if let Some(ref im) = sim.immersed {
         for b in 0..symbi_ib::MAX_SOURCE_BODIES {
             let base = b * per_body;
-            let mut force = symbi_algebra::Tensor::<f64, D>::zeros();
+            // a bare drain/gravity sink has no wall surface, so no form-drag (normal) split.
+            let mut delta = symbi_ib::ExactBodyDelta::<D>::new(b);
             for g in 0..D {
-                force[g] = sums[base + g];
+                delta.force[g] = sums[base + g].clone();
             }
-            let mut torque = symbi_algebra::Tensor::<f64, 3>::zeros();
             for t in 0..3 {
-                torque[t] = sums[base + D + t];
+                delta.torque[t] = sums[base + D + t].clone();
             }
-            im.diagnostics.accumulate(symbi_ib::BodyDelta {
-                idx: b,
-                force_delta: force,
-                // a bare drain/gravity sink has no wall surface, so no form-drag (normal) split.
-                force_normal_delta: symbi_algebra::Tensor::zeros(),
-                torque_delta: torque,
-                mass_delta: sums[base + D + 3],
-                prev_mass_delta: 0.0,
-                energy_delta: 0.0,
-        slip_heat_delta: 0.0,
-            });
+            delta.mass = sums[base + D + 3].clone();
+            im.diagnostics.accumulate_exact(&delta);
         }
     }
 }

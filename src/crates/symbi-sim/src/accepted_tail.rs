@@ -27,7 +27,6 @@
 use crate::state::FieldStore;
 use crate::substrate_seam::KernelSet;
 use crate::tracers::TransportLayout;
-use symbi_ib::BodyDelta;
 use symbi_xpu::MemorySpace;
 
 /// the tiles one participant holds: their stores, kernel sets and devices, by local index
@@ -51,8 +50,8 @@ pub trait FlatBodies<'s, const D: usize, const DOF: usize, M: MemorySpace> {
     fn refresh_halos(&mut self) -> Result<(), Self::Error>;
     /// tile `k`'s place in the whole grid, for the tracer transport
     fn layout(&self, k: usize) -> TransportLayout<D>;
-    /// every tile's consolidated deltas, in flat tile order across every participant
-    fn gather_deltas(&mut self) -> Result<Vec<Vec<BodyDelta<f64, D>>>, Self::Error>;
+    /// every tile's exact deltas, in flat tile order across every participant
+    fn gather_deltas(&mut self) -> Result<Vec<Vec<symbi_ib::ExactBodyDelta<D>>>, Self::Error>;
     /// a step that failed, as this march reports it
     fn failure(&mut self, detail: String) -> Self::Error;
 }

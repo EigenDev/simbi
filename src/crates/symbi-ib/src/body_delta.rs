@@ -13,7 +13,7 @@
 // =============================================================================
 
 use std::ops::AddAssign;
-use symbi_algebra::Tensor;
+use symbi_algebra::{ExactSum, Tensor};
 use symbi_carrier::Scalar;
 
 /// accumulated changes to a body from fluid interaction.
@@ -83,6 +83,105 @@ impl<S: Scalar, const D: usize> AddAssign for BodyDelta<S, D> {
     }
 }
 
+/// a step's body delta as exact sums of the cell contributions: every component an exact
+/// accumulator, so the partials of any split of the grid (tiles, workers) merge into the whole
+/// grid's integers and round once
+#[derive(Clone, Debug)]
+pub struct ExactBodyDelta<const D: usize> {
+    pub idx: usize,
+    pub force: [ExactSum; D],
+    pub force_normal: [ExactSum; D],
+    pub torque: [ExactSum; 3],
+    pub mass: ExactSum,
+    pub energy: ExactSum,
+    pub slip_heat: ExactSum,
+}
+
+impl<const D: usize> ExactBodyDelta<D> {
+    /// the number of exact accumulators a delta carries
+    pub const COMPONENTS: usize = 2 * D + 6;
+    /// the words a delta travels as: every accumulator's wire form
+    pub const WORDS: usize = Self::COMPONENTS * ExactSum::WORDS;
+
+    pub fn new(idx: usize) -> Self {
+        Self {
+            idx,
+            force: std::array::from_fn(|_| ExactSum::new()),
+            force_normal: std::array::from_fn(|_| ExactSum::new()),
+            torque: std::array::from_fn(|_| ExactSum::new()),
+            mass: ExactSum::new(),
+            energy: ExactSum::new(),
+            slip_heat: ExactSum::new(),
+        }
+    }
+
+    fn components(&self) -> impl Iterator<Item = &ExactSum> {
+        self.force.iter().chain(&self.force_normal).chain(&self.torque).chain([&self.mass, &self.energy, &self.slip_heat])
+    }
+
+    fn components_mut(&mut self) -> impl Iterator<Item = &mut ExactSum> {
+        self.force
+            .iter_mut()
+            .chain(self.force_normal.iter_mut())
+            .chain(self.torque.iter_mut())
+            .chain([&mut self.mass, &mut self.energy, &mut self.slip_heat])
+    }
+
+    /// add every component of an already-rounded delta, exactly
+    pub fn add(&mut self, delta: &BodyDelta<f64, D>) {
+        debug_assert_eq!(self.idx, delta.idx);
+        let values = (0..D)
+            .map(|g| delta.force_delta[g])
+            .chain((0..D).map(|g| delta.force_normal_delta[g]))
+            .chain((0..3).map(|t| delta.torque_delta[t]))
+            .chain([delta.mass_delta, delta.energy_delta, delta.slip_heat_delta]);
+        for (sum, value) in self.components_mut().zip(values) {
+            sum.add(value);
+        }
+    }
+
+    /// add every component of `other`, exactly
+    pub fn merge(&mut self, other: &ExactBodyDelta<D>) {
+        debug_assert_eq!(self.idx, other.idx);
+        for (sum, theirs) in self.components_mut().zip(other.components()) {
+            sum.merge(theirs);
+        }
+    }
+
+    /// the delta every component rounds to, once
+    pub fn round(&self) -> BodyDelta<f64, D> {
+        let mut delta = BodyDelta::new(self.idx);
+        for g in 0..D {
+            delta.force_delta[g] = self.force[g].value();
+            delta.force_normal_delta[g] = self.force_normal[g].value();
+        }
+        for t in 0..3 {
+            delta.torque_delta[t] = self.torque[t].value();
+        }
+        delta.mass_delta = self.mass.value();
+        delta.energy_delta = self.energy.value();
+        delta.slip_heat_delta = self.slip_heat.value();
+        delta
+    }
+
+    /// the delta's wire form: every accumulator's words in component order
+    pub fn to_words(&self) -> Vec<u64> {
+        self.components().flat_map(|sum| sum.to_words()).collect()
+    }
+
+    /// read back the delta of body `idx` from its wire form
+    pub fn from_words(idx: usize, words: &[u64]) -> Result<Self, String> {
+        if words.len() != Self::WORDS {
+            return Err(format!("a body delta travels as {} words, not {}", Self::WORDS, words.len()));
+        }
+        let mut delta = Self::new(idx);
+        for (sum, chunk) in delta.components_mut().zip(words.chunks(ExactSum::WORDS)) {
+            *sum = ExactSum::from_words(chunk)?;
+        }
+        Ok(delta)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -129,5 +228,49 @@ mod tests {
         assert_eq!(total.force_delta, V2::new([5.0, 6.0]));
         // mass accumulated
         assert!((total.mass_delta - 1.3).abs() < 1e-14);
+    }
+
+    #[test]
+    fn exact_deltas_merge_to_the_same_rounding_in_any_split() {
+        // cancelling contributions whose float sum depends on the grouping: the exact merge of any
+        // split rounds to the same delta, and the float sum of the split's rounded parts does not
+        let cells = [1.0e16, 1.5, -1.0e16, 1.5];
+        let delta_of = |values: &[f64]| {
+            let mut exact = ExactBodyDelta::<2>::new(0);
+            for v in values {
+                let mut d = BodyDelta::<f64, 2>::new(0);
+                d.force_delta = V2::new([*v, -*v]);
+                d.mass_delta = *v;
+                exact.add(&d);
+            }
+            exact
+        };
+        let whole = delta_of(&cells).round();
+        let mut floats = Vec::new();
+        for cut in 1..cells.len() {
+            let mut merged = delta_of(&cells[..cut]);
+            merged.merge(&delta_of(&cells[cut..]));
+            let got = merged.round();
+            assert_eq!(got.force_delta[0].to_bits(), whole.force_delta[0].to_bits(), "split at {cut}");
+            assert_eq!(got.mass_delta.to_bits(), whole.mass_delta.to_bits(), "split at {cut}");
+            floats.push(delta_of(&cells[..cut]).round().mass_delta + delta_of(&cells[cut..]).round().mass_delta);
+        }
+        assert!(floats.iter().any(|f| f.to_bits() != whole.mass_delta.to_bits()), "every float split agrees; the cells exert no pressure");
+    }
+
+    #[test]
+    fn an_exact_delta_round_trips_its_wire_form() {
+        let mut exact = ExactBodyDelta::<3>::new(4);
+        let mut d = BodyDelta::<f64, 3>::new(4);
+        d.force_delta = V3::new([1.5, -2.25e-300, 7.0e300]);
+        d.torque_delta = V3::new([0.1, 0.2, -0.3]);
+        d.mass_delta = -1.0e-12;
+        d.slip_heat_delta = 3.0;
+        exact.add(&d);
+        let words = exact.to_words();
+        assert_eq!(words.len(), ExactBodyDelta::<3>::WORDS);
+        assert!(words.iter().all(|w| *w <= 0xffff_ffff), "a word takes the bits an absent value reserves");
+        let back = ExactBodyDelta::<3>::from_words(4, &words).expect("decodes").round();
+        assert_eq!(back, exact.round());
     }
 }

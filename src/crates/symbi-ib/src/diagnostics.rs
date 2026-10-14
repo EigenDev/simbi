@@ -21,7 +21,7 @@
 //   let totals = acc.consolidate();
 // =============================================================================
 
-use crate::body_delta::BodyDelta;
+use crate::body_delta::{BodyDelta, ExactBodyDelta};
 use std::sync::Mutex;
 use symbi_carrier::Scalar;
 
@@ -29,19 +29,21 @@ use symbi_carrier::Scalar;
 /// thread-safe via interior mutex. the mutex is taken once per tile merge, so
 /// contention stays low under DomainForEach tiled dispatch.
 pub struct DiagnosticAccumulator<S: Scalar, const D: usize> {
-    // per-body accumulated deltas. protected by mutex for cross-tile merging.
-    totals: Mutex<Vec<BodyDelta<S, D>>>,
+    // per-body exact sums of every contribution. protected by mutex for cross-tile merging.
+    totals: Mutex<Vec<ExactBodyDelta<D>>>,
     n_bodies: usize,
+    scalar: std::marker::PhantomData<S>,
 }
 
 impl<const D: usize> DiagnosticAccumulator<f64, D> {
     /// create an accumulator for the given number of bodies. sized by the
     /// full body count (sources + fragments), unbounded.
     pub fn new(n_bodies: usize) -> Self {
-        let totals = (0..n_bodies).map(|ii| BodyDelta::new(ii)).collect();
+        let totals = (0..n_bodies).map(ExactBodyDelta::new).collect();
         DiagnosticAccumulator {
             totals: Mutex::new(totals),
             n_bodies,
+            scalar: std::marker::PhantomData,
         }
     }
 
@@ -49,7 +51,7 @@ impl<const D: usize> DiagnosticAccumulator<f64, D> {
     pub fn reset(&self) {
         let mut totals = self.totals.lock().unwrap();
         for ii in 0..self.n_bodies {
-            totals[ii] = BodyDelta::new(ii);
+            totals[ii] = ExactBodyDelta::new(ii);
         }
     }
 
@@ -60,7 +62,7 @@ impl<const D: usize> DiagnosticAccumulator<f64, D> {
     pub fn accumulate(&self, delta: BodyDelta<f64, D>) {
         let mut totals = self.totals.lock().unwrap();
         if delta.idx < self.n_bodies {
-            totals[delta.idx] += delta;
+            totals[delta.idx].add(&delta);
         }
     }
 
@@ -72,14 +74,28 @@ impl<const D: usize> DiagnosticAccumulator<f64, D> {
         let mut totals = self.totals.lock().unwrap();
         for delta in deltas {
             if delta.idx < self.n_bodies {
-                totals[delta.idx] += *delta;
+                totals[delta.idx].add(delta);
             }
         }
     }
 
-    /// return per-body totals for this timestep.
+    /// add the exact sums of a reduction over cells, so the partials of a split grid add into
+    /// the whole grid's sums
+    pub fn accumulate_exact(&self, delta: &ExactBodyDelta<D>) {
+        let mut totals = self.totals.lock().unwrap();
+        if delta.idx < self.n_bodies {
+            totals[delta.idx].merge(delta);
+        }
+    }
+
+    /// return per-body totals for this timestep, each component rounded once.
     /// call after all tiles have finished.
     pub fn consolidate(&self) -> Vec<BodyDelta<f64, D>> {
+        self.totals.lock().unwrap().iter().map(ExactBodyDelta::round).collect()
+    }
+
+    /// the per-body exact totals for this timestep, which merge across tiles and workers
+    pub fn exact_totals(&self) -> Vec<ExactBodyDelta<D>> {
         self.totals.lock().unwrap().clone()
     }
 

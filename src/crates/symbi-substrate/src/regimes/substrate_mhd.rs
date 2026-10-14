@@ -980,11 +980,15 @@ where
         })
     }
 
+    fn slip_closure(&self) -> Option<f64> {
+        Some(self.eos_param.value())
+    }
+
     fn magnetic_slip_step(&self, sim: &FieldStore<D, 3, Mem, Sc>, dt: f64) -> bool {
         if !self.has_magnetic_slip(sim) {
             return true;
         }
-        let gamma = self.eos_param.value();
+        let gamma = self.slip_closure().expect("the magnetized kernel set carries its closure");
         let receipt = symbi_sim::driver::prof("magnetic_slip_solve", || {
             crate::regimes::mhd_substrate::magnetic_slip_solve::<D, 3, Mem, Sc>(sim, dt, gamma, 1e-10, 500)
         });

@@ -2222,16 +2222,16 @@ where
         })
         .collect();
     let blocks = symbi_sim::worker_tracers::assemble_blocks(fabric, held.n_root, &local, width, deadline)?;
-    let mut global: Vec<symbi_ib::BodyDelta<f64, D>> = Vec::new();
+    let mut per_tile = Vec::with_capacity(blocks.len());
     for block in &blocks {
-        for record in block.chunks_exact(width) {
-            let delta = decode_body_delta::<D>(record[0] as usize, &record[1..]);
-            match global.iter_mut().find(|g| g.idx == delta.idx) {
-                Some(g) => *g += delta,
-                None => global.push(delta),
-            }
-        }
+        let deltas = block
+            .chunks_exact(width)
+            .map(|record| decode_body_delta::<D>(record[0] as usize, &record[1..]))
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|e| WorkerError::Numerics(format!("a tile's body feedback is malformed: {e}")))?;
+        per_tile.push(deltas);
     }
+    let global = symbi_sim::decomp::merge_body_deltas(per_tile);
     let finest = 1 + plans.nested.len();
     let (t_now, _, _) = agree_fine_clock(tiles, finest, fabric, deadline)?;
     for (k, h) in tiles.iter_mut().enumerate() {

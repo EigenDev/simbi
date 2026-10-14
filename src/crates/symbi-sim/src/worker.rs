@@ -562,33 +562,18 @@ where
     }
 }
 
-/// the words one body's delta travels in: force, normal force, torque, then the accreted mass,
-/// the previous step's mass, the accreted energy and the exported slip heat
-/// the words of one body's delta: force, normal force, torque, and the four scalar exchanges
+/// the words one body's delta travels in: the wire form of its exact force, normal force,
+/// torque, accreted mass, accreted energy and exported slip heat
 pub const fn body_delta_words(d: usize) -> usize {
-    2 * d + 7
+    (2 * d + 6) * symbi_algebra::ExactSum::WORDS
 }
 
-pub fn encode_body_delta<const D: usize>(delta: &symbi_ib::BodyDelta<f64, D>, out: &mut Vec<u64>) {
-    out.extend((0..D).map(|ax| delta.force_delta[ax].to_bits()));
-    out.extend((0..D).map(|ax| delta.force_normal_delta[ax].to_bits()));
-    out.extend((0..3).map(|ax| delta.torque_delta[ax].to_bits()));
-    for v in [delta.mass_delta, delta.prev_mass_delta, delta.energy_delta, delta.slip_heat_delta] {
-        out.push(v.to_bits());
-    }
+pub fn encode_body_delta<const D: usize>(delta: &symbi_ib::ExactBodyDelta<D>, out: &mut Vec<u64>) {
+    out.extend(delta.to_words());
 }
 
-pub fn decode_body_delta<const D: usize>(idx: usize, words: &[u64]) -> symbi_ib::BodyDelta<f64, D> {
-    let at = |k: usize| f64::from_bits(words[k]);
-    let mut delta = symbi_ib::BodyDelta::new(idx);
-    delta.force_delta = symbi_algebra::Tensor::new(std::array::from_fn(|ax| at(ax)));
-    delta.force_normal_delta = symbi_algebra::Tensor::new(std::array::from_fn(|ax| at(D + ax)));
-    delta.torque_delta = symbi_algebra::Tensor::new(std::array::from_fn(|ax| at(2 * D + ax)));
-    delta.mass_delta = at(2 * D + 3);
-    delta.prev_mass_delta = at(2 * D + 4);
-    delta.energy_delta = at(2 * D + 5);
-    delta.slip_heat_delta = at(2 * D + 6);
-    delta
+pub fn decode_body_delta<const D: usize>(idx: usize, words: &[u64]) -> Result<symbi_ib::ExactBodyDelta<D>, String> {
+    symbi_ib::ExactBodyDelta::from_words(idx, words)
 }
 
 /// negate the odd components of every polar ghost band this worker holds, after an antipodal
@@ -1039,7 +1024,7 @@ where
     }
 
     // every tile's partials at its tile id, in flat tile order
-    fn gather_deltas(&mut self) -> Result<Vec<Vec<symbi_ib::BodyDelta<f64, D>>>, WorkerError> {
+    fn gather_deltas(&mut self) -> Result<Vec<Vec<symbi_ib::ExactBodyDelta<D>>>, WorkerError> {
         let n_tiles = self.devices.len();
         let n_bodies = self.stores.iter().find_map(|s| s.immersed.as_ref().map(|im| im.bodies.len())).unwrap_or(0);
         let words = body_delta_words(D);
@@ -1050,7 +1035,7 @@ where
                 continue;
             };
             let mut encoded = Vec::with_capacity(per_tile);
-            for delta in im.diagnostics.consolidate() {
+            for delta in im.diagnostics.exact_totals() {
                 encode_body_delta(&delta, &mut encoded);
             }
             let base = self.tiles[k].0 as u64 * per_tile as u64;
@@ -1069,7 +1054,11 @@ where
                     )),
                 ));
             }
-            tile_deltas.push((0..n_bodies).map(|b| decode_body_delta::<D>(b, &block[b * words..(b + 1) * words])).collect::<Vec<_>>());
+            let deltas = (0..n_bodies)
+                .map(|b| decode_body_delta::<D>(b, &block[b * words..(b + 1) * words]))
+                .collect::<Result<Vec<_>, _>>()
+                .map_err(|e| fail(self.fabric, WorkerError::Numerics(format!("tile {tile}'s body feedback is malformed: {e}"))))?;
+            tile_deltas.push(deltas);
         }
         Ok(tile_deltas)
     }

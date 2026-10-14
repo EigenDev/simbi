@@ -2018,22 +2018,21 @@ pub fn drain_devices<M: MemorySpace>(_devices: &[i32]) {}
 /// the global dt is the min over all tiles' cfl -- identical to a monolithic run, since the
 /// union of the tile interiors is the monolithic interior. rk2 exchanges between stages so the
 /// corrector reconstructs from each neighbor's stage-updated interior.
-/// the global per-body delta from each tile's consolidated partials, in flat tile order: the first
-/// tile's delta stands as given and every later tile's partial is added to it, the summation order
-/// every driver of the tiles reproduces
+/// the global per-body delta from each tile's exact partials: every component adds exactly across
+/// the tiles and rounds once, so the global delta is the whole grid's whatever the partition
 pub fn merge_body_deltas<const D: usize>(
-    per_tile: impl IntoIterator<Item = Vec<symbi_ib::BodyDelta<f64, D>>>,
+    per_tile: impl IntoIterator<Item = Vec<symbi_ib::ExactBodyDelta<D>>>,
 ) -> Vec<symbi_ib::BodyDelta<f64, D>> {
-    let mut global: Vec<symbi_ib::BodyDelta<f64, D>> = Vec::new();
+    let mut global: Vec<symbi_ib::ExactBodyDelta<D>> = Vec::new();
     for deltas in per_tile {
         for d in deltas {
             match global.iter_mut().find(|g| g.idx == d.idx) {
-                Some(g) => *g += d,
+                Some(g) => g.merge(&d),
                 None => global.push(d),
             }
         }
     }
-    global
+    global.iter().map(symbi_ib::ExactBodyDelta::round).collect()
 }
 
 /// apply the global per-body delta to every held tile's bodies: the prescribed advance, the
@@ -2875,8 +2874,8 @@ where
         tile_transport_layout(self.stores, self.schedule, k)
     }
 
-    fn gather_deltas(&mut self) -> Result<Vec<Vec<symbi_ib::BodyDelta<f64, D>>>, Self::Error> {
-        Ok(self.stores.iter().filter_map(|s| s.immersed.as_ref().map(|im| im.diagnostics.consolidate())).collect())
+    fn gather_deltas(&mut self) -> Result<Vec<Vec<symbi_ib::ExactBodyDelta<D>>>, Self::Error> {
+        Ok(self.stores.iter().filter_map(|s| s.immersed.as_ref().map(|im| im.diagnostics.exact_totals())).collect())
     }
 
     fn failure(&mut self, detail: String) -> Self::Error {
