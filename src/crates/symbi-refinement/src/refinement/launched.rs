@@ -2653,15 +2653,17 @@ where
     let err = |e: symbi_sim::checkpoint::IoError| WorkerError::Checkpoint(format!("{path}: {e}"));
     let depth = 2 + plans.nested.len();
     let stored = checkpoint_level_count(path).map_err(err)?;
-    if stored != depth {
+    // a checkpoint deeper than the session would lose levels; a shallower one seeds the levels it
+    // lacks from their parents after the load, as the single hierarchy's deeper restart does
+    if stored > depth {
         return Err(WorkerError::Refused(format!(
-            "{path} carries {stored} level(s); a refined session restarts from a checkpoint of its {depth} levels"
+            "{path} carries {stored} level(s); a refined session of {depth} levels may add levels to a checkpoint, never drop them"
         )));
     }
     for (k, h) in tiles.iter_mut().enumerate() {
         let root_offset = plans.root.plan().tiles[held.root_ids[k].0 as usize].offset;
         load_partitioned_level(&mut h.levels[0].state, path, 0, root_offset, &grids.root).map_err(err)?;
-        for level in 1..depth {
+        for level in 1..stored {
             if let Some(id) = held.level_ids(level)[k] {
                 let plan = if level == 1 { &plans.fine } else { &plans.nested[level - 2].state };
                 let grid = grids.level(level);
@@ -2670,6 +2672,7 @@ where
                 load_partitioned_level(&mut h.levels[level].state, path, level, offset, grid).map_err(err)?;
             }
         }
+        h.inject_levels_from(stored).map_err(WorkerError::Refused)?;
     }
     Ok(())
 }

@@ -6604,12 +6604,13 @@ where
     // a restart reads every level of every tile from the checkpoint's global grids.
     if let Some(path) = cfg.restart_path.as_deref() {
         let stored = symbi_sim::checkpoint::checkpoint_level_count(path).map_err(|e| format!("{e}"))?;
-        // a deeper checkpoint would lose the levels it carries beyond this run's, a shallower one
-        // would leave levels unseeded: both are refused before any level is read
-        if stored != depth {
+        // a deeper checkpoint would lose the levels it carries beyond this run's, so it is refused
+        // before any level is read; a shallower one seeds the levels it lacks from their parents,
+        // as the single hierarchy's deeper restart does
+        if stored > depth {
             return Err(format!(
                 "restart from '{path}': the checkpoint holds {stored} level(s), this run refines to \
-                 {depth}; a refined decomposed run resumes from a checkpoint of its own depth"
+                 {depth}; a restart may add levels to a checkpoint, never drop them"
             ));
         }
         for (i, tile) in tiles.iter_mut().enumerate() {
@@ -6624,11 +6625,15 @@ where
                 }
             }
         }
-        for (level, (fg, offsets, grid)) in fine.iter().enumerate().map(|(k, f)| (k + 1, f)) {
+        for (level, (fg, offsets, grid)) in fine.iter().enumerate().map(|(k, f)| (k + 1, f)).take(stored.saturating_sub(1)) {
             for (k, &i) in fg.order.iter().enumerate() {
                 load_partitioned_level(&mut tiles[i].levels[level].state, path, level, offsets[k], grid)
                     .map_err(|e| format!("restart of tile {i} level {level} from '{path}': {e}"))?;
             }
+        }
+        for (i, tile) in tiles.iter_mut().enumerate() {
+            symbi::symbi_xpu::with_device(i as i32, || tile.inject_levels_from(stored))
+                .map_err(|e| format!("restart of tile {i} from '{path}': {e}"))?;
         }
         // every level's ghost bands and the kernel sets' own derived fields (the isothermal
         // pressure cs^2 rho the timestep reads) follow the restored state, as the single hierarchy's

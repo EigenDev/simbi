@@ -2382,11 +2382,26 @@ where
             symbi_sim::checkpoint::load_checkpoint_level(&mut level.state, path, level_index)
                 .map_err(|e| format!("{e}"))?;
         }
-        for level_index in stored..self.levels.len() {
+        self.inject_levels_from(stored)?;
+        // the censuses continue the file's sampling schedule and accumulations; their registrations
+        // live on the root
+        let (levels, restart_time) = (self.levels.len(), self.levels[0].state.time);
+        let warnings = symbi_sim::checkpoint::restore_census_state(path, &mut self.levels[0].state.store.censuses, levels, restart_time)
+            .map_err(|e| format!("{e}"))?;
+        for warning in warnings {
+            eprintln!("warning: {warning}");
+        }
+        Ok(stored)
+    }
+
+    /// seed every level from `first` on, which a checkpoint of `first` levels does not carry: each
+    /// level is injected from its parent and takes its parent's clock. it enters the run fresh with
+    /// the parent's elapsed history as its own, so the subcycle is synchronized from the first root
+    /// step. a tile of a decomposed run seeds the parts of those levels it holds; injection reads
+    /// the covering parent cell alone, which the tile's own parent interior holds
+    pub fn inject_levels_from(&mut self, first: usize) -> Result<(), String> {
+        for level_index in first.max(1)..self.levels.len() {
             self.inject_level_from_parent(level_index)?;
-            // the injected level inherits its parent's clock: it enters the run fresh and takes the
-            // parent's elapsed history as its own. matching level times keep the subcycle
-            // synchronized from the very first root step.
             let (time, dt, iteration, motion) = {
                 let parent = &self.levels[level_index - 1].state;
                 (parent.time, parent.dt, parent.iteration, parent.motion)
@@ -2397,15 +2412,7 @@ where
             fresh.iteration = iteration;
             fresh.motion = motion;
         }
-        // the censuses continue the file's sampling schedule and accumulations; their registrations
-        // live on the root
-        let (levels, restart_time) = (self.levels.len(), self.levels[0].state.time);
-        let warnings = symbi_sim::checkpoint::restore_census_state(path, &mut self.levels[0].state.store.censuses, levels, restart_time)
-            .map_err(|e| format!("{e}"))?;
-        for warning in warnings {
-            eprintln!("warning: {warning}");
-        }
-        Ok(stored)
+        Ok(())
     }
 
     /// initialize `level` from its parent by piecewise-constant injection: every fine cell takes
