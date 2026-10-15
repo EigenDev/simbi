@@ -9100,7 +9100,8 @@ fn checkpoint_write_error(path: &str, err: impl std::fmt::Debug) -> String {
 
 /// the mesh motion a run admits: hydro on an unrefined grid
 fn validate_mesh_motion(cfg: &Config) -> Result<(), String> {
-    if cfg.mesh_motion {
+    // the scale-factor callables and a traced expression law move the mesh alike
+    if cfg.mesh_motion || cfg.motion_json.is_some() {
         if cfg.refinement_enabled {
             return Err("mesh motion is single-grid only (not wired with refinement)".to_string());
         }

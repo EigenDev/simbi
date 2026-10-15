@@ -7,7 +7,9 @@
 # that expands it homologously, evaluated at every stage's entry time. two host
 # tiles, two launched workers and a launch resumed onto three uneven workers
 # publish the single grid's state and scale factor bit for bit; the motion
-# changes the run (the static mesh lands elsewhere).
+# changes the run (the static mesh lands elsewhere). a moving mesh with
+# refinement or on a magnetized grid is refused by name on one device and on
+# host tiles, given as callables or as an expression law alike.
 #
 # run: pytest -m simulation simbi/simulation/tests/test_launch_mesh_motion.py
 # =============================================================================
@@ -67,6 +69,52 @@ class ExpandingBlast(FlatBlast):
         return t._graph.compile([a, a.diff(t)]).serialize_motion()
 '''
 ARMS = ["TranslatingBlast", "ExpandingBlast"]
+UNWIRED = '''
+from typing import Callable, Optional
+
+from pydantic import computed_field
+
+import simbi.expression as expr
+from simbi_configs.examples.newtonian.nmhd_orszag_tang import NewtonianOrszagTang
+from simbi_configs.examples.newtonian.refined_blast import RefinedBlast
+
+
+def _law():
+    t = expr.variable("t", expr.ExprGraph())
+    a = 1.0 + 2.0 * t + 30.0 * t * t
+    return t._graph.compile([a, a.diff(t)]).serialize_motion()
+
+
+class RefinedExpanding(RefinedBlast):
+    @computed_field
+    @property
+    def scale_factor_expressions(self) -> dict:
+        return _law()
+
+
+class MagnetizedExpanding(NewtonianOrszagTang):
+    @computed_field
+    @property
+    def scale_factor_expressions(self) -> dict:
+        return _law()
+
+
+class MagnetizedTranslating(NewtonianOrszagTang):
+    @computed_field
+    @property
+    def scale_factor(self) -> Optional[Callable[[float], float]]:
+        return lambda t: 1.0 + 0.5 * t
+
+    @computed_field
+    @property
+    def scale_factor_derivative(self) -> Optional[Callable[[float], float]]:
+        return lambda _t: 0.5
+'''
+UNWIRED_ARMS = {
+    "RefinedExpanding": "mesh motion is single-grid only (not wired with refinement)",
+    "MagnetizedExpanding": "mesh motion is not wired for MHD (comoving-field convention pending)",
+    "MagnetizedTranslating": "mesh motion is not wired for MHD (comoving-field convention pending)",
+}
 
 
 @pytest.fixture
@@ -139,3 +187,23 @@ def test_launched_workers_move_the_mesh_as_the_single_grid(tmp_path: Path, varia
     # resumed launch takes the remaining STEPS - STEPS // 2 steps
     resumed = _launch(variants, problem, tmp_path / "resumed", three, STEPS, checkpoint=first)
     _assert_same(resumed, want, f"{problem}: resumed onto three uneven workers")
+
+
+@pytest.mark.parametrize("problem", list(UNWIRED_ARMS))
+@pytest.mark.parametrize("gpus", [1, 2])
+def test_an_unwired_moving_mesh_is_refused_by_name_on_every_in_process_driver(tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+                                                                               problem: str, gpus: int) -> None:
+    (tmp_path / "unwired.py").write_text(UNWIRED)
+    out = tmp_path / "out"
+    snippet = (
+        "import sys\n"
+        "from simbi.simulation import runner\n"
+        f"from unwired import {problem}\n"
+        f"runner.run({problem}(resolution=(32, 32, 1), gpus={gpus}, checkpoint_interval=1e9, data_directory=sys.argv[1]), compute_mode='cpu', max_steps=2)\n"
+    )
+    env = dict(os.environ, SYMBI_GPU_OVERSUBSCRIBE="1", PYTHONPATH=os.pathsep.join([str(tmp_path), os.getcwd(), os.environ.get("PYTHONPATH", "")]))
+    done = subprocess.run([sys.executable, "-c", snippet, str(out)], capture_output=True, text=True, timeout=600, env=env)
+    assert done.returncode != 0, f"{problem} on {gpus} device(s) ran:\n{done.stdout[-1500:]}"
+    assert UNWIRED_ARMS[problem] in " ".join(done.stderr.split()), done.stderr[-2000:]
+    assert "panicked" not in done.stderr, f"{problem}: refused by a panic, not by name:\n{done.stderr[-2000:]}"
+    assert not list(out.glob("*.h5")), f"{problem}: a refused run published a checkpoint"
