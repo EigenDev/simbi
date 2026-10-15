@@ -349,6 +349,23 @@ def test_a_nested_magnetized_run_whose_boxes_span_an_uncut_periodic_axis_runs_as
         _assert_same_levels(launched, reference, f"nested boxes spanning z: {label}")
 
 
+def test_a_nested_magnetized_patch_spanning_a_cut_periodic_axis_is_refused_by_name_on_host_tiles(tmp_path: Path, monkeypatch) -> None:
+    # both boxes span z and the tiles cut z: a magnetized nested level wrapping across tiles has no gate
+    from simbi.simulation.tests.test_decomposed_mhd import SEAM_FLOW_3D
+
+    _spanning_variant(tmp_path, monkeypatch, "nested_cut_span", [*NESTED_BOTH_SPAN, *SEAM_FLOW_3D])
+    snippet = (
+        "import sys\nfrom simbi.simulation import runner\nfrom nested_cut_span import Spanning\n"
+        f"runner.run(Spanning(resolution={RESOLUTION_3D!r}, gpus=2, decompose=[[], [], [12]], data_directory=sys.argv[1], checkpoint_interval=1e9), compute_mode='cpu', max_steps=1)\n"
+    )
+    done = subprocess.run([sys.executable, "-c", snippet, str(tmp_path / "out")], capture_output=True, text=True, timeout=600,
+                          env=dict(os.environ, SYMBI_GPU_OVERSUBSCRIBE="1"))
+    flat = " ".join((done.stdout + done.stderr).split())
+    assert done.returncode != 0, "a magnetized nested level spanning a cut periodic axis ran on host tiles"
+    assert "a nested refined patch reaching the periodic face of axis 2, which is cut into tiles, short of a gas patch spanning the whole axis" in flat, flat[-2000:]
+    assert not list((tmp_path / "out").glob("*.h5")), "a refused run published a checkpoint"
+
+
 def test_a_nested_magnetized_patch_on_one_periodic_face_is_refused_on_launch_as_on_one_device(tmp_path: Path, monkeypatch) -> None:
     # the second box reaches the z = 0 periodic face of the domain and stops short of z = 1: its level
     # would wrap onto its own opposite side, which every driver refuses by name

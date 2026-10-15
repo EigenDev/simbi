@@ -12,7 +12,9 @@
 # - periodic kelvin-helmholtz layers on four tiles whose ragged cuts wrap both
 #   axes, the root closed across its seams, shown to differ from outflow walls;
 #   the fine box widened over the whole periodic x axis on two and four tiles
-#   cut across x, its level wrapping across the tiles at the seam.
+#   cut across x, its level wrapping across the tiles at the seam; a second box
+#   inside it, clear of the faces or spanning x as well, on two and three
+#   uneven host tiles and launched workers cut across x.
 # - the refined isothermal blob on two, three uneven and six tiles cut along
 #   both axes through the fine box; a locally isothermal refined run on tiles is
 #   refused by name before any output.
@@ -200,15 +202,40 @@ def test_a_patch_spanning_a_cut_periodic_axis_on_host_tiles_matches_the_single_h
         _assert_same(tiles, single, f"{gpus} refined tiles cut across the periodic axis")
 
 
-# a second kh box spanning the whole periodic x axis inside the first; the tiles cut across x
-NESTED_SPANNING_REASON = "a nested refined patch reaching the periodic face of axis 0, which is cut into tiles"
-
-
-def test_a_nested_patch_spanning_a_cut_periodic_axis_is_refused_by_name_on_host_tiles_and_launch(tmp_path: Path) -> None:
+def test_a_nested_patch_spanning_a_cut_periodic_axis_matches_the_single_hierarchy(tmp_path: Path) -> None:
+    # both boxes span the periodic x axis, which the tiles cut: the second level wraps across the
+    # tiles at the seam as the first does
     script = _nested_kh_script(tmp_path, [-0.5, 0.5, -0.125, 0.125])
     env = _nested_kh_env(tmp_path)
-    single = subprocess.run(_nested_kh_in_process(tmp_path / "single", 1), capture_output=True, text=True, timeout=600, env=env)
-    assert single.returncode == 0, f"the single hierarchy refused the nested spanning run; the refusal is no gap:\n{single.stderr[-2000:]}"
+    runs = {}
+    for label, cmd, arm_env in (
+        ("single", _nested_kh_in_process(tmp_path / "single", 1), env),
+        ("one box", _nested_kh_in_process(tmp_path / "one", 1, fields=ONE_BOX), env),
+        ("two host tiles", _nested_kh_in_process(tmp_path / "tiles2", 2, [[26], []]), dict(env, SYMBI_GPU_OVERSUBSCRIBE="1")),
+        ("three uneven host tiles", _nested_kh_in_process(tmp_path / "tiles3", 3, [[20, 41], []]), dict(env, SYMBI_GPU_OVERSUBSCRIBE="1")),
+        ("two workers", _nested_kh_launch(script, _layout(tmp_path / "two.toml", workers=2, cuts=[[26], []]), tmp_path / "launch2"), env),
+        ("three uneven workers", _nested_kh_launch(script, _layout(tmp_path / "three.toml", workers=3, cuts=[[20, 41], []]), tmp_path / "launch3"), env),
+    ):
+        out = Path(cmd[-1])
+        done = subprocess.run(cmd, capture_output=True, text=True, timeout=900, env=arm_env)
+        assert done.returncode == 0, f"{label} failed:\n{done.stderr[-3000:]}"
+        (runs[label],) = sorted(out.glob("*final*.h5"))
+    with h5py.File(runs["single"], "r") as f:
+        assert "level_2" in f, "the single hierarchy wrote no second refined level"
+    one = _datasets(runs["one box"])
+    assert any(not np.array_equal(x, one[n]) for n, x in _datasets(runs["single"]).items() if n in one), "the second box left the run unchanged"
+    for label in ("two host tiles", "three uneven host tiles", "two workers", "three uneven workers"):
+        _assert_same(runs[label], runs["single"], label)
+
+
+NESTED_CUT_FACE_REASON = "a nested refined patch reaching the periodic face of axis 0, which is cut into tiles, short of a gas patch spanning the whole axis"
+
+
+def test_a_nested_patch_on_one_face_of_a_cut_periodic_axis_is_refused_by_name_on_host_tiles_and_launch(tmp_path: Path) -> None:
+    # the second box reaches x = -0.5 alone: its level would wrap onto its own opposite side, which
+    # the tiles see as a cut the single hierarchy's check cannot
+    script = _nested_kh_script(tmp_path, [-0.5, 0.25, -0.125, 0.125])
+    env = _nested_kh_env(tmp_path)
     arms = {
         "host tiles": (_nested_kh_in_process(tmp_path / "tiles", 2, [[26], []]), dict(env, SYMBI_GPU_OVERSUBSCRIBE="1"), tmp_path / "tiles"),
         "launch": (_nested_kh_launch(script, _layout(tmp_path / "two.toml", workers=2, cuts=[[26], []]), tmp_path / "launched"), env, tmp_path / "launched"),
@@ -216,7 +243,7 @@ def test_a_nested_patch_spanning_a_cut_periodic_axis_is_refused_by_name_on_host_
     for label, (cmd, arm_env, out) in arms.items():
         done = subprocess.run(cmd, capture_output=True, text=True, timeout=600, env=arm_env)
         assert done.returncode != 0, f"{label}: the run succeeded"
-        assert NESTED_SPANNING_REASON in " ".join((done.stdout + done.stderr).split()), f"{label}: refusal not named:\n{done.stderr[-2000:]}"
+        assert NESTED_CUT_FACE_REASON in " ".join((done.stdout + done.stderr).split()), f"{label}: refusal not named:\n{done.stderr[-2000:]}"
         assert not list(out.glob("*.h5")), f"{label}: a refused run published a checkpoint"
 
 

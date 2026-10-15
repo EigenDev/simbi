@@ -378,6 +378,9 @@ where
     /// first patch spans the domain along them, so the patch has no face there and its level's
     /// halo exchange carries the leg across the seam
     fine_wraps: [bool; NDIM],
+    /// the axes each nested level (level 2 onward) wraps across its tiles: the root wraps them and
+    /// the level's whole region spans the domain along them
+    nested_wraps: Vec<[bool; NDIM]>,
     /// set by `step_root` when the cfl dt is fatal (NaN / non-positive). `Some` halts the march at
     /// the last computed state; the driver writes a
     /// `.crashed` checkpoint and reports it, halting before advancing past t_final on garbage.
@@ -1282,6 +1285,7 @@ where
             tracer_root_offset: [0; NDIM],
             root_wraps: [false; NDIM],
             fine_wraps: [false; NDIM],
+            nested_wraps: Vec::new(),
             crash: None,
             equilibrium_mask_radius: None,
             prev_dt_cfl: 0.0,
@@ -1503,6 +1507,9 @@ where
         // the axes along which the whole first patch spans a root that wraps: the patch has no
         // face there, on any tile
         let mut spans_wrap = [false; NDIM];
+        // per level, the axes its whole region spans along a root axis that wraps across the tiles;
+        // the root's entry is empty
+        let mut level_spans: Vec<[bool; NDIM]> = vec![[false; NDIM]];
         // the root patch's real faces lying on a cut: contributing register faces
         let mut contributing = [[false; 2]; NDIM];
         let mut whole_coverages: Vec<Domain<NDIM>> = Vec::with_capacity(regions.len());
@@ -1545,6 +1552,18 @@ where
                 );
             }
             let coverage = region_to_domain(region, &parent.geom.x_lo, &parent.geom.dx, &parent.geom.index_offset);
+            // the axes this level's whole region spans along a wrapping root axis, read against the
+            // root's whole-grid origin and spacing: the level has no face there on any tile
+            let this_spans: [bool; NDIM] = match layout {
+                Some((global_cells, wraps)) => {
+                    let root = &levels[0].state.geom;
+                    let cell = |x: f64, ax: usize| ((x - root.x_lo[ax]) / root.dx[ax]).round() as isize;
+                    std::array::from_fn(|ax| {
+                        wraps[ax] && cell(whole_region.x_lo[ax], ax) <= 0 && cell(whole_region.x_hi[ax], ax) >= global_cells[ax] as isize
+                    })
+                }
+                None => [false; NDIM],
+            };
             // a region covering its whole parent level leaves the level no leaf cell; such a run
             // wants a finer root grid, so it is refused here with the reason. a tile of the level
             // (a side on a cut) lying wholly under the region leaves leaf cells on other tiles,
@@ -1635,7 +1654,7 @@ where
                 // alone
                 let parent_cuts = levels.last().unwrap().cut_sides;
                 let level = levels.len();
-                for ax in 0..NDIM {
+                for ax in (0..NDIM).filter(|&ax| !this_spans[ax]) {
                     let whole_face = &whole_coverages.last().unwrap().spaces[ax];
                     let on_cut = (coverage.spaces[ax].lo == parent.geom.interior.spaces[ax].lo
                         && whole_face.lo == coverage.spaces[ax].lo
@@ -1670,7 +1689,7 @@ where
             let cut_sides: [[bool; 2]; NDIM] = std::array::from_fn(|ax| {
                 let whole = &whole_coverages.last().unwrap().spaces[ax];
                 let (c, p) = (&coverage.spaces[ax], &parent.geom.interior.spaces[ax]);
-                let wraps = levels.len() == 1 && spans_wrap[ax];
+                let wraps = if levels.len() == 1 { spans_wrap[ax] } else { this_spans[ax] };
                 [
                     c.lo == p.lo && parent.boundaries.lo(ax) == BoundaryType::CoarseFine && (whole.lo != c.lo || wraps),
                     c.hi == p.hi && parent.boundaries.hi(ax) == BoundaryType::CoarseFine && (whole.hi != c.hi || wraps),
@@ -1769,6 +1788,7 @@ where
             if fine.fields.cons.chi_field().is_some() {
                 attempt_entry.alloc_chi(&fine.geom.allocated)?;
             }
+            level_spans.push(if levels.len() == 1 { spans_wrap } else { this_spans });
             levels.push(LevelData {
                 state: fine,
                 kernels,
@@ -1803,10 +1823,10 @@ where
             let donor_width = (level.kernels.reconstruction_reach() as usize)
                 .max(prolong_order.ghost_width())
                 + 1;
-            // a side along which the root's first patch spans the wrapping domain continues across
+            // a side along which the level's child patch spans the wrapping domain continues across
             // the seam, as an interior side does
             let cut: [[bool; 2]; NDIM] = std::array::from_fn(|ax| {
-                if ll == 0 && spans_wrap[ax] {
+                if level_spans.get(ll + 1).is_some_and(|spans| spans[ax]) {
                     return [false; 2];
                 }
                 [
@@ -1873,6 +1893,7 @@ where
             tracer_root_offset: [0; NDIM],
             root_wraps: [false; NDIM],
             fine_wraps: spans_wrap,
+            nested_wraps: level_spans.iter().skip(2).copied().collect(),
             crash: None,
             equilibrium_mask_radius: None,
             prev_dt_cfl: 0.0,
@@ -5634,6 +5655,7 @@ where
     match (level, order.first()) {
         (0, Some(&i)) => Topology::wrapping(tiles[i].root_wraps),
         (1, Some(&i)) => Topology::wrapping(tiles[i].fine_wraps),
+        (l, Some(&i)) => tiles[i].nested_wraps.get(l - 2).map_or(Topology::open(), |&wraps| Topology::wrapping(wraps)),
         _ => Topology::open(),
     }
 }

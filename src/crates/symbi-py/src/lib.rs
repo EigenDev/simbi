@@ -9612,24 +9612,45 @@ fn validate_tiled_march(cfg: &Config) -> Result<(), String> {
             cfg.regime
         ));
     }
-    // the tiles wrap a periodic axis cut into them on the root and on a first patch spanning that
-    // axis; a nested level wraps within its own tile, so a nested patch keeps clear of the
-    // periodic faces of a cut axis
+    // the tiles wrap a periodic axis cut into them on the root and on every gas level spanning that
+    // axis whole; a nested patch reaching one face of it, or a magnetized one reaching it at all,
+    // is refused
     if cfg.refinement_enabled && cfg.refinement_regions.len() > 1 {
+        let magnetized = matches!(cfg.regime.as_str(), "nmhd" | "imhd" | "rmhd");
         let reached = match cfg.dims {
-            1 => nested_patch_on_periodic_face::<1>(cfg, true)?,
-            2 => nested_patch_on_periodic_face::<2>(cfg, true)?,
-            _ => nested_patch_on_periodic_face::<3>(cfg, true)?,
+            1 => nested_patch_on_cut_periodic_face::<1>(cfg, magnetized)?,
+            2 => nested_patch_on_cut_periodic_face::<2>(cfg, magnetized)?,
+            _ => nested_patch_on_cut_periodic_face::<3>(cfg, magnetized)?,
         };
         if let Some(ax) = reached {
             return Err(format!(
                 "a nested refined patch reaching the periodic face of axis {ax}, which is cut into tiles, \
-                 awaits nested levels that wrap across the tiles; keep the nested regions clear of that \
-                 face or run on one device"
+                 short of a gas patch spanning the whole axis, is outside the tiled runs; span the axis, \
+                 keep the nested regions clear of its faces or run on one device"
             ));
         }
     }
     Ok(())
+}
+
+/// the first periodic axis cut into tiles whose face a nested region reaches without spanning the
+/// whole axis (every reach when `spanning_refused`): a nested level spanning it wraps across the
+/// tiles at the seam, a level reaching one face alone would wrap onto its own opposite side
+fn nested_patch_on_cut_periodic_face<const D: usize>(cfg: &Config, spanning_refused: bool) -> Result<Option<usize>, String> {
+    let whole = whole_grid::<D>(cfg);
+    let regions = refinement_regions_nd::<D>(&cfg.refinement_regions)?;
+    let cell = |x: f64, ax: usize| ((x - cfg.x_lo[ax]) / cfg.dx[ax]).round() as isize;
+    let n: [usize; D] = std::array::from_fn(|ax| cfg.n_cells[ax]);
+    let counts = tile_partition(n, cfg)?.counts();
+    for region in regions.iter().skip(1) {
+        for ax in (0..D).filter(|&ax| counts[ax] > 1 && whole.periodic(ax)) {
+            let (lo, hi) = (cell(region.x_lo[ax], ax) <= 0, cell(region.x_hi[ax], ax) >= n[ax] as isize);
+            if (lo || hi) && (spanning_refused || !(lo && hi)) {
+                return Ok(Some(ax));
+            }
+        }
+    }
+    Ok(None)
 }
 
 /// author the metadata the frozen v2.0 reader requires beyond what
