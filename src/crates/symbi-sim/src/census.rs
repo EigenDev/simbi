@@ -800,12 +800,14 @@ impl CensusHistory {
 /// merges two refinement levels' partials and two samples of an accumulating history. requiring
 /// one commutative monoid for both is what makes those combinations order-agnostic — levels are
 /// visited in whatever order the hierarchy holds them, and samples arrive at whatever cadence the
-/// timestepper produces.
+/// timestepper produces. a NaN in either operand gives NaN under every op, as the grid reducer's
+/// combine gives it, so a bin holding an undefined cell reports NaN whatever the partition, the
+/// level layout or the merge order.
 pub fn combine(op: ReductionOp, a: f64, b: f64) -> f64 {
     match op {
         ReductionOp::Add => a + b,
-        ReductionOp::Min => a.min(b),
-        ReductionOp::Max => a.max(b),
+        ReductionOp::Min => if a.is_nan() || b.is_nan() { f64::NAN } else { a.min(b) },
+        ReductionOp::Max => if a.is_nan() || b.is_nan() { f64::NAN } else { a.max(b) },
         ReductionOp::Mul => a * b,
     }
 }
@@ -1296,6 +1298,28 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// a NaN partial absorbs the other under every op, in either merge order and against the
+    /// identity of an empty part, matching the grid reducer
+    #[test]
+    fn a_nan_partial_absorbs_every_merge_in_either_order() {
+        for op in [ReductionOp::Add, ReductionOp::Mul, ReductionOp::Min, ReductionOp::Max] {
+            let identity = match CensusPartial::identity(op, 1, true) {
+                CensusPartial::Values { values, .. } => values[0],
+                _ => unreachable!("a device-form identity carries values"),
+            };
+            for other in [2.5, -7.0, identity] {
+                assert!(combine(op, f64::NAN, other).is_nan(), "{op:?}: NaN merged with {other} lost the NaN");
+                assert!(combine(op, other, f64::NAN).is_nan(), "{op:?}: {other} merged with NaN lost the NaN");
+            }
+        }
+        let host = [f64::NAN, 3.0];
+        let mut a = CensusPartial::Values { values: vec![host[0]], dropped: 0 };
+        a.merge(&CensusPartial::Values { values: vec![host[1]], dropped: 0 }, ReductionOp::Max);
+        let mut b = CensusPartial::Values { values: vec![host[1]], dropped: 0 };
+        b.merge(&CensusPartial::Values { values: vec![host[0]], dropped: 0 }, ReductionOp::Max);
+        assert!(a.round().0[0].is_nan() && b.round().0[0].is_nan(), "a merged maximum dropped the NaN partial");
+    }
 
     /// a part holding none of the level contributes its identity partial: merged into a holder's
     /// partial of every op it changes no accumulator and no dropped count, and it travels under the

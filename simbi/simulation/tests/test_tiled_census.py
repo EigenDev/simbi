@@ -23,6 +23,11 @@
 # - a rigid wall cut by the tiles leaves its interior out of every tile's and
 #   every worker's census: the counted cells equal an independent count of the
 #   leaf cells whose centroid lies outside the wall, unrefined and refined;
+# - an extremal census over an expression undefined on part of the grid
+#   (sqrt of a negative argument) records NaN wherever a bin holds such a cell,
+#   as the single grid's reducer does, on six host tiles and two workers and on
+#   the refined grid: a NaN partial absorbs every other in the merge, whatever
+#   the partition or the merge order;
 # - the excised core of a kerr-schild box cut by two launched workers stays out
 #   of the census: the counted cells equal an independent count of the cells
 #   whose centroid lies outside the excision sphere, by the excision kernels'
@@ -90,6 +95,35 @@ class CensusedBlast(RefinedBlast):
     @property
     def census_expressions(self):
         return [_shells(), _peak()]
+
+
+def _undefined_extrema():
+    """sqrt(x - 0.3) is NaN on every cell left of x = 0.3, so every x bin holds a NaN cell; the
+    pressure peak beside it is finite everywhere. the bins leave parts empty: the root tiles right
+    of a cut hold no cell of the left bins, and the fine patch [-0.25, 0.25] none left of -0.3, so
+    an empty part's identity meets a NaN partial in every merge"""
+    g = expr.ExprGraph()
+    x = expr.variable("x", g)
+    root = expr.sqrt(x - 0.3)
+    axes = [expr.BinAxis("x", x, [-0.5, -0.3, -0.1, 0.5])]
+    return [
+        expr.Census(name="upper", axes=axes, values={"root": root}, op=expr.ReductionOp.MAX).serialize(),
+        expr.Census(name="lower", axes=axes, values={"root": root}, op=expr.ReductionOp.MIN).serialize(),
+        expr.Census(name="finite", axes=axes, values={"pressure": expr.pressure(g)}, op=expr.ReductionOp.MAX).serialize(),
+    ]
+
+
+class UndefinedExtremaBlast(RefinedBlast):
+    @property
+    def census_expressions(self):
+        return _undefined_extrema()
+
+
+class FlatUndefinedExtremaBlast(UndefinedExtremaBlast):
+    refinement_enabled: Annotated[bool, ProblemParam(False, description="flat")]
+
+
+UNDEFINED = {False: "FlatUndefinedExtremaBlast", True: "UndefinedExtremaBlast"}
 
 
 class FlatCensusedBlast(CensusedBlast):
@@ -363,6 +397,22 @@ def test_a_spinning_slab_cut_by_tiles_masks_its_turned_geometry_at_each_sample(t
         np.testing.assert_array_equal(counts, np.array([_outside_slab(refined, t) for t in gas.time], dtype=float),
                                       err_msg=f"{label}: counted gas cells against the slab turned to each sample time")
         np.testing.assert_array_equal(gas.dropped, 0, err_msg=f"{label}: a masked cell was reported out of the bins")
+
+
+@pytest.mark.parametrize("refined", [False, True])
+def test_an_undefined_extremum_records_the_single_grids_nan_on_tiles_and_workers(tmp_path: Path, host_tiles, refined: bool) -> None:
+    cls = globals()[UNDEFINED[refined]]
+    single = _run(tmp_path / "single", 1, refined, cls=cls)
+    upper, lower, finite = (read_census(str(single), name) for name in ("upper", "lower", "finite"))
+    # premise: the reducer propagates a NaN cell into its bin; the pressure peak stays finite
+    assert len(upper.time) == STEPS, f"the single grid recorded {len(upper.time)} rows"
+    assert np.isnan(upper.values).all() and np.isnan(lower.values).all(), "the single grid left a NaN bin finite"
+    assert np.isfinite(finite.values).all(), "the pressure peak is not finite"
+    gpus, cuts = (2, [[12], []]) if refined else (6, [[9, 17], [13]])
+    tiles = _run(tmp_path / "tiles", gpus, refined, cls=cls, decompose=cuts)
+    _assert_same_census(tiles, single, f"{gpus} {'refined ' if refined else ''}host tiles")
+    launched = _launch(tmp_path, refined, tmp_path / "launched", _layout(tmp_path / "two.toml", workers=2, cuts=[[12], []]), arms=UNDEFINED)
+    _assert_same_census(launched, single, "two workers")
 
 
 EXCISED = '''
