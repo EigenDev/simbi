@@ -670,6 +670,40 @@ impl<'p, const D: usize> PlanExchange<'p, D> {
     }
 }
 
+/// the send counts of every phase of a session, summed over its plans, each distinct `[peer][axis]`
+/// row held once. a plan's counts at a nested point read the point's level and kind and never its
+/// substep path (the move rules match the path away), so the summed row is computed once per point
+/// with its path cleared and every phase along the paths names that row; a computed row joins the
+/// row it equals in every count. the session's table is walked phase by phase, holding one summed
+/// row at a time
+pub fn session_phase_counts<const D: usize>(plans: &[&PlanExchange<'_, D>]) -> symbi_fabric::PhaseCounts {
+    let first = plans.first().expect("at least one plan");
+    let workers = first.placement.workers as usize;
+    let mut class_of_point: std::collections::HashMap<ExchangePoint, u32> = std::collections::HashMap::new();
+    let mut builder = symbi_fabric::PhaseCountsBuilder::default();
+    for phase in first.table.phases() {
+        let key = phase.point.without_path();
+        let class = match class_of_point.get(&key) {
+            Some(&class) => class,
+            None => {
+                let mut row = vec![vec![0u32; D]; workers];
+                for plan in plans {
+                    for (sum, per_axis) in row.iter_mut().zip(plan.sends_at(phase.point)) {
+                        for (s, c) in sum.iter_mut().zip(per_axis) {
+                            *s += c;
+                        }
+                    }
+                }
+                let class = builder.class_for(row);
+                class_of_point.insert(key, class);
+                class
+            }
+        };
+        builder.push_class(class);
+    }
+    builder.finish()
+}
+
 /// one fabric endpoint for several plans of one session: the plans' transfers occupy
 /// disjoint id ranges in offset order (each plan's `id_offset` is the sum of the lengths of
 /// the plans before it), the send counts of every phase are summed over the plans, and the
@@ -682,26 +716,14 @@ pub fn fabric_for<const D: usize, L: Link>(
 ) -> Fabric<L> {
     let first = plans.first().expect("at least one plan");
     let mut lens = Vec::new();
-    let mut counts: Vec<Vec<Vec<u32>>> = first
-        .table
-        .phases()
-        .iter()
-        .map(|_| vec![vec![0u32; D]; first.placement.workers as usize])
-        .collect();
     for plan in plans {
         assert_eq!(plan.me, first.me, "every plan of a session names one worker");
         assert_eq!(plan.placement.workers, first.placement.workers);
         assert_eq!(plan.table.digest(), first.table.digest(), "every plan walks one phase table");
         assert_eq!(plan.id_offset as usize, lens.len(), "plans occupy disjoint id ranges in offset order");
         lens.extend(plan.lens());
-        for (byte, per_peer) in plan.phase_counts().into_iter().enumerate() {
-            for (peer, per_axis) in per_peer.into_iter().enumerate() {
-                for (axis, c) in per_axis.into_iter().enumerate() {
-                    counts[byte][peer][axis] += c;
-                }
-            }
-        }
     }
+    let counts = session_phase_counts(plans);
     let mut passes: std::collections::BTreeMap<(usize, u8), Vec<Vec<u32>>> = std::collections::BTreeMap::new();
     for plan in plans {
         for (byte, kind, per_peer) in plan.pass_counts() {
@@ -714,9 +736,9 @@ pub fn fabric_for<const D: usize, L: Link>(
         }
     }
     let prime = first.table.byte_of(ExchangePoint::Prime).expect("every table holds the prime") as usize;
-    let default = counts[prime].clone();
+    let default = counts.get(prime).expect("the prime has counts").clone();
     let fabric = Fabric::new(link, first.me, session, first.placement.workers as usize, D, &lens, default)
-        .with_phase_counts(counts)
+        .with_count_classes(counts)
         .with_phase_rules(first.table.rules());
     passes.into_iter().fold(fabric, |f, ((byte, kind), c)| f.with_pass_counts(byte, kind, c))
 }

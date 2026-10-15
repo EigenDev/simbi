@@ -34,9 +34,9 @@
 # vortex under two nested boxes on two workers cut through both, as the single
 # hierarchy runs. nested levels:
 # the refined blast with a second box inside the first, every level compared,
-# fresh on two and on four ragged workers and resumed onto four from two; a
-# depth whose phase table overflows the wire byte is refused by name before any
-# session is built. nested MHD under contact and uct: each nested level's face
+# fresh on two and on four ragged workers and resumed onto four from two; five
+# levels, past the 255 phases one wire byte held before protocol 8, on two and
+# three workers, one holding no deeper tile. nested MHD under contact and uct: each nested level's face
 # halo prolongation reads its parent's faces from a stencil gathered across the
 # parent's cuts at the parent's last stage, same gates. a late rejection on the deepest level (the
 # last stage of its last substep in a root step, after every earlier substep of
@@ -748,15 +748,25 @@ def _refused_launch(tmp_path: Path, script: str, reason: str) -> None:
     assert not list((tmp_path / "refused").glob("*.h5")), "a checkpoint was published"
 
 
-def test_a_depth_past_the_phase_byte_is_refused_by_name(tmp_path: Path, monkeypatch) -> None:
-    regions = [[-0.25 / 2**k, 0.25 / 2**k, -0.25 / 2**k, 0.25 / 2**k] for k in range(5)]
+def test_five_levels_launch_past_the_old_phase_byte_as_the_single_hierarchy_runs(tmp_path: Path, monkeypatch) -> None:
+    # five levels, the root included: an rk2 nested table of 349 phases, past the 255 one wire byte
+    # held before protocol 8. the boxes halve about the centre (root cells 8..24, 12..20, 14..18,
+    # 15..17); two workers cut every box through its middle, three cut at root cells 9 and 21, clear
+    # of every level's faces, leaving a worker with no tile of the deeper levels
+    regions = [[-0.25 / 2**k, 0.25 / 2**k, -0.25 / 2**k, 0.25 / 2**k] for k in range(4)]
     extra = [
-        f"refinement_max_levels: Annotated[int, ProblemParam(6, description='levels')]",
+        "refinement_max_levels: Annotated[int, ProblemParam(5, description='levels')]",
         f"refinement_regions: Annotated[list[list[float]], ProblemParam({regions!r}, description='r')]",
-        "refinement_ratios: Annotated[list[int], ProblemParam([2, 2, 2, 2, 2], description='ratios')]",
+        "refinement_ratios: Annotated[list[int], ProblemParam([2, 2, 2, 2], description='ratios')]",
     ]
-    _, _, script = _nested_module(tmp_path, monkeypatch, extra=extra)
-    _refused_launch(tmp_path, script, "6 levels, the root included (phase table of")
+    module, cls, script = _nested_module(tmp_path, monkeypatch, extra=extra)
+    reference = _script_reference(module, cls, RESOLUTION, tmp_path / "single", STEPS)
+    with h5py.File(reference, "r") as f:
+        assert "level_4" in f, "the single hierarchy published no fourth refined level; the depth is not past the byte"
+    for tag, workers, kwargs in [("two", 2, {"shape": (2, 1)}), ("three", 3, {"cuts": [[9, 21], []]})]:
+        layout = _layout(tmp_path / f"{tag}.toml", workers=workers, **kwargs)
+        launched = _script_launch(script, RESOLUTION, tmp_path / tag, layout, STEPS, workers=workers)
+        _assert_same_all_levels(launched, reference, f"five levels on {workers} workers")
 
 
 # the deepest box spans root cells 16..20 on both axes, inside the root tile above both cuts at 12:

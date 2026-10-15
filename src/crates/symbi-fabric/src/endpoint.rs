@@ -362,9 +362,9 @@ pub struct Fabric<L: Link> {
     /// exchange points whose phases move a different set of transfers: a selector over the
     /// point byte with its own `[peer][axis]` send counts, against which a grant for such a
     /// point is validated.
-    /// the send counts of every phase of the table, `[byte][peer][axis]`; absent, every
-    /// phase carries `sends_per_peer_axis`
-    phase_counts: Option<Vec<Vec<Vec<u32>>>>,
+    /// the send counts of every phase of the table, one row per distinct `[peer][axis]` table;
+    /// absent, every phase carries `sends_per_peer_axis`
+    phase_counts: Option<PhaseCounts>,
     /// the send counts of the exchanges of an iterative point, by (point byte, exchange kind):
     /// `[peer][axis]`
     pass_counts: std::collections::BTreeMap<(usize, u8), Vec<Vec<u32>>>,
@@ -405,6 +405,91 @@ struct Blocks {
 
 /// the pause after a waiting pass that advanced nothing.
 const POLL_PAUSE: Duration = Duration::from_micros(50);
+
+/// the send counts of every phase of a table, each distinct `[peer][axis]` row held once:
+/// `class_of[byte]` names the row of phase `byte`. two phases share a row exactly when every
+/// count of theirs agrees, so the lookup returns what a dense `[byte][peer][axis]` table holds
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PhaseCounts {
+    classes: Vec<Vec<Vec<u32>>>,
+    class_of: Vec<u32>,
+}
+
+impl PhaseCounts {
+    /// the rows and each phase's row; every index names a row
+    pub fn new(classes: Vec<Vec<Vec<u32>>>, class_of: Vec<u32>) -> Self {
+        assert!(class_of.iter().all(|&c| (c as usize) < classes.len()), "a phase names a row the table lacks");
+        Self { classes, class_of }
+    }
+
+    /// the rows of a dense `[byte][peer][axis]` table, each distinct row held once
+    pub fn from_dense(dense: Vec<Vec<Vec<u32>>>) -> Self {
+        let mut builder = PhaseCountsBuilder::default();
+        for row in dense {
+            builder.push(row);
+        }
+        builder.finish()
+    }
+
+    /// the counts of phase `byte`, `[peer][axis]`
+    pub fn get(&self, byte: usize) -> Option<&Vec<Vec<u32>>> {
+        self.class_of.get(byte).map(|&c| &self.classes[c as usize])
+    }
+
+    /// the phases the table covers
+    pub fn len(&self) -> usize {
+        self.class_of.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.class_of.is_empty()
+    }
+
+    /// the distinct rows held
+    pub fn classes(&self) -> usize {
+        self.classes.len()
+    }
+}
+
+/// a phase table's counts built phase by phase: each row joins the row it equals in every count,
+/// or opens a new one
+#[derive(Debug, Default)]
+pub struct PhaseCountsBuilder {
+    classes: Vec<Vec<Vec<u32>>>,
+    index: std::collections::HashMap<Vec<Vec<u32>>, u32>,
+    class_of: Vec<u32>,
+}
+
+impl PhaseCountsBuilder {
+    /// the counts of the next phase, `[peer][axis]`
+    pub fn push(&mut self, row: Vec<Vec<u32>>) {
+        let class = self.class_for(row);
+        self.class_of.push(class);
+    }
+
+    /// the row `row` equals in every count, opened when none does
+    pub fn class_for(&mut self, row: Vec<Vec<u32>>) -> u32 {
+        match self.index.get(&row) {
+            Some(&c) => c,
+            None => {
+                let c = u32::try_from(self.classes.len()).expect("fewer distinct rows than phases");
+                self.index.insert(row.clone(), c);
+                self.classes.push(row);
+                c
+            }
+        }
+    }
+
+    /// the next phase carries row `class`, one `class_for` returned
+    pub fn push_class(&mut self, class: u32) {
+        assert!((class as usize) < self.classes.len(), "a phase names a row the table lacks");
+        self.class_of.push(class);
+    }
+
+    pub fn finish(self) -> PhaseCounts {
+        PhaseCounts::new(self.classes, self.class_of)
+    }
+}
 
 /// the kinds of exchange an iterative point carries, in the low two bits of an epoch's `op`; its
 /// high six bits number the exchange within the pass
@@ -487,8 +572,13 @@ impl<L: Link> Fabric<L> {
     /// the send counts of every phase of the table, `[byte][peer][axis]`: a grant for a
     /// phase must carry that count, one for a peer and axis with a zero count is refused,
     /// and a phase byte beyond the table is a protocol error.
-    pub fn with_phase_counts(mut self, counts: Vec<Vec<Vec<u32>>>) -> Self {
-        assert!(counts.iter().all(|c| c.len() == self.workers && c.iter().all(|p| p.len() == self.axes)));
+    pub fn with_phase_counts(self, counts: Vec<Vec<Vec<u32>>>) -> Self {
+        self.with_count_classes(PhaseCounts::from_dense(counts))
+    }
+
+    /// the send counts of every phase of the table as distinct rows and each phase's row
+    pub fn with_count_classes(mut self, counts: PhaseCounts) -> Self {
+        assert!(counts.classes.iter().all(|c| c.len() == self.workers && c.iter().all(|p| p.len() == self.axes)));
         self.phase_counts = Some(counts);
         self
     }
