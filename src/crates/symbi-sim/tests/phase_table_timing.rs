@@ -358,7 +358,7 @@ fn a_peer_that_passes_an_owed_phase_is_refused_on_receipt() {
 fn a_worker_is_refused_at_its_own_open_for_every_illegal_transition() {
     let table = table();
     let byte = |p| table.byte_of(p).unwrap();
-    let e = |attempt: u16, point: u8, axis: u8| Epoch { round: 0, op: 0, step: 0, attempt, point, axis };
+    let e = |attempt: u16, point: u32, axis: u8| Epoch { round: 0, op: 0, step: 0, attempt, point, axis };
     let prolong = byte(ExchangePoint::Fine { substep: 0, point: FinePoint::Prolong });
     let stage = |k, axis| e(0, byte(ExchangePoint::Stage(k)), axis);
     let cases: [(&str, Vec<Epoch>, &str); 8] = [
@@ -404,7 +404,7 @@ fn a_grant_beyond_the_table_and_a_late_prime_are_refused() {
     let table = table();
     let mut a = endpoint(&link, A, &table);
     let grant = |epoch: Epoch| Header { kind: Kind::Grant, session: S, epoch, id: 1, payload_len: 0 };
-    link.inject(B, A, grant(Epoch { round: 0, op: 0, step: 0, attempt: 0, point: table.len() as u8, axis: 0 }), &[]);
+    link.inject(B, A, grant(Epoch { round: 0, op: 0, step: 0, attempt: 0, point: table.len() as u32, axis: 0 }), &[]);
     let err = a.service().unwrap_err().to_string();
     assert!(err.contains("outside the table"), "another refusal: {err}");
     let mut a = endpoint(&link, A, &table);

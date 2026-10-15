@@ -699,13 +699,13 @@ mod tests {
             host: "127.0.0.1".into(),
             byte_order: LITTLE_ENDIAN,
         };
-        // a worker built before the iterative pass entered the epoch is refused at the handshake
+        // a worker built before the phase index widened past one byte is refused at the handshake
         let mut previous = mine.clone();
-        previous.protocol = 6;
+        previous.protocol = 7;
         assert!(
             disagreement(&mine, &previous, WorkerId(1))
                 .unwrap()
-                .contains("protocol 6 against 7")
+                .contains("protocol 7 against 8")
         );
         let mut table = mine.clone();
         table.identity.phase_table_digest = Digest(11);

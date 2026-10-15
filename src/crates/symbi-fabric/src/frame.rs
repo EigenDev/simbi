@@ -14,11 +14,11 @@
 //   8  session      u64
 //  16  step         u64
 //  24  attempt      u16
-//  26  point        u8
+//  26  point        low byte of the u32 phase index
 //  27  op           u8
 //  28  round        u32
 //  32  axis         u8
-//  33  reserved     3 bytes (zero)
+//  33  point        the phase index's three high bytes, little-endian
 //  36  id           u32
 //  40  payload_len  u32
 //
@@ -39,8 +39,9 @@ pub const MAGIC: [u8; 4] = *b"SFAB";
 /// 2 + 3k: flag exchange, halos, audit); version 2 had no audit points and version 1
 /// numbered stage k's halos 1 + k. version 7 adds the iterative pass (`round`) and the
 /// exchange within it (`op`) to the epoch, so a solve's repeated exchanges each have their own
-/// phase.
-pub const VERSION: u16 = 7;
+/// phase. version 8 widens the phase index to 32 bits, its low byte at offset 26 and its three
+/// high bytes at offsets 33..36, so a nested refined table holds more than 255 phases.
+pub const VERSION: u16 = 8;
 pub const HEADER_LEN: usize = 44;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -91,7 +92,6 @@ pub enum FrameError {
     Version(u16),
     Kind(u8),
     Flags(u8),
-    Reserved([u8; 3]),
 }
 
 impl std::fmt::Display for FrameError {
@@ -101,7 +101,6 @@ impl std::fmt::Display for FrameError {
             FrameError::Version(v) => write!(f, "unsupported version {v}"),
             FrameError::Kind(k) => write!(f, "unknown frame kind {k}"),
             FrameError::Flags(x) => write!(f, "nonzero flags {x:#x}"),
-            FrameError::Reserved(r) => write!(f, "nonzero reserved bytes {r:?}"),
         }
     }
 }
@@ -115,11 +114,12 @@ impl Header {
         out[8..16].copy_from_slice(&self.session.0.to_le_bytes());
         out[16..24].copy_from_slice(&self.epoch.step.to_le_bytes());
         out[24..26].copy_from_slice(&self.epoch.attempt.to_le_bytes());
-        out[26] = self.epoch.point;
+        let point = self.epoch.point.to_le_bytes();
+        out[26] = point[0];
         out[27] = self.epoch.op;
         out[28..32].copy_from_slice(&self.epoch.round.to_le_bytes());
         out[32] = self.epoch.axis;
-        out[33..36].copy_from_slice(&[0; 3]);
+        out[33..36].copy_from_slice(&point[1..4]);
         out[36..40].copy_from_slice(&self.id.to_le_bytes());
         out[40..44].copy_from_slice(&self.payload_len.to_le_bytes());
     }
@@ -137,10 +137,6 @@ impl Header {
         if bytes[7] != 0 {
             return Err(FrameError::Flags(bytes[7]));
         }
-        let reserved: [u8; 3] = bytes[33..36].try_into().expect("three bytes");
-        if reserved != [0; 3] {
-            return Err(FrameError::Reserved(reserved));
-        }
         let u64_at =
             |o: usize| u64::from_le_bytes(bytes[o..o + 8].try_into().expect("eight bytes"));
         let u32_at = |o: usize| u32::from_le_bytes(bytes[o..o + 4].try_into().expect("four bytes"));
@@ -150,7 +146,7 @@ impl Header {
             epoch: Epoch {
                 step: u64_at(16),
                 attempt: u16::from_le_bytes([bytes[24], bytes[25]]),
-                point: bytes[26],
+                point: u32::from_le_bytes([bytes[26], bytes[33], bytes[34], bytes[35]]),
                 op: bytes[27],
                 round: u32_at(28),
                 axis: bytes[32],
@@ -224,12 +220,12 @@ mod tests {
         v[4] = 9;
         assert!(matches!(Header::decode(&v), Err(FrameError::Version(_))));
         // the previous protocol versions, whose exchange-point bytes mean different points
-        for previous in [1u16, 2, 3, 4, 5, 6] {
+        for previous in [1u16, 2, 3, 4, 5, 6, 7] {
             let mut old = bytes;
             old[4..6].copy_from_slice(&previous.to_le_bytes());
             assert!(matches!(Header::decode(&old), Err(FrameError::Version(v)) if v == previous));
         }
-        assert_eq!(VERSION, 7, "a change of wire meaning takes a new version and a new pin");
+        assert_eq!(VERSION, 8, "a change of wire meaning takes a new version and a new pin");
         let mut k = bytes;
         k[6] = 200;
         assert!(matches!(Header::decode(&k), Err(FrameError::Kind(200))));
@@ -249,12 +245,21 @@ mod tests {
         assert_eq!((back.epoch.round, back.epoch.op), (0x0102_0304, 5));
     }
 
+    /// the phase index spans its low byte and its three high bytes: every byte of it reaches the
+    /// decoded epoch, and an index past 255 orders after every smaller one
     #[test]
-    fn nonzero_reserved_bytes_are_refused() {
-        let mut bytes = [0u8; HEADER_LEN];
-        sample().encode(&mut bytes);
-        bytes[34] = 1;
-        assert_eq!(Header::decode(&bytes), Err(FrameError::Reserved([0, 1, 0])));
+    fn a_wide_phase_index_round_trips_and_keeps_its_order() {
+        for point in [0u32, 255, 256, 0x0001_0203, 221_221, Epoch::NO_POINT - 1] {
+            let mut header = sample();
+            header.epoch.point = point;
+            let mut bytes = [0u8; HEADER_LEN];
+            header.encode(&mut bytes);
+            assert_eq!(bytes[26], point.to_le_bytes()[0], "the low byte at its offset");
+            assert_eq!(&bytes[33..36], &point.to_le_bytes()[1..4], "the high bytes at theirs");
+            assert_eq!(Header::decode(&bytes).unwrap().epoch.point, point);
+        }
+        let (lo, hi) = (Epoch::at(3, 0, 255, 0), Epoch::at(3, 0, 256, 0));
+        assert!(lo < hi, "a later phase orders later past the first byte");
     }
 
     #[test]

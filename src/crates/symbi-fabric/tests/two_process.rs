@@ -64,7 +64,7 @@ fn value(worker: u32, transfer: u32, i: usize) -> f64 {
     1.0 + f64::from(worker) * 0.5 + f64::from(transfer) * 0.01 + i as f64 * 1e-6
 }
 
-fn epoch(point: u8, axis: u8) -> Epoch {
+fn epoch(point: u32, axis: u8) -> Epoch {
     Epoch {
         round: 0,
         op: 0,

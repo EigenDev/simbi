@@ -131,7 +131,7 @@ fn restrict_with_bands<R, const D: usize, const DOF: usize, M, E, S, Mem, K, T, 
     held: &Held<'_>,
     plans: &RefinedPlans<'_, D>,
     level: usize,
-    path: u8,
+    path: u32,
     alpha: f64,
     step: u64,
     attempt: u16,
@@ -1330,16 +1330,16 @@ where
                                     .map_err(|e| fail(fabric, e.into()))?;
                                 }
                                 let nested = NestedStep { held, plans, transport, deadline, nstages, depth, audit_every: base.audit_every_point, step: iter, attempt, atlas: atlas.as_ref(), discrete: discrete_atlas.is_some() };
-                                if nested_subcycle(tiles, &nested, fabric, &mut timing, &mut report, 2, sub as u8, fine_dt)? {
+                                if nested_subcycle(tiles, &nested, fabric, &mut timing, &mut report, 2, sub as u32, fine_dt)? {
                                     rejected = true;
                                     break 'subcycle;
                                 }
-                                restrict_with_bands(tiles, held, plans, 1, sub as u8, alpha, iter, attempt, transport, fabric, deadline, &mut timing.exchange)
+                                restrict_with_bands(tiles, held, plans, 1, sub as u32, alpha, iter, attempt, transport, fabric, deadline, &mut timing.exchange)
                                     .map_err(|e| fail(fabric, e.into()))?;
                                 {
                                     let fine = fine_fields!();
                                     let part = PlanPart { plan: &plans.fine, fields: &fine, devices: held.fine_devices, fault: None, dst_fields: None };
-                                    exchange_point_plans(&[part], transport, fabric, ExchangePoint::NestedRestrict { level: 1, path: sub as u8 }, iter, attempt, deadline, &mut timing.exchange)
+                                    exchange_point_plans(&[part], transport, fabric, ExchangePoint::NestedRestrict { level: 1, path: sub as u32 }, iter, attempt, deadline, &mut timing.exchange)
                                         .map_err(|e| fail(fabric, e.into()))?;
                                 }
                                 for &k in &refined {
@@ -1637,7 +1637,7 @@ fn nested_subcycle<R, const D: usize, const DOF: usize, M, E, S, Mem, K, T, L>(
     timing: &mut WorkerTiming,
     report: &mut WorkerReport,
     level: usize,
-    parent_path: u8,
+    parent_path: u32,
     dt: f64,
 ) -> Result<bool, WorkerError>
 where
@@ -1691,7 +1691,7 @@ where
         Ok(())
     };
     for sub in 0..RATIO {
-        let path = (parent_path as usize * RATIO + sub) as u8;
+        let path = parent_path * RATIO as u32 + sub as u32;
         let alpha = sub as f64 / RATIO as f64;
         let at = |point| ExchangePoint::Nested { level: level as u8, path, point };
         for (r, &k) in mine.iter().enumerate() {

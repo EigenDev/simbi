@@ -30,7 +30,7 @@ const T1: TransferId = TransferId(1);
 const T2: TransferId = TransferId(2);
 const T3: TransferId = TransferId(3);
 
-fn epoch(attempt: u16, point: u8, axis: u8) -> Epoch {
+fn epoch(attempt: u16, point: u32, axis: u8) -> Epoch {
     Epoch {
         round: 0,
         op: 0,

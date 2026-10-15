@@ -332,7 +332,7 @@ pub enum ExchangePoint {
     /// densities and the band chains' equilibria beside the cuts inside the band of the seam on
     /// `axis` (its `high` side) of the finer level's patch, the start the far tiles resume their
     /// chains from, across the `hop`-th cut from the seam
-    BandSeam { level: u8, path: u8, axis: u8, high: bool, hop: u8 },
+    BandSeam { level: u8, path: u32, axis: u8, high: bool, hop: u8 },
     Rollback,
     /// after the named exchange: each tile below a cut sends its copy of the shared
     /// interface face to the tile above, which compares it with its own bit for bit. the
@@ -352,10 +352,10 @@ pub enum ExchangePoint {
     /// one point of one substep of a nested refined level `level >= 2`: `path` numbers the
     /// substep along the subcycles of every level above it (`path = parent_path * 2 + s`);
     /// that level's plan moves here
-    Nested { level: u8, path: u8, point: FinePoint },
+    Nested { level: u8, path: u32, point: FinePoint },
     /// after the restriction of level `level + 1` into level `level` within the substep
     /// `path` of level `level`: that level's halos carry the restricted covered cells
-    NestedRestrict { level: u8, path: u8 },
+    NestedRestrict { level: u8, path: u32 },
     /// at initialization, before level `level >= 2` is seeded by prolongation: the conserved
     /// halos of level `level - 1` cross its cuts
     Seed { level: u8 },
@@ -473,9 +473,10 @@ impl ExchangePoint {
         )
     }
 
-    /// a stable code of the point's kind and indices for the phase table's digest
-    pub fn kind_code(self) -> u32 {
-        let (kind, a, b): (u32, u32, u32) = match self {
+    /// a stable code of the point's kind and indices for the phase table's digest: the kind in
+    /// the top byte, the first index in the next 32 bits, the second in the low 16
+    pub fn kind_code(self) -> u64 {
+        let (kind, a, b): (u64, u32, u32) = match self {
             ExchangePoint::Prime => (0, 0, 0),
             ExchangePoint::Primed => (18, 0, 0),
             ExchangePoint::Stage(k) => (1, k as u32, 0),
@@ -502,9 +503,9 @@ impl ExchangePoint {
                 FinePoint::AuditTail => (16, substep as u32, 0),
                 FinePoint::Coefficients => (34, substep as u32, 0),
             },
-            // the level in the high bits of `a`, the path in its low five
+            // the level in the high byte of `a`, the path in its low 24 bits
             ExchangePoint::Nested { level, path, point } => {
-                let a = (level as u32) << 5 | path as u32;
+                let a = (level as u32) << 24 | path;
                 match point {
                     FinePoint::Prolong => (19, a, 0),
                     FinePoint::Troubled(k) => (20, a, k as u32),
@@ -515,7 +516,7 @@ impl ExchangePoint {
                     FinePoint::Coefficients => (35, a, 0),
                 }
             }
-            ExchangePoint::NestedRestrict { level, path } => (25, (level as u32) << 5 | path as u32, 0),
+            ExchangePoint::NestedRestrict { level, path } => (25, (level as u32) << 24 | path, 0),
             ExchangePoint::Seed { level } => (26, level as u32, 0),
             ExchangePoint::ExciseSweep(k) => (31, k as u32, 0),
             ExchangePoint::ExciseRebuild(k) => (32, k as u32, 0),
@@ -527,10 +528,24 @@ impl ExchangePoint {
             ExchangePoint::SlipRebuild { half } => (41, half as u32, 0),
             ExchangePoint::SlipSync { half } => (42, half as u32, 0),
             ExchangePoint::BandSeam { level, path, axis, high, hop } => {
-                (37, (level as u32) << 5 | path as u32, (hop as u32) << 3 | (axis as u32) << 1 | high as u32)
+                (37, (level as u32) << 24 | path, (hop as u32) << 3 | (axis as u32) << 1 | high as u32)
             }
         };
-        kind << 16 | a << 8 | b
+        kind << 56 | (a as u64) << 16 | (b as u64 & 0xffff)
+    }
+
+    /// the largest substep path a nested point carries: its code holds the path in 24 bits
+    pub const MAX_PATH: u32 = (1 << 24) - 1;
+
+    /// the point with its substep path cleared: every substep of a level carries the same kind
+    /// of exchange at the same place in its own substep
+    pub fn without_path(self) -> Self {
+        match self {
+            ExchangePoint::Nested { level, point, .. } => ExchangePoint::Nested { level, path: 0, point },
+            ExchangePoint::NestedRestrict { level, .. } => ExchangePoint::NestedRestrict { level, path: 0 },
+            ExchangePoint::BandSeam { level, axis, high, hop, .. } => ExchangePoint::BandSeam { level, path: 0, axis, high, hop },
+            other => other,
+        }
     }
 }
 

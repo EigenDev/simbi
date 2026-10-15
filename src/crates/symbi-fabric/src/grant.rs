@@ -391,7 +391,7 @@ impl GrantTable {
 mod tests {
     use super::*;
 
-    fn e(step: u64, attempt: u16, point: u8, axis: u8) -> Epoch {
+    fn e(step: u64, attempt: u16, point: u32, axis: u8) -> Epoch {
         Epoch {
             round: 0,
             op: 0,
@@ -425,7 +425,7 @@ mod tests {
         r
     }
 
-    fn pass(attempt: u16, point: u8, round: u32, op: u8, axis: u8) -> Epoch {
+    fn pass(attempt: u16, point: u32, round: u32, op: u8, axis: u8) -> Epoch {
         Epoch { step: 0, attempt, point, round, op, axis }
     }
 

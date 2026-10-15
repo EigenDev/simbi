@@ -34,9 +34,12 @@ pub struct Phase {
     pub init_only: bool,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone)]
 pub struct PhaseTable {
-    phases: Vec<Phase>,
+    /// shared by every plan of a session: a clone carries the same phases and index
+    phases: std::sync::Arc<Vec<Phase>>,
+    /// each point's place in `phases`: the index an exchange looks its epoch up in
+    index: std::sync::Arc<std::collections::HashMap<ExchangePoint, u32>>,
     stages: u8,
     substeps: u8,
     fine_stages: u8,
@@ -67,8 +70,22 @@ impl std::fmt::Display for PhaseTableError {
 
 impl std::error::Error for PhaseTableError {}
 
+impl PartialEq for PhaseTable {
+    fn eq(&self, other: &Self) -> bool {
+        (&self.phases, self.stages, self.substeps, self.fine_stages, self.depth)
+            == (&other.phases, other.stages, other.substeps, other.fine_stages, other.depth)
+    }
+}
+
+impl Eq for PhaseTable {}
+
+/// each point's place in `phases`
+fn index_of(phases: &[Phase]) -> std::collections::HashMap<ExchangePoint, u32> {
+    phases.iter().enumerate().map(|(i, p)| (p.point, i as u32)).collect()
+}
+
 impl PhaseTable {
-    /// the bytes below the reserved `NO_POINT`
+    /// the wire indices below the reserved `NO_POINT`
     pub const CAPACITY: usize = Epoch::NO_POINT as usize;
 
     /// the table of a flat run: prime, the root stages, the post-step, the rollback, the
@@ -159,9 +176,9 @@ impl PhaseTable {
             }
             phases.push(skippable(ExchangePoint::Fine { substep: s, point: FinePoint::Coefficients }));
             if depth > 2 {
-                nested_phases(&mut phases, 2, s, substeps, fine_stages, depth, bands)?;
-                push_band_points(&mut phases, bands, 1, s);
-                phases.push(mandatory(ExchangePoint::NestedRestrict { level: 1, path: s }));
+                nested_phases(&mut phases, 2, u32::from(s), substeps, fine_stages, depth, bands)?;
+                push_band_points(&mut phases, bands, 1, u32::from(s));
+                phases.push(mandatory(ExchangePoint::NestedRestrict { level: 1, path: u32::from(s) }));
             }
             // the restriction into the root, in the last substep before its post-tail point
             if s + 1 == substeps {
@@ -190,7 +207,8 @@ impl PhaseTable {
         if phases.len() > Self::CAPACITY {
             return Err(PhaseTableError::Overflow { phases: phases.len() });
         }
-        Ok(Self { phases, stages, substeps, fine_stages, depth })
+        let index = std::sync::Arc::new(index_of(&phases));
+        Ok(Self { phases: std::sync::Arc::new(phases), index, stages, substeps, fine_stages, depth })
     }
 
     /// the table of a run carrying a magnetic-slip body: the opening half's drain, solve,
@@ -210,13 +228,15 @@ impl PhaseTable {
             }
             points.into_iter().map(|point| Phase { point, skippable: true, init_only: false }).collect()
         };
-        let first_stage = self.phases.iter().position(|p| p.point == ExchangePoint::Troubled(0)).expect("every table holds its first stage");
-        self.phases.splice(first_stage..first_stage, half(0));
-        let post = self.phases.iter().position(|p| p.point == ExchangePoint::TracerCoefficients).expect("every table holds its post-step points");
-        self.phases.splice(post..post, half(1));
-        if self.phases.len() > Self::CAPACITY {
-            return Err(PhaseTableError::Overflow { phases: self.phases.len() });
+        let phases = std::sync::Arc::make_mut(&mut self.phases);
+        let first_stage = phases.iter().position(|p| p.point == ExchangePoint::Troubled(0)).expect("every table holds its first stage");
+        phases.splice(first_stage..first_stage, half(0));
+        let post = phases.iter().position(|p| p.point == ExchangePoint::TracerCoefficients).expect("every table holds its post-step points");
+        phases.splice(post..post, half(1));
+        if phases.len() > Self::CAPACITY {
+            return Err(PhaseTableError::Overflow { phases: phases.len() });
         }
+        self.index = std::sync::Arc::new(index_of(phases));
         Ok(self)
     }
 
@@ -248,13 +268,13 @@ impl PhaseTable {
         self.fine_stages
     }
 
-    /// the wire byte of `point`, when the table holds it
-    pub fn byte_of(&self, point: ExchangePoint) -> Option<u8> {
-        self.phases.iter().position(|p| p.point == point).map(|i| i as u8)
+    /// the wire index of `point`, when the table holds it
+    pub fn byte_of(&self, point: ExchangePoint) -> Option<u32> {
+        self.index.get(&point).copied()
     }
 
-    /// the point a wire byte names, when the table holds it
-    pub fn point_of(&self, byte: u8) -> Option<ExchangePoint> {
+    /// the point a wire index names, when the table holds it
+    pub fn point_of(&self, byte: u32) -> Option<ExchangePoint> {
         self.phases.get(byte as usize).map(|p| p.point)
     }
 
@@ -289,8 +309,8 @@ impl PhaseTable {
         h.u32(self.fine_stages as u32);
         h.u32(self.depth as u32);
         h.u32(self.phases.len() as u32);
-        for p in &self.phases {
-            h.u32(p.point.kind_code());
+        for p in self.phases.iter() {
+            h.u64(p.point.kind_code());
             h.u32(u32::from(p.skippable) | u32::from(p.init_only) << 1);
         }
         h.finish()
@@ -311,7 +331,7 @@ pub struct BandHops {
     pub distances: Vec<isize>,
 }
 
-fn push_band_points(phases: &mut Vec<Phase>, bands: &[BandHops], level: u8, path: u8) {
+fn push_band_points(phases: &mut Vec<Phase>, bands: &[BandHops], level: u8, path: u32) {
     for band in bands.iter().filter(|b| b.level == level) {
         for hop in 0..band.distances.len() as u8 {
             let point = ExchangePoint::BandSeam { level, path, axis: band.axis, high: band.high, hop };
@@ -320,14 +340,23 @@ fn push_band_points(phases: &mut Vec<Phase>, bands: &[BandHops], level: u8, path
     }
 }
 
+/// the path of substep `s` of a level inside its parent's substep `parent_path`, when a point's
+/// code holds it
+fn nested_path(parent_path: u32, substeps: u8, s: u8) -> Option<u32> {
+    parent_path
+        .checked_mul(u32::from(substeps))
+        .and_then(|p| p.checked_add(u32::from(s)))
+        .filter(|&p| p <= ExchangePoint::MAX_PATH)
+}
+
 /// the substeps of nested level `level` inside the substep `path` of its parent, in execution
 /// order: each substep's prolongation, its stages, the substeps of the level below with the
-/// exchange after their restriction, then its post-tail point. the path packs into the five low
-/// bits of the point's code, so a level holds at most 32 substeps along its path
+/// exchange after their restriction, then its post-tail point. a level's path numbers its
+/// substeps among every substep of the level in the root step
 fn nested_phases(
     phases: &mut Vec<Phase>,
     level: u8,
-    parent_path: u8,
+    parent_path: u32,
     substeps: u8,
     stages: u8,
     depth: u8,
@@ -336,11 +365,10 @@ fn nested_phases(
     let mandatory = |point| Phase { point, skippable: false, init_only: false };
     let skippable = |point| Phase { point, skippable: true, init_only: false };
     for s in 0..substeps {
-        let path = u32::from(parent_path) * u32::from(substeps) + u32::from(s);
-        if path >= 32 || level >= 8 || phases.len() > PhaseTable::CAPACITY {
-            return Err(PhaseTableError::Overflow { phases: phases.len().max(PhaseTable::CAPACITY + 1) });
+        let path = nested_path(parent_path, substeps, s).ok_or(PhaseTableError::Overflow { phases: PhaseTable::CAPACITY + 1 })?;
+        if phases.len() > PhaseTable::CAPACITY {
+            return Err(PhaseTableError::Overflow { phases: phases.len() });
         }
-        let path = path as u8;
         phases.push(mandatory(ExchangePoint::Nested { level, path, point: FinePoint::Prolong }));
         for k in 0..stages {
             phases.push(skippable(ExchangePoint::Nested { level, path, point: FinePoint::Troubled(k) }));
@@ -391,7 +419,7 @@ mod tests {
             }
             // every slip point lies before the post-step, so a rollback opens from any of them
             let post = slip.byte_of(P::PostStep).unwrap();
-            assert!(slip.phases().iter().enumerate().filter(|(_, p)| p.point.is_slip()).all(|(b, _)| (b as u8) < post));
+            assert!(slip.phases().iter().enumerate().filter(|(_, p)| p.point.is_slip()).all(|(b, _)| (b as u32) < post));
         }
     }
 
@@ -427,8 +455,8 @@ mod tests {
             ]
         );
         for (i, p) in order.iter().enumerate() {
-            assert_eq!(t.byte_of(*p), Some(i as u8));
-            assert_eq!(t.point_of(i as u8), Some(*p));
+            assert_eq!(t.byte_of(*p), Some(i as u32));
+            assert_eq!(t.point_of(i as u32), Some(*p));
         }
         assert_eq!(t.point_of(Epoch::NO_POINT), None);
         assert_eq!(t.byte_of(ExchangePoint::Restrict), None, "a flat table has no restriction");
@@ -494,8 +522,8 @@ mod tests {
         let r = t.rules();
         let b = |p| t.byte_of(p).unwrap() as usize;
         assert!(r.init_only[b(ExchangePoint::Seed { level: 2 })] && r.skippable[b(ExchangePoint::Seed { level: 2 })]);
-        for s in 0..2u8 {
-            let fine = |point| ExchangePoint::Fine { substep: s, point };
+        for s in 0..2u32 {
+            let fine = |point| ExchangePoint::Fine { substep: s as u8, point };
             let nested = |path, point| ExchangePoint::Nested { level: 2, path, point };
             // the level-2 substeps 2s and 2s + 1 sit between the level-1 stages and its post-tail
             assert!(bytes(fine(FinePoint::Stage(1))) < bytes(nested(2 * s, FinePoint::Prolong)));
@@ -513,9 +541,9 @@ mod tests {
     /// aliases a shallower one's point
     #[test]
     fn a_nested_table_codes_every_phase_once() {
-        for (stages, depth) in [(2u8, 3u8), (3, 3), (2, 4), (3, 4)] {
+        for (stages, depth) in [(2u8, 3u8), (3, 3), (2, 4), (3, 4), (2, 6), (3, 7)] {
             let t = PhaseTable::nested(stages, 2, depth).unwrap();
-            let mut codes: Vec<u32> = t.phases().iter().map(|p| p.point.kind_code()).collect();
+            let mut codes: Vec<u64> = t.phases().iter().map(|p| p.point.kind_code()).collect();
             let n = codes.len();
             codes.sort_unstable();
             codes.dedup();
@@ -524,18 +552,32 @@ mod tests {
         }
     }
 
-    /// the depth the wire byte cannot hold is refused at the table, before any session holds it
+    /// a nested table past 255 phases builds, and its every phase reads back from its index and
+    /// its index from it
     #[test]
-    fn a_nested_table_past_the_wire_byte_is_refused() {
-        assert!(matches!(PhaseTable::nested(3, 2, 5), Err(PhaseTableError::Overflow { .. })));
-        assert!(matches!(PhaseTable::nested(2, 2, 6), Err(PhaseTableError::Overflow { .. })));
+    fn a_nested_table_past_one_byte_indexes_every_phase() {
+        for (stages, depth) in [(3u8, 5u8), (2, 6)] {
+            let t = PhaseTable::nested(stages, 2, depth).unwrap();
+            assert!(t.phases().len() > 255, "{stages} stages, {depth} levels: {} phases fit one byte; the gate is vacuous", t.phases().len());
+            for (i, phase) in t.phases().iter().enumerate() {
+                assert_eq!(t.byte_of(phase.point), Some(i as u32));
+                assert_eq!(t.point_of(i as u32), Some(phase.point));
+            }
+        }
+    }
+
+    /// a substep path past the 24 bits of a point's code is refused; the largest one is not
+    #[test]
+    fn a_path_past_the_point_code_is_refused() {
+        assert_eq!(nested_path(ExchangePoint::MAX_PATH / 2, 2, 1), Some(ExchangePoint::MAX_PATH));
+        assert_eq!(nested_path(ExchangePoint::MAX_PATH / 2 + 1, 2, 0), None);
+        assert_eq!(nested_path(u32::MAX, 2, 0), None, "a product past u32 is refused, not wrapped");
     }
 
     #[test]
     fn the_table_refuses_overflow_and_emptiness() {
         assert_eq!(PhaseTable::flat(0), Err(PhaseTableError::Empty));
         assert_eq!(PhaseTable::refined(1, 1, 0), Err(PhaseTableError::Empty));
-        assert!(matches!(PhaseTable::refined(3, 30, 3), Err(PhaseTableError::Overflow { .. })));
         assert!(PhaseTable::refined(3, 2, 3).is_ok());
     }
 
