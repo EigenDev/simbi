@@ -2200,6 +2200,27 @@ mod tests {
         0.0
     }
 
+    /// equality lowers to the exact compare the VM evaluates: at equality, at the two zeros, one ulp
+    /// apart, just inside and just outside the window the VM once tolerated, and at NaN
+    #[test]
+    fn equality_lowers_as_the_vm_evaluates_it() {
+        let mut dag = Dag::new();
+        let x1 = dag.var_x1();
+        let x2 = dag.var_x2();
+        let eq = dag.binary(Op::Eq, x1, x2);
+        let (one, zero) = (dag.constant(1.0), dag.constant(0.0));
+        let root = dag.if_then_else(eq, one, zero);
+        let nodes = dag.nodes().to_vec();
+        let built = lower_dag_to_program(&nodes, &[root]).expect("equality lowers");
+        let expr = dag.compile(&[root]);
+        let one_ulp = f64::from_bits(1.0f64.to_bits() + 1);
+        for (a, b) in [(1.0, 1.0), (0.0, -0.0), (1.0, one_ulp), (0.0, 5.0e-15), (0.0, 2.0e-14), (f64::NAN, f64::NAN)] {
+            let want = expr.eval(a, b, x3_unused(), 0.0)[0];
+            let got = eval_lowered(&built, built.outputs()[0], &[("x_0", a), ("x_1", b)]);
+            assert_eq!(got.to_bits(), want.to_bits(), "at ({a}, {b}): VM {want} IR {got}");
+        }
+    }
+
     /// `Sgn` and `Mod` lower to the IR and evaluate as the VM does, bit for bit: the sign at
     /// both zeros and at NaN, and the truncated remainder of either sign and of a zero divisor
     #[test]

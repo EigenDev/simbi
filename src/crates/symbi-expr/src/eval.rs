@@ -86,8 +86,9 @@ pub fn evaluate(
                     0.0
                 }
             }
+            // exact IEEE equality, as the compiled kernels compare
             Op::Eq => {
-                if (s0 - s1).abs() < 1e-14 {
+                if s0 == s1 {
                     1.0
                 } else {
                     0.0
@@ -390,6 +391,24 @@ mod tests {
         let expr = dag.compile(&[r]);
         assert!(approx(expr.eval(1.0, 0.0, 0.0, 0.0)[0], 1.0));
         assert!(approx(expr.eval(-1.0, 0.0, 0.0, 0.0)[0], 0.0));
+    }
+
+    /// equality is exact: a difference of one ulp, or of anything below the old 1e-14 window,
+    /// separates two values, and a NaN equals nothing
+    #[test]
+    fn eval_equality_is_exact() {
+        let mut dag = Dag::new();
+        let x = dag.var_x1();
+        let y = dag.var_x2();
+        let eq = dag.binary(Op::Eq, x, y);
+        let expr = dag.compile(&[eq]);
+        let one_ulp = f64::from_bits(1.0f64.to_bits() + 1);
+        assert_eq!(expr.eval(1.0, 1.0, 0.0, 0.0)[0], 1.0, "a value equals itself");
+        assert_eq!(expr.eval(0.0, -0.0, 0.0, 0.0)[0], 1.0, "the two zeros are equal");
+        assert_eq!(expr.eval(1.0, one_ulp, 0.0, 0.0)[0], 0.0, "values one ulp apart are distinct");
+        assert_eq!(expr.eval(0.0, 5.0e-15, 0.0, 0.0)[0], 0.0, "values 5e-15 apart (inside the old window) are distinct");
+        assert_eq!(expr.eval(0.0, 2.0e-14, 0.0, 0.0)[0], 0.0, "values 2e-14 apart (outside the old window) are distinct");
+        assert_eq!(expr.eval(f64::NAN, f64::NAN, 0.0, 0.0)[0], 0.0, "a NaN equals nothing");
     }
 
     #[test]
