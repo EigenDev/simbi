@@ -355,6 +355,14 @@ impl<S: Scalar> Scalar for Dual<S> {
         }
     }
     #[inline]
+    fn fmod(self, b: Self) -> Self {
+        // away from the jumps, a mod b = a - q b with the integer q = trunc(a / b) held fixed:
+        // d(a mod b) = da - q db
+        let ratio = self.value / b.value;
+        let q = S::select(ratio.cmp_ge(S::ZERO), ratio.floor(), ratio.ceil());
+        Self { value: self.value.fmod(b.value), tangent: self.tangent - q * b.tangent }
+    }
+    #[inline]
     fn exp(self) -> Self {
         let ev = self.value.exp();
         Self {

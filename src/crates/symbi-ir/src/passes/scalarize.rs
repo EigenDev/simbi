@@ -1816,6 +1816,9 @@ fn scalar_element_wise(op: ElementWiseOp, mut inputs: Vec<ScalarExpr>) -> Scalar
         // (`a.div_euclid(b)`); the cuda emitter special-cases the name into an
         // explicit floor-division ternary; the interpreter floors the quotient.
         ElementWiseOp::FloorDiv => method_binary("div_euclid", &mut inputs),
+        // floating remainder: the `fmod` carrier method on the host (rust `%`), C `fmod` on cuda,
+        // a `%` shim in the jit
+        ElementWiseOp::Rem => method_binary("fmod", &mut inputs),
         // operator-based unary
         ElementWiseOp::Neg => ScalarExpr::UnaryOp(UnaryKind::Neg, Box::new(pop(&mut inputs))),
         // method-based unary. abs stays a method call (same ternary rationale as

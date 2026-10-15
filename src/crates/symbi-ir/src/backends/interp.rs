@@ -304,6 +304,7 @@ fn eval_method(recv: f64, method: &str, args: &[f64]) -> Value {
         // integer floor division held in the f64-based interpreter: the operands
         // are exact small integers, so floor(a/b) is the exact euclidean quotient.
         "div_euclid" => Value::F((recv / args[0]).floor()),
+        "fmod" => Value::F(recv % args[0]),
         "sin" => Value::F(recv.sin()),
         "cos" => Value::F(recv.cos()),
         "tan" => Value::F(recv.tan()),

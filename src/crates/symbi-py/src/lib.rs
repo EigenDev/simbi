@@ -997,11 +997,12 @@ mod source_collection_tests {
         let sources = [SourcePayload {
             origin: "source_expressions[3]".to_string(),
             json: r#"{
-                "kind":"force", "dim":1, "outputs":[2], "params":[],
+                "kind":"force", "dim":1, "outputs":[3], "params":[],
                 "vocabulary":{"reads":[],"params":[]},
                 "nodes":[{"op":"CONSTANT","value":1.0},
                          {"op":"CONSTANT","value":2.0},
-                         {"op":"MOD","left":0,"right":1}]
+                         {"op":"GT","left":0,"right":1},
+                         {"op":"ADD","left":2,"right":0}]
             }"#
             .to_string(),
         }];
@@ -1073,15 +1074,16 @@ mod source_collection_tests {
 
     #[test]
     fn census_lower_error_names_the_registration_index() {
-        // an unlowerable expression must be reported against the registration that
-        // carries it, not as an anonymous failure at the first sample.
+        // an unlowerable expression (arithmetic on a comparison's mask) must be reported against
+        // the registration that carries it, not as an anonymous failure at the first sample.
         let censuses = [SourcePayload {
             origin: "census_expressions[3]".to_string(),
-            json: r#"{ "name":"bad", "axes":[], "values":[2], "value_names":["v"],
+            json: r#"{ "name":"bad", "axes":[], "values":[3], "value_names":["v"],
                        "op":"add", "params":[],
                        "nodes":[{"op":"CONSTANT","value":1.0},
                                 {"op":"CONSTANT","value":2.0},
-                                {"op":"MOD","left":0,"right":1}] }"#
+                                {"op":"GT","left":0,"right":1},
+                                {"op":"ADD","left":2,"right":0}] }"#
                 .to_string(),
         }];
         let error = lower_configured_censuses(&censuses).expect_err("unsupported op was accepted");

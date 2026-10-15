@@ -256,6 +256,9 @@ pub trait Scalar:
     /// principal arctangent, total on R with range (-pi/2, pi/2).
     fn atan(self) -> Self;
     fn atan2(self, other: Self) -> Self;
+    /// the truncated remainder `self - trunc(self / other) * other`, computed exactly (C `fmod`):
+    /// its sign follows `self`, and it is NaN for a zero `other`
+    fn fmod(self, other: Self) -> Self;
 
     fn exp(self) -> Self;
     fn ln(self) -> Self;
@@ -638,6 +641,10 @@ impl Scalar for f64 {
     fn atan2(self, b: f64) -> f64 {
         f64::atan2(self, b)
     }
+    #[inline(always)]
+    fn fmod(self, b: f64) -> f64 {
+        self % b
+    }
 
     #[inline(always)]
     fn exp(self) -> f64 {
@@ -830,6 +837,10 @@ impl Scalar for f32 {
     #[inline(always)]
     fn atan2(self, b: f32) -> f32 {
         f32::atan2(self, b)
+    }
+    #[inline(always)]
+    fn fmod(self, b: f32) -> f32 {
+        self % b
     }
 
     #[inline(always)]

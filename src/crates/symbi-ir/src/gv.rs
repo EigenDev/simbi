@@ -1696,6 +1696,10 @@ impl<'t> symbi_carrier::Scalar for Gv<'t> {
     fn atan(self) -> Gv<'t> {
         self.unop(ElementWiseOp::Atan)
     }
+    fn fmod(self, o: Gv<'t>) -> Gv<'t> {
+        let (a, b) = (self.node(), o.node());
+        Gv::of(with_trace(|t| t.graph.element_wise(ElementWiseOp::Rem, vec![a, b], None)))
+    }
     fn atan2(self, o: Gv<'t>) -> Gv<'t> {
         let (y, x) = (self.node(), o.node());
         Gv::of(with_trace(|t| {

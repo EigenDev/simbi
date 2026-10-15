@@ -118,6 +118,9 @@ extern "C" fn sh_powi(a: f64, b: f64) -> f64 {
 extern "C" fn sh_div_euclid(a: f64, b: f64) -> f64 {
     (a / b).floor()
 }
+extern "C" fn sh_fmod(a: f64, b: f64) -> f64 {
+    a % b
+}
 
 // f32 twins of the shims: an f32 kernel calls these directly (native f32 libm), so the CLIF
 // call passes f32 operands to an f32 signature — no promote/demote, bit-matching the AOT f32
@@ -163,6 +166,9 @@ extern "C" fn sh_powi32(a: f32, b: f32) -> f32 {
 extern "C" fn sh_div_euclid32(a: f32, b: f32) -> f32 {
     (a / b).floor()
 }
+extern "C" fn sh_fmod32(a: f32, b: f32) -> f32 {
+    a % b
+}
 
 /// `(symbol, arity-incl-receiver, fn-ptr)` for every shimmed method. `arity` is the total
 /// float args the CLIF call passes (receiver + method args). the f32 twin has the same names
@@ -192,6 +198,7 @@ fn shim_table_f32() -> &'static [(&'static str, usize, *const u8)] {
         ("hypot", 2, sh_hypot32 as *const u8),
         ("powi", 2, sh_powi32 as *const u8),
         ("div_euclid", 2, sh_div_euclid32 as *const u8),
+        ("fmod", 2, sh_fmod32 as *const u8),
     ]
 }
 
@@ -222,6 +229,7 @@ fn shim_table() -> &'static [(&'static str, usize, *const u8)] {
         ("hypot", 2, sh_hypot as *const u8),
         ("powi", 2, sh_powi as *const u8),
         ("div_euclid", 2, sh_div_euclid as *const u8),
+        ("fmod", 2, sh_fmod as *const u8),
     ]
 }
 

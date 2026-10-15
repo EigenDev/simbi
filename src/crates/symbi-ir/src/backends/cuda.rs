@@ -648,6 +648,7 @@ fn cuda_method_to_fn(method: &str) -> &str {
         "asinh" | "acosh" | "atanh" => method,
         "powf" => "pow",
         "hypot" => "hypot",
+        "fmod" => "fmod",
         // fallback: pass through and trust nvcc to either find or error.
         other => other,
     }

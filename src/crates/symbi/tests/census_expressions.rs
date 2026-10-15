@@ -21,7 +21,7 @@ use symbi::regimes::substrate_gpu::field_segmented_reduce;
 use symbi::regimes::substrate_newton::AdiabaticSubstrateKernelSet;
 use symbi::sim::state::*;
 use symbi_algebra::Tensor;
-use symbi_geometry::Spherical;
+use symbi_geometry::{Cartesian, Spherical};
 use symbi_hydro::eos::IdealGas;
 use symbi_hydro::newtonian::Newtonian;
 use symbi_hydro::quantity::{Density, Pressure};
@@ -32,6 +32,7 @@ use symbi_source_compile::CensusConfig;
 use symbi_xpu::{CpuSpace, HostMemory};
 
 type SimSph = SimState<Newtonian, 1, Spherical, IdealGas<f64>, CpuSpace, HostMemory>;
+type SimCart = SimState<Newtonian, 1, Cartesian, IdealGas<f64>, CpuSpace, HostMemory>;
 
 const GAMMA: f64 = 1.4;
 const N: usize = 256;
@@ -478,4 +479,154 @@ fn a_covered_region_is_excluded_so_a_refined_grid_counts_it_once() {
         (inner + leaves - whole).abs() <= 1.0e-12 * whole,
         "the covered and leaf halves do not partition the total: {inner:e} + {leaves:e} != {whole:e}"
     );
+}
+
+/// the atmosphere on a cartesian line over the same span, where a cell's centroid is its midpoint
+/// on both engines, so a comparison of them measures the ops alone
+fn build_cartesian_sim() -> SimCart {
+    let sim = SimCart::build(Newtonian, IdealGas { gamma: GAMMA }, Cartesian)
+        .cells([N])
+        .origin([R_LO])
+        .spacing([DR])
+        .boundaries(Boundaries::uniform(BoundaryType::Outflow))
+        .allocate()
+        .expect("cartesian sim construction failed")
+        .set_initial(|x| Prim::adiabatic(Density(density_at(x[0])), Tensor::new([0.0]), Pressure(pressure_at(x[0]))))
+        .build();
+    let sub = AdiabaticSubstrateKernelSet::<HostMemory, f64, 1>::new(GAMMA, 0.4, &sim.geom.allocated);
+    sub.c2p(&sim.store);
+    sim
+}
+
+/// a census of signs and truncated remainders: the compiled map, the one tiles and workers run,
+/// writes every accumulator cell bit for bit as the per-cell interpreter does. the signs meet
+/// both zeros (the gas is at rest, so `-v` is a negative zero) and the remainders take dividends
+/// of either sign and a zero divisor
+#[test]
+fn a_census_of_signs_and_remainders_compiles_to_the_interpreters_values() {
+    let sim = build_cartesian_sim();
+    let cfg = CensusConfig::from_json(
+        r#"{
+            "name": "signs",
+            "axes": [],
+            "values": [3, 7, 10, 12],
+            "value_names": ["side", "phase", "rest", "undefined"],
+            "op": "add",
+            "params": [],
+            "nodes": [
+                {"op": "VARIABLE_X1"},
+                {"op": "CONSTANT", "value": 2.0},
+                {"op": "SUBTRACT", "left": 0, "right": 1},
+                {"op": "SGN", "left": 2},
+                {"op": "CONSTANT", "value": 0.37},
+                {"op": "CONSTANT", "value": 2.5},
+                {"op": "SUBTRACT", "left": 0, "right": 5},
+                {"op": "MOD", "left": 6, "right": 4},
+                {"op": "VARIABLE_VEL1"},
+                {"op": "NEG", "left": 8},
+                {"op": "SGN", "left": 9},
+                {"op": "CONSTANT", "value": 0.0},
+                {"op": "MOD", "left": 0, "right": 11}
+            ]
+        }"#,
+    )
+    .expect("census config parses");
+    let ev = CensusEvaluator::new(&cfg).expect("census compiles");
+    ev.lower().expect("signs and remainders lower to a compiled map");
+    let interpreted = sim.census_fields(&ev, None).expect("host-resident sim");
+    let compiled = sim.store.census_scratch(&ev).expect("host-resident sim");
+    assert!(
+        symbi::regimes::substrate_kernels::census_compiled::census_map_compiled(&sim.store, &ev, &compiled.values, &compiled.segment, true),
+        "the compiled map declined the census"
+    );
+    let (mut negative, mut positive, mut zero) = (0, 0, 0);
+    for c in sim.geom.interior.iter() {
+        for (k, (want, got)) in interpreted.values.iter().zip(&compiled.values).enumerate() {
+            let (want, got) = (*want.view().at(c), *got.view().at(c));
+            assert_eq!(got.to_bits(), want.to_bits(), "value {k} at {c:?}: interpreted {want} compiled {got}");
+        }
+        let phase = *interpreted.values[1].view().at(c);
+        match phase.partial_cmp(&0.0) {
+            Some(std::cmp::Ordering::Less) => negative += 1,
+            Some(std::cmp::Ordering::Greater) => positive += 1,
+            _ => zero += 1,
+        }
+        assert_eq!(*interpreted.values[2].view().at(c), 0.0, "the sign of a resting gas");
+        assert!(interpreted.values[3].view().at(c).is_nan(), "a remainder by zero");
+    }
+    assert!(negative > 0 && positive > 0, "the remainders take one sign ({negative} below, {positive} above, {zero} zero); the gate is vacuous");
+}
+
+/// every expression op compiles into the census map and evaluates there bit for bit as the
+/// interpreter does: a census that constructs runs compiled, the form tiles and workers sample.
+/// each op takes arguments inside its domain; the comparisons and logic select between two
+/// constants, as a census accumulates scalars
+#[test]
+fn every_expression_op_compiles_into_the_census_map_as_the_interpreter_evaluates_it() {
+    let sim = build_cartesian_sim();
+    let mut nodes: Vec<String> = Vec::new();
+    let mut push = |node: String| -> usize {
+        nodes.push(node);
+        nodes.len() - 1
+    };
+    let x = push(r#"{"op": "VARIABLE_X1"}"#.into());
+    let rho = push(r#"{"op": "VARIABLE_RHO"}"#.into());
+    let pre = push(r#"{"op": "VARIABLE_PRESSURE"}"#.into());
+    let vel = push(r#"{"op": "VARIABLE_VEL1"}"#.into());
+    let dv = push(r#"{"op": "VARIABLE_DV"}"#.into());
+    let t = push(r#"{"op": "VARIABLE_T"}"#.into());
+    let p0 = push(r#"{"op": "PARAMETER", "param_idx": 0}"#.into());
+    let c = |v: f64| format!(r#"{{"op": "CONSTANT", "value": {v:?}}}"#);
+    let (fifth, one, zero, two) = (push(c(0.2)), push(c(1.0)), push(c(0.0)), push(c(2.5)));
+    let un = |op: &str, a: usize| format!(r#"{{"op": "{op}", "left": {a}}}"#);
+    let bin = |op: &str, a: usize, b: usize| format!(r#"{{"op": "{op}", "left": {a}, "right": {b}}}"#);
+    // u in (0.1, 0.9) for the inverse trigonometric and hyperbolic ops; w = x + 1 > 1 for acosh
+    let u = push(bin("MULTIPLY", x, fifth));
+    let w = push(bin("ADD", x, one));
+    let mut values: Vec<usize> = vec![x, rho, pre, vel, dv, t, p0];
+    for op in ["ADD", "SUBTRACT", "MULTIPLY", "DIVIDE", "POW", "MIN", "MAX", "MOD", "ATAN2"] {
+        values.push(push(bin(op, x, two)));
+    }
+    for op in ["NEG", "LOG", "LOG10", "ABS", "SIN", "COS", "TAN", "ATAN", "EXP", "SQRT", "SINH", "COSH", "TANH", "ASINH", "CEIL", "FLOOR", "SGN"] {
+        values.push(push(un(op, x)));
+    }
+    for op in ["ASIN", "ACOS", "ATANH"] {
+        values.push(push(un(op, u)));
+    }
+    values.push(push(un("ACOSH", w)));
+    let gt = push(bin("GT", x, two));
+    let lt = push(bin("LT", x, two));
+    let masks = [
+        gt,
+        lt,
+        push(bin("GE", x, two)),
+        push(bin("LE", x, two)),
+        push(bin("EQ", x, x)),
+        push(bin("AND", gt, lt)),
+        push(bin("OR", gt, lt)),
+        push(un("NOT", gt)),
+    ];
+    for m in masks {
+        values.push(push(format!(r#"{{"op": "IF_THEN_ELSE", "condition": {m}, "true_case": {one}, "false_case": {zero}}}"#)));
+    }
+    let names: Vec<String> = (0..values.len()).map(|k| format!("\"v{k}\"")).collect();
+    let json = format!(
+        r#"{{"name": "every_op", "axes": [], "values": {values:?}, "value_names": [{}], "op": "add", "params": [0.75], "nodes": [{}]}}"#,
+        names.join(", "),
+        nodes.join(", ")
+    );
+    let cfg = CensusConfig::from_json(&json).expect("census config parses");
+    let ev = CensusEvaluator::new(&cfg).expect("census compiles");
+    let interpreted = sim.census_fields(&ev, None).expect("host-resident sim");
+    let compiled = sim.store.census_scratch(&ev).expect("host-resident sim");
+    assert!(
+        symbi::regimes::substrate_kernels::census_compiled::census_map_compiled(&sim.store, &ev, &compiled.values, &compiled.segment, true),
+        "the compiled map declined a census of every op"
+    );
+    for c in sim.geom.interior.iter() {
+        for (k, (want, got)) in interpreted.values.iter().zip(&compiled.values).enumerate() {
+            let (want, got) = (*want.view().at(c), *got.view().at(c));
+            assert_eq!(got.to_bits(), want.to_bits(), "value {k} at {c:?}: interpreted {want} compiled {got}");
+        }
+    }
 }

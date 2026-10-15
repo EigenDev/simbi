@@ -45,9 +45,6 @@ const CELL_VOLUME_REJECTION: &str = "cell volume is not a source-term input: a s
 /// a `symbi-expr` op falls outside the `symbi-ir` vocabulary, or the DAG is malformed.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum BridgeError {
-    /// op lies outside the carrier-traceable `symbi-ir` primitives (`Sgn`, `Mod`). rejected
-    /// at bridge time — the user gets a loud error, so every emitted kernel matches the script.
-    UnsupportedOp(Op),
     /// a node references a child index outside the already-defined prefix (forward ref / out of
     /// range). well-formed DAGs are topologically ordered, so this means malformed input.
     BadChild { node: usize, child: usize },
@@ -202,6 +199,17 @@ fn eval_dag<'t>(cx: TraceCx<'t>, nodes: &[Node]) -> Result<Vec<ExprValue<'t>>, B
                 let (a, b) = binary(&map)?;
                 ExprValue::Scalar(a.atan2(b))
             }
+            Mod => {
+                let (a, b) = binary(&map)?;
+                ExprValue::Scalar(a.fmod(b))
+            }
+            // +1 above zero, -1 below, 0 at either zero and at NaN, as the interpreter evaluates it
+            Sgn => {
+                let a = unary(&map)?;
+                let (zero, one) = (cx.lit(0.0), cx.lit(1.0));
+                let below = Gv::select(a.cmp_lt(zero), -one, zero);
+                ExprValue::Scalar(Gv::select(a.cmp_gt(zero), one, below))
+            }
             Neg => ExprValue::Scalar(-unary(&map)?),
             Abs => ExprValue::Scalar(unary(&map)?.abs()),
             Sqrt => ExprValue::Scalar(unary(&map)?.sqrt()),
@@ -254,7 +262,6 @@ fn eval_dag<'t>(cx: TraceCx<'t>, nodes: &[Node]) -> Result<Vec<ExprValue<'t>>, B
                 Payload::Unary(c) => ExprValue::Mask(!child(&map, i, c)?.mask(i, op)?),
                 _ => return Err(bad()),
             },
-            Sgn | Mod => return Err(BridgeError::UnsupportedOp(op)),
         };
         map.push(value);
     }
@@ -2193,18 +2200,38 @@ mod tests {
         0.0
     }
 
+    /// `Sgn` and `Mod` lower to the IR and evaluate as the VM does, bit for bit: the sign at
+    /// both zeros and at NaN, and the truncated remainder of either sign and of a zero divisor
     #[test]
-    fn unsupported_ops_are_rejected_not_miscompiled() {
-        // `Sgn` / `Mod` fall outside the carrier-traceable primitives — the bridge must reject them.
+    fn sign_and_remainder_lower_as_the_vm_evaluates_them() {
         let mut dag = Dag::new();
         let x1 = dag.var_x1();
+        let x2 = dag.var_x2();
         let sgn = dag.unary(Op::Sgn, x1);
+        let rem = dag.binary(Op::Mod, x1, x2);
         let nodes = dag.nodes().to_vec();
-        let result = lower_dag_to_program(&nodes, &[sgn]);
-        assert!(
-            matches!(result, Err(BridgeError::UnsupportedOp(Op::Sgn))),
-            "Sgn must be rejected as unsupported",
-        );
+        let built = lower_dag_to_program(&nodes, &[sgn, rem]).expect("sgn and mod lower");
+        let expr = dag.compile(&[sgn, rem]);
+        let cases = [
+            (2.5, 0.75),
+            (-2.5, 0.75),
+            (2.5, -0.75),
+            (-7.25, -2.0),
+            (0.0, 3.0),
+            (-0.0, 3.0),
+            (1.0e300, 3.0),
+            (5.0, 0.0),
+            (f64::NAN, 1.0),
+            (f64::INFINITY, 2.0),
+            (3.0, f64::INFINITY),
+        ];
+        for (a, b) in cases {
+            let want = expr.eval(a, b, x3_unused(), 0.0);
+            for (k, &out) in built.outputs().iter().enumerate() {
+                let got = eval_lowered(&built, out, &[("x_0", a), ("x_1", b)]);
+                assert_eq!(got.to_bits(), want[k].to_bits(), "output {k} at ({a}, {b}): VM {} IR {got}", want[k]);
+            }
+        }
     }
 }
 

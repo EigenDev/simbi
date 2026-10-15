@@ -164,6 +164,9 @@ pub enum ElementWiseOp {
     // possibly-negative fine ghost index). integer-only: renders as `div_euclid`
     // (rust), an explicit floor-division ternary (cuda), and stays in integer space.
     FloorDiv,
+    // truncated floating remainder (C `fmod`, rust `%` on floats): exact, its sign follows the
+    // dividend
+    Rem,
     // arithmetic unary
     Neg,
     Abs,
@@ -239,6 +242,7 @@ impl ElementWiseOp {
             | ElementWiseOp::Mul
             | ElementWiseOp::Div
             | ElementWiseOp::FloorDiv
+            | ElementWiseOp::Rem
             | ElementWiseOp::Min
             | ElementWiseOp::Max
             | ElementWiseOp::Eq
@@ -310,6 +314,7 @@ impl ElementWiseOp {
                 | ElementWiseOp::Ceil
                 | ElementWiseOp::Round
                 | ElementWiseOp::Trunc
+                | ElementWiseOp::Rem
                 | ElementWiseOp::Sin
                 | ElementWiseOp::Cos
                 | ElementWiseOp::Acos
@@ -328,6 +333,7 @@ impl ElementWiseOp {
             ElementWiseOp::Mul => "Mul",
             ElementWiseOp::Div => "Div",
             ElementWiseOp::FloorDiv => "FloorDiv",
+            ElementWiseOp::Rem => "Rem",
             ElementWiseOp::Min => "Min",
             ElementWiseOp::Max => "Max",
             ElementWiseOp::Neg => "Neg",

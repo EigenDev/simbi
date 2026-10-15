@@ -284,13 +284,14 @@ def test_the_backend_rejects_a_census_it_cannot_lower() -> None:
     g = expr.ExprGraph()
     payload = _sod_payload()
     cfg = expr.Census(name="c", values={"m": expr.density(g)}).serialize()
-    # mod has no carrier primitive, so the bridge cannot lower it.
+    # a comparison yields a mask, and arithmetic on a mask has no lowering
     cfg["nodes"] = [
         {"op": "CONSTANT", "value": 1.0},
         {"op": "CONSTANT", "value": 2.0},
-        {"op": "MOD", "left": 0, "right": 1},
+        {"op": "GT", "left": 0, "right": 1},
+        {"op": "ADD", "left": 2, "right": 0},
     ]
-    cfg["values"] = [2]
+    cfg["values"] = [3]
     payload["census_expressions"] = [cfg]
     with pytest.raises(ValueError, match=r"census_expressions\[0\] lower:"):
         backend.validate_simulation(sim_info=payload)
