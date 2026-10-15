@@ -11464,13 +11464,14 @@ fn validate_refined_launch_scope(cfg: &Config) -> Result<(), String> {
         return refused(&format!("a refined patch on the periodic face of axis {ax}"));
     }
     // a magnetized nested level reads its parent's faces through stencils compiled on the parent's
-    // open partition, so a nested patch keeps clear of every periodic face; the first patch may
-    // span an uncut periodic axis, whose levels wrap within each tile
+    // partition; along an uncut periodic axis every level wraps within each tile, so a nested patch
+    // may span it, and a nested patch on the periodic face of a cut axis is refused by the shared
+    // tiled admission
     if magnetized && nested > 1 {
         let nested_seam = match cfg.dims {
-            1 => nested_patch_on_periodic_face::<1>(cfg, false)?,
-            2 => nested_patch_on_periodic_face::<2>(cfg, false)?,
-            _ => nested_patch_on_periodic_face::<3>(cfg, false)?,
+            1 => nested_patch_on_periodic_face::<1>(cfg, true)?,
+            2 => nested_patch_on_periodic_face::<2>(cfg, true)?,
+            _ => nested_patch_on_periodic_face::<3>(cfg, true)?,
         };
         if let Some(ax) = nested_seam {
             return refused(&format!("a nested magnetized patch on the periodic face of axis {ax}"));
@@ -12136,6 +12137,17 @@ where
     let mut nested_frames: Vec<Vec<[isize; D]>> = Vec::new();
     let mut nested_roots: Vec<Vec<usize>> = Vec::new();
     let mut nested_origins: Vec<[isize; D]> = Vec::new();
+    // a nested level wraps an axis its parent wraps (a periodic axis cut into tiles) where its region
+    // spans the whole parent level, as the first level wraps one the root wraps; its plans compile
+    // on that topology
+    let mut nested_topologies: Vec<symbi::sim::decomp::Topology<D>> = Vec::new();
+    let mut parent_wraps = fine_wraps;
+    // the axes each level spans whole along a periodic axis of the domain, cut or not: a parent face
+    // stencil reads the periodic image of the parent's faces there, as the root's stencil does
+    let whole_periodic: [bool; D] = std::array::from_fn(|ax| whole_grid::<D>(cfg).periodic(ax));
+    let fine_spans: [bool; D] = std::array::from_fn(|ax| whole_periodic[ax] && patch[ax] == (0, n[ax]));
+    let mut nested_spans: Vec<[bool; D]> = Vec::new();
+    let mut parent_spans = fine_spans;
     let mut parent_origin: [isize; D] = std::array::from_fn(|a| (2 * patch[a].0) as isize);
     for level in 2..depth {
         let (parent_part, parent_frames, parent_roots) = if level == 2 {
@@ -12154,6 +12166,16 @@ where
             }
             rel[a] = (lo as usize, hi as usize);
         }
+        let parent_cells: [usize; D] = {
+            let pc = parent_part.counts();
+            std::array::from_fn(|a| (0..pc[a]).map(|ii| { let mut tc = [0; D]; tc[a] = ii; parent_part.tile_extents(tc)[a].1 }).sum())
+        };
+        let wraps: [bool; D] = std::array::from_fn(|a| parent_wraps[a] && rel[a] == (0, parent_cells[a]));
+        nested_topologies.push(symbi::sim::decomp::Topology::wrapping(wraps));
+        parent_wraps = wraps;
+        let spans: [bool; D] = std::array::from_fn(|a| parent_spans[a] && rel[a] == (0, parent_cells[a]));
+        nested_spans.push(spans);
+        parent_spans = spans;
         let part = FinePartition::of(parent_part, rel, 2)?;
         let level_counts = part.partition.counts();
         let parent_counts = parent_part.counts();
@@ -12180,7 +12202,7 @@ where
     let nested_state_plans: Vec<ExchangePlan<D>> = (0..nested_parts.len())
         .map(|i| {
             let frames = &nested_frames[i];
-            ExchangePlan::compile_shifted(&nested_parts[i].partition, &open, &schema, ng + 1, &|t: TileId| frames[t.0 as usize])
+            ExchangePlan::compile_shifted(&nested_parts[i].partition, &nested_topologies[i], &schema, ng + 1, &|t: TileId| frames[t.0 as usize])
                 .map_err(|e| e.to_string())
         })
         .collect::<Result<_, _>>()?;
@@ -12196,7 +12218,7 @@ where
         for i in 0..nested_parts.len() {
             let frames = &nested_frames[i];
             plans.push(
-                ExchangePlan::compile_shifted(&nested_parts[i].partition, &open, &coefficient_schema, ng + 1, &|t: TileId| frames[t.0 as usize])
+                ExchangePlan::compile_shifted(&nested_parts[i].partition, &nested_topologies[i], &coefficient_schema, ng + 1, &|t: TileId| frames[t.0 as usize])
                     .map_err(|e| e.to_string())?,
             );
         }
@@ -12219,7 +12241,7 @@ where
         for i in 0..nested_parts.len() {
             let frames = &nested_frames[i];
             plans.push(
-                ExchangePlan::compile_shifted(&nested_parts[i].partition, &open, &band_schema, ng + 1, &|t: TileId| frames[t.0 as usize])
+                ExchangePlan::compile_shifted(&nested_parts[i].partition, &nested_topologies[i], &band_schema, ng + 1, &|t: TileId| frames[t.0 as usize])
                     .map_err(|e| e.to_string())?,
             );
         }
@@ -12228,15 +12250,19 @@ where
     digests.extend(band_plans.iter().map(|p| p.digest));
     let nested_seed_plans: Vec<ExchangePlan<D>> = (0..nested_parts.len())
         .map(|i| {
-            let (parent_part, frames) =
-                if i == 0 { (&fine_partition.partition, &fine_frames) } else { (&nested_parts[i - 1].partition, &nested_frames[i - 1]) };
-            ExchangePlan::compile_shifted(parent_part, &open, &cons_schema, ng + 1, &|t: TileId| frames[t.0 as usize])
+            let (parent_part, frames, topology) = if i == 0 {
+                (&fine_partition.partition, &fine_frames, &fine_topology)
+            } else {
+                (&nested_parts[i - 1].partition, &nested_frames[i - 1], &nested_topologies[i - 1])
+            };
+            ExchangePlan::compile_shifted(parent_part, topology, &cons_schema, ng + 1, &|t: TileId| frames[t.0 as usize])
                 .map_err(|e| e.to_string())
         })
         .collect::<Result<_, _>>()?;
     // a magnetized nested level reads its parent's faces past a tile's face lattice from a stencil
     // gathered on the parent's partition: the boxes of the level's patch on every parent tile, in
     // whole-parent-level face indices, the parent partition's outer edges its coarse-fine boundary
+    // except along an axis the parent wraps, where the stencil reads the periodic image
     let nested_stencil_plans: Vec<Option<ExchangePlan<D>>> = (0..nested_parts.len())
         .map(|i| {
             if !magnetized {
@@ -12263,7 +12289,8 @@ where
                 };
                 boxes.push(tile);
             }
-            ExchangePlan::face_stencil_shifted(parent_part, &open, &boxes, ng + 1, &|t: TileId| frames[t.0 as usize])
+            let topology = symbi::sim::decomp::Topology::wrapping(if i == 0 { fine_spans } else { nested_spans[i - 1] });
+            ExchangePlan::face_stencil_shifted(parent_part, &topology, &boxes, ng + 1, &|t: TileId| frames[t.0 as usize])
                 .map(Some)
                 .map_err(|e| e.to_string())
         })
