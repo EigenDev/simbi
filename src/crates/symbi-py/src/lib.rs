@@ -9623,25 +9623,6 @@ fn validate_tiled_march(cfg: &Config) -> Result<(), String> {
             ));
         }
     }
-    // the tiles sample a census at each accepted root step through its compiled map, merging
-    // their exact partials into the whole grid's sample; a refined level's own steps run
-    // independently on each tile
-    for evaluator in lower_configured_censuses(&cfg.census_jsons)? {
-        let name = evaluator.spec().name().to_string();
-        if cfg.refinement_enabled && evaluator.spec().cadence() == symbi_sim::census::Cadence::PerLevelStep {
-            return Err(format!(
-                "census '{name}' samples every refined level's own steps, which with several tiles \
-                 awaits a cross-tile reduction inside the subcycle; sample it per root step or run on \
-                 one device"
-            ));
-        }
-        if let Err(e) = evaluator.lower() {
-            return Err(format!(
-                "census '{name}' has no compiled map ({e}); several tiles sample a census through its \
-                 compiled map alone; run it on one device"
-            ));
-        }
-    }
     Ok(())
 }
 

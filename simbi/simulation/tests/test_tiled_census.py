@@ -15,8 +15,11 @@
 #   continues the sampling schedule: the records of the two segments
 #   concatenate to the uninterrupted record, with no duplicate and no extra
 #   first sample;
-# - a census sampling every refined level's own steps on tiles is refused by
-#   name before any output;
+# - a census sampling every refined level's own steps records the single
+#   hierarchy's rows, level by level, on two host tiles and on two and three
+#   launched workers, the three cutting the root so two workers hold no tile
+#   of the refined level, and a run resumed onto another partition continues
+#   every level's schedule;
 # - a rigid wall cut by the tiles leaves its interior out of every tile's and
 #   every worker's census: the counted cells equal an independent count of the
 #   leaf cells whose centroid lies outside the wall, unrefined and refined;
@@ -45,6 +48,7 @@ from simbi.reader.census import read_census
 from simbi.simulation import runner
 from simbi.simulation.tests.test_launch import _layout
 from simbi.types.bodies import BodyCapability, ImmersedBodyConfig, RigidProperties
+from simbi.types.shape import Shape
 from simbi_configs.examples.newtonian.refined_blast import RefinedBlast
 
 pytestmark = pytest.mark.simulation
@@ -69,7 +73,7 @@ def _shells(cadence=expr.Cadence.ROOT_STEP):
     ).serialize()
 
 
-def _peak():
+def _peak(cadence=expr.Cadence.ROOT_STEP):
     g = expr.ExprGraph()
     x = expr.variable("x", g)
     return expr.Census(
@@ -78,6 +82,7 @@ def _peak():
         values={"pressure": expr.pressure(g)},
         op=expr.ReductionOp.MAX,
         sample_interval=INTERVAL,
+        cadence=cadence,
     ).serialize()
 
 
@@ -94,7 +99,7 @@ class FlatCensusedBlast(CensusedBlast):
 class PerLevelCensusedBlast(RefinedBlast):
     @property
     def census_expressions(self):
-        return [_shells(expr.Cadence.PER_LEVEL_STEP)]
+        return [_shells(expr.Cadence.PER_LEVEL_STEP), _peak(expr.Cadence.PER_LEVEL_STEP)]
 
 
 # a wall wholly inside the refined patch [-0.25, 0.25]^2, crossed by the cuts x = 9, 12, 17 and y = 13
@@ -121,8 +126,32 @@ class FlatWalledBlast(WalledBlast):
     refinement_enabled: Annotated[bool, ProblemParam(False, description="flat")]
 
 
+# a slab spinning about its center inside the refined patch, crossed by the same cuts; its mask
+# turns as Rodrigues(z, omega t) between samples
+SPIN_CENTER, SPIN_HALF, SPIN_OMEGA = (0.005, -0.01), (0.21, 0.11), 120.0
+
+
+class SpinningWalledBlast(RefinedBlast):
+    @property
+    def census_expressions(self):
+        return [_gas_cells()]
+
+    @property
+    def immersed_bodies(self):
+        slab = Shape.box((0.0, 0.0, 0.0), (*SPIN_HALF, 1.0))
+        return [ImmersedBodyConfig(capability=BodyCapability.RIGID, mass=0.0, radius=0.24, position=SPIN_CENTER,
+                                   velocity=(0.0, 0.0), rigid=RigidProperties(inertia=1.0, apply_no_slip=True,
+                                                                              shape=slab, omega=SPIN_OMEGA))]
+
+
+class FlatSpinningWalledBlast(SpinningWalledBlast):
+    refinement_enabled: Annotated[bool, ProblemParam(False, description="flat")]
+
+
 ARMS = {False: "FlatCensusedBlast", True: "CensusedBlast"}
+PER_LEVEL = {True: "PerLevelCensusedBlast"}
 WALLED = {False: "FlatWalledBlast", True: "WalledBlast"}
+SPINNING = {False: "FlatSpinningWalledBlast", True: "SpinningWalledBlast"}
 
 
 @pytest.fixture
@@ -231,25 +260,72 @@ def test_a_tiled_census_resumed_onto_another_partition_continues_the_schedule(tm
     _assert_continues(whole, launched_first, launched_resumed, "launched workers")
 
 
-def test_a_per_level_census_on_refined_tiles_is_refused_by_name(tmp_path: Path, host_tiles) -> None:
-    with pytest.raises(Exception, match="samples every refined level's own steps"):
-        _run(tmp_path / "tiles", 2, True, cls=PerLevelCensusedBlast)
-    assert not list((tmp_path / "tiles").glob("*.h5")), "a refused run published a checkpoint"
+def _assert_per_level_exercised(path: Path) -> None:
+    shells, peak = read_census(str(path), "shells"), read_census(str(path), "peak")
+    assert shells.levels == (0, 1), f"the per-level census holds levels {shells.levels}"
+    root, fine = shells.for_level(0), shells.for_level(1)
+    assert len(root.time) == STEPS and len(fine.time) == 2 * STEPS, f"rows per level: {len(root.time)}, {len(fine.time)}"
+    assert 1 < len(peak.for_level(1).time) < 2 * STEPS, "the per-level interval skips no fine substep"
+    assert not np.array_equal(fine.values[0], fine.values[-1]), "the fine level's census never changed; the comparison is vacuous"
 
 
-def _gas_cell_count(refined: bool) -> int:
-    """the leaf cells whose centroid lies outside the wall, counted from the grid alone"""
+def test_a_per_level_census_on_refined_tiles_and_workers_records_the_single_hierarchys_rows(tmp_path: Path, host_tiles) -> None:
+    single = _run(tmp_path / "single", 1, True, cls=PerLevelCensusedBlast)
+    _assert_per_level_exercised(single)
+    tiles = _run(tmp_path / "tiles", 2, True, cls=PerLevelCensusedBlast, decompose=[[12], []])
+    _assert_same_census(tiles, single, "two refined host tiles")
+    two = _launch(tmp_path, True, tmp_path / "two", _layout(tmp_path / "two.toml", workers=2, cuts=[[12], []]), arms=PER_LEVEL)
+    _assert_same_census(two, single, "two workers")
+    # the patch spans root cells 6..18: the cuts at 4 and 20 leave the outer workers no refined tile
+    three = _launch(tmp_path, True, tmp_path / "three", _layout(tmp_path / "three.toml", workers=3, cuts=[[4, 20], []]), arms=PER_LEVEL)
+    _assert_same_census(three, single, "three workers, two holding no refined tile")
+
+
+def test_a_per_level_census_resumed_onto_another_partition_continues_every_level(tmp_path: Path, host_tiles) -> None:
+    whole = _run(tmp_path / "whole", 1, True, cls=PerLevelCensusedBlast)
+    first = _run(tmp_path / "first", 2, True, steps=STEPS // 2 + 1, cls=PerLevelCensusedBlast, decompose=[[12], []])
+    resumed = _launch(tmp_path, True, tmp_path / "resumed", _layout(tmp_path / "three.toml", workers=3, cuts=[[4, 20], []]),
+                      checkpoint=first, arms=PER_LEVEL)
+    for name in ("shells", "peak"):
+        want, head, tail = (read_census(str(p), name) for p in (whole, first, resumed))
+        for level in (0, 1):
+            w, h, t = want.for_level(level), head.for_level(level), tail.for_level(level)
+            assert len(h.time) > 0 and len(t.time) > 0, f"{name} level {level}: a segment recorded nothing"
+            np.testing.assert_array_equal(np.concatenate([h.time, t.time]), w.time, err_msg=f"{name} level {level}: sample times")
+            np.testing.assert_array_equal(np.concatenate([h.values, t.values]), w.values, err_msg=f"{name} level {level}: samples")
+
+
+def _leaf_cells_outside(refined: bool, inside) -> int:
+    """the leaf cells whose centroid lies outside the body `inside(xx, yy)`, counted from the grid
+    alone"""
     def outside(n: int, lo: float, hi: float, keep) -> int:
         h = (hi - lo) / n
         c = lo + (np.arange(n) + 0.5) * h
         xx, yy = np.meshgrid(c, c, indexing="ij")
-        return int(np.count_nonzero(keep(xx, yy) & (np.hypot(xx - WALL_CENTER[0], yy - WALL_CENTER[1]) >= WALL_RADIUS)))
+        return int(np.count_nonzero(keep(xx, yy) & ~inside(xx, yy)))
 
     everywhere = lambda xx, yy: np.ones_like(xx, dtype=bool)  # noqa: E731
     if not refined:
         return outside(RESOLUTION[0], -0.5, 0.5, everywhere)
     uncovered = lambda xx, yy: ~((np.abs(xx) < 0.25) & (np.abs(yy) < 0.25))  # noqa: E731
     return outside(RESOLUTION[0], -0.5, 0.5, uncovered) + outside(RESOLUTION[0], -0.25, 0.25, everywhere)
+
+
+def _gas_cell_count(refined: bool) -> int:
+    """the leaf cells whose centroid lies outside the round wall"""
+    return _leaf_cells_outside(refined, lambda xx, yy: np.hypot(xx - WALL_CENTER[0], yy - WALL_CENTER[1]) < WALL_RADIUS)
+
+
+def _outside_slab(refined: bool, t: float) -> int:
+    """the leaf cells whose centroid lies outside the slab turned by omega t: the body-frame point
+    of a centroid is R(omega t)^T (x - center)"""
+    c, s = np.cos(SPIN_OMEGA * t), np.sin(SPIN_OMEGA * t)
+
+    def inside(xx, yy):
+        dx, dy = xx - SPIN_CENTER[0], yy - SPIN_CENTER[1]
+        return (np.abs(c * dx + s * dy) < SPIN_HALF[0]) & (np.abs(-s * dx + c * dy) < SPIN_HALF[1])
+
+    return _leaf_cells_outside(refined, inside)
 
 
 @pytest.mark.parametrize("refined", [False, True])
@@ -267,6 +343,25 @@ def test_a_wall_cut_by_tiles_leaves_its_interior_out_of_the_census(tmp_path: Pat
         assert len(gas.time) == STEPS, f"{label}: {len(gas.time)} rows"
         counts = gas.values.reshape(len(gas.time), -1)[:, 0]
         np.testing.assert_array_equal(counts, np.full(STEPS, float(want)), err_msg=f"{label}: counted gas cells")
+        np.testing.assert_array_equal(gas.dropped, 0, err_msg=f"{label}: a masked cell was reported out of the bins")
+
+
+@pytest.mark.parametrize("refined", [False, True])
+def test_a_spinning_slab_cut_by_tiles_masks_its_turned_geometry_at_each_sample(tmp_path: Path, host_tiles, refined: bool) -> None:
+    cls = globals()[SPINNING[refined]]
+    single = _run(tmp_path / "single", 1, refined, cls=cls)
+    gpus, cuts = (2, [[12], []]) if refined else (6, [[9, 17], [13]])
+    tiles = _run(tmp_path / "tiles", gpus, refined, cls=cls, decompose=cuts)
+    launched = _launch(tmp_path, refined, tmp_path / "launched", _layout(tmp_path / "two.toml", workers=2, cuts=[[12], []]), arms=SPINNING)
+    want = np.array([_outside_slab(refined, t) for t in read_census(str(single), "gas").time], dtype=float)
+    assert len(np.unique(want)) > 2, f"the slab's count changes {len(np.unique(want)) - 1} times; the turn is vacuous"
+    assert want.min() < _leaf_cells_outside(refined, lambda xx, yy: np.zeros_like(xx, dtype=bool)) - 40, "the slab masks too few cells"
+    for label, path in (("single", single), (f"{gpus} host tiles", tiles), ("two workers", launched)):
+        gas = read_census(str(path), "gas")
+        assert len(gas.time) == STEPS, f"{label}: {len(gas.time)} rows"
+        counts = gas.values.reshape(len(gas.time), -1)[:, 0]
+        np.testing.assert_array_equal(counts, np.array([_outside_slab(refined, t) for t in gas.time], dtype=float),
+                                      err_msg=f"{label}: counted gas cells against the slab turned to each sample time")
         np.testing.assert_array_equal(gas.dropped, 0, err_msg=f"{label}: a masked cell was reported out of the bins")
 
 

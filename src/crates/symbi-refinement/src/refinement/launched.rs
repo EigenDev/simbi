@@ -1373,6 +1373,8 @@ where
                                 rejected = true;
                                 break 'subcycle;
                             }
+                            let workers = plans.root.placement().workers as usize;
+                            launched_level_census(tiles, 1, fine_dev, workers, fabric, deadline)?;
                             // the last substep: the refined tiles restrict and reflux before the
                             // post-tail exchange, so the staggered faces it carries to the neighbors
                             // across the cuts are the corrected ones
@@ -1542,9 +1544,16 @@ where
         if continuous {
             relocate_continuous_to_finest(tiles, held, atlas.as_ref().unwrap(), depth, fabric, deadline).map_err(|e| fail(fabric, e.into()))?;
         }
-        // the root-step censuses at the root's new clock, ahead of the body step as on the single
-        // hierarchy: every worker merges its tiles' exact partials of every level, the workers'
-        // partials merge into the whole hierarchy's sample, and every tile's root records it
+        // the root's own per-level census row at its new clock, ahead of the body step as the
+        // single hierarchy records it in the root's tail
+        launched_level_census(tiles, 0, root_dev, plans.root.placement().workers as usize, fabric, deadline)?;
+        if tiles.iter().any(|h| h.levels[0].state.has_bodies()) {
+            refined_body_step(tiles, held, plans, fabric, dt, deadline).map_err(|e| fail(fabric, e))?;
+        }
+        // the root-step censuses at the root's new clock, after the body step as on the single
+        // hierarchy, so a moving body masks the cells it covers at that clock: every worker merges
+        // its tiles' exact partials of every level, the workers' partials merge into the whole
+        // hierarchy's sample, and every tile's root records it
         if !tiles[0].levels[0].state.censuses.is_empty() {
             let local = crate::refinement::hierarchy::tiles_root_step_census(tiles, root_dev);
             let workers = plans.root.placement().workers as usize;
@@ -1553,9 +1562,6 @@ where
             for h in tiles.iter_mut() {
                 h.levels[0].state.store.record_census(now, 0, &total);
             }
-        }
-        if tiles.iter().any(|h| h.levels[0].state.has_bodies()) {
-            refined_body_step(tiles, held, plans, fabric, dt, deadline).map_err(|e| fail(fabric, e))?;
         }
         (t, iter) = advance_clock(t, iter, dt);
         report.steps = iter;
@@ -1810,6 +1816,9 @@ where
                 with_device(dev(r), || tiles[k].level_tail_post(level, level_dt));
             }
         }
+        let held = cx.held;
+        let level_device = |k: usize| held.level_devices(level)[held.level_ids(level)[k].expect("a holder of the level").0 as usize];
+        launched_level_census(tiles, level, level_device, cx.plans.root.placement().workers as usize, fabric, deadline)?;
         exchange(tiles, fabric, timing, at(FinePoint::PostTail))?;
         audit(tiles, fabric, report, at(FinePoint::AuditTail))?;
     }
@@ -2035,6 +2044,39 @@ where
     for &k in &mine {
         with_device(device(k), || tiles[k].finish_level_tail_post(level, dt));
     }
+    Ok(())
+}
+
+/// the per-level census row of `level` once every worker's tiles have finished its substep: the
+/// level's clock agreed across the workers (the root's is every worker's own), each worker's
+/// holders merged exactly, the workers' partials merged into the whole level's sample, and the
+/// row recorded on every tile's root. a worker holding no tile of the level joins with empty
+/// partials, so every worker keeps the same schedule
+#[allow(clippy::too_many_arguments)]
+fn launched_level_census<R, const D: usize, const DOF: usize, M, E, S, Mem, K, L>(
+    tiles: &mut [Hierarchy<R, D, DOF, M, E, S, Mem, K>],
+    level: usize,
+    device: impl Fn(usize) -> i32,
+    workers: usize,
+    fabric: &mut Fabric<L>,
+    deadline: Duration,
+) -> Result<(), WorkerError>
+where
+    R: Regime<f64, D> + Copy,
+    M: Metric<f64, D> + Copy + Send + Sync,
+    E: symbi_hydro::eos::EosFor<f64, <R as Regime<f64, D>>::Energy> + Copy + Send + Sync,
+    S: ExecutionSpace,
+    Mem: MemorySpace + Sync,
+    K: KernelSet<D, DOF, Mem, f64>,
+    L: Link,
+{
+    if !tiles[0].has_per_level_census() {
+        return Ok(());
+    }
+    let now = if level == 0 { tiles[0].levels[0].state.time } else { agree_fine_clock(tiles, level, fabric, deadline)?.0 };
+    let local = crate::refinement::hierarchy::tiles_level_census(tiles, level, now, device);
+    let total = symbi_sim::worker::combine_census_partials(fabric, workers, &tiles[0].levels[0].state.censuses, &local, deadline)?;
+    crate::refinement::hierarchy::record_tiles_level_census(tiles, level, now, &total);
     Ok(())
 }
 

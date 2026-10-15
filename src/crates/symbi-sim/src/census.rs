@@ -822,6 +822,22 @@ pub enum CensusPartial {
 }
 
 impl CensusPartial {
+    /// the partial of a part holding no cells of the reduction, in the form a holder's partial
+    /// takes: exact zero sums for an additive census on host memory, otherwise every accumulator
+    /// at the identity of the reduce op. merging it changes nothing
+    pub fn identity(op: ReductionOp, slots: usize, device: bool) -> CensusPartial {
+        if op == ReductionOp::Add && !device {
+            return CensusPartial::Sums { values: vec![symbi_algebra::ExactSum::new(); slots], dropped: 0 };
+        }
+        let value = match op {
+            ReductionOp::Add => 0.0,
+            ReductionOp::Mul => 1.0,
+            ReductionOp::Min => f64::INFINITY,
+            ReductionOp::Max => f64::NEG_INFINITY,
+        };
+        CensusPartial::Values { values: vec![value; slots], dropped: 0 }
+    }
+
     /// fold `other` into this partial with the census's reduce op
     pub fn merge(&mut self, other: &CensusPartial, op: ReductionOp) {
         match (self, other) {
@@ -1280,6 +1296,29 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// a part holding none of the level contributes its identity partial: merged into a holder's
+    /// partial of every op it changes no accumulator and no dropped count, and it travels under the
+    /// holder's tag
+    #[test]
+    fn an_identity_partial_merges_as_nothing_in_the_holders_form() {
+        let held = [0.5, -2.0, 3.25];
+        for op in [ReductionOp::Add, ReductionOp::Mul, ReductionOp::Min, ReductionOp::Max] {
+            for device in [false, true] {
+                let holder = if op == ReductionOp::Add && !device {
+                    let sums = held.iter().map(|&v| { let mut s = symbi_algebra::ExactSum::new(); s.add(v); s }).collect();
+                    CensusPartial::Sums { values: sums, dropped: 4 }
+                } else {
+                    CensusPartial::Values { values: held.to_vec(), dropped: 4 }
+                };
+                let identity = CensusPartial::identity(op, held.len(), device);
+                assert_eq!(identity.tag(), holder.tag(), "{op:?} device={device}: the identity travels under another tag");
+                let mut merged = holder.clone();
+                merged.merge(&identity, op);
+                assert_eq!(merged.round(), holder.round(), "{op:?} device={device}: the identity changed the merge");
+            }
+        }
+    }
 
     fn axis(edges: &[f64]) -> BinAxis {
         BinAxis::new("a", edges.to_vec()).expect("valid edges")

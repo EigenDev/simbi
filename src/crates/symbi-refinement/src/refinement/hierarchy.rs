@@ -2997,9 +2997,10 @@ where
         let root = &mut self.levels[0];
         // homologous linear advance, taken when the run leaves the motion law untraced.
         advance_state_clock(&mut root.state, dt);
-        // the census rows of the step carry the clock of the state they hold
-        self.census_sample_root_step();
         self.root_body_step(dt);
+        // the census rows of the step carry the clock of the state they hold, the bodies
+        // included: a moving body masks the cells it covers at that clock
+        self.census_sample_root_step();
     }
 
     /// the registered binned reductions, at the tail of the accepted step: the stage sequence has
@@ -3955,6 +3956,16 @@ where
         }
     }
 
+    /// whether the run registers a census sampled at every level's own steps
+    pub fn has_per_level_census(&self) -> bool {
+        self.levels[0]
+            .state
+            .store
+            .censuses
+            .iter()
+            .any(|r| r.evaluator.spec().cadence() == symbi_sim::census::Cadence::PerLevelStep)
+    }
+
     /// the cells of `level` a census leaves out as nonphysical beyond its covered cells: its
     /// excised core, from the level's own kernel set
     fn census_nonphysical(&self, level: usize) -> symbi_substrate::census_sample::NonphysicalCells {
@@ -3969,9 +3980,11 @@ where
     /// consumer can tell it from a root row or from another level's. summing rows across levels is
     /// therefore left to the consumer.
     ///
-    /// the registrations live on the root, which owns the history; a finer level defers to it.
+    /// the registrations live on the root, which owns the history; a finer level defers to it. a
+    /// tile of a decomposed run holds part of the level, so its driver merges every tile's
+    /// partials once the level's tails have run ([`tiles_level_census`]).
     fn sample_per_level_censuses(&mut self, level: usize, time: f64) {
-        if self.levels[0].state.store.censuses.is_empty() {
+        if self.levels[0].state.store.censuses.is_empty() || self.run_levels.is_some() {
             return;
         }
         let partial = symbi_substrate::census_sample::level_partials_exact(
@@ -7390,6 +7403,13 @@ where
                 symbi_xpu::with_device(fg.devices[k], || tiles[i].level_tail_post(level, fine_dt));
             }
         }
+        // the level's own census row, once every tile holding it has finished the substep
+        if tiles[0].has_per_level_census() {
+            let device = |i: usize| fg.devices[fg.order.iter().position(|&j| j == i).expect("a holder of the level")];
+            let now = tiles[fg.order[0]].levels[level].state.time;
+            let partials = tiles_level_census(tiles, level, now, device);
+            record_tiles_level_census(tiles, level, now, &partials);
+        }
     }
     false
 }
@@ -7917,6 +7937,76 @@ where
     total
 }
 
+/// the per-level census sample of `level` across the tiles holding it, at `now`, the level's clock
+/// after its tail: every holder reduces its leaf cells of the level on its device and the exact
+/// partials merge, as the single hierarchy samples the whole level. with no holder here, each
+/// census due at `now` takes its identity partial, so a part holding none of the level sends the
+/// form every holder sends
+pub fn tiles_level_census<R, const NDIM: usize, const DOF: usize, M, E, S, Mem, K>(
+    tiles: &[Hierarchy<R, NDIM, DOF, M, E, S, Mem, K>],
+    level: usize,
+    now: f64,
+    device: impl Fn(usize) -> i32,
+) -> Vec<symbi_sim::census::CensusPartial>
+where
+    R: Regime<f64, NDIM>,
+    M: Metric<f64, NDIM> + Copy,
+    E: symbi_hydro::eos::Eos<f64>,
+    S: ExecutionSpace,
+    Mem: MemorySpace,
+    K: KernelSet<NDIM, DOF, Mem, f64>,
+{
+    let registrations = &tiles[0].levels[0].state.store.censuses;
+    let holders: Vec<usize> = (0..tiles.len()).filter(|&i| tiles[i].levels.len() > level).collect();
+    if holders.is_empty() {
+        let per_level = Some(symbi_sim::census::Cadence::PerLevelStep);
+        return registrations
+            .iter()
+            .map(|r| {
+                let spec = r.evaluator.spec();
+                if per_level != Some(spec.cadence()) || !r.is_due_at_level(now, level) {
+                    return symbi_sim::census::CensusPartial::None;
+                }
+                symbi_sim::census::CensusPartial::identity(spec.op(), spec.n_segments() * spec.n_values(), Mem::IS_DEVICE_ACCESSIBLE)
+            })
+            .collect();
+    }
+    let stores: Vec<_> = holders.iter().map(|&i| &tiles[i].levels[level].state.store).collect();
+    let kernels: Vec<&K> = holders.iter().map(|&i| &tiles[i].levels[level].kernels).collect();
+    let level_devices: Vec<i32> = holders.iter().map(|&i| device(i)).collect();
+    let covered = |k: usize| tiles[holders[k]].levels[level].state.composite_ownership.coverage.as_ref();
+    symbi_sim::census::tile_census_partials(
+        &stores,
+        registrations,
+        &kernels,
+        &level_devices,
+        level,
+        Some(symbi_sim::census::Cadence::PerLevelStep),
+        covered,
+        now,
+    )
+    .expect("the root registers a census")
+}
+
+/// record the per-level sample of `level` at `now` on every tile's root, which owns the history
+pub fn record_tiles_level_census<R, const NDIM: usize, const DOF: usize, M, E, S, Mem, K>(
+    tiles: &mut [Hierarchy<R, NDIM, DOF, M, E, S, Mem, K>],
+    level: usize,
+    now: f64,
+    partials: &[symbi_sim::census::CensusPartial],
+) where
+    R: Regime<f64, NDIM>,
+    M: Metric<f64, NDIM> + Copy,
+    E: symbi_hydro::eos::Eos<f64>,
+    S: ExecutionSpace,
+    Mem: MemorySpace,
+    K: KernelSet<NDIM, DOF, Mem, f64>,
+{
+    for tile in tiles.iter_mut() {
+        tile.levels[0].state.store.record_census(now, level, partials);
+    }
+}
+
 /// the accepted-step tail of the decomposed march: the per-step immersed-body bookkeeping
 /// (each tile's finest level reduces its local feedback partials — the tile finest interiors
 /// partition the sink region — the deltas sum across tiles into the true global reaction,
@@ -7941,16 +8031,14 @@ where
     T: HaloTransport,
 {
     let n = tiles.len();
-    // the root-step censuses at the root's new clock, ahead of the body step as on the single
-    // hierarchy: the merged sample of every level of every tile, recorded on every tile's root
-    if !tiles[0].levels[0].state.censuses.is_empty() {
-        drain_devices::<Mem>(devices);
-        let total = tiles_root_step_census(tiles, |i| devices[i]);
-        let now = tiles[0].levels[0].state.time;
-        for tile in tiles.iter_mut() {
-            tile.levels[0].state.store.record_census(now, 0, &total);
+        // the root's own per-level census row at its new clock, ahead of the body step as the
+        // single hierarchy records it in the root's tail
+        if tiles[0].has_per_level_census() {
+            drain_devices::<Mem>(devices);
+            let now = tiles[0].levels[0].state.time;
+            let partials = tiles_level_census(tiles, 0, now, |i| devices[i]);
+            record_tiles_level_census(tiles, 0, now, &partials);
         }
-    }
         // per-step immersed-body bookkeeping, the hierarchy form of the flat decomposed
         // body step: each tile's finest level reduces its local feedback partials (the
         // tile finest interiors partition the sink region — coarser levels carry a
@@ -7983,6 +8071,17 @@ where
                     "refinement x decomposition: a sink sphere overlaps UNREFINED tile {i} — the \
                      refined patch must cover the sink on every tile it touches"
                 );
+            }
+        }
+        // the root-step censuses at the root's new clock, after the body step as on the single
+        // hierarchy, so a moving body masks the cells it covers at that clock: the merged sample
+        // of every level of every tile, recorded on every tile's root
+        if !tiles[0].levels[0].state.censuses.is_empty() {
+            drain_devices::<Mem>(devices);
+            let total = tiles_root_step_census(tiles, |i| devices[i]);
+            let now = tiles[0].levels[0].state.time;
+            for tile in tiles.iter_mut() {
+                tile.levels[0].state.store.record_census(now, 0, &total);
             }
         }
         // the restrict/c2p recomputed root prim over the allocated domain (incl. the cut halo from
