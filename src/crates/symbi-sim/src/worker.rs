@@ -161,12 +161,6 @@ impl From<FabricError> for WorkerError {
     }
 }
 
-/// whether a store carries immersed bodies but no horizon body: a step of such a run has no body
-/// restore on the launched march
-fn bodies_without_horizon<const D: usize, const DOF: usize, M: MemorySpace>(store: &FieldStore<D, DOF, M, f64>) -> bool {
-    store.immersed.is_some() && crate::driver::horizon_request(store).is_none()
-}
-
 /// the whole run's horizon partial from every worker's: each worker supplies its own partial's
 /// words at its own window, every worker receives every partial, and the merge is exact, so every
 /// worker holds the integer the whole grid's sum holds whatever the partition
@@ -1725,12 +1719,10 @@ where
         for k in 0..sh.len() {
             // a replay from anything but the step entry is a different computation dressed as a
             // retry: every worker ends the session instead. the attempt restores the tracers
-            // itself; the kernel set restores the fields. the bodies of a run carrying a horizon
-            // change after acceptance alone (the ledger, the feedback and the motion), so its
-            // replay starts from the entry bodies; other immersed bodies have no restore here
-            // a slip run's bodies change inside the attempt by the deltas its drain and slip booked
-            // alone, which the reset below discards
-            if !kernels[k].field_rollback_is_complete(sh[k]) || (bodies_without_horizon(sh[k]) && self.slip.is_none()) {
+            // itself; the kernel set restores the fields. immersed bodies move, accrete and book
+            // their history at the accepted tail alone, so inside an attempt they change only by
+            // the feedback deltas it accumulated, which the reset below discards
+            if !kernels[k].field_rollback_is_complete(sh[k]) {
                 return Err(fail(
                     self.fabric,
                     WorkerError::Numerics(
@@ -1743,10 +1735,8 @@ where
             with_device(dev(k), || kernels[k].restore_step(sh[k]));
             // the tile stands at its step entry again, the clock its ghost refills read
             sh[k].reset_state_clock();
-            if self.slip.is_some() {
-                if let Some(im) = sh[k].immersed.as_ref() {
-                    im.diagnostics.reset();
-                }
+            if let Some(im) = sh[k].immersed.as_ref() {
+                im.diagnostics.reset();
             }
         }
         let deadline = self.cfg.deadline;
@@ -2009,11 +1999,11 @@ where
         // the relativistic gas and the relativistic magnetized gas carry a curved spacetime
         let curved = matches!(cfg.regime, crate::substrate_seam::RegimeKind::Rhd | crate::substrate_seam::RegimeKind::Rmhd);
         refuse(&sh, kernels, curved).map_err(|e| fail(fabric, e))?;
-        // a rejection replays the step from its entry, which needs the whole entry state kept; a
-        // slip run's bodies change inside the attempt by the deltas its rollback discards
+        // a rejection replays the step from its entry, which needs the whole entry field state kept;
+        // the bodies' attempt deltas are discarded by the replay itself
         if !cfg.injection.reject_at.is_empty() {
             for (store, kernel) in sh.iter().zip(kernels) {
-                if !kernel.field_rollback_is_complete(store) || (bodies_without_horizon(store) && slip.is_none()) {
+                if !kernel.field_rollback_is_complete(store) {
                     return Err(fail(
                         fabric,
                         WorkerError::Refused(

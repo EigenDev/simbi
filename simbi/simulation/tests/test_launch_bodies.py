@@ -22,7 +22,11 @@
 #   and a late fine-substep rejection against its capped clean control, which
 #   must publish no contribution of the rejected attempt.
 # - an accreting bondi sink under two nested fine levels on three workers, two
-#   of them holding level 1 without level 2, against the single hierarchy.
+#   of them holding level 1 without level 2, against the single hierarchy;
+# - on an unrefined grid, a stage rejected on one worker with an accreting
+#   sink and with a wall cut by the workers replays as the run capped at the
+#   accepted timestep: grid, bodies, history and diagnostics carry nothing of
+#   the rejected attempt.
 # a magnetized wall takes its shape (a box and a sphere leave different flows),
 # and a bonded fragment assembly with mesh refinement is refused on launch by
 # name.
@@ -546,3 +550,48 @@ def test_a_late_fine_rejection_publishes_no_body_contribution_of_the_rejected_at
     # no accretion, force, torque or heat of the rejected attempt survives in any of them
     _assert_same(rejecting, capped, "late fine rejection against the capped control")
     _assert_same_diagnostics(tmp_path / "rejecting", tmp_path / "capped", "late fine rejection")
+
+
+FLAT_REJECTION_STEP = 2
+# the cut runs through the wall; the 3d sink splits along x
+FLAT_REJECTING = {"sink": ("Bondi", None, None), "wall": ("WindTunnel", (64, 32), [[16], []])}
+
+
+def _launch_flat_counting(variants: Path, problem: str, resolution: tuple | None, out: Path, layout: Path,
+                          inject: str | None) -> tuple[Path, set[int]]:
+    script = variants.parent / f"launched_{problem.lower()}.py"
+    script.write_text(f"from variants import {problem} as Base\n\n\nclass Launched{problem}(Base):\n    pass\n")
+    cmd = [sys.executable, "-m", "simbi.cli", "launch", str(script), "--layout", str(layout), "--max-steps", str(STEPS),
+           "--data-directory", str(out), "--checkpoint-interval", "1e9"]
+    if resolution is not None:
+        cmd += ["--resolution", ",".join(str(r) for r in resolution)]
+    env = dict(os.environ)
+    env.pop("SIMBI_LAUNCH_EXPERIMENTAL", None)
+    if inject is not None:
+        env["SIMBI_FABRIC_INJECT"] = inject
+    done = subprocess.run(cmd, capture_output=True, text=True, timeout=900, env=env)
+    assert done.returncode == 0, f"launch failed:\nstdout:\n{done.stdout[-2000:]}\nstderr:\n{done.stderr[-3000:]}"
+    return _final(out), {int(r) for r in REJECTIONS.findall(done.stderr)}
+
+
+@pytest.mark.parametrize("arm", list(FLAT_REJECTING))
+def test_a_flat_rejection_with_bodies_replays_as_the_capped_run(tmp_path: Path, variants: Path, arm: str) -> None:
+    problem, resolution, cuts = FLAT_REJECTING[arm]
+    two = _layout(tmp_path / "two.toml", workers=2, cuts=cuts) if cuts is not None else _layout(tmp_path / "two.toml", workers=2, shape=(2, 1, 1))
+    step = FLAT_REJECTION_STEP
+    rejecting, counts = _launch_flat_counting(variants, problem, resolution, tmp_path / "rejecting", two, f"reject:1:{step}:1")
+    assert counts == {1}, f"{arm}: the rejection was not counted once on every worker: {counts}"
+    clean, clean_counts = _launch_flat_counting(variants, problem, resolution, tmp_path / "clean", two, None)
+    assert clean_counts == {0}
+    with h5py.File(rejecting, "r") as fr, h5py.File(clean, "r") as fc:
+        accepted = float(fr["body_diagnostics/dt"][step])
+        assert accepted < float(fc["body_diagnostics/dt"][step]), f"{arm}: the rejection never reduced the timestep"
+        # the rejected attempt booked body feedback: discarding it is the transaction under test
+        booked = [name for name, obj in fc["body_diagnostics"].items()
+                  if name not in ("dt", "time") and np.asarray(obj[()]).ndim >= 1 and np.abs(np.asarray(obj[()])[step]).max() > 0.0]
+        assert booked, f"{arm}: the body booked no feedback at the rejected step"
+    capped, capped_counts = _launch_flat_counting(variants, problem, resolution, tmp_path / "capped", two,
+                                                  f"cap:{step}:{int(np.float64(accepted).view(np.uint64))}")
+    assert capped_counts == {0}, f"{arm}: the capped control rejected a step"
+    _assert_same(rejecting, capped, f"{arm}: flat rejection against the capped control")
+    _assert_same_diagnostics(tmp_path / "rejecting", tmp_path / "capped", f"{arm}: flat rejection")
