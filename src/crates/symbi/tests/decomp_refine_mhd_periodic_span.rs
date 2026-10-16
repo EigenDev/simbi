@@ -154,7 +154,7 @@ fn build_tiles(partition: &Partition<2>, regions: &[RefinementRegion<2>]) -> Vec
                 clipped.push(RefinementRegion { x_lo: [c_lo, r.x_lo[1]], x_hi: [c_hi, r.x_hi[1]] });
             }
             let whole_patches = &regions[..clipped.len()];
-            Hier::with_refinement_placed(root, k, &clipped, whole_patches, ProlongOrder::Ppm, kset, [N, N], [true, false])
+            Hier::with_refinement_placed(root, k, &clipped, whole_patches, ProlongOrder::Ppm, kset, [N, N], [true, false], symbi::sim::refinement::CutFaces::Contribute)
                 .expect("tile hierarchy")
         })
         .collect();

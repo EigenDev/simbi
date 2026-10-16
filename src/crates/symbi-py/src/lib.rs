@@ -6497,6 +6497,10 @@ where
     use symbi_sim::checkpoint::{
         LevelTiles, PhysicsIdentity, TileView, load_partitioned_level, write_partitioned_checkpoint,
     };
+    // the inputs attached after the build (the continuous tracers) against a gathered prim stencil
+    for tile in &tiles {
+        tile.prim_stencil_admission()?;
+    }
 
     let ntiles = tiles.len();
     let devices: Vec<i32> = (0..ntiles as i32).collect();
@@ -6955,7 +6959,7 @@ macro_rules! build_and_run_hydro_decomposed_refined {
                     // level wraps across the tiles, as the root does
                     let (clipped, whole_patch): (Vec<_>, Vec<_>) = tile_regions.iter().copied().unzip();
                     let ring = whole.topology(counts);
-                    Hierarchy::with_refinement_placed(sim, sub, &clipped, &whole_patch, prolong, make, n, std::array::from_fn(|ax| ring.is_periodic(ax)))
+                    Hierarchy::with_refinement_placed(sim, sub, &clipped, &whole_patch, prolong, make, n, std::array::from_fn(|ax| ring.is_periodic(ax)), symbi::sim::refinement::CutFaces::Donate)
                         .map_err(|e| format!("tile {flat} refinement build: {e:?}"))?
                 };
                 // immersed bodies on every tile hierarchy at their global positions: the finest
@@ -7003,7 +7007,15 @@ macro_rules! build_and_run_hydro_decomposed_refined {
             .map_err(|e| format!("decomposed fine seed: {e:?}"))?;
             // the declared stationary target on every level of every tile, its imbalance read off
             // the tiled probe per level; a fresh run seeded from it starts there, as the single
-            // hierarchy does
+            // hierarchy does. the probe prolongs the target's coarse-fine ghosts from the root
+            // halo, so a tile reading a gathered prim stencil is refused before it
+            if cfg.equilibrium_json.is_some() && tiles.iter().any(|h| h.prim_stencil().is_some()) {
+                return Err("a refinement patch face on a decomposition cut prolongs its fine ghosts past the root halo \
+                            from a gathered parent stencil of the gas primitives and the dye; a declared stationary \
+                            target prolongs further parent data past that halo; give the root the full prolongation \
+                            reach in ghost cells or move the face off the cut"
+                    .into());
+            }
             if let Some(target) = cfg.equilibrium_json.as_ref() {
                 use symbi_hydro::state::PrimFromSlots;
                 let declared = symbi_source_compile::EquilibriumConfig::from_json(target)
@@ -7039,6 +7051,8 @@ macro_rules! build_and_run_hydro_decomposed_refined {
                 }
                 symbi::symbi_xpu::with_device(devices[k], || h.prime());
             }
+            // a patch face on a root cut prolongs past the root halo from the primed neighbors
+            symbi::sim::refinement::prime_prim_stencils(&mut tiles, &devices, &seed_transport)?;
         }
 
         // the full-size output hierarchy (root + the full region): gather scatters each level's tile
@@ -7181,7 +7195,7 @@ macro_rules! build_and_run_magnetized_decomposed_refined {
                     // the build sees the whole grid and its wrapping axes: a patch spanning a
                     // periodic axis cut into tiles has no face along it and wraps across the seam
                     let (clipped, whole_patch): (Vec<_>, Vec<_>) = tile_regions.iter().copied().unzip();
-                    Hierarchy::with_refinement_placed(sim, sub, &clipped, &whole_patch, prolong, kernels_of, n, std::array::from_fn(|ax| ring.is_periodic(ax)))
+                    Hierarchy::with_refinement_placed(sim, sub, &clipped, &whole_patch, prolong, kernels_of, n, std::array::from_fn(|ax| ring.is_periodic(ax)), symbi::sim::refinement::CutFaces::Contribute)
                         .map_err(|e| format!("tile {flat} refinement build: {e:?}"))?
                 };
                 // the sinks on each tile's finest level at their global positions, gravity-only
@@ -11706,7 +11720,7 @@ where
         let (clip, whole): (Vec<_>, Vec<_>) = clipped.into_iter().unzip();
         let prolong = prolong_order_for(&cfg.reconstruction_name);
         let ring = grid.topology(layout.partition.counts());
-        Hierarchy::with_refinement_placed(sim, sub, &clip, &whole, prolong, |s| kernels_of(s, LevelRole::Fine), layout.n, std::array::from_fn(|ax| ring.is_periodic(ax)))
+        Hierarchy::with_refinement_placed(sim, sub, &clip, &whole, prolong, |s| kernels_of(s, LevelRole::Fine), layout.n, std::array::from_fn(|ax| ring.is_periodic(ax)), symbi::sim::refinement::CutFaces::Contribute)
             .map_err(|e| format!("tile {flat} refinement build: {e:?}"))?
     };
     // immersed bodies at their global positions: the finest level owns the full bodies, coarser

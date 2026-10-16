@@ -103,7 +103,7 @@ fn build_tiles(partition: &Partition<2>, make: fn(&Sim) -> Kern) -> Vec<Hier> {
             let k = make(&root);
             let (lo, hi) = (ext[0].0 as f64 * DX, (ext[0].0 + ext[0].1) as f64 * DX);
             let region = RefinementRegion { x_lo: [lo, PY_LO], x_hi: [hi, PY_HI] };
-            Hier::with_refinement_placed(root, k, &[region], &[whole()], ProlongOrder::Ppm, make, [N, N], [true, false])
+            Hier::with_refinement_placed(root, k, &[region], &[whole()], ProlongOrder::Ppm, make, [N, N], [true, false], symbi::sim::refinement::CutFaces::Donate)
                 .expect("tile hierarchy")
         })
         .collect();

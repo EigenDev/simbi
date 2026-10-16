@@ -9,7 +9,12 @@
 // register units to the tile across the cut, which holds the coarse cells
 // their reflux corrects; under a PPM root whose halo holds the prolongation
 // stencil (five cells) that layout matches too, on a low and a high face of
-// each axis. both runs feed the phase probe, so a failure
+// each axis. under the production halos (PPM 3, PLM 2) the fine ghosts past
+// such a face prolong from a prim stencil gathered from the tiles owning the
+// parent cells past the root halo: the prolonged ghosts and both time levels
+// of the stencil equal the single hierarchy bit for bit, with the stencil
+// drawing on two tiles, on the diagonal tile at a corner, and on a replayed
+// attempt. both runs feed the phase probe, so a failure
 // names the first operation (per level and ordinal), tile, cell and field
 // after which the two hierarchies differ, before the composite is compared.
 //
@@ -21,7 +26,7 @@ use symbi::regimes::substrate_newton::AdiabaticSubstrateKernelSet;
 use symbi::sim::decomp::{LocalCopy, Partition, unflatten};
 use symbi::sim::refinement::launched::receiving_faces_of_tile;
 use symbi::sim::refinement::{
-    Hierarchy, ProlongOrder, RefinementRegion, evolve_hierarchy_decomposed,
+    Hierarchy, PrimStencil, ProlongOrder, RefinementRegion, evolve_hierarchy_decomposed, prime_prim_stencils,
     seed_decomposed_fine_from_coarse,
 };
 use symbi::sim::state::*;
@@ -148,7 +153,7 @@ fn build_tiles(partition: &Partition<2>, scheme: Scheme) -> Vec<Hier> {
         let h = if cx[0] < cx[1] && cy[0] < cy[1] {
             let region = RefinementRegion { x_lo: [cx[0], cy[0]], x_hi: [cx[1], cy[1]] };
             let whole = RefinementRegion { x_lo: [PX_LO, PY_LO], x_hi: [PX_HI, PY_HI] };
-            Hier::with_refinement_of_contributing(root, k, &[region], &[whole], scheme.prolong, make).expect("tile hier")
+            Hier::with_refinement_of_donating(root, k, &[region], &[whole], scheme.prolong, make).expect("tile hier")
         } else {
             match receiving_faces_of_tile(partition, PATCH, TileId(flat as u32)) {
                 Some((patch_local, faces)) => Hier::single(root, k).with_receiving_register(&patch_local, faces).expect("receiving register"),
@@ -162,6 +167,7 @@ fn build_tiles(partition: &Partition<2>, scheme: Scheme) -> Vec<Hier> {
     for h in tiles.iter_mut() {
         h.prime();
     }
+    prime_prim_stencils(&mut tiles, &vec![0; partition.n_tiles()], &LocalCopy).expect("prim stencil prime");
     tiles
 }
 
@@ -355,6 +361,13 @@ fn assert_layout_matches(cuts: [Vec<usize>; 2], scheme: Scheme, reject: Option<(
             scheme.recon
         );
     }
+    // a patch face on a cut under a root halo shallower than the prolongation reach reads a
+    // gathered prim stencil, and every other layout reads its own root
+    let stencils = dec.iter().filter(|h| h.prim_stencil().is_some()).count();
+    assert_eq!(stencils > 0, on_cut && scheme.ng < PPM_CUT_FACE.ng, "cuts {cuts:?}: the prim stencils miss the layout's short halos");
+    if stencils > 0 {
+        assert_stencils_exact(&mono_log, &dec_log, &dec, &frames, &cuts);
+    }
     // every fine interior cell of every tile against the single hierarchy at the end
     let mono_fine = mono_log.iter().rev().find(|s| s.level == 1).expect("a fine sample");
     let index = index_mono(mono_fine);
@@ -373,6 +386,143 @@ fn assert_layout_matches(cuts: [Vec<usize>; 2], scheme: Scheme, reject: Option<(
             }
         }
     }
+}
+
+/// the global index of a tile's root cell `c` (in the tile's index space)
+fn root_global(h: &Hier, frame: &TileFrame, c: [isize; 2]) -> [isize; 2] {
+    let lo = &h.levels[0].state.geom.interior;
+    std::array::from_fn(|a| frame.root_origin[a] + (c[a] - lo.spaces[a].lo))
+}
+
+/// on every tile reading a prim stencil, bit for bit against the single hierarchy: every fine
+/// ghost each substep's prolongation wrote, the stencil's old time level against the single
+/// root at the step's entry, and its new time level against the single root after its last
+/// stage (this hydro root carries no tail operator). each check counts the cells past the tile's
+/// root allocation it compared, so a stencil that never reached past the halo fails here
+fn assert_stencils_exact(mono_log: &[PhaseSample], dec_log: &[PhaseSample], dec: &[Hier], frames: &[TileFrame], cuts: &[Vec<usize>; 2]) {
+    let mono_prolong: Vec<&PhaseSample> = mono_log.iter().filter(|s| s.level == 1 && s.phase == "prolong").collect();
+    let last_root = |phase: &str| mono_log.iter().rev().find(|s| s.level == 0 && s.phase == phase).expect("a root sample");
+    let (mono_old, mono_new) = (last_root("begin"), last_root(phase_probe::STAGE[1]));
+    let names = ["rho", "v0", "v1", "pre"];
+    let at = |s: &PhaseSample, origin: [isize; 2]| -> HashMap<[isize; 2], usize> {
+        s.cells.iter().enumerate().map(|(k, c)| (global_of(s, origin, *c), k)).collect()
+    };
+    let field = |s: &PhaseSample, name: &str| -> Vec<f64> { s.fields.iter().find(|(n, _)| *n == name).expect("a probed field").1.clone() };
+    for (i, h) in dec.iter().enumerate() {
+        let Some(stencil) = h.prim_stencil() else { continue };
+        // the prolonged fine ghosts
+        let mine: Vec<&PhaseSample> = dec_log.iter().filter(|s| s.level == 1 && s.tile == i && s.phase == "prolong").collect();
+        assert_eq!(mine.len(), mono_prolong.len(), "cuts {cuts:?}: tile {i} prolonged {} times against {}", mine.len(), mono_prolong.len());
+        let fine_alloc_ghosts = |s: &PhaseSample, c: &[isize; 3]| (0..2).any(|a| c[a] < s.interior_lo[a] || c[a] >= s.interior_hi[a]);
+        for (k, (d, m)) in mine.iter().zip(&mono_prolong).enumerate() {
+            let index = at(m, [PATCH_LO_FINE; 2]);
+            let mut compared = 0usize;
+            for name in names {
+                let (dv, mv) = (field(d, name), field(m, name));
+                for (ci, c) in d.cells.iter().enumerate() {
+                    if !fine_alloc_ghosts(d, c) {
+                        continue;
+                    }
+                    let g = global_of(d, frames[i].fine_origin.expect("a fine origin"), *c);
+                    let Some(&mi) = index.get(&g) else { continue };
+                    assert!(
+                        dv[ci].to_bits() == mv[mi].to_bits(),
+                        "cuts {cuts:?}: tile {i} substep prolongation {k}: fine ghost {g:?} {name} = {:e} against {:e}",
+                        dv[ci],
+                        mv[mi]
+                    );
+                    compared += 1;
+                }
+            }
+            assert!(compared > 0, "cuts {cuts:?}: tile {i} prolongation {k} compared no fine ghost");
+        }
+        // the two time levels of the stencil
+        let alloc = &h.levels[0].state.geom.allocated;
+        for (label, held, mono) in [("old", &stencil.old, mono_old), ("new", &stencil.new, mono_new)] {
+            let index = at(mono, [0, 0]);
+            let comps = PrimStencil::components(held);
+            assert_eq!(comps.len(), names.len(), "the stencil carries rho, two velocities and the pressure");
+            let mut past = 0usize;
+            for (name, f) in names.iter().zip(comps) {
+                let mv = field(mono, name);
+                let view = f.view();
+                for c in stencil.domain.iter() {
+                    let g = root_global(h, &frames[i], c);
+                    let &mi = index.get(&g).unwrap_or_else(|| panic!("cuts {cuts:?}: stencil cell {g:?} lies outside the single root"));
+                    let x = *view.at(c);
+                    assert!(
+                        x.to_bits() == mv[mi].to_bits(),
+                        "cuts {cuts:?}: tile {i} {label} stencil cell {g:?} {name} = {x:e} against {:e}",
+                        mv[mi]
+                    );
+                    past += usize::from(!alloc.contains(c));
+                }
+            }
+            assert!(past > 0, "cuts {cuts:?}: tile {i}'s {label} stencil holds no cell past its root allocation; the gate is vacuous");
+        }
+    }
+}
+
+/// the prim stencil's footprint on each tile reading one, and the values a gather moves across
+/// tiles, at the production halos of the gated layouts; printed for the record and bounded by
+/// the patch coverage grown by the prolongation reach
+#[test]
+fn prim_stencil_sizes_at_the_production_halo() {
+    for (scheme, label) in [(PPM, "ppm ng 3"), (PLM, "plm ng 2")] {
+        for cuts in [[vec![12], vec![20]], [vec![9, 12], vec![20]]] {
+            let partition = Partition::explicit([N, N], cuts.clone()).expect("cuts inside the grid");
+            let tiles = build_tiles(&partition, scheme);
+            let mut any = false;
+            for (i, h) in tiles.iter().enumerate() {
+                let Some(st) = h.prim_stencil() else { continue };
+                any = true;
+                let ncomp = PrimStencil::components(&st.old).len();
+                let alloc = &h.levels[0].state.geom.allocated;
+                let held = st.domain.volume();
+                let crossing: usize = st.domain.guillotine_difference(alloc).iter().map(|b| b.volume()).sum();
+                let cov = h.levels[0].coverage.as_ref().expect("a refined tile");
+                let bound: usize = (0..2).map(|a| cov.spaces[a].size() + 8).product();
+                eprintln!(
+                    "{label} cuts {cuts:?} tile {i}: stencil {:?} = {held} cells x {ncomp} components x 3 buffers = {} bytes; \
+                     {crossing} cells past the root allocation, {} values = {} bytes per gather, 2 gathers per root step; \
+                     root tile allocation {} cells",
+                    st.domain.shape(),
+                    held * ncomp * 3 * 8,
+                    crossing * ncomp,
+                    crossing * ncomp * 8,
+                    alloc.volume()
+                );
+                assert!(held <= bound, "the stencil exceeds the coverage grown by the reach");
+                assert!(crossing > 0, "the stencil reaches no cell past the root allocation");
+            }
+            assert!(any, "{label} cuts {cuts:?}: no tile reads a prim stencil; the measurement is vacuous");
+        }
+    }
+}
+
+/// a prim stencil holds the root of the attempt that gathered it: the step's entry and a
+/// restored attempt invalidate it, and a prolongation reading it before the next gather stops by
+/// name
+#[test]
+fn a_prim_stencil_read_before_its_gather_stops_by_name() {
+    let partition = Partition::explicit([N, N], [vec![12], vec![20]]).expect("cuts inside the grid");
+    let mut tiles = build_tiles(&partition, PPM);
+    let i = tiles.iter().position(|h| h.prim_stencil().is_some()).expect("a tile reading a prim stencil");
+    // the stencil prime leaves it invalid until the first step gathers it
+    assert!(!tiles[i].prim_stencil().unwrap().is_filled(), "the primed stencil stays valid past the prime");
+    symbi::sim::refinement::gather_prim_stencils(&tiles, &vec![0; tiles.len()], &LocalCopy, symbi::sim::refinement::StencilTime::Old);
+    symbi::sim::refinement::gather_prim_stencils(&tiles, &vec![0; tiles.len()], &LocalCopy, symbi::sim::refinement::StencilTime::New);
+    assert!(tiles[i].prim_stencil().unwrap().is_filled());
+    tiles[i].restore_attempt_entry();
+    assert!(!tiles[i].prim_stencil().unwrap().is_filled(), "a restored attempt keeps the rejected attempt's stencil");
+    symbi::sim::refinement::gather_prim_stencils(&tiles, &vec![0; tiles.len()], &LocalCopy, symbi::sim::refinement::StencilTime::Old);
+    symbi::sim::refinement::gather_prim_stencils(&tiles, &vec![0; tiles.len()], &LocalCopy, symbi::sim::refinement::StencilTime::New);
+    tiles[i].level_step_begin(0, 1e-3);
+    assert!(!tiles[i].prim_stencil().unwrap().is_filled(), "a new step keeps the previous step's stencil");
+    let read = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| tiles[i].prolong_cf(1, 0.0)));
+    let message = read.expect_err("the prolongation read a stale stencil");
+    let text = message.downcast_ref::<String>().cloned().unwrap_or_default();
+    assert!(text.contains("read before the driver gathered both time levels"), "the stop names another cause: {text}");
 }
 
 #[test]
@@ -408,6 +558,35 @@ fn ppm_patch_faces_on_root_cuts_20_12_match_after_one_root_step() {
 #[test]
 fn ppm_patch_faces_on_root_cuts_match_after_a_rejected_fine_stage() {
     assert_matches_with_rejection([12, 20], PPM_CUT_FACE, Some((1, 1)));
+}
+
+/// a patch face on the low x cut and the high y cut at the production PPM halo (ng 3): the fine
+/// ghosts past each face that the root halo cannot feed prolong from the prim stencil gathered
+/// from the tiles across the cut, the corner where the two faces meet from the diagonal tile
+#[test]
+fn ppm_patch_faces_on_root_cuts_at_the_production_halo_match() {
+    assert_one_step_matches([12, 20], PPM);
+}
+
+/// the same at the production PLM halo (ng 2), where every fine ghost layer past the face reads
+/// the prim stencil
+#[test]
+fn plm_patch_faces_on_root_cuts_at_the_production_halo_match() {
+    assert_one_step_matches([12, 20], PLM);
+}
+
+/// a three-cell tile beside the low x face: the four cells of the stencil past the face come
+/// from two tiles
+#[test]
+fn a_prim_stencil_across_two_owners_matches_at_the_production_halo() {
+    assert_one_step_matches_on([vec![9, 12], vec![20]], PPM);
+}
+
+/// a fine stage rejected after the first substep prolonged from the prim stencil: the replay
+/// gathers the stencil again and matches
+#[test]
+fn production_halo_patch_faces_on_cuts_match_after_a_rejected_fine_stage() {
+    assert_matches_with_rejection([12, 20], PPM, Some((1, 1)));
 }
 
 /// the builder for a driver that carries no register unit across a cut refuses a patch face

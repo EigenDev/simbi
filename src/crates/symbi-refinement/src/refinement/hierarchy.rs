@@ -185,6 +185,69 @@ impl<const D: usize, Mem: MemorySpace> FaceStencil<D, Mem> {
     }
 }
 
+/// the parent primitives the first refined level's coarse-fine prolongation reads, over the
+/// patch coverage grown by the prolongation reach: a patch face on a root cut prolongs its fine
+/// ghosts from parent cells up to that reach past the cut, deeper than the root halo. `old` holds
+/// the parent at the root attempt's entry and `new` after the root stages; the cells inside the
+/// tile's root allocation come from the tile, the cells past it from the tiles that own them.
+/// `lerp` is the time-interpolation scratch. derived state: each time level is invalid from the
+/// attempt's entry until the driver gathers it
+pub struct PrimStencil<const D: usize, const DOF: usize, Mem: MemorySpace> {
+    pub domain: Domain<D>,
+    pub old: PrimFieldsGeneric<D, DOF, Mem>,
+    pub new: PrimFieldsGeneric<D, DOF, Mem>,
+    lerp: PrimFieldsGeneric<D, DOF, Mem>,
+    old_filled: std::cell::Cell<bool>,
+    new_filled: std::cell::Cell<bool>,
+}
+
+impl<const D: usize, const DOF: usize, Mem: MemorySpace> PrimStencil<D, DOF, Mem> {
+    fn zeros(domain: Domain<D>, has_pre: bool, has_chi: bool) -> symbi_xpu::Result<Self> {
+        let fields = || -> symbi_xpu::Result<PrimFieldsGeneric<D, DOF, Mem>> {
+            let mut p = PrimFieldsGeneric::zeros_with_pressure(&domain, has_pre)?;
+            if has_chi {
+                p.alloc_chi(&domain)?;
+            }
+            Ok(p)
+        };
+        Ok(Self {
+            old: fields()?,
+            new: fields()?,
+            lerp: fields()?,
+            domain,
+            old_filled: std::cell::Cell::new(false),
+            new_filled: std::cell::Cell::new(false),
+        })
+    }
+
+    /// the stencil's components: rho, the DOF velocities, the pressure and the dye when present
+    pub fn components(fields: &PrimFieldsGeneric<D, DOF, Mem>) -> Vec<&Field<f64, D, Mem>> {
+        let mut out = vec![&fields.rho];
+        out.extend(fields.vel.iter());
+        out.extend(fields.pre_field());
+        out.extend(fields.chi_field());
+        out
+    }
+
+    pub fn is_filled(&self) -> bool {
+        self.old_filled.get() && self.new_filled.get()
+    }
+
+    fn invalidate(&self) {
+        self.old_filled.set(false);
+        self.new_filled.set(false);
+    }
+}
+
+/// the time level of the root a prim stencil gathers
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StencilTime {
+    /// the root attempt's entry
+    Old,
+    /// after the root stages and tail, before the fine subcycle
+    New,
+}
+
 pub struct LevelData<R, const NDIM: usize, const DOF: usize, M, E, S, Mem, K>
 where
     R: Regime<f64, NDIM>,
@@ -230,6 +293,9 @@ where
     /// that own them at both time levels of the root step: a tile's own face lattice ends at
     /// its interior along each face's normal axis, which a patch face on a cut reaches past
     pub face_stencil: Option<FaceStencil<NDIM, Mem>>,
+    /// the parent primitives past the tile's root allocation that a patch face on a root cut
+    /// prolongs its fine ghosts from; `None` where the root halo holds the whole stencil
+    pub prim_stencil: Option<PrimStencil<NDIM, DOF, Mem>>,
     /// per-slab intermediates of the axis-split prolongation into this level,
     /// in `cf_ghost_slabs` order. the refinement slabs are fixed, so
     /// the shapes are too: lazily allocated on the first prolongation, reused
@@ -318,11 +384,15 @@ fn fatal_cfl_dt(dt_cfl: f64) -> bool {
 
 /// how a builder treats a patch's real face that lies on a decomposition cut
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum CutFaces {
+pub enum CutFaces {
     /// refuse the layout by name: the driver carries no register contribution across a cut
     Refuse,
-    /// a contributing register face, its fine unit sent to the neighbor by the driver
+    /// a contributing register face, its fine unit sent to the neighbor by the driver; the
+    /// prolongation stencil of its fine ghosts has to fit inside the root halo
     Contribute,
+    /// a contributing register face whose fine ghosts prolong from a prim stencil the driver
+    /// gathers from the tiles owning the parent cells past the root halo
+    Donate,
 }
 
 pub struct HierarchyRetrySidecars<const D: usize> {
@@ -1265,6 +1335,7 @@ where
                 cut_sides: [[false; 2]; NDIM],
                 patch_interior: None,
                 face_stencil: None,
+                prim_stencil: None,
                 coverage: None,
                 flux_eq: None,
                 residual_eq: None,
@@ -1352,10 +1423,24 @@ where
         Self::refine_levels(coarse, coarse_kernels, regions, whole, prolong_order, make_kernels, CutFaces::Contribute, None)
     }
 
+    /// `with_refinement_of_contributing` for the in-process tiled driver, which gathers the parent
+    /// primitives a patch face on a cut prolongs from past the root halo into a prim stencil
+    pub fn with_refinement_of_donating(
+        coarse: SimStateGeneric<R, NDIM, DOF, M, E, S, Mem>,
+        coarse_kernels: K,
+        regions: &[RefinementRegion<NDIM>],
+        whole: &[RefinementRegion<NDIM>],
+        prolong_order: ProlongOrder,
+        make_kernels: impl Fn(&SimStateGeneric<R, NDIM, DOF, M, E, S, Mem>) -> K,
+    ) -> symbi_xpu::Result<Self> {
+        Self::refine_levels(coarse, coarse_kernels, regions, whole, prolong_order, make_kernels, CutFaces::Donate, None)
+    }
+
     /// `with_refinement_of_contributing` for a tile placed on the whole root grid of
     /// `global_cells`, closed into a ring along the axes `wraps` names: a whole first patch
     /// spanning such an axis has no face on it, keeps its core across the seam, and its level
-    /// wraps across the tiles. the tile's root layout is set as `set_root_layout` sets it
+    /// wraps across the tiles. the tile's root layout is set as `set_root_layout` sets it.
+    /// `cut_faces` is `Contribute` or `Donate`, as the driver carries the patch faces on cuts
     #[allow(clippy::too_many_arguments)]
     pub fn with_refinement_placed(
         coarse: SimStateGeneric<R, NDIM, DOF, M, E, S, Mem>,
@@ -1366,7 +1451,9 @@ where
         make_kernels: impl Fn(&SimStateGeneric<R, NDIM, DOF, M, E, S, Mem>) -> K,
         global_cells: [usize; NDIM],
         wraps: [bool; NDIM],
+        cut_faces: CutFaces,
     ) -> symbi_xpu::Result<Self> {
+        assert_ne!(cut_faces, CutFaces::Refuse, "a placed tile carries its patch faces on cuts");
         let offset: [usize; NDIM] = std::array::from_fn(|ax| coarse.geom.index_offset[ax].max(0) as usize);
         let mut h = Self::refine_levels(
             coarse,
@@ -1375,7 +1462,7 @@ where
             whole,
             prolong_order,
             make_kernels,
-            CutFaces::Contribute,
+            cut_faces,
             Some((global_cells, wraps)),
         )?;
         h.set_root_layout(global_cells, offset, wraps);
@@ -1481,6 +1568,44 @@ where
         level < self.flux_registers.len()
     }
 
+    /// the gathered parent stencil of the first refined level, when a patch face on a root cut
+    /// prolongs past the root halo
+    pub fn prim_stencil(&self) -> Option<&PrimStencil<NDIM, DOF, Mem>> {
+        self.levels.get(1).and_then(|l| l.prim_stencil.as_ref())
+    }
+
+    /// whether a run of this tile prolongs every input from its gathered prim stencil: the gas
+    /// primitives and the dye do; the continuous tracers' ito coefficients, an isothermal closure's
+    /// sound speed, a declared stationary target and the hydrostatically balanced transfer read
+    /// their parent past the root halo, and a tile carrying one of them with a stencil is refused
+    /// by name
+    pub fn prim_stencil_admission(&self) -> Result<(), String> {
+        if self.prim_stencil().is_none() {
+            return Ok(());
+        }
+        let refusal = |what: &str| {
+            Err(format!(
+                "a refinement patch face on a decomposition cut prolongs its fine ghosts past the root halo \
+                 from a gathered parent stencil of the gas primitives and the dye; {what} prolongs further \
+                 parent data past that halo; give the root the full prolongation reach in ghost cells or \
+                 move the face off the cut"
+            ))
+        };
+        if self.levels.iter().any(|l| l.state.continuous_tracers.is_some()) {
+            return refusal("the continuous tracers' ito transport");
+        }
+        if self.levels.iter().any(|l| l.state.fields.cs2.is_some()) {
+            return refusal("the isothermal closure");
+        }
+        if self.levels.iter().any(|l| l.prim_eq.is_some()) {
+            return refusal("a declared stationary target");
+        }
+        if (1..self.levels.len()).any(|ll| self.cf_transfer_balanced(ll)) {
+            return refusal("the hydrostatically balanced transfer");
+        }
+        Ok(())
+    }
+
     /// whether a register of this hierarchy sends or receives a unit across a cut
     pub fn transports_registers(&self) -> bool {
         self.flux_registers.iter().any(|r| r.has_contributing() || r.has_receiving())
@@ -1531,6 +1656,7 @@ where
             cut_sides: [[false; 2]; NDIM],
             patch_interior: None,
             face_stencil: None,
+            prim_stencil: None,
             coverage: None,
             flux_eq: None,
             residual_eq: None,
@@ -1681,9 +1807,49 @@ where
             // fine ghost depth: one above the root's (the prolongation stencil
             // is one order above the evolution reconstruction).
             let ng = root_ng + 1;
-            validate_coverage(&coverage, parent, ng, prolong_order, real_on_cut).map_err(|detail| {
+            // a real face on a cut whose prolongation stencil reaches past the root halo, on a
+            // driver gathering that reach from the owning tiles: its fine ghosts prolong from a prim
+            // stencil over the coverage grown by the reach. the stencil carries the gas primitives
+            // and the dye; a magnetized level, a curvilinear or mapped root and a curved spacetime
+            // prolong further inputs and keep the halo requirement
+            let reach = (ng.div_ceil(RATIO) + prolong_order.ghost_width()) as isize;
+            let donated: [[bool; 2]; NDIM] = std::array::from_fn(|ax| {
+                let halo = parent.geom.interior.spaces[ax].lo - parent.geom.allocated.spaces[ax].lo;
+                let short = cut_faces == CutFaces::Donate && reach > halo;
+                [real_on_cut[ax][0] && short, real_on_cut[ax][1] && short]
+            });
+            let donates = donated.iter().flatten().any(|&d| d);
+            if donates
+                && (parent.fields.mhd.is_some()
+                    || !uniform_cartesian(parent)
+                    || !matches!(parent.geom.spacetime, symbi_geometry::Spacetime::Minkowski))
+            {
+                return Err(symbi_xpu::XpuError {
+                    operation: "refinement region",
+                    code: 0,
+                    detail: format!(
+                        "the refinement patch's real face lies on a decomposition cut and its prolongation \
+                         stencil reaches past the root halo; the gathered parent stencil carries the gas \
+                         primitives of a flat uniform cartesian grid alone, and this level is magnetized, \
+                         curvilinear, mapped or curved; give the root {reach} ghost cells or move the face \
+                         off the cut"
+                    ),
+                });
+            }
+            let unmet: [[bool; 2]; NDIM] =
+                std::array::from_fn(|ax| [real_on_cut[ax][0] && !donated[ax][0], real_on_cut[ax][1] && !donated[ax][1]]);
+            validate_coverage(&coverage, parent, ng, prolong_order, unmet).map_err(|detail| {
                 symbi_xpu::XpuError { operation: "refinement region", code: 0, detail }
             })?;
+            let stencil_domain = donates.then(|| {
+                Domain::new(std::array::from_fn(|ax| {
+                    let (c, a) = (&coverage.spaces[ax], &parent.geom.allocated.spaces[ax]);
+                    let lo = if donated[ax][0] { c.lo - reach } else { (c.lo - reach).max(a.lo) };
+                    let hi = if donated[ax][1] { c.hi + reach } else { (c.hi + reach).min(a.hi) };
+                    Space { name: a.name, lo, hi }
+                }))
+            });
+            let stencil_fields = (parent.fields.prim.pre_field().is_some(), parent.fields.prim.chi_field().is_some());
             // a side of the fine level lying on a cut the patch continues across: past the whole
             // patch's own extent, or across the seam of a wrapping axis the first patch spans
             let cut_sides: [[bool; 2]; NDIM] = std::array::from_fn(|ax| {
@@ -1806,6 +1972,9 @@ where
                 cut_sides,
                 patch_interior: Some(patch_interior),
                 face_stencil: None,
+                prim_stencil: stencil_domain
+                    .map(|domain| PrimStencil::zeros(domain, stencil_fields.0, stencil_fields.1))
+                    .transpose()?,
                 coverage: None,
                 flux_eq: None,
                 residual_eq: None,
@@ -2778,6 +2947,9 @@ where
             if let Some(stencil) = level.face_stencil.as_ref() {
                 stencil.filled.set(false);
             }
+            if let Some(stencil) = level.prim_stencil.as_ref() {
+                stencil.invalidate();
+            }
         }
         for (ll, level) in self.levels.iter().enumerate().skip(1) {
             if let Some(entry) = level.attempt_entry.as_ref() {
@@ -3334,6 +3506,11 @@ where
         let has_finer = level + 1 < self.levels.len();
         if has_finer {
             prof("refine_save_prim", || save_prim_old(&self.levels[level]));
+        }
+        // the finer level's gathered parent stencil holds the previous attempt's root until the
+        // driver gathers this one
+        if let Some(stencil) = self.levels.get(level + 1).and_then(|l| l.prim_stencil.as_ref()) {
+            stencil.invalidate();
         }
         self.levels[level].state.dt = dt;
         if self.levels[level].state.continuous_tracers.is_some() {
@@ -4063,6 +4240,10 @@ where
     fn prolong_ito_cf(&self, level: usize) {
         let parent = &self.levels[level - 1];
         let fine = &self.levels[level];
+        assert!(
+            fine.prim_stencil.is_none(),
+            "level {level}: the ito coefficients prolong from the root halo, which a patch face on a cut reaches past"
+        );
         let parent_coefficients = parent
             .state
             .ito_coefficients
@@ -4605,6 +4786,25 @@ where
             .prim_lerp
             .as_ref()
             .expect("the parent of a fine level carries prim_lerp");
+        // a level reading a gathered prim stencil prolongs from the stencil's two time levels over
+        // the stencil's cells; the tile's prime runs before the driver gathers it, and the driver's
+        // stencil prime prolongs the level afterwards
+        let stencil = match fine.prim_stencil.as_ref() {
+            Some(stencil) if stencil.is_filled() => Some(stencil),
+            Some(_) if self.priming => return,
+            Some(_) => panic!("level {level}'s parent prim stencil is read before the driver gathered both time levels"),
+            None => None,
+        };
+        let (old, new, lerp, feeds) = match stencil {
+            Some(st) => {
+                assert!(
+                    parent.prim_eq.is_none() && !self.cf_transfer_balanced(level),
+                    "level {level}: the gathered prim stencil carries the plain primitive prolongation alone"
+                );
+                (&st.old, &st.new, &st.lerp, &st.domain)
+            }
+            None => (prim_old, &parent.state.fields.prim, prim_lerp, &parent.state.geom.allocated),
+        };
         // a slab is clipped to the fine cells the parent can actually feed: a patch that
         // runs out to the edge of a decomposed tile has ghost cells whose prolongation
         // stencil reaches past the parent's own cells, and the fine halo exchange carries
@@ -4615,9 +4815,7 @@ where
             &fine.state.boundaries,
         )
         .iter()
-        .filter_map(|slab| {
-            clip_to_prolongable(slab, &parent.state.geom.allocated, self.prolong_order)
-        })
+        .filter_map(|slab| clip_to_prolongable(slab, feeds, self.prolong_order))
         .collect();
         let sweep_scratch = fine.prolong_sweep.get_or_init(|| {
             let has_pre = fine.state.fields.prim.pre_field().is_some();
@@ -4667,25 +4865,14 @@ where
                     &fine.state.immersed.as_ref().unwrap().bodies,
                 );
             } else {
-                prolong_prims_swept(
-                    scratch,
-                    prim_lerp,
-                    prim_old,
-                    &parent.state.fields.prim,
-                    &fine.state.fields.prim,
-                    slab,
-                    self.prolong_order,
-                    alpha,
-                );
+                prolong_prims_swept(scratch, lerp, old, new, &fine.state.fields.prim, slab, self.prolong_order, alpha);
             }
             // the dye rides the same time-interpolated prolongation as the rest of the primitive
             // state. it sits outside the swept pass because that pass carries a positional
             // component count (rho, DOF velocities, optional pressure) sized by its scratch.
-            if let (Some(chi_old), Some(pchi), Some(fchi)) = (
-                prim_old.chi_field(),
-                parent.state.fields.prim.chi_field(),
-                fine.state.fields.prim.chi_field(),
-            ) {
+            if let (Some(chi_old), Some(pchi), Some(fchi)) =
+                (old.chi_field(), new.chi_field(), fine.state.fields.prim.chi_field())
+            {
                 prolong_field(chi_old, pchi, fchi, slab, self.prolong_order, alpha);
             }
             // mhd: the cell-centered B ghosts feed the fine reconstruction +
@@ -6358,6 +6545,183 @@ fn exchange_level_halos<R, const NDIM: usize, const DOF: usize, M, E, S, Mem, K,
     }
 }
 
+/// the root cells tile `tile` holds authoritatively, in whole-grid indices: its interior, grown
+/// into its ghosts across the root's physical faces. the tiles' boxes cover the whole root and
+/// its physical ghost layers once each
+fn root_cells_held<R, const NDIM: usize, const DOF: usize, M, E, S, Mem, K>(
+    tile: &Hierarchy<R, NDIM, DOF, M, E, S, Mem, K>,
+) -> Domain<NDIM>
+where
+    R: Regime<f64, NDIM> + Copy,
+    M: Metric<f64, NDIM> + Copy + Send + Sync,
+    E: symbi_hydro::eos::EosFor<f64, <R as Regime<f64, NDIM>>::Energy> + Copy + Send + Sync,
+    S: ExecutionSpace,
+    Mem: MemorySpace + Sync,
+    K: KernelSet<NDIM, DOF, Mem, f64>,
+{
+    let root = &tile.levels[0].state;
+    let physical = |b: BoundaryType| b != BoundaryType::CoarseFine && b != BoundaryType::Periodic;
+    Domain::new(std::array::from_fn(|ax| {
+        let (int, alloc) = (&root.geom.interior.spaces[ax], &root.geom.allocated.spaces[ax]);
+        let off = root.geom.index_offset[ax];
+        let lo = if physical(root.boundaries.lo(ax)) { alloc.lo } else { int.lo };
+        let hi = if physical(root.boundaries.hi(ax)) { alloc.hi } else { int.hi };
+        Space { name: int.name, lo: lo + off, hi: hi + off }
+    }))
+}
+
+fn shifted<const NDIM: usize>(d: &Domain<NDIM>, by: [isize; NDIM]) -> Domain<NDIM> {
+    Domain::new(std::array::from_fn(|ax| {
+        let s = &d.spaces[ax];
+        Space { name: s.name, lo: s.lo + by[ax], hi: s.hi + by[ax] }
+    }))
+}
+
+/// gather the root primitives of time level `time` into every tile's prim stencil: the stencil's
+/// cells inside the tile's root allocation from the tile, the cells past it from the tiles holding
+/// them (`root_cells_held`), across the seam of a periodic root axis by the root's period. the
+/// root primitives read are the current ones, so the old level is gathered at the attempt's entry
+/// and the new one after the root stages and tail. returns the number of values that crossed
+/// between tiles
+pub fn gather_prim_stencils<R, const NDIM: usize, const DOF: usize, M, E, S, Mem, K, T>(
+    tiles: &[Hierarchy<R, NDIM, DOF, M, E, S, Mem, K>],
+    devices: &[i32],
+    transport: &T,
+    time: StencilTime,
+) -> usize
+where
+    R: Regime<f64, NDIM> + Copy,
+    M: Metric<f64, NDIM> + Copy + Send + Sync,
+    E: symbi_hydro::eos::EosFor<f64, <R as Regime<f64, NDIM>>::Energy> + Copy + Send + Sync,
+    S: ExecutionSpace,
+    Mem: MemorySpace + Sync,
+    K: KernelSet<NDIM, DOF, Mem, f64>,
+    T: HaloTransport,
+{
+    if tiles.iter().all(|t| t.prim_stencil().is_none()) {
+        return 0;
+    }
+    drain_devices::<Mem>(devices);
+    let held: Vec<Domain<NDIM>> = tiles.iter().map(root_cells_held).collect();
+    let offset = |t: &Hierarchy<R, NDIM, DOF, M, E, S, Mem, K>| t.levels[0].state.geom.index_offset;
+    let period: [isize; NDIM] = std::array::from_fn(|ax| {
+        tiles.iter().map(|t| t.levels[0].state.geom.interior.spaces[ax].hi + offset(t)[ax]).max().unwrap_or(0)
+    });
+    let periodic: [bool; NDIM] = std::array::from_fn(|ax| {
+        tiles.iter().any(|t| {
+            let b = &t.levels[0].state.boundaries;
+            t.root_wraps[ax] || b.lo(ax) == BoundaryType::Periodic || b.hi(ax) == BoundaryType::Periodic
+        })
+    });
+    // every image of a cell across the periodic seams: shifts of -1, 0, +1 periods per periodic axis
+    let images: Vec<[isize; NDIM]> = (0..3usize.pow(NDIM as u32))
+        .map(|code| std::array::from_fn(|ax| (code / 3usize.pow(ax as u32) % 3) as isize - 1))
+        .filter(|k: &[isize; NDIM]| (0..NDIM).all(|ax| periodic[ax] || k[ax] == 0))
+        .map(|k| std::array::from_fn(|ax| k[ax] * period[ax]))
+        .collect();
+    let mut crossed = 0usize;
+    for (i, tile) in tiles.iter().enumerate() {
+        let Some(stencil) = tile.prim_stencil() else { continue };
+        let dst = match time {
+            StencilTime::Old => &stencil.old,
+            StencilTime::New => &stencil.new,
+        };
+        let root = &tile.levels[0].state;
+        let src = PrimStencil::<NDIM, DOF, Mem>::components(&root.fields.prim);
+        let dst = PrimStencil::<NDIM, DOF, Mem>::components(dst);
+        assert_eq!(src.len(), dst.len(), "tile {i}: the prim stencil carries the root's primitive components");
+        let own = stencil.domain.intersect(&root.geom.allocated);
+        symbi_xpu::with_device(devices[i], || {
+            for (s, d) in src.iter().zip(&dst) {
+                copy_field_region(s, d, &own);
+            }
+        });
+        let off_i = offset(tile);
+        for band in stencil.domain.guillotine_difference(&root.geom.allocated) {
+            let whole = shifted(&band, off_i);
+            let mut covered = 0usize;
+            for image in &images {
+                let at = shifted(&whole, *image);
+                for (j, source) in tiles.iter().enumerate() {
+                    if (j == i && image.iter().all(|&k| k == 0)) || !at.overlaps(&held[j]) {
+                        continue;
+                    }
+                    let cells = at.intersect(&held[j]);
+                    let off_j = offset(source);
+                    let src_region = shifted(&cells, std::array::from_fn(|ax| -off_j[ax]));
+                    let dst_region = shifted(&cells, std::array::from_fn(|ax| -image[ax] - off_i[ax]));
+                    let from = PrimStencil::<NDIM, DOF, Mem>::components(&source.levels[0].state.fields.prim);
+                    for (s, d) in from.iter().zip(&dst) {
+                        transport.copy_region(s, &src_region, d, &dst_region, devices[j], devices[i]);
+                    }
+                    covered += cells.volume();
+                }
+            }
+            assert_eq!(
+                covered,
+                band.volume(),
+                "tile {i}: the prim stencil's cells {band:?} past the root allocation are held by no tile once each"
+            );
+            crossed += covered * dst.len();
+        }
+    }
+    drain_devices::<Mem>(devices);
+    for tile in tiles {
+        if let Some(stencil) = tile.prim_stencil() {
+            match time {
+                StencilTime::Old => stencil.old_filled.set(true),
+                StencilTime::New => stencil.new_filled.set(true),
+            }
+        }
+    }
+    crossed
+}
+
+/// the prime of the levels below each tile's prim stencil, after every tile primed: a tile primes
+/// before its neighbors hold primed roots, so its first refined level's coarse-fine ghosts wait
+/// for the stencil. the stencil gathers the primed roots at both time levels, each such tile
+/// prolongs and fills its refined levels coarsest-first at the current state, as the single
+/// hierarchy's prime does, and the stencil is invalidated again until the first step gathers it.
+/// a tile prolonging an input the stencil does not carry is refused first
+/// (`Hierarchy::prim_stencil_admission`)
+pub fn prime_prim_stencils<R, const NDIM: usize, const DOF: usize, M, E, S, Mem, K, T>(
+    tiles: &mut [Hierarchy<R, NDIM, DOF, M, E, S, Mem, K>],
+    devices: &[i32],
+    transport: &T,
+) -> Result<(), String>
+where
+    R: Regime<f64, NDIM> + Copy,
+    M: Metric<f64, NDIM> + Copy + Send + Sync,
+    E: symbi_hydro::eos::EosFor<f64, <R as Regime<f64, NDIM>>::Energy> + Copy + Send + Sync,
+    S: ExecutionSpace,
+    Mem: MemorySpace + Sync,
+    K: KernelSet<NDIM, DOF, Mem, f64>,
+    T: HaloTransport,
+{
+    for tile in tiles.iter() {
+        tile.prim_stencil_admission()?;
+    }
+    gather_prim_stencils(tiles, devices, transport, StencilTime::Old);
+    gather_prim_stencils(tiles, devices, transport, StencilTime::New);
+    for (k, tile) in tiles.iter_mut().enumerate() {
+        if tile.prim_stencil().is_none() {
+            continue;
+        }
+        symbi_xpu::with_device(devices[k], || {
+            tile.priming = true;
+            for ll in 1..tile.levels.len() {
+                tile.prolong_cf(ll, 1.0);
+                tile.fill_physical_ghosts(ll);
+            }
+            tile.priming = false;
+        });
+        if let Some(stencil) = tile.prim_stencil() {
+            stencil.invalidate();
+        }
+    }
+    Ok(())
+}
+
 /// the register units of one fine stage across the root cuts: each root tile's contributing face
 /// (a patch face on a cut) lands in the inbox of the same patch face on the root tile across the
 /// cut, which holds the coarse cells its reflux corrects; every contributing face is then cleared
@@ -7578,6 +7942,8 @@ where
             phase_probe::set_tile(i);
             phase_probe::sample("begin", 0, &tiles[i].levels[0].state);
         }
+        // the roots at the attempt's entry, the old time level of a patch face on a cut
+        gather_prim_stencils(tiles, devices, transport, StencilTime::Old);
         let mut retry = false;
         // the root SSP stages, each with the troubled marks crossing the cuts before the
         // correction and a root halo exchange after.
@@ -7655,6 +8021,8 @@ where
             // restricted covered cells: the next step's prolongation snapshot and the
             // cut-adjacent stencils read them.
             if let Some(fg) = fine.first() {
+                // the roots after their stages and tail, the new time level of a patch face on a cut
+                gather_prim_stencils(tiles, devices, transport, StencilTime::New);
                 retry |= decomposed_subcycle(tiles, 0, fine, (counts, devices), transport, nstages, dt);
                 if !retry {
                     for (k, &i) in fg.order.iter().enumerate() {
