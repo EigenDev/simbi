@@ -1814,9 +1814,9 @@ where
             let ng = root_ng + 1;
             // a real face on a cut whose prolongation stencil reaches past the root halo, on a
             // driver gathering that reach from the owning tiles: its fine ghosts prolong from a prim
-            // stencil over the coverage grown by the reach. the stencil carries the gas primitives
-            // and the dye; a magnetized level, a curvilinear or mapped root and a curved spacetime
-            // prolong further inputs and keep the halo requirement
+            // stencil over the coverage grown by the reach. the stencil carries the newtonian gas
+            // primitives and the dye; a relativistic or magnetized level, a
+            // curvilinear or mapped root and a curved spacetime keep the halo requirement
             let reach = (ng.div_ceil(RATIO) + prolong_order.ghost_width()) as isize;
             let donated: [[bool; 2]; NDIM] = std::array::from_fn(|ax| {
                 let halo = parent.geom.interior.spaces[ax].lo - parent.geom.allocated.spaces[ax].lo;
@@ -1826,6 +1826,7 @@ where
             let donates = donated.iter().flatten().any(|&d| d);
             if donates
                 && (parent.fields.mhd.is_some()
+                    || parent.physics.regime.is_relativistic()
                     || !uniform_cartesian(parent)
                     || !matches!(parent.geom.spacetime, symbi_geometry::Spacetime::Minkowski))
             {
@@ -1834,10 +1835,10 @@ where
                     code: 0,
                     detail: format!(
                         "the refinement patch's real face lies on a decomposition cut and its prolongation \
-                         stencil reaches past the root halo; the gathered parent stencil carries the gas \
-                         primitives of a flat uniform cartesian grid alone, and this level is magnetized, \
-                         curvilinear, mapped or curved; give the root {reach} ghost cells or move the face \
-                         off the cut"
+                         stencil reaches past the root halo; the gathered parent stencil carries the newtonian \
+                         gas primitives of a flat uniform cartesian grid alone, and this level is relativistic, \
+                         magnetized, curvilinear, mapped or curved; give the root {reach} ghost cells or move \
+                         the face off the cut"
                     ),
                 });
             }
