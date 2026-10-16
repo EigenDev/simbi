@@ -397,8 +397,8 @@ fn root_global(h: &Hier, frame: &TileFrame, c: [isize; 2]) -> [isize; 2] {
 /// on every tile reading a prim stencil, bit for bit against the single hierarchy: every fine
 /// ghost each substep's prolongation wrote, the stencil's old time level against the single
 /// root at the step's entry, and its new time level against the single root after its last
-/// stage (this hydro root carries no tail operator). each check counts the cells past the tile's
-/// root allocation it compared, so a stencil that never reached past the halo fails here
+/// stage (the tail of this hydro root leaves its primitives unchanged). each check counts the cells past the tile's
+/// root allocation it compared, so a stencil confined to the halo fails here
 fn assert_stencils_exact(mono_log: &[PhaseSample], dec_log: &[PhaseSample], dec: &[Hier], frames: &[TileFrame], cuts: &[Vec<usize>; 2]) {
     let mono_prolong: Vec<&PhaseSample> = mono_log.iter().filter(|s| s.level == 1 && s.phase == "prolong").collect();
     let last_root = |phase: &str| mono_log.iter().rev().find(|s| s.level == 0 && s.phase == phase).expect("a root sample");
@@ -561,7 +561,7 @@ fn ppm_patch_faces_on_root_cuts_match_after_a_rejected_fine_stage() {
 }
 
 /// a patch face on the low x cut and the high y cut at the production PPM halo (ng 3): the fine
-/// ghosts past each face that the root halo cannot feed prolong from the prim stencil gathered
+/// ghosts past each face beyond the root halo's reach prolong from the prim stencil gathered
 /// from the tiles across the cut, the corner where the two faces meet from the diagonal tile
 #[test]
 fn ppm_patch_faces_on_root_cuts_at_the_production_halo_match() {

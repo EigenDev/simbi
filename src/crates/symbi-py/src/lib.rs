@@ -11532,7 +11532,7 @@ fn validate_refined_launch_scope(cfg: &Config) -> Result<(), String> {
         return refused(&format!("a refined patch on the periodic face of axis {ax}"));
     }
     // a magnetized nested level reads its parent's faces through stencils compiled on the parent's
-    // partition, which wraps along a periodic axis the parent level spans, cut into tiles or not; a
+    // partition, which wraps along a periodic axis the parent level spans, cut into tiles or whole; a
     // nested patch on one periodic face of a cut axis is refused by the shared tiled admission
     if cfg.excision_radius > 0.0 && !launched_refined_gr(cfg) {
         return refused("excision");

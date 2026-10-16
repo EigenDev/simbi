@@ -6738,7 +6738,7 @@ where
 /// for the stencil. the stencil gathers the primed roots at both time levels, each such tile
 /// prolongs and fills its refined levels coarsest-first at the current state, as the single
 /// hierarchy's prime does, and the stencil is invalidated again until the first step gathers it.
-/// a tile prolonging an input the stencil does not carry is refused first
+/// a tile prolonging an input beyond the stencil's is refused first
 /// (`Hierarchy::prim_stencil_admission`)
 pub fn prime_prim_stencils<R, const NDIM: usize, const DOF: usize, M, E, S, Mem, K, T>(
     tiles: &mut [Hierarchy<R, NDIM, DOF, M, E, S, Mem, K>],

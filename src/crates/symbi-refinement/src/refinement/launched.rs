@@ -2817,7 +2817,7 @@ pub fn face_stencil_boxes_of_level_tile<const D: usize>(
 /// holding a real patch face on a cut, under a root halo of `ng` cells shallower than the
 /// prolongation reach, holds the patch coverage grown by that reach, past its allocation on those
 /// sides and clipped to it elsewhere; every other tile holds none. `wraps` names the root axes
-/// closed into a ring, where a cut domain face is a seam and a patch spanning the axis has no face.
+/// closed into a ring, where a cut domain face is a seam and a patch spanning the axis wraps across it.
 /// `Hierarchy::prim_stencil` of a held tile equals its entry, in the tile's own index space
 pub fn prim_stencil_boxes<const D: usize>(
     partition: &symbi_sim::decomp::Partition<D>,
