@@ -228,7 +228,7 @@ def test_a_nested_patch_spanning_a_cut_periodic_axis_matches_the_single_hierarch
         _assert_same(runs[label], runs["single"], label)
 
 
-NESTED_CUT_FACE_REASON = "a nested refined patch reaching the periodic face of axis 0, which is cut into tiles, short of a gas patch spanning the whole axis"
+NESTED_CUT_FACE_REASON = "a nested refined patch reaching the periodic face of axis 0, which is cut into tiles, short of a patch spanning the whole axis"
 
 
 def test_a_nested_patch_on_one_face_of_a_cut_periodic_axis_is_refused_by_name_on_host_tiles_and_launch(tmp_path: Path) -> None:

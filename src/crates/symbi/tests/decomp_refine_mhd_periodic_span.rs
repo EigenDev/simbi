@@ -12,7 +12,8 @@
 // the fine density moves, the fine field evolves, and the same run without a
 // field leaves a measurably different gas. a second level nested in the
 // spanning patch, clear of the periodic faces with the cuts through it,
-// reaches the single hierarchy on the same tiles.
+// reaches the single hierarchy on the same tiles, and so does a second level
+// spanning the periodic axis too, wrapping across the tiles at the seam.
 //
 // run: cargo test -p symbi --test decomp_refine_mhd_periodic_span
 // =============================================================================
@@ -353,6 +354,20 @@ fn evolved_nested(regions: &[RefinementRegion<2>]) -> Hier {
 #[test]
 fn a_nested_magnetized_patch_clear_of_the_periodic_faces_matches_the_single_hierarchy_across_a_cut() {
     let regions = [whole(), nested_clear()];
+    let single = evolved_nested(&regions);
+    assert_tiles_match_over(vec![16], &single, &regions);
+    assert_tiles_match_over(vec![10, 21], &single, &regions);
+}
+
+/// the nested level spanning the whole periodic x axis over root cells 14..18 in y, inside the
+/// spanning patch
+fn nested_spanning() -> RefinementRegion<2> {
+    RefinementRegion { x_lo: [0.0, 0.4375], x_hi: [1.0, 0.5625] }
+}
+
+#[test]
+fn a_nested_magnetized_patch_spanning_a_cut_periodic_axis_matches_the_single_hierarchy() {
+    let regions = [whole(), nested_spanning()];
     let single = evolved_nested(&regions);
     assert_tiles_match_over(vec![16], &single, &regions);
     assert_tiles_match_over(vec![10, 21], &single, &regions);

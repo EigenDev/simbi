@@ -9661,20 +9661,18 @@ fn validate_tiled_march(cfg: &Config) -> Result<(), String> {
             cfg.regime
         ));
     }
-    // the tiles wrap a periodic axis cut into them on the root and on every gas level spanning that
-    // axis whole; a nested patch reaching one face of it, or a magnetized one reaching it at all,
-    // is refused
+    // the tiles wrap a periodic axis cut into them on the root and on every level spanning that
+    // axis whole, its staggered faces included; a nested patch reaching one face of it is refused
     if cfg.refinement_enabled && cfg.refinement_regions.len() > 1 {
-        let magnetized = matches!(cfg.regime.as_str(), "nmhd" | "imhd" | "rmhd");
         let reached = match cfg.dims {
-            1 => nested_patch_on_cut_periodic_face::<1>(cfg, magnetized)?,
-            2 => nested_patch_on_cut_periodic_face::<2>(cfg, magnetized)?,
-            _ => nested_patch_on_cut_periodic_face::<3>(cfg, magnetized)?,
+            1 => nested_patch_on_cut_periodic_face::<1>(cfg)?,
+            2 => nested_patch_on_cut_periodic_face::<2>(cfg)?,
+            _ => nested_patch_on_cut_periodic_face::<3>(cfg)?,
         };
         if let Some(ax) = reached {
             return Err(format!(
                 "a nested refined patch reaching the periodic face of axis {ax}, which is cut into tiles, \
-                 short of a gas patch spanning the whole axis, is outside the tiled runs; span the axis, \
+                 short of a patch spanning the whole axis, is outside the tiled runs; span the axis, \
                  keep the nested regions clear of its faces or run on one device"
             ));
         }
@@ -9683,9 +9681,9 @@ fn validate_tiled_march(cfg: &Config) -> Result<(), String> {
 }
 
 /// the first periodic axis cut into tiles whose face a nested region reaches without spanning the
-/// whole axis (every reach when `spanning_refused`): a nested level spanning it wraps across the
-/// tiles at the seam, a level reaching one face alone would wrap onto its own opposite side
-fn nested_patch_on_cut_periodic_face<const D: usize>(cfg: &Config, spanning_refused: bool) -> Result<Option<usize>, String> {
+/// whole axis: a nested level spanning it wraps across the tiles at the seam, a level reaching one
+/// face alone would wrap onto its own opposite side
+fn nested_patch_on_cut_periodic_face<const D: usize>(cfg: &Config) -> Result<Option<usize>, String> {
     let whole = whole_grid::<D>(cfg);
     let regions = refinement_regions_nd::<D>(&cfg.refinement_regions)?;
     let cell = |x: f64, ax: usize| ((x - cfg.x_lo[ax]) / cfg.dx[ax]).round() as isize;
@@ -9694,7 +9692,7 @@ fn nested_patch_on_cut_periodic_face<const D: usize>(cfg: &Config, spanning_refu
     for region in regions.iter().skip(1) {
         for ax in (0..D).filter(|&ax| counts[ax] > 1 && whole.periodic(ax)) {
             let (lo, hi) = (cell(region.x_lo[ax], ax) <= 0, cell(region.x_hi[ax], ax) >= n[ax] as isize);
-            if (lo || hi) && (spanning_refused || !(lo && hi)) {
+            if (lo || hi) && !(lo && hi) {
                 return Ok(Some(ax));
             }
         }
@@ -11512,9 +11510,8 @@ fn validate_refined_launch_scope(cfg: &Config) -> Result<(), String> {
     // the root and seed plans carry the wrap of a periodic axis cut into tiles; the fine level and
     // its registers exchange inside the domain, so on a cut periodic axis the patch keeps clear of
     // the faces. an uncut periodic axis wraps within each tile, and the fine level of a patch
-    // spanning it wraps with it; the root's parent face stencil reads the periodic image, and the
-    // nested levels' parent face stencils read inside the domain, so a magnetized nested run keeps
-    // clear of every periodic face
+    // spanning it wraps with it; the root's parent face stencil and the nested levels' read the
+    // periodic image along an axis their parent level spans
     let magnetized = matches!(cfg.regime.as_str(), "nmhd" | "imhd" | "rmhd");
     let nested = cfg.refinement_regions.len();
     if magnetized && nested > 1 && !cfg.bodies.is_empty() && !gated_nested_magnetized_bodies(cfg, cfg.dims, nested) {
@@ -11535,19 +11532,8 @@ fn validate_refined_launch_scope(cfg: &Config) -> Result<(), String> {
         return refused(&format!("a refined patch on the periodic face of axis {ax}"));
     }
     // a magnetized nested level reads its parent's faces through stencils compiled on the parent's
-    // partition; along an uncut periodic axis every level wraps within each tile, so a nested patch
-    // may span it, and a nested patch on the periodic face of a cut axis is refused by the shared
-    // tiled admission
-    if magnetized && nested > 1 {
-        let nested_seam = match cfg.dims {
-            1 => nested_patch_on_periodic_face::<1>(cfg, true)?,
-            2 => nested_patch_on_periodic_face::<2>(cfg, true)?,
-            _ => nested_patch_on_periodic_face::<3>(cfg, true)?,
-        };
-        if let Some(ax) = nested_seam {
-            return refused(&format!("a nested magnetized patch on the periodic face of axis {ax}"));
-        }
-    }
+    // partition, which wraps along a periodic axis the parent level spans, cut into tiles or not; a
+    // nested patch on one periodic face of a cut axis is refused by the shared tiled admission
     if cfg.excision_radius > 0.0 && !launched_refined_gr(cfg) {
         return refused("excision");
     }
@@ -11566,25 +11552,6 @@ fn patch_on_periodic_face<const D: usize>(cfg: &Config) -> Result<Option<usize>,
         let spans = patch[ax].0 == 0 && patch[ax].1 >= cfg.n_cells[ax];
         whole.periodic(ax) && counts[ax] > 1 && (patch[ax].0 == 0 || patch[ax].1 >= cfg.n_cells[ax]) && !spans
     }))
-}
-
-/// the first periodic axis a nested refinement region (every region past the first) reaches the
-/// domain face of; with `cut_only`, among the axes cut into tiles
-fn nested_patch_on_periodic_face<const D: usize>(cfg: &Config, cut_only: bool) -> Result<Option<usize>, String> {
-    let whole = whole_grid::<D>(cfg);
-    let regions = refinement_regions_nd::<D>(&cfg.refinement_regions)?;
-    let cell = |x: f64, ax: usize| ((x - cfg.x_lo[ax]) / cfg.dx[ax]).round() as usize;
-    let n: [usize; D] = std::array::from_fn(|ax| cfg.n_cells[ax]);
-    let counts = tile_partition(n, cfg)?.counts();
-    for region in regions.iter().skip(1) {
-        for ax in 0..D {
-            let considered = !cut_only || counts[ax] > 1;
-            if considered && whole.periodic(ax) && (cell(region.x_lo[ax], ax) == 0 || cell(region.x_hi[ax], ax) >= cfg.n_cells[ax]) {
-                return Ok(Some(ax));
-            }
-        }
-    }
-    Ok(None)
 }
 
 /// the refined root patch of the launch's one region in root cells per axis, snapped as the

@@ -28,7 +28,9 @@
 # uneven workers cut through both boxes as the single hierarchy runs; a nested
 # magnetized box reaching one periodic face is refused by name, as on one
 # device; nested boxes spanning the uncut periodic z axis launch on two and four
-# uneven workers as the single hierarchy and its host tiles run. a nested orszag-tang vortex, whose field
+# uneven workers as the single hierarchy and its host tiles run, and spanning it
+# cut into tiles and workers they wrap across the seam as the single hierarchy
+# runs. a nested orszag-tang vortex, whose field
 # changes sign across the second box's faces, launches on two and four workers
 # cut clear of the second box and cut through it, fresh and resumed, and the 3D
 # vortex under two nested boxes on two workers cut through both, as the single
@@ -349,21 +351,31 @@ def test_a_nested_magnetized_run_whose_boxes_span_an_uncut_periodic_axis_runs_as
         _assert_same_levels(launched, reference, f"nested boxes spanning z: {label}")
 
 
-def test_a_nested_magnetized_patch_spanning_a_cut_periodic_axis_is_refused_by_name_on_host_tiles(tmp_path: Path, monkeypatch) -> None:
-    # both boxes span z and the tiles cut z: a magnetized nested level wrapping across tiles has no gate
+def test_a_nested_magnetized_run_whose_boxes_span_a_cut_periodic_axis_runs_as_the_single_hierarchy(tmp_path: Path, monkeypatch) -> None:
+    # both boxes span the periodic z axis with the flow along z through the seam, and the tiles cut z:
+    # each refined level, its staggered faces included, wraps across the tiles at the seam as the root does
     from simbi.simulation.tests.test_decomposed_mhd import SEAM_FLOW_3D
 
-    _spanning_variant(tmp_path, monkeypatch, "nested_cut_span", [*NESTED_BOTH_SPAN, *SEAM_FLOW_3D])
-    snippet = (
-        "import sys\nfrom simbi.simulation import runner\nfrom nested_cut_span import Spanning\n"
-        f"runner.run(Spanning(resolution={RESOLUTION_3D!r}, gpus=2, decompose=[[], [], [12]], data_directory=sys.argv[1], checkpoint_interval=1e9), compute_mode='cpu', max_steps=1)\n"
-    )
-    done = subprocess.run([sys.executable, "-c", snippet, str(tmp_path / "out")], capture_output=True, text=True, timeout=600,
-                          env=dict(os.environ, SYMBI_GPU_OVERSUBSCRIBE="1"))
-    flat = " ".join((done.stdout + done.stderr).split())
-    assert done.returncode != 0, "a magnetized nested level spanning a cut periodic axis ran on host tiles"
-    assert "a nested refined patch reaching the periodic face of axis 2, which is cut into tiles, short of a gas patch spanning the whole axis" in flat, flat[-2000:]
-    assert not list((tmp_path / "out").glob("*.h5")), "a refused run published a checkpoint"
+    stem = "nested_cut_span"
+    script = _spanning_variant(tmp_path, monkeypatch, stem, [*NESTED_BOTH_SPAN, *SEAM_FLOW_3D])
+    reference = _script_reference(stem, "Spanning", RESOLUTION_3D, tmp_path / "single", STEPS)
+    with h5py.File(reference, "r") as f:
+        assert "level_2" in f, "the single hierarchy published no second refined level"
+        h = int(f["level_2"]["mesh"].attrs["halo_width"])
+        nested = f["level_2/conserved/den"][()][h:-h, h:-h, h:-h]
+    assert np.ptp(nested.mean(axis=(1, 2))) > 0.0, "the second fine level is uniform along z; its wrap carries nothing"
+    monkeypatch.setenv("SYMBI_GPU_OVERSUBSCRIBE", "1")
+    # the cuts cross both boxes along z (and x for the uneven arms), through the seam's neighbors
+    for label, fields in [("two host tiles", "gpus=2, decompose=[[], [], [12]]"), ("four uneven host tiles", "gpus=4, decompose=[[11], [], [9]]")]:
+        tiles = _script_reference(stem, "Spanning", RESOLUTION_3D, tmp_path / label.replace(" ", "_"), STEPS, fields=fields)
+        _assert_same_levels(tiles, reference, f"nested boxes spanning a cut z: {label}")
+    monkeypatch.delenv("SYMBI_GPU_OVERSUBSCRIBE")
+    for label, workers, layout in [
+        ("two workers", 2, _layout(tmp_path / "two.toml", workers=2, cuts=[[], [], [12]])),
+        ("four uneven workers", 4, _layout(tmp_path / "four.toml", workers=4, cuts=[[11], [], [9]])),
+    ]:
+        launched = _script_launch(script, RESOLUTION_3D, tmp_path / label.replace(" ", "_"), layout, STEPS, workers=workers)
+        _assert_same_levels(launched, reference, f"nested boxes spanning a cut z: {label}")
 
 
 def test_a_nested_magnetized_patch_on_one_periodic_face_is_refused_on_launch_as_on_one_device(tmp_path: Path, monkeypatch) -> None:
