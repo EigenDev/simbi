@@ -159,6 +159,17 @@ impl HaloTransport for LocalCopy {
         _src_dev: i32,
         _dst_dev: i32,
     ) {
+        // the regions lie inside their fields, release-active: the views index by absolute cell, so
+        // a region past a field reads or writes past its storage
+        for (role, field, region) in [("source", src, src_region), ("destination", dst, dst_region)] {
+            let dom = field.domain();
+            assert!(
+                (0..D).all(|a| region.spaces[a].lo >= dom.spaces[a].lo && region.spaces[a].hi <= dom.spaces[a].hi),
+                "a local copy's {role} region {:?} lies outside its field's domain {:?}",
+                region.spaces,
+                dom.spaces
+            );
+        }
         let sv = src.view();
         let mut dv = dst.view_mut();
         for (sc, dc) in src_region.iter().zip(dst_region.iter()) {

@@ -7,7 +7,9 @@
 # per parent, leaves only, the window); live arms check that budgeted startup
 # children keep a run under the bound while every process is still counted,
 # and that excess processes, a second child, and a child lingering past the
-# window trip the guard.
+# window trip the guard. `run_reaped` kills a timed-out command's whole process
+# group, grandchildren included, and kills and names a grandchild outliving a
+# finished command.
 # =============================================================================
 from __future__ import annotations
 
@@ -18,7 +20,9 @@ import sys
 import time
 from pathlib import Path
 
-from simbi.simulation.tests.process_guard import ProcessGuard, budgeted_startup_children, descendants
+import pytest
+
+from simbi.simulation.tests.process_guard import LingeringProcesses, ProcessGuard, budgeted_startup_children, descendants, run_reaped
 
 PY = "/usr/bin/Python -m simbi.cli launch"
 
@@ -108,3 +112,33 @@ def test_a_startup_child_lingering_past_the_window_trips_the_guard(tmp_path: Pat
         _finish(procs)
     assert guard.tripped, f"probe children outliving the startup window were budgeted (peak {guard.peak})"
     assert any("uname" in line and "budgeted" not in line for line in guard.report), "\n".join(guard.report)
+
+
+# a child that starts a sleeping grandchild, prints its pid, then sleeps itself (or exits at once)
+_SPAWNER = (
+    "import subprocess, sys, time\n"
+    "g = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(120)'])\n"
+    "print(g.pid, flush=True)\n"
+    "time.sleep(float(sys.argv[1]))\n"
+)
+
+
+def _alive(pid: int) -> bool:
+    row = subprocess.Popen(["ps", "-o", "stat=", "-p", str(pid)], stdout=subprocess.PIPE, text=True).communicate()[0].strip()
+    return bool(row) and not row.startswith("Z")
+
+
+def test_a_timed_out_command_has_its_grandchildren_reaped(tmp_path: Path) -> None:
+    out = tmp_path / "out.txt"
+    with open(out, "w") as sink:
+        with pytest.raises(subprocess.TimeoutExpired):
+            run_reaped([sys.executable, "-c", _SPAWNER, "120"], stdout=sink, text=True, timeout=3)
+    grandchild = int(out.read_text().split()[0])
+    assert not _alive(grandchild), f"the grandchild {grandchild} survived the timeout"
+
+
+def test_a_grandchild_outliving_its_command_is_killed_and_named(tmp_path: Path) -> None:
+    with pytest.raises(LingeringProcesses) as raised:
+        run_reaped([sys.executable, "-c", _SPAWNER, "0"], capture_output=True, text=True, timeout=30)
+    grandchild = int(str(raised.value).split("processes [")[1].split("]")[0].split(",")[0])
+    assert not _alive(grandchild), f"the lingering grandchild {grandchild} was left running"

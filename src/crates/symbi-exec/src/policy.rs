@@ -49,6 +49,7 @@ pub fn dispatch_fields<Sc: Scalar + OrderedNumeric, Mem: MemorySpace, const D: u
     let layouts: smallvec::SmallVec<[([i32; D], [u32; D], usize); 16]> = std::iter::repeat(shared)
         .take(inputs.len() + outputs.len())
         .collect();
+    assert_bindings_contained(name, exec, inputs, outputs, Some(&layouts));
     let buffers = disjoint_host_buffers(name, inputs, outputs, &layouts);
     let inv = KernelInvocation {
         buffers,
@@ -59,6 +60,41 @@ pub fn dispatch_fields<Sc: Scalar + OrderedNumeric, Mem: MemorySpace, const D: u
     };
     let (cpu, ir) = expect_kernel::<Sc>(name);
     dispatch::<Sc, Mem, _>(inv, ir, name, cpu);
+}
+
+/// the writes of a dispatch stay inside the memory each binding owns: every binding's layout is
+/// its field's own allocation, and the execution window lies inside every output's domain. a
+/// kernel indexes its buffers by absolute cell, so a window past an output, or a layout wider than
+/// the field bound to it, reads and writes past that field's storage into neighboring heap
+/// allocations; release-active, at the cost of a few comparisons per binding
+fn assert_bindings_contained<Sc, const D: usize, Mem>(
+    name: &str,
+    exec: &Domain<D>,
+    inputs: &[&Field<Sc, D, Mem>],
+    outputs: &[&Field<Sc, D, Mem>],
+    layouts: Option<&[([i32; D], [u32; D], usize)]>,
+) where
+    Sc: Scalar + OrderedNumeric,
+    Mem: MemorySpace,
+{
+    if let Some(layouts) = layouts {
+        for (k, (f, layout)) in inputs.iter().chain(outputs.iter()).zip(layouts).enumerate() {
+            let own = alloc_layout(f.domain());
+            assert!(
+                own == *layout,
+                "dispatch '{name}': binding {k} is laid out as {layout:?} over a field allocated as {own:?}; \
+                 the kernel would index past the field's storage"
+            );
+        }
+    }
+    for (k, f) in outputs.iter().enumerate() {
+        let d = f.domain();
+        assert!(
+            (0..D).all(|ax| exec.spaces[ax].lo >= d.spaces[ax].lo && exec.spaces[ax].hi <= d.spaces[ax].hi),
+            "dispatch '{name}': output {k} over {d:?} does not hold the execution window {exec:?}; \
+             the kernel would write past the field's storage"
+        );
+    }
 }
 
 /// the host CPU fallback for a runtime-built kernel: unreachable. a runtime kernel
@@ -104,6 +140,7 @@ pub fn dispatch_fields_runtime_ir<Sc: Scalar + OrderedNumeric, Mem: MemorySpace,
     let layouts: smallvec::SmallVec<[([i32; D], [u32; D], usize); 16]> = std::iter::repeat(shared)
         .take(inputs.len() + outputs.len())
         .collect();
+    assert_bindings_contained(name, exec, inputs, outputs, Some(&layouts));
     let buffers = disjoint_host_buffers(name, inputs, outputs, &layouts);
     let inv = KernelInvocation {
         buffers,
@@ -371,6 +408,7 @@ pub fn dispatch_fields_each<Sc: Scalar + OrderedNumeric, Mem: MemorySpace, const
     scalars: &[Sc],
 ) {
     let (grid, dlo) = exec_layout(exec);
+    assert_bindings_contained(name, exec, inputs, outputs, None);
 
     // universal executor (the prolong / amr-transfer path too). cache-tile big
     // windows into a disjoint cover dispatched in a single fork-join — at large grids

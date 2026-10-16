@@ -12346,7 +12346,7 @@ where
             let mut boxes: Vec<Option<Vec<[Span; D]>>> = Vec::with_capacity(parent_part.n_tiles());
             for t in 0..parent_part.n_tiles() {
                 let ext = parent_part.tile_extents(unflatten(t, parent_counts));
-                let tile = match symbi::sim::refinement::launched::face_stencil_boxes_of_level_tile(parent_part, rel, TileId(t as u32), false) {
+                let tile = match symbi::sim::refinement::launched::face_stencil_boxes_of_level_tile(parent_part, rel, TileId(t as u32), false, nested_spans[i]) {
                     None => None,
                     Some(components) => Some(
                         components

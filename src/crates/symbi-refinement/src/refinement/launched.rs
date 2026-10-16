@@ -920,6 +920,31 @@ where
                 h.levels[0].kernels.ghost_fill(&h.levels[0].state);
             });
         }
+        // every gathered stencil lands inside the stencil fields the builder gave each held tile:
+        // the plans derive the boxes from the partition, the builder from the level's own sides
+        {
+            let mut checks: Vec<Result<(), String>> = Vec::new();
+            if let Some((old, new)) = plans.stencil.as_ref() {
+                let (stencil_old, stencil_new) = stencil_fields!();
+                checks.push(old.check_destinations(&stencil_old));
+                checks.push(new.check_destinations(&stencil_new));
+            }
+            if let Some((old, new)) = plans.prim_stencil.as_ref() {
+                let (_, _, stencil_old, stencil_new) = prim_stencil_fields!();
+                checks.push(old.check_destinations(&stencil_old));
+                checks.push(new.check_destinations(&stencil_new));
+            }
+            for (i, nested) in plans.nested.iter().enumerate() {
+                if let Some((old, new)) = nested.stencil.as_ref() {
+                    let (_, _, old_dst, new_dst) = nested_stencil_lists!(i + 2);
+                    checks.push(old.check_destinations(&old_dst));
+                    checks.push(new.check_destinations(&new_dst));
+                }
+            }
+            if let Some(Err(e)) = checks.into_iter().find(Result::is_err) {
+                return Err(fail(fabric, WorkerError::Refused(format!("a gathered stencil outgrows its held field: {e}"))));
+            }
+        }
         // a fresh start fills the root's ghosts for the fine seed before its cut halos cross, so
         // the exchange carries the cells where a face's ghosts meet a cut
         let root_ghosts: Vec<SeedGhosts> = if cfg.restart {
@@ -2763,17 +2788,20 @@ pub fn face_stencil_boxes_of_tile<const D: usize>(
     patch: [(usize, usize); D],
     tile: TileId,
 ) -> Option<[Option<symbi_algebra::Domain<D>>; D]> {
-    face_stencil_boxes_of_level_tile(partition, patch, tile, true)
+    face_stencil_boxes_of_level_tile(partition, patch, tile, true, [false; D])
 }
 
 /// `face_stencil_boxes_of_tile` on the partition of any level: `edges_physical` says whether the
 /// partition's outer edges are the domain's walls (the root) or its patch's coarse-fine boundary (a
-/// refined level parenting a nested one)
+/// refined level parenting a nested one), and `spans` names the periodic axes the patch spans
+/// whole, along which its level wraps (within a tile, or across the tiles at the seam) and takes
+/// its face halo from its own wrap, as the builder's level does
 pub fn face_stencil_boxes_of_level_tile<const D: usize>(
     partition: &symbi_sim::decomp::Partition<D>,
     patch: [(usize, usize); D],
     tile: TileId,
     edges_physical: bool,
+    spans: [bool; D],
 ) -> Option<[Option<symbi_algebra::Domain<D>>; D]> {
     use symbi_algebra::{Domain, Space};
     use symbi_sim::state::{Boundaries, BoundaryType, axis_name};
@@ -2805,8 +2833,8 @@ pub fn face_stencil_boxes_of_level_tile<const D: usize>(
             }
         };
         [
-            side(lo[a] == ext[a].0, tc[a] == 0, lo[a] > patch[a].0),
-            side(hi[a] == ext[a].0 + ext[a].1, tc[a] + 1 == counts[a], hi[a] < patch[a].1),
+            side(lo[a] == ext[a].0, tc[a] == 0, lo[a] > patch[a].0 || spans[a]),
+            side(hi[a] == ext[a].0 + ext[a].1, tc[a] + 1 == counts[a], hi[a] < patch[a].1 || spans[a]),
         ]
     }));
     Some(super::transfer::face_stencil_boxes(&interior, &boundaries))

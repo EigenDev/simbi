@@ -18,10 +18,16 @@
 # with children of its own, or one outliving the window counts against the
 # limit.
 #
+# `run_reaped` is `subprocess.run` with the command as the leader of its own
+# process group: on a timeout or any error every member of the group (a
+# launcher's workers included) is killed and reaped before the error is
+# raised, and a member that outlives a finished command is killed and named.
+#
 # usage:
 #   with ProcessGuard(limit=12, startup=10.0) as guard:
 #       subprocess.run([...])
 #   assert not guard.tripped
+#   done = run_reaped([...], capture_output=True, text=True, timeout=600)
 # =============================================================================
 from __future__ import annotations
 
@@ -127,3 +133,70 @@ class ProcessGuard:
     def __exit__(self, *exc) -> None:
         self._stop.set()
         self._thread.join()
+
+
+_RUN = subprocess.run
+
+
+def group_members(pgid: int) -> list[int]:
+    """the live processes of process group `pgid`"""
+    table = _RUN(["ps", "-axo", "pid=,pgid=,stat="], capture_output=True, text=True).stdout
+    return [int(pid) for pid, group, stat in (row.split()[:3] for row in table.splitlines() if row.strip()) if int(group) == pgid and not stat.startswith("Z")]
+
+
+def kill_group(pgid: int) -> list[int]:
+    """kill every live member of process group `pgid` and return their pids; members exiting
+    meanwhile are skipped"""
+    members = group_members(pgid)
+    for pid in members:
+        try:
+            os.kill(pid, signal.SIGKILL)
+        except (ProcessLookupError, PermissionError):
+            pass
+    deadline = time.monotonic() + 5.0
+    while group_members(pgid) and time.monotonic() < deadline:
+        time.sleep(0.05)
+    return members
+
+
+class LingeringProcesses(RuntimeError):
+    """members of a finished command's process group were still running; they were killed"""
+
+
+def run_reaped(args, *, input=None, capture_output=False, timeout=None, check=False, **kwargs) -> subprocess.CompletedProcess:
+    """`subprocess.run` with the command leading its own process group: a timeout or any error
+    kills and reaps every member of the group before it propagates, and a member outliving the
+    finished command is killed and reported as `LingeringProcesses`"""
+    if capture_output:
+        kwargs["stdout"] = subprocess.PIPE
+        kwargs["stderr"] = subprocess.PIPE
+    kwargs["start_new_session"] = True
+    proc = subprocess.Popen(args, **kwargs)
+    end = None if timeout is None else time.monotonic() + timeout
+    lingering: list[int] = []
+    try:
+        # read in short slices: the leader may exit while a group member it left behind holds its
+        # output pipes open, which a single blocking read would wait on until the timeout
+        while True:
+            try:
+                out, err = proc.communicate(input, timeout=0.5)
+                break
+            except subprocess.TimeoutExpired:
+                input = None
+                if end is not None and time.monotonic() > end:
+                    kill_group(proc.pid)
+                    out, err = proc.communicate()
+                    raise subprocess.TimeoutExpired(proc.args, timeout, output=out, stderr=err) from None
+                if proc.poll() is not None:
+                    lingering = kill_group(proc.pid)
+    except BaseException:
+        kill_group(proc.pid)
+        proc.wait()
+        raise
+    lingering += kill_group(proc.pid)
+    if lingering:
+        raise LingeringProcesses(f"{proc.args!r} exited {proc.returncode} leaving processes {lingering} in its group; they were killed")
+    done = subprocess.CompletedProcess(proc.args, proc.returncode, out, err)
+    if check:
+        done.check_returncode()
+    return done

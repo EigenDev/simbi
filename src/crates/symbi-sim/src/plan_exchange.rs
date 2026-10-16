@@ -652,6 +652,28 @@ impl<'p, const D: usize> PlanExchange<'p, D> {
 
     /// the first half of `finish_axis_at`: every landed receive of `axis` scattered into its
     /// destination region, the phase left open for the caller to close
+    /// whether every transfer this worker receives lands inside the destination field it names:
+    /// `fields` holds, per destination tile, the fields the plan writes. a gathered stencil's
+    /// boxes are derived from the partition on every worker and the held fields by the builder, so
+    /// this compares the two before the session moves a value; the first transfer landing past
+    /// its field is named
+    pub fn check_destinations<M: MemorySpace>(&self, fields: &[Vec<&Field<f64, D, M>>]) -> Result<(), String> {
+        for t in self.plan.transfers().filter(|t| self.owns(t.dst)) {
+            let field = fields
+                .get(t.dst.0 as usize)
+                .and_then(|list| list.get(t.field as usize))
+                .ok_or_else(|| format!("{:?} plan: tile {:?} holds no field {} the plan writes", self.role, t.dst, t.field))?;
+            let dom = field.domain();
+            if !(0..D).all(|a| t.dst_region[a].lo >= dom.spaces[a].lo && t.dst_region[a].hi <= dom.spaces[a].hi) {
+                return Err(format!(
+                    "{:?} plan: transfer {:?} lands field {} of tile {:?} over {:?}, past the held field's domain {:?}",
+                    self.role, t.id, t.field, t.dst, t.dst_region, dom.spaces
+                ));
+            }
+        }
+        Ok(())
+    }
+
     pub fn unpack_axis_at<M: MemorySpace, L: Link>(
         &self,
         fields: &[Vec<&Field<f64, D, M>>],
@@ -667,6 +689,19 @@ impl<'p, const D: usize> PlanExchange<'p, D> {
         for t in moved {
             if self.owns(t.dst) && !self.owns(t.src) {
                 let field = fields[t.dst.0 as usize][t.field as usize];
+                let dom = field.domain();
+                assert!(
+                    (0..D).all(|a| t.dst_region[a].lo >= dom.spaces[a].lo && t.dst_region[a].hi <= dom.spaces[a].hi),
+                    "{:?} plan at {point:?}: transfer {:?} from tile {:?} lands field {} of tile {:?} over {:?}, past the \
+                     field's domain {:?}",
+                    self.role,
+                    t.id,
+                    t.src,
+                    t.field,
+                    t.dst,
+                    t.dst_region,
+                    dom.spaces
+                );
                 scatter(field, &t.dst_region, fabric.payload(self.fabric_id(t))?);
                 fabric.mark_unpacked(self.fabric_id(t))?;
             }
@@ -861,6 +896,15 @@ pub fn scatter<const D: usize, M: MemorySpace>(
     region: &[Span; D],
     buf: &[f64],
 ) {
+    let dom = field.domain();
+    for a in 0..D {
+        assert!(
+            region[a].lo >= dom.spaces[a].lo && region[a].hi <= dom.spaces[a].hi,
+            "a transfer's destination region {region:?} lies outside its field's domain {:?} on axis {a}: the \
+             plan's tile layout and the tile's store disagree",
+            dom.spaces
+        );
+    }
     let mut view = field.view_mut();
     for (c, value) in domain_of(region).iter().zip(buf) {
         *view.at_mut(c) = *value;
