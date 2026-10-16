@@ -16,8 +16,8 @@
 // match the single-process reference bitwise.
 //
 // the loop evolves single-level hydro and ideal MHD with their dye, immersed
-// bodies and mesh motion; a store carrying a horizon body, tracers, or
-// excision is refused at entry. a local fatal error tells every peer through
+// bodies and mesh motion, and the relativistic gas with its excision and
+// horizon ledger. a local fatal error tells every peer through
 // the abort relay before the loop returns it.
 //
 // usage:

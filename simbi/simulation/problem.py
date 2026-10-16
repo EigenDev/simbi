@@ -661,6 +661,14 @@ class SimbiProblem(BaseModel):
         bool, ProblemParam(False, cli=True, description="use quirk smoothing")
     ]
 
+    # the horizon's accounting: the rest-mass and killing-energy flux through the diagnostic shell
+    # around an excised core, booked once per accepted root step and carried across restarts. it
+    # needs an excised cartesian kerr-schild box and declares no immersed body
+    horizon_ledger: Annotated[
+        bool,
+        ProblemParam(False, description="book the horizon's mass and energy ledger on an excised kerr-schild box"),
+    ]
+
     # =========================================================================
     # refinement / fmr settings (fixed mesh refinement only)
     # =========================================================================

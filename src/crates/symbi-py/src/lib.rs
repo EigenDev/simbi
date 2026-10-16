@@ -153,6 +153,9 @@ struct Config {
     // horizon-excision sphere radius about the chart origin (cartesian kerr-schild,
     // 2d or 3d); 0 disables excision. must sit inside the horizon r_+ = 2M.
     excision_radius: f64,
+    /// book the horizon ledger (the rest-mass and killing-energy flux through the diagnostic
+    /// shell) on an excised cartesian kerr-schild box
+    horizon_ledger: bool,
     excision_rho_scale: f64,
     excision_pre_scale: f64,
     x1_spacing: String,
@@ -1486,6 +1489,12 @@ fn parse_config(dict: &Bound<'_, PyDict>) -> PyResult<Config> {
         bare_alpha_key: dict.get_item("alpha").ok().flatten().is_some(),
         resistivity: get_f64_or(dict, "resistivity", 0.0),
         excision_radius: get_f64_or(dict, "excision_radius", 0.0),
+        horizon_ledger: dict
+            .get_item("horizon_ledger")
+            .ok()
+            .flatten()
+            .and_then(|v| v.extract::<bool>().ok())
+            .unwrap_or(false),
         excision_rho_scale: 1.0,
         excision_pre_scale: 1.0,
         x1_spacing: enum_str_or(dict, "x1_spacing", "linear"),
@@ -2800,7 +2809,7 @@ where
     // body diagnostics: a separate, user-defined cadence (natural units), only
     // when the run has bodies and a positive interval. one `<dir>diagnostics.dat`
     // table for the whole run.
-    let diag_path = if cfg.diagnostic_interval > 0.0 && !cfg.bodies.is_empty() {
+    let diag_path = if cfg.diagnostic_interval > 0.0 && carries_bodies(cfg) {
         Some(format!("{data_dir}diagnostics.dat"))
     } else {
         None
@@ -4278,10 +4287,15 @@ fn horizon_diagnostic_radius(cfg: &Config) -> f64 {
     3.0 * cfg.schwarzschild_mass
 }
 
-/// whether the run books a horizon ledger: the horizon body rides with the run's immersed bodies,
-/// so an excised run carrying none excises its core and books no ledger
+/// whether the run books a horizon ledger: the run asks for it (`horizon_ledger`) on an excised
+/// cartesian kerr-schild box, and the horizon body that books it is the run's only body there
 fn carries_horizon_ledger(cfg: &Config) -> bool {
-    builds_horizon_body(cfg) && (!cfg.bodies.is_empty() || cfg.bonded_assembly.is_some())
+    builds_horizon_body(cfg) && cfg.horizon_ledger
+}
+
+/// whether the run carries an immersed body: a declared one, or the horizon body of a ledger
+fn carries_bodies(cfg: &Config) -> bool {
+    !cfg.bodies.is_empty() || carries_horizon_ledger(cfg)
 }
 
 /// the horizon ledger is the root's (single owning level): the root books the flux through the
@@ -4391,7 +4405,7 @@ mod horizon_shell_clearance_tests {
 /// analytic sphere when the run carries it
 fn build_body_shapes_and_horizon(cfg: &Config) -> Vec<Option<symbi_ib::sdf::SdfExpr<f64, 3>>> {
     let mut shapes = build_body_shapes(&cfg.bodies);
-    if builds_horizon_body(cfg) {
+    if carries_horizon_ledger(cfg) {
         shapes.push(None);
     }
     shapes
@@ -4399,7 +4413,7 @@ fn build_body_shapes_and_horizon(cfg: &Config) -> Vec<Option<symbi_ib::sdf::SdfE
 
 fn build_bodies_and_horizon<const D: usize>(cfg: &Config) -> BodyCollection<f64, D> {
     let mut coll = build_bodies::<D>(&cfg.bodies, cfg.binary.as_ref());
-    if builds_horizon_body(cfg) {
+    if carries_horizon_ledger(cfg) {
         let diagnostic_radius = horizon_diagnostic_radius(cfg);
         let idx = coll.len();
         coll = coll.add(symbi_ib::Body::horizon(
@@ -5806,7 +5820,7 @@ macro_rules! build_and_run_hydro {
         // declares any. a refined run attaches them to the hierarchy instead (finest level owns
         // the sinks), so skip the sim-level attach here and defer to `hier.with_bodies` after
         // `into_hierarchy` (fragments reject refinement upstream).
-        let has_any_body = !cfg.bodies.is_empty() || cfg.bonded_assembly.is_some();
+        let has_any_body = carries_bodies(cfg) || cfg.bonded_assembly.is_some();
         let sim = if !has_any_body || cfg.refinement_enabled {
             sim
         } else {
@@ -5871,7 +5885,7 @@ macro_rules! build_and_run_hydro {
         // a refined run attaches its immersed bodies to the hierarchy: the finest level owns the full
         // (accreting) bodies, coarser levels carry a gravity-only proxy (finest-owns-bodies, so the
         // sink applies once). the sink sphere must lie inside the finest level (asserted there).
-        if !cfg.bodies.is_empty() && cfg.refinement_enabled {
+        if carries_bodies(cfg) && cfg.refinement_enabled {
             hier = hier.with_bodies(build_bodies_and_horizon::<$d>(cfg));
             hier.attach_body_shapes(build_body_shapes_and_horizon(cfg));
         }
@@ -6222,7 +6236,7 @@ where
     // bodies + a positive interval -- mirrors the single-grid run. the body state is identical on
     // every tile (`step_bodies_decomposed` applies the cross-tile-summed feedback to all tiles), so
     // any tile's bodies are the global diagnostic. one `<dir>diagnostics.dat` for the whole run.
-    let diag_path = if cfg.diagnostic_interval > 0.0 && !cfg.bodies.is_empty() {
+    let diag_path = if cfg.diagnostic_interval > 0.0 && carries_bodies(cfg) {
         Some(format!("{}diagnostics.dat", cfg.data_dir))
     } else {
         None
@@ -6529,7 +6543,7 @@ where
     let cp_width = checkpoint_time_width(cfg);
     // body diagnostics at their own cadence, from the finest bodies, as the single hierarchy
     // records them: every tile's finest bodies carry the cross-tile-summed reaction
-    let diag_path = if cfg.diagnostic_interval > 0.0 && !cfg.bodies.is_empty() {
+    let diag_path = if cfg.diagnostic_interval > 0.0 && carries_bodies(cfg) {
         Some(format!("{}diagnostics.dat", cfg.data_dir))
     } else {
         None
@@ -6950,7 +6964,7 @@ macro_rules! build_and_run_hydro_decomposed_refined {
                 // across tiles and advances every tile's bodies identically; the clipped sink
                 // containment (sphere overlap with a tile must lie inside its fine level) is
                 // asserted each step.
-                if !cfg.bodies.is_empty() {
+                if carries_bodies(cfg) {
                     h = h.with_bodies(build_bodies_and_horizon::<$d>(cfg));
                     h.attach_body_shapes(build_body_shapes_and_horizon(cfg));
                 }
@@ -7172,7 +7186,7 @@ macro_rules! build_and_run_magnetized_decomposed_refined {
                 };
                 // the sinks on each tile's finest level at their global positions, gravity-only
                 // proxies below, as on the single hierarchy
-                if !cfg.bodies.is_empty() {
+                if carries_bodies(cfg) {
                     h = h.try_with_bodies(build_bodies_and_horizon::<$d>(cfg)).map_err(|e| format!("tile {flat}: {e}"))?;
                 }
                 h.set_root_layout(n, tile_lo, std::array::from_fn(|ax| ring.is_periodic(ax)));
@@ -7348,7 +7362,7 @@ macro_rules! build_and_run_hydro_decomposed {
                 // tile at their global positions (refinement takes the refined decomposed path
                 // earlier, so no hierarchy branch here). unshaped point bodies get an empty shape
                 // list (a no-op), so only shaped / fragment runs differ from a bare with_bodies.
-                let has_any_body = !cfg.bodies.is_empty() || cfg.bonded_assembly.is_some();
+                let has_any_body = carries_bodies(cfg) || cfg.bonded_assembly.is_some();
                 let mut sim = if !has_any_body {
                     sim
                 } else {
@@ -7822,7 +7836,7 @@ macro_rules! build_and_run_mhd {
         // body-free runs keep the original sim untouched. a refined run attaches them to the
         // hierarchy instead: the finest level owns the sinks, the coarser levels carry
         // gravity-only proxies.
-        let sim = if cfg.bodies.is_empty() || cfg.refinement_enabled {
+        let sim = if !carries_bodies(cfg) || cfg.refinement_enabled {
             sim
         } else {
             attach_bodies_and_shapes!(sim, cfg, $d)
@@ -7848,7 +7862,7 @@ macro_rules! build_and_run_mhd {
         // the sinks on the finest level, gravity-only proxies below; a sink whose operator
         // support (accretion sphere, drain mask, slip shell, stencil reach) leaves the finest
         // level is a configuration fault reported here.
-        if !cfg.bodies.is_empty() && cfg.refinement_enabled {
+        if carries_bodies(cfg) && cfg.refinement_enabled {
             hier = hier.try_with_bodies(build_bodies_and_horizon::<$d>(cfg))?;
         }
         run_loop(&mut hier, cfg).map_err(|e| e.to_string())
@@ -7950,7 +7964,7 @@ macro_rules! build_and_run_imhd {
         // body-free runs keep the original sim untouched. a refined run attaches them to the
         // hierarchy instead: the finest level owns the sinks, the coarser levels carry
         // gravity-only proxies.
-        let sim = if cfg.bodies.is_empty() || cfg.refinement_enabled {
+        let sim = if !carries_bodies(cfg) || cfg.refinement_enabled {
             sim
         } else {
             attach_bodies_and_shapes!(sim, cfg, $d)
@@ -7974,7 +7988,7 @@ macro_rules! build_and_run_imhd {
         });
         // the sinks on the finest level, gravity-only proxies below; a sink whose operator
         // support leaves the finest level is a configuration fault reported here.
-        if !cfg.bodies.is_empty() && cfg.refinement_enabled {
+        if carries_bodies(cfg) && cfg.refinement_enabled {
             hier = hier.try_with_bodies(build_bodies_and_horizon::<$d>(cfg))?;
         }
         run_loop(&mut hier, cfg).map_err(|e| e.to_string())
@@ -8068,7 +8082,7 @@ macro_rules! build_and_run_mhd_decomposed {
                 // decomposed loop sums the backward feedback across tiles + advances the prescribed
                 // binary orbit identically.
 
-                let sim = if cfg.bodies.is_empty() {
+                let sim = if !carries_bodies(cfg) {
                     sim
                 } else {
                     attach_bodies_and_shapes!(sim, cfg, $d)
@@ -8225,7 +8239,7 @@ macro_rules! build_and_run_imhd_decomposed {
                 // decomposed loop sums the backward feedback across tiles + advances the prescribed
                 // binary orbit identically.
 
-                let sim = if cfg.bodies.is_empty() {
+                let sim = if !carries_bodies(cfg) {
                     sim
                 } else {
                     attach_bodies_and_shapes!(sim, cfg, $d)
@@ -8551,7 +8565,7 @@ macro_rules! build_and_run_iso_decomposed {
 
                 // gravity / accretion sinks plus bonded fragments and shaped walls, attached per
                 // tile at their global positions, as the energy-regime tiles attach them
-                let has_any_body = !cfg.bodies.is_empty() || cfg.bonded_assembly.is_some();
+                let has_any_body = carries_bodies(cfg) || cfg.bonded_assembly.is_some();
                 let sim = if !has_any_body {
                     sim
                 } else {
@@ -8697,7 +8711,7 @@ macro_rules! build_and_run_iso {
         // attach immersed bodies (gravity / accretion sinks + bonded fragments) when
         // declared. a refined run attaches them to the hierarchy instead (finest level
         // owns the sinks), exactly like the energy-regime hydro macro.
-        let has_any_body = !cfg.bodies.is_empty() || cfg.bonded_assembly.is_some();
+        let has_any_body = carries_bodies(cfg) || cfg.bonded_assembly.is_some();
         let sim = if !has_any_body || cfg.refinement_enabled {
             sim
         } else {
@@ -8773,7 +8787,7 @@ macro_rules! build_and_run_iso {
         // a refined run attaches its immersed bodies to the hierarchy: the finest
         // level owns the full (accreting) bodies, coarser levels a gravity-only
         // proxy (finest-owns-bodies, so the sink applies once).
-        if !cfg.bodies.is_empty() && cfg.refinement_enabled {
+        if carries_bodies(cfg) && cfg.refinement_enabled {
             hier = hier.with_bodies(build_bodies_and_horizon::<$d>(cfg));
             hier.attach_body_shapes(build_body_shapes_and_horizon(cfg));
         }
@@ -9321,6 +9335,27 @@ fn validate_declared_target(cfg: &Config, dof: usize) -> Result<(), String> {
 /// host tiles and the launched workers all call it, so a capability decision lives in one place
 fn validate_run(cfg: &Config) -> Result<(), String> {
     validate_porous_body_overlaps(&cfg.bodies)?;
+    // the relativistic regimes carry no immersed-body operator: their kernel sets have no body
+    // source, feedback or penalization fit for relativistic conserved variables, so a declared
+    // body would either leave the gas untouched (rhd) or meet the newtonian penalization (rmhd).
+    // the horizon ledger is the one body these regimes book, asked for by `horizon_ledger`
+    if matches!(cfg.regime.as_str(), "rhd" | "rmhd") && (!cfg.bodies.is_empty() || cfg.binary.is_some()) {
+        return Err(format!(
+            "immersed bodies on the {} regime are outside the supported physics: no relativistic \
+             body operator exists, so a body would not act on the gas as declared; remove them, or set \
+             horizon_ledger = True on an excised kerr-schild box for the horizon's mass and energy accounting",
+            cfg.regime
+        ));
+    }
+    // the horizon ledger books the flux through the diagnostic shell of an excised cartesian
+    // kerr-schild box
+    if cfg.horizon_ledger && !builds_horizon_body(cfg) {
+        return Err(
+            "horizon_ledger books the flux through the horizon's diagnostic shell on an excised \
+             cartesian kerr-schild box (a curved spacetime, a cartesian chart and excision_radius > 0)"
+                .to_string(),
+        );
+    }
     // a user source acts on a magnetized run's hydro slots on the single grid; the refined
     // magnetized march carries none, on any driver
     if matches!(cfg.regime.as_str(), "nmhd" | "imhd" | "rmhd") && cfg.refinement_enabled && !cfg.source_jsons.is_empty() {
@@ -11372,9 +11407,10 @@ fn validate_launch_scope(cfg: &Config) -> Result<(), String> {
         if cfg.refinement_enabled && !launched_refined_gr(cfg) {
             return refused(&format!("the {} spacetime with mesh refinement", cfg.spacetime));
         }
-        // the relativistic gas carries immersed bodies on the excised three-dimensional
-        // kerr-schild box, where the root books the horizon ledger across the workers
-        let body_box = cfg.regime == "rhd"
+        // the launched relativistic gas books the horizon ledger on the excised three-dimensional
+        // kerr-schild box, the root merging every worker's shell partials; immersed bodies on a
+        // relativistic regime are refused for every driver by `validate_run`
+        let ledger_box = cfg.regime == "rhd"
             && cfg.dims == 3
             && cfg.coord_system == "cartesian"
             && matches!(cfg.spacetime.as_str(), "schwarzschild_ks" | "kerr_ks")
@@ -11382,9 +11418,9 @@ fn validate_launch_scope(cfg: &Config) -> Result<(), String> {
         if cfg.bonded_assembly.is_some() {
             return refused(&format!("a bonded assembly on the {} spacetime", cfg.spacetime));
         }
-        if !cfg.bodies.is_empty() && !body_box {
+        if cfg.horizon_ledger && !ledger_box {
             return refused(&format!(
-                "immersed bodies with the {} regime on the {} spacetime off the excised three-dimensional kerr-schild box",
+                "a horizon ledger with the {} regime on the {} spacetime off the excised three-dimensional kerr-schild box",
                 cfg.regime, cfg.spacetime
             ));
         }
@@ -11675,7 +11711,7 @@ where
     };
     // immersed bodies at their global positions: the finest level owns the full bodies, coarser
     // levels a gravity-only proxy, as on the in-process refined tiles
-    if !cfg.bodies.is_empty() {
+    if carries_bodies(cfg) {
         h = h.try_with_bodies(build_bodies_and_horizon::<D>(cfg)).map_err(|e| format!("tile {flat}: {e}"))?;
         h.attach_body_shapes(build_body_shapes_and_horizon(cfg));
     }
@@ -12587,7 +12623,7 @@ where
     let write_initial = !restart && (cfg.checkpoint_index == 0 || cfg.start_time == 0.0);
     // the body diagnostics, written by the coordinator from its first tile's finest bodies, which
     // carry the cross-tile-summed reaction as every tile's do; one `<dir>diagnostics.dat` per run
-    let diag_path = if me == WorkerId(0) && cfg.diagnostic_interval > 0.0 && !cfg.bodies.is_empty() {
+    let diag_path = if me == WorkerId(0) && cfg.diagnostic_interval > 0.0 && carries_bodies(cfg) {
         Some(format!("{}diagnostics.dat", cfg.data_dir))
     } else {
         None
@@ -12813,7 +12849,7 @@ fn run_worker_process(
                 let sim = with_tile_dye!(sim, cfg, tile_lo, n, flat);
                 // gravity / accretion sinks plus bonded fragments and shaped walls, every tile
                 // holding the whole set at their global positions
-                let sim = if cfg.bodies.is_empty() && cfg.bonded_assembly.is_none() {
+                let sim = if !carries_bodies(cfg) && cfg.bonded_assembly.is_none() {
                     sim
                 } else {
                     attach_bodies_and_fragments!(sim, cfg, $d)
@@ -12924,7 +12960,7 @@ fn run_worker_process(
                     .seed_faces_indexed(&tile_faces)
                     .build();
                 // the immersed bodies and their shaped walls, every tile holding the whole set
-                let sim = if cfg.bodies.is_empty() { sim } else { attach_bodies_and_shapes!(sim, cfg, $d) };
+                let sim = if !carries_bodies(cfg) { sim } else { attach_bodies_and_shapes!(sim, cfg, $d) };
                 // the numerics, sources, driven boundaries and gradient walls the single grid
                 // installs, each tile evaluating them at the whole grid's coordinates of its cells
                 let settings = KernelSettings::of(cfg, <NewtonianMhd as Regime<f64, $d>>::SPEC);
@@ -13011,7 +13047,7 @@ fn run_worker_process(
                     .seed_faces_indexed(&tile_faces)
                     .build();
                 // the immersed bodies and their shaped walls, every tile holding the whole set
-                let sim = if cfg.bodies.is_empty() { sim } else { attach_bodies_and_shapes!(sim, cfg, $d) };
+                let sim = if !carries_bodies(cfg) { sim } else { attach_bodies_and_shapes!(sim, cfg, $d) };
                 // the numerics, sources, driven boundaries and gradient walls the single grid
                 // installs, each tile evaluating them at the whole grid's coordinates of its cells
                 let settings = KernelSettings::of(cfg, <Rmhd as Regime<f64, $d>>::SPEC);
@@ -13086,7 +13122,7 @@ fn run_worker_process(
                 let sim = with_tile_dye!(sim, cfg, tile_lo, n, flat);
                 // gravity / accretion sinks plus bonded fragments and shaped walls, every tile
                 // holding the whole set at their global positions
-                let sim = if cfg.bodies.is_empty() && cfg.bonded_assembly.is_none() {
+                let sim = if !carries_bodies(cfg) && cfg.bonded_assembly.is_none() {
                     sim
                 } else {
                     attach_bodies_and_fragments!(sim, cfg, $d)
@@ -13195,7 +13231,7 @@ fn run_worker_process(
                     .seed_faces_indexed(&tile_faces)
                     .build();
                 // the immersed bodies and their shaped walls, every tile holding the whole set
-                let sim = if cfg.bodies.is_empty() { sim } else { attach_bodies_and_shapes!(sim, cfg, $d) };
+                let sim = if !carries_bodies(cfg) { sim } else { attach_bodies_and_shapes!(sim, cfg, $d) };
                 // the numerics, sources, driven boundaries and gradient walls the single grid
                 // installs, each tile evaluating them at the whole grid's coordinates of its cells
                 let settings = KernelSettings::of(cfg, <IsothermalMhd as Regime<f64, $d>>::SPEC);
@@ -13764,7 +13800,7 @@ where
     }
     // the body diagnostics, on the coordinator alone: every worker's bodies are the same, at the
     // cadence the single grid keeps
-    let diag_path = if me == WorkerId(0) && cfg.diagnostic_interval > 0.0 && !cfg.bodies.is_empty() {
+    let diag_path = if me == WorkerId(0) && cfg.diagnostic_interval > 0.0 && carries_bodies(cfg) {
         Some(format!("{}diagnostics.dat", cfg.data_dir))
     } else {
         None

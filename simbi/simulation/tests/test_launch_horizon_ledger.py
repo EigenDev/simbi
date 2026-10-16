@@ -1,22 +1,24 @@
 # =============================================================================
-# test_launch_gr_bodies.py
+# test_launch_horizon_ledger.py
 #
-# an excised kerr-schild box carrying an immersed body on launched workers.
-# the run carries the horizon body, whose ledger the root books once per
-# accepted root step: every worker merges its tiles' exact shell partials, the
-# workers' partials merge into the whole grid's, and every tile books the
-# rates rounded once. so, against the single grid (or hierarchy):
+# an excised kerr-schild box asked for its horizon ledger (`horizon_ledger`) on
+# launched workers. the run carries the horizon body, whose ledger the root
+# books once per accepted root step: every worker merges its tiles' exact shell
+# partials, the workers' partials merge into the whole grid's, and every tile
+# books the rates rounded once. these gates establish the ledger's accounting
+# across drivers; no immersed body acts on relativistic gas (a declared body is
+# refused, test_relativistic_bodies). so, against the single grid (or hierarchy):
 # - two workers and four uneven workers cut through the shell publish the same
 #   grid, bodies and horizon ledger bit for bit, unrefined and refined;
 # - a run resumed onto another partition continues the ledger and the grid as
 #   the uninterrupted run does;
 # - a step rejected on one worker books nothing of the rejected attempt: the
 #   run equals the clean run capped at the accepted timestep;
-# - a refined patch across the diagnostic shell, and bodies off the excised
-#   kerr-schild box, are refused by name before any output.
+# - a refined patch across the diagnostic shell is refused by name before any
+#   output.
 # the ledger is nonzero in every run compared.
 #
-# run: pytest -m simulation simbi/simulation/tests/test_launch_gr_bodies.py
+# run: pytest -m simulation simbi/simulation/tests/test_launch_horizon_ledger.py
 # =============================================================================
 
 import os
@@ -40,21 +42,19 @@ FIELDS = "domain_radius=0.4, excision_radius=1.6"
 REJECTIONS = re.compile(r"SIMBI launch: worker=\d+/\d+ steps=\d+ rejections=(\d+)")
 
 BASE = '''
-from simbi.types.bodies import BodyCapability, GravitationalProperties, ImmersedBodyConfig
+from typing import Annotated
+
+from simbi import ProblemParam
 from simbi_configs.examples.grhd.gr_bondi_cartesian import GrBondiCartesian
 
 
-class WithBody(GrBondiCartesian):
-    """the excised kerr-schild bondi box with a light gravitating body"""
+class WithLedger(GrBondiCartesian):
+    """the excised kerr-schild bondi box booking its horizon ledger"""
 
-    @property
-    def immersed_bodies(self):
-        ll = self.domain_radius * self._r_bondi()
-        return [ImmersedBodyConfig(capability=BodyCapability.GRAVITATIONAL, mass=1e-6, radius=0.0, position=(0.5 * ll, 0.5 * ll, 0.5 * ll),
-                                   velocity=(0.0, 0.0, 0.0), gravitational=GravitationalProperties(softening_length=0.1 * ll))]
+    horizon_ledger: Annotated[bool, ProblemParam(True, description="ledger")]
 
 
-class RefinedWithBody(WithBody):
+class RefinedWithLedger(WithLedger):
     """a patch over the corner box from r = 5.2 M, outside the diagnostic shell's band"""
 
     def setup(self) -> None:
@@ -66,7 +66,7 @@ class RefinedWithBody(WithBody):
         self.refinement_regions = [[0.5 * ll, 5.0 * ll / 6.0] * 3]
 
 
-class RefinedAcrossShell(RefinedWithBody):
+class RefinedAcrossShell(RefinedWithLedger):
     """the patch over the corner box from r = 3.5 M, across the diagnostic shell at r = 3 M"""
 
     def setup(self) -> None:
@@ -75,16 +75,16 @@ class RefinedAcrossShell(RefinedWithBody):
         self.refinement_regions = [[ll / 3.0, 0.75 * ll] * 3]
 '''
 
-CASES = {"flat": "WithBody", "refined": "RefinedWithBody", "across": "RefinedAcrossShell"}
+CASES = {"flat": "WithLedger", "refined": "RefinedWithLedger", "across": "RefinedAcrossShell"}
 
 
 @pytest.fixture
 def scripts(tmp_path: Path) -> dict[str, Path]:
-    (tmp_path / "gr_body_base.py").write_text(BASE)
+    (tmp_path / "gr_ledger_base.py").write_text(BASE)
     out = {}
     for case, cls in CASES.items():
         path = tmp_path / f"launched_{case}.py"
-        path.write_text(f"from gr_body_base import {cls} as Base\n\n\nclass Launched{cls}(Base):\n    pass\n")
+        path.write_text(f"from gr_ledger_base import {cls} as Base\n\n\nclass Launched{cls}(Base):\n    pass\n")
         out[case] = path
     return out
 
@@ -106,7 +106,7 @@ def _reference(tmp_path: Path, cls: str, out: Path, steps: int = STEPS) -> Path:
     snippet = (
         "import sys\n"
         "from simbi.simulation import runner\n"
-        f"from gr_body_base import {cls}\n"
+        f"from gr_ledger_base import {cls}\n"
         f"runner.run({cls}(resolution={RESOLUTION!r}, {FIELDS}, data_directory=sys.argv[1], checkpoint_interval=1e9), compute_mode='cpu', max_steps={steps})\n"
     )
     done = subprocess.run([sys.executable, "-c", snippet, str(out)], capture_output=True, text=True, timeout=900, env=_env(tmp_path))
@@ -147,7 +147,7 @@ def _assert_same(got: Path, want: Path, label: str) -> None:
 
 
 @pytest.mark.parametrize("case", ["flat", "refined"])
-def test_an_excised_box_with_a_body_launches_as_the_single_grid(tmp_path: Path, scripts: dict[str, Path], case: str) -> None:
+def test_an_excised_box_with_its_ledger_launches_as_the_single_grid(tmp_path: Path, scripts: dict[str, Path], case: str) -> None:
     want = _reference(tmp_path, CASES[case], tmp_path / "single")
     mass, energy = _ledger(want)
     assert mass != 0.0 and energy != 0.0, f"the reference booked ({mass}, {energy}); its ledger is empty"
