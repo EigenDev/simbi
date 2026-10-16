@@ -11720,9 +11720,27 @@ where
         let (clip, whole): (Vec<_>, Vec<_>) = clipped.into_iter().unzip();
         let prolong = prolong_order_for(&cfg.reconstruction_name);
         let ring = grid.topology(layout.partition.counts());
-        Hierarchy::with_refinement_placed(sim, sub, &clip, &whole, prolong, |s| kernels_of(s, LevelRole::Fine), layout.n, std::array::from_fn(|ax| ring.is_periodic(ax)), symbi::sim::refinement::CutFaces::Contribute)
+        Hierarchy::with_refinement_placed(sim, sub, &clip, &whole, prolong, |s| kernels_of(s, LevelRole::Fine), layout.n, std::array::from_fn(|ax| ring.is_periodic(ax)), symbi::sim::refinement::CutFaces::Donate)
             .map_err(|e| format!("tile {flat} refinement build: {e:?}"))?
     };
+    // the parent prim stencils of the session, derived from the partition alone: this tile's own
+    // equals its builder's, and the cells it gives to any of them are kept at every attempt's entry
+    {
+        let ng = h.levels[0].state.geom.ng;
+        let ring = grid.topology(layout.partition.counts());
+        let wraps: [bool; D] = std::array::from_fn(|ax| ring.is_periodic(ax));
+        let boxes = symbi::sim::refinement::launched::prim_stencil_boxes(&layout.partition, layout.patch, ng, prolong_order_for(&cfg.reconstruction_name), wraps);
+        let held = h.prim_stencil().map(|st| -> [symbi_sim::atlas::Span; D] {
+            std::array::from_fn(|ax| symbi_sim::atlas::Span { lo: st.domain.spaces[ax].lo + tile.offset[ax] as isize, hi: st.domain.spaces[ax].hi + tile.offset[ax] as isize })
+        });
+        if held != boxes[flat] {
+            return Err(format!("tile {flat}: its parent prim stencil {held:?} differs from the session's {:?}", boxes[flat]));
+        }
+        if let Some(cells) = symbi_sim::atlas::ExchangePlan::cell_stencil_sources(&layout.partition, &ring, &boxes, ng, TileId(flat as u32)) {
+            let cells = symbi_algebra::Domain::new(std::array::from_fn(|ax| symbi_algebra::Space { name: symbi_sim::state::axis_name(ax), lo: cells[ax].lo, hi: cells[ax].hi }));
+            h.enable_prim_entry(&cells).map_err(|e| format!("tile {flat} prim entry: {e:?}"))?;
+        }
+    }
     // immersed bodies at their global positions: the finest level owns the full bodies, coarser
     // levels a gravity-only proxy, as on the in-process refined tiles
     if carries_bodies(cfg) {
@@ -12195,6 +12213,21 @@ where
     } else {
         None
     };
+    // a gas patch face on a cut whose prolongation reaches past the root halo reads a parent prim
+    // stencil gathered from the cells' owners, one component per conserved gas field
+    let prim_stencil_plan = if magnetized {
+        None
+    } else {
+        let boxes = symbi::sim::refinement::launched::prim_stencil_boxes(partition, patch, ng, prolong_order_for(&cfg.reconstruction_name), std::array::from_fn(|ax| wrap.is_periodic(ax)));
+        if boxes.iter().any(Option::is_some) {
+            let schema = (0..cons_schema.len()).fold(symbi_sim::atlas::FieldSchema::new(), |schema, k| schema.cell(&format!("prim_stencil_{k}")));
+            let plan = ExchangePlan::cell_stencil(partition, &wrap, &boxes, &schema, ng).map_err(|e| e.to_string())?;
+            digests.push(plan.digest);
+            Some(plan)
+        } else {
+            None
+        }
+    };
     // the nested levels: each refines its parent level over its region, its tiles cut where the
     // parent's cuts cross the region and owned by the worker owning the root tile beneath; every
     // worker derives every level's tiles, owners and index frames from the partition alone
@@ -12435,6 +12468,11 @@ where
         }
         None => (None, None, None, None),
     };
+    let prim_stencil = prim_stencil_plan.as_ref().map(|plan| {
+        let old = next(plan, placement, PlanRole::PrimStencil);
+        let new = next(plan, placement, PlanRole::PrimStencil);
+        (old, new)
+    });
     // the nested levels' plans take the ids after every plan of the first refined level, the
     // order every worker lists the plans in
     let mut nested_plans = Vec::with_capacity(nested_state_plans.len());
@@ -12519,6 +12557,9 @@ where
     if let Some((old, new)) = stencil.as_ref() {
         all.extend([old, new]);
     }
+    if let Some((old, new)) = prim_stencil.as_ref() {
+        all.extend([old, new]);
+    }
     for level in &nested_plans {
         all.extend([&level.state, &level.seed]);
         if let Some((old, new)) = level.stencil.as_ref() {
@@ -12546,7 +12587,7 @@ where
         let _ = std::io::stderr().write_all(line.as_bytes());
     }
     let mut fabric = fabric_for(&all, link, session).with_block_credit(credit);
-    let plans = RefinedPlans { root, seed, fine, flux, emf, faces, corrected, stencil, nested: nested_plans, coefficients, bands, band_seams, slip_shared, slip_cells };
+    let plans = RefinedPlans { root, seed, fine, flux, emf, faces, corrected, stencil, prim_stencil, nested: nested_plans, coefficients, bands, band_seams, slip_shared, slip_cells };
     let root_devices = vec![0i32; n_root];
     let fine_devices = vec![0i32; n_fine];
     let nested_held: Vec<NestedHeld> = nested_ids

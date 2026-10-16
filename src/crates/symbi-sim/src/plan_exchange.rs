@@ -48,6 +48,10 @@ pub enum PlanRole {
     /// a refined tile's parent face stencil gathered from the faces' owners: every transfer
     /// moves at the last root stage point, after the root stages and before the fine subcycle
     FaceStencil,
+    /// a refined tile's parent prim stencil gathered from the cells' owners: every transfer moves
+    /// at the last root stage point, after the root stages and before the fine subcycle, and at
+    /// the primed point, before the stencil's tiles prolong their primed levels
+    PrimStencil,
     /// the state of nested level `level >= 2`: its state, bands and audits at its own points,
     /// its state after the primed restriction, after the restriction of the level below it,
     /// and at the rollback
@@ -242,6 +246,7 @@ impl<'p, const D: usize> PlanExchange<'p, D> {
             ),
             PlanRole::CorrectedFace => point == ExchangePoint::CorrectedFaces,
             PlanRole::FaceStencil => point == ExchangePoint::Stage(self.table.stages() - 1),
+            PlanRole::PrimStencil => point == ExchangePoint::Stage(self.table.stages() - 1) || point == ExchangePoint::Primed,
             PlanRole::BandSeam { level } => match point {
                 ExchangePoint::BandSeam { level: l, .. } => (l == level || l + 1 == level) && !t.audit,
                 _ => false,

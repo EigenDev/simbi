@@ -33,7 +33,7 @@ use symbi::regimes::substrate_newton::AdiabaticSubstrateKernelSet;
 use symbi::sim::decomp::{FinePartition, LocalCopy, Partition, Topology, flatten, plan_cons_schema, plan_schema, unflatten};
 use symbi::sim::refinement::launched::{
     ClockField,
-    Held, RefinedConfig, RefinedGrids, RefinedPlans, evolve_refined_worker, load_refined_tiles, refined_checkpoint,
+    Held, RefinedConfig, RefinedGrids, RefinedPlans, evolve_refined_worker, load_refined_tiles, prim_stencil_boxes, refined_checkpoint,
 };
 use symbi_io::{Hdf5Backend, IoBackend, Metadata, TreeBuf};
 use symbi_sim::checkpoint::{PhysicsIdentity, write_hierarchy_checkpoint};
@@ -48,7 +48,7 @@ use symbi_hydro::eos::IdealGas;
 use symbi_hydro::newtonian::Newtonian;
 use symbi_hydro::quantity::{Density, Pressure};
 use symbi_hydro::state::Prim;
-use symbi_sim::atlas::{ExchangePlan, Placement, TileId};
+use symbi_sim::atlas::{ExchangePlan, FieldSchema, Placement, Span, TileId};
 use symbi_sim::phase_table::PhaseTable;
 use symbi_sim::plan_exchange::{PlanExchange, PlanRole, StagingFault, fabric_for};
 use symbi_sim::substrate_seam::RegimeKind;
@@ -184,6 +184,27 @@ impl Arm {
 
 }
 
+/// the session's parent prim stencils, from the partition alone as the launched driver derives them
+fn prim_stencil_boxes_of(partition: &Partition<2>, patch: [(usize, usize); 2], ng: usize) -> Vec<Option<[Span; 2]>> {
+    prim_stencil_boxes(partition, patch, ng, ProlongOrder::Ppm, [false; 2])
+}
+
+/// a tile keeping, at every attempt's entry, the root cells it gives to the session's prim stencils;
+/// a refined tile's own stencil equals the session's entry for it
+fn with_prim_entry(mut h: Hier, partition: &Partition<2>, flat: usize, patch: [(usize, usize); 2], ng: usize) -> Hier {
+    let boxes = prim_stencil_boxes_of(partition, patch, ng);
+    let ext = partition.tile_extents(unflatten(flat, partition.counts()));
+    let held = h.prim_stencil().map(|st| -> [Span; 2] {
+        std::array::from_fn(|a| Span { lo: st.domain.spaces[a].lo + ext[a].0 as isize, hi: st.domain.spaces[a].hi + ext[a].0 as isize })
+    });
+    assert_eq!(held, boxes[flat], "tile {flat}: the builder's prim stencil differs from the session's");
+    if let Some(cells) = ExchangePlan::cell_stencil_sources(partition, &Topology::open(), &boxes, ng, TileId(flat as u32)) {
+        let cells = symbi_algebra::Domain::new(std::array::from_fn(|a| symbi_algebra::Space { name: axis_name(a), lo: cells[a].lo, hi: cells[a].hi }));
+        h.enable_prim_entry(&cells).expect("prim entry");
+    }
+    h
+}
+
 /// one root tile's hierarchy: the patch clipped to the tile with the whole patch beside it,
 /// a patch face on a cut as a contributing register face; a tile beside such a face with no
 /// part of the patch carries the receiving register of the cells that face corrects
@@ -206,8 +227,13 @@ fn tile(partition: &Partition<2>, flat: usize, patch: [(usize, usize); 2], ng: u
     let k = kset(&root);
     if cx[0] < cx[1] && cy[0] < cy[1] {
         let clipped = RefinementRegion { x_lo: [cx[0], cy[0]], x_hi: [cx[1], cy[1]] };
-        return Hier::with_refinement_of_contributing(root, k, &[clipped], &[whole], ProlongOrder::Ppm, kset)
-            .expect("tile hier");
+        return with_prim_entry(
+            Hier::with_refinement_of_donating(root, k, &[clipped], &[whole], ProlongOrder::Ppm, kset).expect("tile hier"),
+            partition,
+            flat,
+            patch,
+            ng,
+        );
     }
     // the patch faces this tile sits beside: beyond a hi face the tile starts at it, beyond
     // a lo face it ends at it, its transverse extent meeting the patch
@@ -235,9 +261,9 @@ fn tile(partition: &Partition<2>, flat: usize, patch: [(usize, usize); 2], ng: u
             };
             symbi_algebra::Space { name: axis_name(aa), lo, hi }
         }));
-        h.with_receiving_register(&patch_local, faces).expect("receiving register")
+        with_prim_entry(h.with_receiving_register(&patch_local, faces).expect("receiving register"), partition, flat, patch, ng)
     } else {
-        h
+        with_prim_entry(h, partition, flat, patch, ng)
     }
 }
 
@@ -511,9 +537,21 @@ fn run_worker(arm: &Arm, me: WorkerId, out: PathBuf) -> Result<(), WorkerError> 
         PlanExchange::new(&flux_plan, &placement, me, table.clone())
             .with_role(PlanRole::FluxContribution, (root.lens().len() + seed.lens().len() + fine.lens().len()) as u32)
     });
+    // the parent prim stencils of a patch face on a cut under a root halo shallower than the reach
+    let boxes = prim_stencil_boxes_of(&partition, arm.patch, ng);
+    let stencil_plan = boxes.iter().any(Option::is_some).then(|| {
+        let schema = (0..N_COMP).fold(FieldSchema::new(), |schema, k| schema.cell(&format!("prim_stencil_{k}")));
+        ExchangePlan::cell_stencil(&partition, &Topology::open(), &boxes, &schema, ng).expect("prim stencil plan")
+    });
+    let prim_stencil = stencil_plan.as_ref().map(|plan| {
+        let offset = (root.lens().len() + seed.lens().len() + fine.lens().len() + flux.as_ref().map_or(0, |f| f.lens().len())) as u32;
+        let old = PlanExchange::new(plan, &placement, me, table.clone()).with_role(PlanRole::PrimStencil, offset);
+        let new = PlanExchange::new(plan, &placement, me, table.clone()).with_role(PlanRole::PrimStencil, offset + old.lens().len() as u32);
+        (old, new)
+    });
     let plan_digest = {
         let mut h = Fnv::new();
-        for d in [root_plan.digest, seed_plan.digest, fine_plan.digest, flux_plan.digest] {
+        for d in [root_plan.digest, seed_plan.digest, fine_plan.digest, flux_plan.digest].into_iter().chain(stencil_plan.as_ref().map(|p| p.digest)) {
             h.u32((d.0 >> 32) as u32);
             h.u32(d.0 as u32);
         }
@@ -540,12 +578,15 @@ fn run_worker(arm: &Arm, me: WorkerId, out: PathBuf) -> Result<(), WorkerError> 
     };
     let mut all: Vec<&PlanExchange<'_, 2>> = vec![&root, &seed, &fine];
     all.extend(flux.as_ref());
+    if let Some((old, new)) = prim_stencil.as_ref() {
+        all.extend([old, new]);
+    }
     let max_payload = all.iter().flat_map(|p| p.lens()).max().unwrap_or(0) * 8;
     // a checkpoint block travels on the same link: the payload bound covers the agreed credit
     let (link, session) = connect(&r, max_payload.max(4096))?;
     // the block credit the handshake agreed, which a checkpoint's blocks are sent under
     let mut fabric = fabric_for(&all, link, session).with_block_credit(4096);
-    let plans = RefinedPlans { root, seed, fine, flux, emf: None, faces: None, corrected: None, stencil: None, nested: Vec::new(), coefficients: Vec::new(), bands: Vec::new(), band_seams: Vec::new(), slip_shared: None, slip_cells: None };
+    let plans = RefinedPlans { root, seed, fine, flux, emf: None, faces: None, corrected: None, stencil: None, prim_stencil, nested: Vec::new(), coefficients: Vec::new(), bands: Vec::new(), band_seams: Vec::new(), slip_shared: None, slip_cells: None };
     let cfg = RefinedConfig {
         base: WorkerConfig {
             regime: RegimeKind::of::<f64, 2, Newtonian>(),
@@ -912,6 +953,19 @@ fn patch_face_on_cut() -> Arm {
     ragged_17_13().with_patch([(12, 17), (12, 20)], 5)
 }
 
+/// the patch's lo face on axis 0 on the cut at 12 and its hi face on axis 1 on the cut at 20, under
+/// the production root halo of two cells: the fine ghosts past both faces prolong from the parent
+/// prim stencil gathered from the tiles across the cuts, the corner from the diagonal tile
+fn production_halo_faces() -> Arm {
+    Arm { cuts0: vec![12], cuts1: vec![20], owner: vec![0, 1, 2, 3], steps: STEPS, patch: PATCH, ng: NG }
+}
+
+/// the same faces with a three-cell column beside the lo face: the stencil's four cells past that
+/// face come from two tiles on two workers, the corner from a third
+fn production_halo_two_owners() -> Arm {
+    Arm { cuts0: vec![9, 12], cuts1: vec![20], owner: vec![0, 1, 2, 2, 0, 1], steps: STEPS, patch: PATCH, ng: NG }
+}
+
 /// three workers on a 3x2 tile grid: the patch lies in the middle column, whose two tiles
 /// worker 1 owns, so workers 0 and 2 hold no fine tile
 fn no_fine_on_two_workers() -> Arm {
@@ -1222,6 +1276,33 @@ fn a_patch_face_on_a_cut_refluxes_through_the_neighbor() {
         &[("W_REJECT_FINE_WORKER", "1".into()), ("W_REJECT_FINE", "3,1,1".into())],
     );
     assert_rejection_matches_capped_control(test, &arm, rejecting, 3, "the fine-rejecting run with a patch face on the cut");
+}
+
+/// patch faces on cuts under the production root halo: every arm's stencil reaches past it, the
+/// run equals the single hierarchy in every component, a rejection in the second fine substep
+/// replays from a regathered stencil, and the quad layout's checkpoint resumed onto the layout
+/// continues bitwise
+#[test]
+fn patch_faces_on_cuts_at_the_production_halo_match_through_the_prim_stencil() {
+    if in_worker_role() {
+        worker_main();
+    }
+    let test = "patch_faces_on_cuts_at_the_production_halo_match_through_the_prim_stencil";
+    for (tag, arm) in [("faces", production_halo_faces()), ("two_owners", production_halo_two_owners())] {
+        assert!(
+            prim_stencil_boxes_of(&arm.partition(), arm.patch, arm.ng).iter().any(Option::is_some),
+            "{tag}: no tile reads a prim stencil; the gate is vacuous"
+        );
+        let outcomes = run_arm(test, tag, &arm, &[]);
+        assert_matches_reference(test, tag, &outcomes, &arm, &format!("{tag}: patch faces on cuts at the production halo"));
+    }
+    let arm = production_halo_faces();
+    let rejecting = run_arm(test, "rejecting", &arm, &[("W_REJECT_FINE_WORKER", "2".into()), ("W_REJECT_FINE", "3,1,1".into())]);
+    assert_rejection_matches_capped_control(test, &arm, rejecting, 3, "the fine-rejecting run with patch faces on cuts at the production halo");
+    let dir = run_dir(test, "files");
+    let (ckpt, before) = quad_checkpoint(test, &dir);
+    let resumed = run_arm(test, "resumed", &arm, &[("W_RESTART_FROM", ckpt.to_str().unwrap().into())]);
+    assert_matches_reference_after(test, "resumed", &resumed, &arm, "resumed onto patch faces on cuts at the production halo", &before);
 }
 
 /// a contribution sent twice and one never sent each end the session on every worker

@@ -1341,6 +1341,151 @@ impl<const D: usize> ExchangePlan<D> {
         Ok(Self { digest, ..plan })
     }
 
+    /// the plan gathering every cell of each tile's parent prim stencil from the cells' owners: a
+    /// patch face on a cut prolongs its fine ghosts from parent cells past the root halo. `boxes`
+    /// holds each tile's stencil in whole-grid cell indices, `schema` the gathered cell fields. a
+    /// tile owns its interior grown into its ghosts across the domain's faces along the axes
+    /// `topology` leaves open; along a periodic axis a box reads the periodic image of the cells.
+    /// every cell of every box has exactly one owner, or the plan is refused
+    pub fn cell_stencil(
+        partition: &Partition<D>,
+        topology: &Topology<D>,
+        boxes: &[Option<[Span; D]>],
+        schema: &FieldSchema,
+        ng: usize,
+    ) -> Result<Self, PlanError> {
+        let counts = partition.counts();
+        let n_tiles = partition.n_tiles();
+        assert_eq!(boxes.len(), n_tiles, "one stencil entry per tile");
+        assert!(schema.entries.iter().all(|e| e.kind == FieldKind::Cell), "a prim stencil gathers cell fields");
+        let tiles: Vec<TileLayout<D>> = (0..n_tiles).map(|t| TileLayout::of_partition(partition, TileId(t as u32), ng)).collect();
+        let n_fields = schema.entries.len();
+        let exts: Vec<[(usize, usize); D]> = (0..n_tiles).map(|t| partition.tile_extents(unflatten(t, counts))).collect();
+        let mut fields: Vec<Vec<FieldLayout<D>>> =
+            (0..n_tiles).map(|t| (0..n_fields).map(|_| FieldLayout::of(&tiles[t], FieldKind::Cell)).collect()).collect();
+        let local = |g: &[Span; D], t: usize| -> [Span; D] {
+            std::array::from_fn(|a| Span { lo: g[a].lo - exts[t][a].0 as isize, hi: g[a].hi - exts[t][a].0 as isize })
+        };
+        let (_, owned, images) = Self::stencil_owners(partition, topology, ng);
+        let mut transfers = Vec::new();
+        for (dst, gbox) in boxes.iter().enumerate() {
+            let Some(gbox) = gbox else { continue };
+            let lbox = local(gbox, dst);
+            for f in fields[dst].iter_mut() {
+                f.allocated = std::array::from_fn(|a| Span { lo: f.allocated[a].lo.min(lbox[a].lo), hi: f.allocated[a].hi.max(lbox[a].hi) });
+            }
+            let mut covered = 0usize;
+            for (src, own) in owned.iter().enumerate() {
+                for image in &images {
+                    let at: [Span; D] = std::array::from_fn(|a| Span { lo: own[a].lo + image[a], hi: own[a].hi + image[a] });
+                    let piece: [Span; D] = std::array::from_fn(|a| Span { lo: gbox[a].lo.max(at[a].lo), hi: gbox[a].hi.min(at[a].hi) });
+                    if piece.iter().any(|s| s.hi <= s.lo) {
+                        continue;
+                    }
+                    covered += volume(&piece);
+                    let unshifted: [Span; D] = std::array::from_fn(|a| Span { lo: piece[a].lo - image[a], hi: piece[a].hi - image[a] });
+                    let (src_region, dst_region) = (local(&unshifted, src), local(&piece, dst));
+                    for f in 0..n_fields {
+                        transfers.push(Transfer {
+                            id: TransferId(0),
+                            axis: 0,
+                            src: TileId(src as u32),
+                            dst: TileId(dst as u32),
+                            field: f as u16,
+                            len: volume(&dst_region),
+                            src_region,
+                            dst_region,
+                            audit: false,
+                        });
+                    }
+                }
+            }
+            if covered != volume(gbox) {
+                return Err(PlanError::Partition(format!("the parent prim stencil of tile {dst} reads cells no tile owns once: {gbox:?}")));
+            }
+        }
+        for (k, t) in transfers.iter_mut().enumerate() {
+            t.id = TransferId(k as u32);
+        }
+        let mut axes: Vec<AxisPhase<D>> = (0..D).map(|ax| AxisPhase { axis: ax as u8, transfers: Vec::new() }).collect();
+        axes[0].transfers = transfers;
+        let plan = Self {
+            reach: ng,
+            tiles,
+            fields,
+            schema: schema.clone(),
+            axes,
+            seam: None,
+            polar_bands: Vec::new(),
+            wraps: std::array::from_fn(|ax| topology.is_periodic(ax)),
+            digest: Digest(0),
+        };
+        plan.validate()?;
+        let digest = plan.compute_digest(counts, topology);
+        Ok(Self { digest, ..plan })
+    }
+
+    /// the whole-grid extent per axis, the cells each tile owns for a cell stencil (its interior,
+    /// grown into its ghosts across a domain face along an axis `topology` leaves open), and the
+    /// periodic images a stencil box may reach (one period either way along each periodic axis)
+    #[allow(clippy::type_complexity)]
+    fn stencil_owners(partition: &Partition<D>, topology: &Topology<D>, ng: usize) -> ([isize; D], Vec<[Span; D]>, Vec<[isize; D]>) {
+        let counts = partition.counts();
+        let exts: Vec<[(usize, usize); D]> = (0..partition.n_tiles()).map(|t| partition.tile_extents(unflatten(t, counts))).collect();
+        let grid: [isize; D] = std::array::from_fn(|a| exts.iter().map(|e| e[a].0 + e[a].1).max().unwrap_or(0) as isize);
+        let owned = (0..exts.len())
+            .map(|t| {
+                let tc = unflatten(t, counts);
+                std::array::from_fn(|a| {
+                    let (lo, hi) = (exts[t][a].0 as isize, (exts[t][a].0 + exts[t][a].1) as isize);
+                    let open = !topology.is_periodic(a);
+                    let grow_lo = if open && tc[a] == 0 { ng as isize } else { 0 };
+                    let grow_hi = if open && tc[a] + 1 == counts[a] { ng as isize } else { 0 };
+                    Span { lo: lo - grow_lo, hi: hi + grow_hi }
+                })
+            })
+            .collect();
+        let mut images: Vec<[isize; D]> = vec![[0; D]];
+        for a in 0..D {
+            if topology.is_periodic(a) {
+                images = images.iter().flat_map(|img| [-1, 0, 1].map(|k| { let mut next = *img; next[a] = k; next })).collect();
+            }
+        }
+        let images = images.into_iter().map(|k| std::array::from_fn(|a| k[a] * grid[a])).collect();
+        (grid, owned, images)
+    }
+
+    /// the cells tile `tile` gives to the parent prim stencils of `boxes` (`cell_stencil`), as the
+    /// smallest box in the tile's own index space holding them all; `None` when it gives none
+    pub fn cell_stencil_sources(
+        partition: &Partition<D>,
+        topology: &Topology<D>,
+        boxes: &[Option<[Span; D]>],
+        ng: usize,
+        tile: TileId,
+    ) -> Option<[Span; D]> {
+        let (_, owned, images) = Self::stencil_owners(partition, topology, ng);
+        let own = &owned[tile.0 as usize];
+        let lo = partition.tile_extents(unflatten(tile.0 as usize, partition.counts()));
+        let mut hull: Option<[Span; D]> = None;
+        for gbox in boxes.iter().flatten() {
+            for image in &images {
+                let piece: [Span; D] = std::array::from_fn(|a| Span {
+                    lo: gbox[a].lo.max(own[a].lo + image[a]) - image[a] - lo[a].0 as isize,
+                    hi: gbox[a].hi.min(own[a].hi + image[a]) - image[a] - lo[a].0 as isize,
+                });
+                if piece.iter().any(|s| s.hi <= s.lo) {
+                    continue;
+                }
+                hull = Some(match hull {
+                    None => piece,
+                    Some(h) => std::array::from_fn(|a| Span { lo: h[a].lo.min(piece[a].lo), hi: h[a].hi.max(piece[a].hi) }),
+                });
+            }
+        }
+        hull
+    }
+
     /// the plan carrying the staggered faces a tile beside a neighbor's patch corrected on
     /// one of its own cuts: for every real face of `patch` lying on a cut, the tile across
     /// it applies edge slabs whose corrected faces run along the plane over the patch's node

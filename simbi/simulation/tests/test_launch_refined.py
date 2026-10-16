@@ -4,9 +4,10 @@
 # mesh refinement through `simbi launch`: a root grid with one fine box,
 # launched across workers whose cuts cross the box, against the single-process
 # refined run, both levels compared bit for bit; resumed onto a changed
-# partition from the launch's own two-level checkpoint; and a patch face on a
-# cut refused by name, whose fine ghosts would read the root halo past its
-# depth. each arm runs the refined blast in newtonian hydro and the
+# partition from the launch's own two-level checkpoint; a hydro patch face on
+# a cut under the production halo, its fine ghosts prolonged from parent cells
+# gathered past the root halo, equal bit for bit fresh and resumed, and a
+# magnetized one refused by name. each arm runs the refined blast in newtonian hydro and the
 # magnetized blast in 2.5D newtonian and special-relativistic MHD, the latter
 # two under the Contact and the UCT edge EMF, their staggered faces on both
 # levels compared with the cells; a
@@ -366,9 +367,31 @@ def _refused(tmp_path: Path, script: str, resolution: tuple[int, ...] | None, la
     return " ".join(done.stderr.split())
 
 
-@pytest.mark.parametrize("problem", PROBLEMS[:2])
-def test_a_patch_face_on_a_cut_is_refused_by_name(tmp_path: Path, problem: Problem) -> None:
-    # the box's low face on axis 0 at root cell 8, on the cut: its fine ghosts prolong from the
-    # root halo, which plm's two ghost cells do not hold
+# the coarse-fine prolongation's reach in root cells past a patch face: half the fine halo (one
+# cell deeper than the root's) rounded up, plus the stencil half-width of 2
+PROLONG_REACH = 4
+
+
+def test_a_hydro_patch_face_on_a_cut_matches_the_single_process_run(tmp_path: Path) -> None:
+    # the box's low face on axis 0 at root cell 8 and its high face on axis 1 at root cell 24 lie
+    # on the cuts: their fine ghosts prolong from parent cells past the root halo, gathered from
+    # the workers owning them each root step, the corner from the diagonal worker; fresh and
+    # resumed from a two-worker checkpoint whose cut crosses the box
+    problem = PROBLEMS[0].values[0]
+    reference = problem.reference(tmp_path / "single", STEPS)
+    with h5py.File(reference, "r") as f:
+        halo = int(f["level_0/mesh"].attrs["halo_width"])
+    assert halo < PROLONG_REACH, f"the root halo ({halo}) holds the prolongation reach; the cut faces read no gathered cell"
+    on_faces = _layout(tmp_path / "faces.toml", workers=4, cuts=[[8], [24]])
+    _assert_same_levels(problem.launch(tmp_path / "faces", on_faces, STEPS, 4), reference, "patch faces on the cuts")
+    first = problem.launch(tmp_path / "first", _layout(tmp_path / "two.toml", workers=2, shape=(2, 1)), STEPS // 2, 2)
+    resumed = problem.launch(tmp_path / "resumed", on_faces, STEPS, 4, checkpoint=first)
+    _assert_same_levels(resumed, reference, "patch faces on the cuts, resumed")
+
+
+def test_a_magnetized_patch_face_on_a_cut_is_refused_by_name(tmp_path: Path) -> None:
+    # the magnetized box's low face on axis 0 at root cell 8, on the cut: its cell and face field
+    # prolong from the root halo, which plm's two ghost cells do not hold
+    problem = PROBLEMS[1].values[0]
     stderr = _refused(tmp_path, problem.script, RESOLUTION, _layout(tmp_path / "two.toml", workers=2, cuts=[[8], []]))
     assert "lies on a decomposition cut" in stderr, stderr
