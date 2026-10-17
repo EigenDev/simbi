@@ -14,14 +14,15 @@
 #   halfway;
 # - after a level-2 stage rejected in the second substep of a root step,
 #   once the first substep's units crossed the cut: the run cut on the face
-#   equals the run cut clear of it, and both differ from the run rejecting
-#   nothing.
+#   equals the run cut clear of it and the clean run whose rejected step takes
+#   the timestep the replay accepted.
 # a launch publishes the same state: the faces on two and four workers, a
 # two-worker checkpoint resumed on four, and the rejected stage replayed alike
-# on and clear of the face with the rejection counted once on every worker. a
-# nested unit listed twice ends the session before any output, and a launch
-# carrying parent prim stencils on two levels is refused by name. every arm
-# runs as a fresh process, the tiled ones as host tiles on a cpu build.
+# on and clear of the face, counted once on every worker, equal to the capped
+# clean launch. a nested unit listed twice ends the session before any output,
+# and a launch carrying parent prim stencils on two levels is refused by name.
+# every arm runs as a fresh process, the tiled ones as host tiles on a cpu
+# build.
 #
 # run: pytest -m simulation simbi/simulation/tests/test_tiled_nested_face_on_cut.py
 # =============================================================================
@@ -133,20 +134,42 @@ def test_a_level_2_face_on_a_level_1_cut_resumes_on_another_partition(tmp_path: 
     assert_same_checkpoint(resumed, one, "a level-2 face on a level-1 cut resumed on four tiles", expect=["level_1", "level_2"])
 
 
-def test_a_rejected_level_2_stage_after_booked_units_replays_alike(tmp_path: Path) -> None:
+# the root step whose level-2 stage a rejecting run rejects; the rejecting runs stop after it
+REJECTED_STEP = 2
+
+
+def _accepted_dt(rejecting: Path, clean: Path) -> float:
+    """the root timestep the replay of the rejected step accepted, which the clean run's exceeds"""
+    with h5py.File(rejecting, "r") as fr, h5py.File(clean, "r") as fc:
+        accepted = float(fr["level_0"].attrs["dt"])
+        assert accepted < float(fc["level_0"].attrs["dt"]), "the rejection left the timestep unreduced; the replay is never exercised"
+    return accepted
+
+
+def _capped_clean_launch(script: str, tmp_path: Path, accepted: float) -> Path:
+    """the clean two-worker launch cut on the face whose rejected step takes the timestep the replay
+    accepted: the same accepted timestep sequence, entered from a state no rollback touched"""
+    layout = _layout(tmp_path / "capped.toml", workers=2, cuts=[[16], []])
+    out = tmp_path / "capped"
+    done = _launch(script, out, layout, REJECTED_STEP + 1, inject=f"cap:{REJECTED_STEP}:{int(np.float64(accepted).view(np.uint64))}")
+    capped = _launched(done, out, 2)
+    assert {int(r) for r in REJECTIONS.findall(done.stderr)} == {0}, "the capped control rejected a step"
+    return capped
+
+
+def test_a_rejected_level_2_stage_after_booked_units_replays_to_the_capped_clean_run(tmp_path: Path) -> None:
     """a level-2 stage of the second substep of root step 2 rejected after the first substep's
-    units crossed the level-1 cut: the run cut on the face equals the run cut clear of it (level 2
-    on one tile, at x = -0.125), and both differ from the run rejecting nothing"""
+    units crossed the level-1 cut: the host tiles cut on the face equal those cut clear of it (level
+    2 on one tile, at x = -0.125), and equal the clean launch whose step 2 takes the timestep the
+    replay accepted"""
     script = _script(tmp_path / "low.py", FACES["low"])
-    reject = "reject_level:0:2:2:1:1"
-    on_face = _capped(script, tmp_path / "on_face", 2, STEPS, [[16], []], inject=reject)
-    clear = _capped(script, tmp_path / "clear", 2, STEPS, [[12], []], inject=reject)
+    reject = f"reject_level:0:{REJECTED_STEP}:2:1:1"
+    on_face = _capped(script, tmp_path / "on_face", 2, REJECTED_STEP + 1, [[16], []], inject=reject)
+    clear = _capped(script, tmp_path / "clear", 2, REJECTED_STEP + 1, [[12], []], inject=reject)
     assert_same_checkpoint(on_face, clear, "a rejected level-2 stage cut on and clear of the face", expect=["level_1", "level_2"])
-    clean = _capped(script, tmp_path / "clean", 2, STEPS, [[16], []])
-    with h5py.File(on_face, "r") as a, h5py.File(clean, "r") as b:
-        assert not np.array_equal(a["level_2/conserved/den"][()], b["level_2/conserved/den"][()]), (
-            "the rejection left level 2 unchanged; the replay is never exercised"
-        )
+    clean = _capped(script, tmp_path / "clean", 2, REJECTED_STEP + 1, [[16], []])
+    capped = _capped_clean_launch(script, tmp_path, _accepted_dt(on_face, clean))
+    assert_same_checkpoint(on_face, capped, "a rejected level-2 stage on host tiles against the capped clean launch", expect=["level_1", "level_2"])
 
 
 REJECTIONS = re.compile(r"SIMBI launch: worker=\d+/\d+ steps=\d+ rejections=(\d+)")
@@ -198,28 +221,26 @@ def test_a_level_2_face_on_a_level_1_cut_resumes_on_more_workers(tmp_path: Path)
     assert_same_checkpoint(resumed, one, "a level-2 face on a level-1 cut resumed on four workers", expect=["level_1", "level_2"])
 
 
-def test_a_rejected_level_2_stage_after_booked_units_replays_alike_on_launch(tmp_path: Path) -> None:
+def test_a_rejected_level_2_stage_after_booked_units_replays_to_the_capped_clean_run_on_launch(tmp_path: Path) -> None:
     """worker 1, holding level 2, rejects a stage of the second level-2 substep of root step 2 after
     the first substep's units crossed the level-1 cut: the launch cut on the face equals the launch
-    cut clear of it, every worker counts the rejection once, and the state differs from the clean
-    launch"""
+    cut clear of it, every worker counts the rejection once, and both equal the clean launch whose
+    step 2 takes the timestep the replay accepted"""
     script = _script(tmp_path / "low.py", FACES["low"])
-    reject = "reject_level:1:2:2:1:1"
+    reject = f"reject_level:1:{REJECTED_STEP}:2:1:1"
     finals = {}
     for cut in (16, 12):
         layout = _layout(tmp_path / f"cut{cut}.toml", workers=2, cuts=[[cut], []])
         out = tmp_path / f"rejecting_{cut}"
-        done = _launch(script, out, layout, STEPS, inject=reject)
+        done = _launch(script, out, layout, REJECTED_STEP + 1, inject=reject)
         finals[cut] = _launched(done, out, 2)
         counts = {int(r) for r in REJECTIONS.findall(done.stderr)}
         assert counts == {1}, f"cut at {cut}: the rejection was not counted once on every worker: {counts}"
     assert_same_checkpoint(finals[16], finals[12], "a rejected level-2 stage launched cut on and clear of the face", expect=["level_1", "level_2"])
     layout = _layout(tmp_path / "clean.toml", workers=2, cuts=[[16], []])
-    clean = _launched(_launch(script, tmp_path / "clean", layout, STEPS), tmp_path / "clean", 2)
-    with h5py.File(finals[16], "r") as a, h5py.File(clean, "r") as b:
-        assert not np.array_equal(a["level_2/conserved/den"][()], b["level_2/conserved/den"][()]), (
-            "the rejection left level 2 unchanged; the replay is never exercised"
-        )
+    clean = _launched(_launch(script, tmp_path / "clean", layout, REJECTED_STEP + 1), tmp_path / "clean", 2)
+    capped = _capped_clean_launch(script, tmp_path, _accepted_dt(finals[16], clean))
+    assert_same_checkpoint(finals[16], capped, "a rejected level-2 stage launched against the capped clean launch", expect=["level_1", "level_2"])
 
 
 def test_a_duplicated_nested_unit_ends_the_launch(tmp_path: Path) -> None:
