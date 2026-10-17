@@ -593,8 +593,10 @@ pub fn prolong_prims_balanced<const D: usize, const DOF: usize, Mem: MemorySpace
     alpha: f64,
     coarse_x_lo: &[f64; D],
     coarse_dx: &[f64; D],
+    coarse_off: &[f64; D],
     fine_x_lo: &[f64; D],
     fine_dx: &[f64; D],
+    fine_off: &[f64; D],
     coarse_bodies: &symbi_ib::BodyCollection<f64, D>,
     fine_bodies: &symbi_ib::BodyCollection<f64, D>,
 ) {
@@ -656,6 +658,7 @@ pub fn prolong_prims_balanced<const D: usize, const DOF: usize, Mem: MemorySpace
     let mut scalars = vec![alpha];
     scalars.extend_from_slice(coarse_x_lo);
     scalars.extend_from_slice(coarse_dx);
+    scalars.extend_from_slice(coarse_off);
     push_body_slot_scalars(coarse_bodies, &mut scalars);
     prof("wb_cf_encode", || {
         dispatch_fields_each::<f64, Mem, D>(
@@ -687,6 +690,7 @@ pub fn prolong_prims_balanced<const D: usize, const DOF: usize, Mem: MemorySpace
     let mut scalars = Vec::new();
     scalars.extend_from_slice(fine_x_lo);
     scalars.extend_from_slice(fine_dx);
+    scalars.extend_from_slice(fine_off);
     push_body_slot_scalars(fine_bodies, &mut scalars);
     let departures = census_snapshot(dst.pre_field().expect(pre), region);
     prof("wb_cf_decode", || {
@@ -920,9 +924,12 @@ pub fn band_hops<'a, const D: usize>(seams: impl Iterator<Item = &'a BandSeam<D>
 
 /// the band of the seam on `axis` (low or `high` side) of the whole patch `whole` the tile with
 /// coverage `coverage` holds cells of, `None` when it holds none. the band spans `band` coarse
-/// cells inward from the seam and the whole coverage across it; the tile holds the uncovered cell
-/// when it lies in the tile's coarse interior. on a single hierarchy the coverage is the whole
-/// patch, and a band whose uncovered cell lies outside the interior meets a domain boundary
+/// cells inward from the seam and the whole coverage across it; the tile starts the band's chains
+/// (`Near`) when the uncovered cell lies in its coarse interior, or in the halo cell beside it
+/// across a cut (`start_across_cut`: the patch face lies on the tile's own cut, and the tile across
+/// it refluxes and recovers that cell before the rewrite). on a single hierarchy the coverage is
+/// the whole patch, and a band whose uncovered cell lies outside the interior meets a domain
+/// boundary
 pub fn band_seam<const D: usize>(
     coverage: &Domain<D>,
     whole: &Domain<D>,
@@ -930,6 +937,7 @@ pub fn band_seam<const D: usize>(
     band: usize,
     axis: usize,
     high: bool,
+    start_across_cut: bool,
 ) -> Option<BandSeam<D>> {
     assert!(
         band as i64 <= symbi_discretize::WB_CF_CHAIN_MAX && (2 * band - 1) as i64 <= symbi_discretize::WB_BAND_CHAIN_MAX,
@@ -953,7 +961,9 @@ pub fn band_seam<const D: usize>(
     }));
     fine_band.spaces[axis].lo = 2 * lo;
     fine_band.spaces[axis].hi = 2 * hi;
-    let near = uncovered >= coarse_interior.spaces[axis].lo && uncovered < coarse_interior.spaces[axis].hi;
+    let (i_lo, i_hi) = (coarse_interior.spaces[axis].lo, coarse_interior.spaces[axis].hi);
+    let beside = if high { uncovered == i_hi } else { uncovered == i_lo - 1 };
+    let near = (uncovered >= i_lo && uncovered < i_hi) || (start_across_cut && beside);
     let side = match (near, high) {
         (true, _) => BandSide::Near,
         (false, true) => BandSide::Far { row: hi, fine_row: 2 * hi },
@@ -1020,8 +1030,10 @@ pub fn rewrite_band_seam<const D: usize, const DOF: usize, Mem: MemorySpace>(
     gamma: f64,
     fine_x_lo: &[f64; D],
     fine_dx: &[f64; D],
+    fine_off: &[f64; D],
     coarse_x_lo: &[f64; D],
     coarse_dx: &[f64; D],
+    coarse_off: &[f64; D],
     bodies: &symbi_ib::BodyCollection<f64, D>,
 ) {
     assert!(
@@ -1081,7 +1093,7 @@ pub fn rewrite_band_seam<const D: usize, const DOF: usize, Mem: MemorySpace>(
     // near side's equilibrium at the fine row beside the cut.
     match seam.side {
         BandSide::Near => {
-            let face = fine_x_lo[ax] + seam.face_index as f64 * fine_dx[ax];
+            let face = fine_x_lo[ax] + (seam.face_index as f64 + fine_off[ax]) * fine_dx[ax];
             let mut ints: Vec<i32> = Vec::new();
             let mut lo = fine_lo.clone();
             let mut hi = fine_hi.clone();
@@ -1093,8 +1105,10 @@ pub fn rewrite_band_seam<const D: usize, const DOF: usize, Mem: MemorySpace>(
             let mut scalars = vec![face];
             scalars.extend_from_slice(fine_x_lo);
             scalars.extend_from_slice(fine_dx);
+            scalars.extend_from_slice(fine_off);
             scalars.extend_from_slice(coarse_x_lo);
             scalars.extend_from_slice(coarse_dx);
+            scalars.extend_from_slice(coarse_off);
             scalars.extend_from_slice(&body_scalars);
             prof("wb_band_encode", || {
                 dispatch_fields_each::<f64, Mem, D>(
@@ -1126,6 +1140,7 @@ pub fn rewrite_band_seam<const D: usize, const DOF: usize, Mem: MemorySpace>(
             let mut scalars = Vec::new();
             scalars.extend_from_slice(fine_x_lo);
             scalars.extend_from_slice(fine_dx);
+            scalars.extend_from_slice(fine_off);
             scalars.extend_from_slice(&body_scalars);
             prof("wb_band_encode", || {
                 dispatch_fields_each::<f64, Mem, D>(
@@ -1161,6 +1176,7 @@ pub fn rewrite_band_seam<const D: usize, const DOF: usize, Mem: MemorySpace>(
     let mut scalars = Vec::new();
     scalars.extend_from_slice(coarse_x_lo);
     scalars.extend_from_slice(coarse_dx);
+    scalars.extend_from_slice(coarse_off);
     scalars.extend_from_slice(&body_scalars);
     // the chain's start at the reference row, in its own buffer: the decode writes the pressure
     // and the equilibrium in place

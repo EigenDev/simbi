@@ -11154,10 +11154,11 @@ fn validate_tiled_balance(cfg: &Config) -> Result<(), String> {
             2 => cuts_in_balanced_bands::<2>(cfg)?,
             _ => cuts_in_balanced_bands::<3>(cfg)?,
         };
-        // the tiles carry a band's chains across every cut inside it, hop by hop from the seam; a
-        // cut on the patch face leaves the uncovered cell the chains start from on a tile beside the
-        // band
-        if let Some(c) = crossings.iter().find(|c| c.on_face) {
+        // the tiles carry a band's chains across every cut inside it, hop by hop from the seam, and
+        // from a root cut on the patch face, where the tile across the cut refluxes and recovers the
+        // uncovered cell the chains start from before the band; a nested patch face on a cut of its
+        // parent level carries no register across that cut
+        if let Some(c) = crossings.iter().find(|c| c.on_face && c.level > 0) {
             let (level, ax, cut, face, band) = (c.level, c.axis, c.cut, c.face, c.band);
             let at = if level == 0 {
                 format!("the patch face at {face}")
@@ -11487,6 +11488,20 @@ fn validate_refined_launch_scope(cfg: &Config) -> Result<(), String> {
     }
     if cfg.coord_system != "cartesian" {
         return refused(&format!("the {} chart", cfg.coord_system));
+    }
+    // the launched workers rewrite a balanced band from the cells their own tiles hold; a root cut on
+    // the patch face puts the band's uncovered cell on the worker across the cut
+    if cfg.wb_reconstruction && cfg.refinement_enabled {
+        let crossings = match cfg.dims {
+            2 => cuts_in_balanced_bands::<2>(cfg)?,
+            _ => cuts_in_balanced_bands::<3>(cfg)?,
+        };
+        if let Some(c) = crossings.iter().find(|c| c.on_face && c.level == 0) {
+            return refused(&format!(
+                "a balanced restriction band whose patch face at root cell {} on axis {} lies on a cut",
+                c.face, c.axis
+            ));
+        }
     }
     let mapped = axis_maps_any(cfg);
     if mapped {

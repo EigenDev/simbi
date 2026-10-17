@@ -1580,10 +1580,10 @@ where
     }
 
     /// whether a run of this tile prolongs every input from its gathered prim stencil: the gas
-    /// primitives and the dye do; the continuous tracers' ito coefficients, an isothermal closure's
-    /// sound speed, a declared stationary target and the hydrostatically balanced transfer read
-    /// their parent past the root halo, and a tile carrying one of them with a stencil is refused
-    /// by name
+    /// primitives and the dye do, through the plain and the hydrostatically balanced transfer; the
+    /// continuous tracers' ito coefficients, an isothermal closure's sound speed and a declared
+    /// stationary target read their parent past the root halo, and a tile carrying one of them
+    /// with a stencil is refused by name
     pub fn prim_stencil_admission(&self) -> Result<(), String> {
         if self.prim_stencil().is_none() {
             return Ok(());
@@ -1604,9 +1604,6 @@ where
         }
         if self.levels.iter().any(|l| l.prim_eq.is_some()) {
             return refusal("a declared stationary target");
-        }
-        if (1..self.levels.len()).any(|ll| self.cf_transfer_balanced(ll)) {
-            return refusal("the hydrostatically balanced transfer");
         }
         Ok(())
     }
@@ -4707,7 +4704,28 @@ where
         // takes to reach it (measured ~10x attenuation per cell on the sealed class column).
         // capped by the decode's unrolled chain.
         let band = (coarse.kernels.reconstruction_reach() as usize + 2).min(symbi_discretize::WB_CF_CHAIN_MAX as usize);
-        band_seam(coverage, &whole, &coarse.state.geom.interior, band, axis, high)
+        // on the root, the side beyond the uncovered cell is a decomposition cut when it is a
+        // coarse-fine side: the tile across it holds that cell
+        let side = if high { coarse.state.boundaries.hi(axis) } else { coarse.state.boundaries.lo(axis) };
+        let start_across_cut = level == 0 && side == BoundaryType::CoarseFine;
+        band_seam(coverage, &whole, &coarse.state.geom.interior, band, axis, high, start_across_cut)
+    }
+
+    /// whether a seam band of level `level + 1` this tile rewrites starts its chains from the
+    /// uncovered cell in the tile's halo, across a cut on the patch face
+    pub fn band_starts_across_cut(&self, level: usize) -> bool {
+        if !self.rewrites_bands(level) {
+            return false;
+        }
+        let interior = &self.levels[level].state.geom.interior;
+        (0..NDIM).any(|axis| {
+            [false, true].into_iter().any(|high| {
+                self.band_seam(level, axis, high).is_some_and(|seam| {
+                    let span = &interior.spaces[axis];
+                    seam.side == BandSide::Near && (seam.uncovered < span.lo || seam.uncovered >= span.hi)
+                })
+            })
+        })
     }
 
     /// the balanced restriction of level `level`'s seam bands from level `level + 1`:
@@ -4769,10 +4787,12 @@ where
                 coarse_anchor,
                 coarse_reference,
                 gamma,
-                &shifted_origin(&fine.state.geom),
+                &fine.state.geom.x_lo,
                 &fine.state.geom.dx,
-                &shifted_origin(&coarse.state.geom),
+                &index_offsets(&fine.state.geom),
+                &coarse.state.geom.x_lo,
                 &coarse.state.geom.dx,
+                &index_offsets(&coarse.state.geom),
                 &coarse.state.immersed.as_ref().unwrap().bodies,
             )
         });
@@ -4855,8 +4875,9 @@ where
         let (old, new, lerp, feeds) = match stencil {
             Some(st) => {
                 assert!(
-                    parent.prim_eq.is_none() && !self.cf_transfer_balanced(level),
-                    "level {level}: the gathered prim stencil carries the plain primitive prolongation alone"
+                    parent.prim_eq.is_none(),
+                    "level {level}: the gathered prim stencil carries the plain and the balanced prolongation; \
+                     a declared target reads its parent past the root halo"
                 );
                 (&st.old, &st.new, &st.lerp, &st.domain)
             }
@@ -4906,18 +4927,20 @@ where
                 // scratch, with the slab's sweep intermediates carrying the departures.
                 prolong_prims_balanced(
                     scratch,
-                    prim_old,
-                    &parent.state.fields.prim,
-                    prim_lerp,
+                    old,
+                    new,
+                    lerp,
                     &fine.state.fields.prim,
                     slab,
                     fine.patch_interior.as_ref().unwrap_or(&fine.state.geom.interior),
                     self.prolong_order,
                     alpha,
-                    &shifted_origin(&parent.state.geom),
+                    &parent.state.geom.x_lo,
                     &parent.state.geom.dx,
-                    &shifted_origin(&fine.state.geom),
+                    &index_offsets(&parent.state.geom),
+                    &fine.state.geom.x_lo,
                     &fine.state.geom.dx,
+                    &index_offsets(&fine.state.geom),
                     &parent.state.immersed.as_ref().unwrap().bodies,
                     &fine.state.immersed.as_ref().unwrap().bodies,
                 );
@@ -5769,16 +5792,11 @@ pub(crate) fn region_to_domain<const D: usize>(
     }))
 }
 
-/// the origin a kernel that places cell `i` at `x_lo + (i + 0.5) dx` needs for a lattice whose
-/// local cell 0 is whole-grid cell `index_offset`; the grid's own origin on an undivided grid
-fn shifted_origin<const D: usize>(geom: &symbi_sim::state::PartitionGeometry<D>) -> [f64; D] {
-    std::array::from_fn(|ax| {
-        if geom.index_offset[ax] == 0 {
-            geom.x_lo[ax]
-        } else {
-            geom.x_lo[ax] + geom.index_offset[ax] as f64 * geom.dx[ax]
-        }
-    })
+/// the offset of a level's first cell on the whole grid of its level, per axis: the balanced
+/// kernels place a cell at `x_lo + ((i + offset) + 1/2) dx` with `x_lo` the whole grid's origin,
+/// so a tile's positions are the whole grid's bit for bit
+fn index_offsets<const D: usize>(geom: &symbi_sim::state::PartitionGeometry<D>) -> [f64; D] {
+    std::array::from_fn(|ax| geom.index_offset[ax] as f64)
 }
 
 /// the coverage must sit inside the parent interior, and on every coarse-fine
@@ -8086,23 +8104,30 @@ where
                         phase_probe::set_tile(i);
                         symbi_xpu::with_device(fg.devices[k], || tiles[i].level_restrict_cells(0));
                     }
+                    // a tile beside a neighbor's patch face on a cut applies the units it received
+                    // and recovers its cells beside the patch, as the single hierarchy refluxes and
+                    // recovers every uncovered cell before its bands: a band on that face chains
+                    // from one of those cells, carried to the patch tile's halo
+                    for i in 0..n {
+                        if tiles[i].levels.len() == 1 && tiles[i].has_flux_register(0) {
+                            symbi_xpu::with_device(devices[i], || {
+                                tiles[i].reflux_received();
+                                tiles[i].recover_beside_patch();
+                            });
+                        }
+                    }
+                    if tiles.iter().any(|h| h.band_starts_across_cut(0)) {
+                        exchange_level_halos(tiles, 0, root_order, counts, devices, transport);
+                    }
                     decomposed_bands(tiles, 0, (root_order, counts, devices), fg, transport);
                     for (k, &i) in fg.order.iter().enumerate() {
                         symbi_xpu::with_device(fg.devices[k], || tiles[i].level_restrict_finish(0, 0.0));
                     }
-                    // a tile beside a neighbor's patch face on a cut applies the units it received
-                    // and recovers its cells beside the patch; every other tile holding no fine
-                    // level recovers its root as the restriction recovers the single hierarchy's
+                    // every other tile holding no fine level recovers its root as the restriction
+                    // recovers the single hierarchy's
                     for i in 0..n {
-                        if tiles[i].levels.len() == 1 {
-                            symbi_xpu::with_device(devices[i], || {
-                                if tiles[i].has_flux_register(0) {
-                                    tiles[i].reflux_received();
-                                    tiles[i].recover_beside_patch();
-                                } else {
-                                    tiles[i].recover_level(0);
-                                }
-                            });
+                        if tiles[i].levels.len() == 1 && !tiles[i].has_flux_register(0) {
+                            symbi_xpu::with_device(devices[i], || tiles[i].recover_level(0));
                         }
                     }
                     exchange_level_halos(tiles, 0, root_order, counts, devices, transport);

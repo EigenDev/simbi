@@ -274,7 +274,7 @@ fn an_inadmissible_band_decode_keeps_the_conservative_pressure() {
     }
 
     // the dispatch mirrors the transfer's band decode: the uncovered row as the
-    // reference clamp, the coarse lattice scalars, then the body slots in
+    // reference clamp, the coarse lattice scalars (origin, spacing, index offset), then the body slots in
     // declared order (pos, mass, softening, softening kind per slot; an absent
     // slot carries zero mass with unit softening).
     let mut lo: Vec<i32> = (0..3)
@@ -289,6 +289,7 @@ fn an_inadmissible_band_decode_keeps_the_conservative_pressure() {
     let mut scalars = Vec::new();
     scalars.extend_from_slice(&st.geom.x_lo);
     scalars.extend_from_slice(&st.geom.dx);
+    scalars.extend(st.geom.index_offset.iter().map(|&o| o as f64));
     let bodies = &st.immersed.as_ref().unwrap().bodies;
     for b in 0..symbi_ib::collection::MAX_SOURCE_BODIES {
         if b < bodies.len() {

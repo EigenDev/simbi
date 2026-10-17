@@ -897,22 +897,29 @@ fn body_slots_potential<'t>(
         .sum::<Gv>()
 }
 
-/// the cell centroid on a uniform cartesian lattice: `x_lo + (i + 1/2) dx` per
-/// grid axis — the same text the host `stagger_coord(Center)` computes, so the
-/// kernel potential agrees with a host evaluation bit for bit.
+/// the cell centroid on a uniform cartesian lattice: `x_lo + ((i + idx_off) + 1/2) dx` per
+/// grid axis, with `x_lo` the whole grid's origin and `idx_off` the offset of the tile's first
+/// cell on it (zero on a single grid) — the index sum is exact, so a tile's positions are the
+/// whole grid's bit for bit, and the potential agrees with a host evaluation of the same text.
 fn centroid_position<'t>(
     cx: TraceCx<'t>,
     ndim: usize,
     coords: &[NodeId],
     x_lo: &[Gv<'t>],
     dx: &[Gv<'t>],
+    off: &[Gv<'t>],
 ) -> [Gv<'t>; 3] {
     let half = Gv::from_f64(0.5);
     let mut pos = [Gv::from_f64(0.0), Gv::from_f64(0.0), Gv::from_f64(0.0)];
     for g in 0..ndim {
-        pos[g] = x_lo[g] + (cx.gv(coords[g]) + half) * dx[g];
+        pos[g] = x_lo[g] + ((cx.gv(coords[g]) + off[g]) + half) * dx[g];
     }
     pos
+}
+
+/// the per-axis index offsets of a lattice, scalars `{prefix}idx_off_{ax}`
+fn declare_index_offsets<'t>(cx: TraceCx<'t>, ndim: usize, prefix: &str) -> Vec<Gv<'t>> {
+    (0..ndim).map(|ax| cx.scalar(&format!("{prefix}idx_off_{ax}"))).collect()
 }
 
 /// integer-index helpers on the trace graph: constants, arithmetic and the
@@ -954,19 +961,20 @@ fn chained_pressure<'t>(
     rho_at: &dyn Fn(&[NodeId]) -> Gv<'t>,
     x_lo: &[Gv<'t>],
     dx: &[Gv<'t>],
+    off: &[Gv<'t>],
     slots: &[([Gv<'t>; 3], Gv<'t>, Gv<'t>, Gv<'t>)],
     max_steps: i64,
     vary: &[bool],
 ) -> Gv<'t> {
     let coords: Vec<NodeId> = cx.with_trace(|t| (0..ndim).map(|ax| t.coord(ax as u8)).collect());
     let phi_center =
-        |idx: &[NodeId]| body_slots_potential(&centroid_position(cx, ndim, idx, x_lo, dx), slots);
+        |idx: &[NodeId]| body_slots_potential(&centroid_position(cx, ndim, idx, x_lo, dx, off), slots);
     // the face of cell `idx` on its lower (`side = 0`) or upper (`side = 1`) edge along
     // `ax`. the side rides as a value, since a walk carries its direction as data.
     let phi_face = |idx: &[NodeId], ax: usize, side: NodeId| {
-        let mut pos = centroid_position(cx, ndim, idx, x_lo, dx);
+        let mut pos = centroid_position(cx, ndim, idx, x_lo, dx, off);
         let face_index = int_op(cx, ElementWiseOp::Add, idx[ax], side);
-        pos[ax] = x_lo[ax] + cx.gv(face_index) * dx[ax];
+        pos[ax] = x_lo[ax] + (cx.gv(face_index) + off[ax]) * dx[ax];
         body_slots_potential(&pos, slots)
     };
     let zero = Gv::from_f64(0.0);
@@ -1046,7 +1054,7 @@ fn chained_pressure<'t>(
 ///
 /// buffers: src_old_0, src_new_0, .., interleaved (inputs) then dst_0..
 /// (outputs). ints: lo_{ax}, hi_{ax} (the coarse cells under the fine interior,
-/// inclusive). scalars: alpha, x_lo_{ax}, dx_{ax} (the coarse lattice), then
+/// inclusive). scalars: alpha, x_lo_{ax}, dx_{ax}, idx_off_{ax} (the coarse lattice), then
 /// the body slots.
 pub fn wb_cf_lerp_encode_gv(ndim: usize, ncomp: usize, n_bodies: usize) -> KernelProgram {
     assert!(
@@ -1066,6 +1074,7 @@ pub fn wb_cf_lerp_encode_gv(ndim: usize, ncomp: usize, n_bodies: usize) -> Kerne
             .map(|ax| cx.scalar(&format!("x_lo_{ax}")))
             .collect();
         let dx: Vec<Gv> = (0..ndim).map(|ax| cx.scalar(&format!("dx_{ax}"))).collect();
+        let off = declare_index_offsets(cx, ndim, "");
         let slots = declare_body_slots(cx, ndim, n_bodies);
 
         let one = Gv::from_f64(1.0);
@@ -1106,6 +1115,7 @@ pub fn wb_cf_lerp_encode_gv(ndim: usize, ncomp: usize, n_bodies: usize) -> Kerne
             &rho_at,
             &x_lo,
             &dx,
+            &off,
             &slots,
             WB_CF_CHAIN_MAX,
             &all,
@@ -1148,7 +1158,7 @@ fn declare_interior_bounds(cx: TraceCx<'_>, ndim: usize) -> (Vec<NodeId>, Vec<No
 ///
 /// buffers: dst_rho (the fine density, input), dst_pre (the fine ghosts, in-place
 /// output). ints: lo_{ax}, hi_{ax} (the fine interior, inclusive). scalars:
-/// x_lo_{ax}, dx_{ax} (the fine lattice), then the body slots.
+/// x_lo_{ax}, dx_{ax}, idx_off_{ax} (the fine lattice), then the body slots.
 pub fn wb_cf_decode_gv(ndim: usize, n_bodies: usize) -> KernelProgram {
     assert!(
         (1..=3).contains(&ndim),
@@ -1160,6 +1170,7 @@ pub fn wb_cf_decode_gv(ndim: usize, n_bodies: usize) -> KernelProgram {
             .map(|ax| cx.scalar(&format!("x_lo_{ax}")))
             .collect();
         let dx: Vec<Gv> = (0..ndim).map(|ax| cx.scalar(&format!("dx_{ax}"))).collect();
+        let off = declare_index_offsets(cx, ndim, "");
         let slots = declare_body_slots(cx, ndim, n_bodies);
 
         // registration order pins the buffer order: density first (input), then the
@@ -1182,6 +1193,7 @@ pub fn wb_cf_decode_gv(ndim: usize, n_bodies: usize) -> KernelProgram {
             &rho_at,
             &x_lo,
             &dx,
+            &off,
             &slots,
             WB_CF_CHAIN_MAX,
             &all,
@@ -1283,7 +1295,7 @@ pub fn wb_target_decode_gv(ndim: usize, ncomp: usize) -> KernelProgram {
 /// restricted departures, input), ref_pre (the chain's start at the reference
 /// row: the coarse pressure, or past a cut the near side's equilibrium, input),
 /// dst_pre (conservative pressure in, decoded pressure out), eq (the chained
-/// equilibrium, output). ints: lo_{ax}, hi_{ax} (the reference row, inclusive). scalars: x_lo_{ax}, dx_{ax} (the coarse lattice), then the body
+/// equilibrium, output). ints: lo_{ax}, hi_{ax} (the reference row, inclusive). scalars: x_lo_{ax}, dx_{ax}, idx_off_{ax} (the coarse lattice), then the body
 /// slots.
 pub fn wb_band_decode_gv(ndim: usize, n_bodies: usize) -> KernelProgram {
     assert!(
@@ -1296,6 +1308,7 @@ pub fn wb_band_decode_gv(ndim: usize, n_bodies: usize) -> KernelProgram {
             .map(|ax| cx.scalar(&format!("x_lo_{ax}")))
             .collect();
         let dx: Vec<Gv> = (0..ndim).map(|ax| cx.scalar(&format!("dx_{ax}"))).collect();
+        let off = declare_index_offsets(cx, ndim, "");
         let slots = declare_body_slots(cx, ndim, n_bodies);
 
         // registration order pins the buffer order: density, departures, the reference
@@ -1321,6 +1334,7 @@ pub fn wb_band_decode_gv(ndim: usize, n_bodies: usize) -> KernelProgram {
             &rho_at,
             &x_lo,
             &dx,
+            &off,
             &slots,
             WB_CF_CHAIN_MAX,
             &all,
@@ -1359,7 +1373,8 @@ pub fn wb_band_decode_gv(ndim: usize, n_bodies: usize) -> KernelProgram {
 /// seam's normal axis, the interior elsewhere), a (the uncovered coarse index on
 /// the normal axis). the normal itself is a bake-time axis, so the chain carries
 /// one leg. scalars: face (the seam coordinate along the normal), x_lo_{ax},
-/// dx_{ax} (fine), crs_x_lo_{ax}, crs_dx_{ax} (coarse), then the body slots.
+/// dx_{ax}, idx_off_{ax} (fine), crs_x_lo_{ax}, crs_dx_{ax}, crs_idx_off_{ax} (coarse), then the
+/// body slots.
 pub fn wb_band_encode_gv(ndim: usize, n_bodies: usize, normal: usize) -> KernelProgram {
     assert!(
         (1..=3).contains(&ndim),
@@ -1377,12 +1392,14 @@ pub fn wb_band_encode_gv(ndim: usize, n_bodies: usize, normal: usize) -> KernelP
             .map(|ax| cx.scalar(&format!("x_lo_{ax}")))
             .collect();
         let dx: Vec<Gv> = (0..ndim).map(|ax| cx.scalar(&format!("dx_{ax}"))).collect();
+        let off = declare_index_offsets(cx, ndim, "");
         let crs_x_lo: Vec<Gv> = (0..ndim)
             .map(|ax| cx.scalar(&format!("crs_x_lo_{ax}")))
             .collect();
         let crs_dx: Vec<Gv> = (0..ndim)
             .map(|ax| cx.scalar(&format!("crs_dx_{ax}")))
             .collect();
+        let crs_off = declare_index_offsets(cx, ndim, "crs_");
         let slots = declare_body_slots(cx, ndim, n_bodies);
 
         // registration order pins the buffer order: fine rho, fine pre, coarse rho,
@@ -1412,10 +1429,10 @@ pub fn wb_band_encode_gv(ndim: usize, n_bodies: usize, normal: usize) -> KernelP
 
         // the coarse cell's center, the seam face point on its transverse center
         // line, and the fine edge cell's center.
-        let c_a = centroid_position(cx, ndim, &crs_idx, &crs_x_lo, &crs_dx);
+        let c_a = centroid_position(cx, ndim, &crs_idx, &crs_x_lo, &crs_dx, &crs_off);
         let mut f_pt = c_a;
         f_pt[normal] = face;
-        let c_e = centroid_position(cx, ndim, &ref_idx, &x_lo, &dx);
+        let c_e = centroid_position(cx, ndim, &ref_idx, &x_lo, &dx, &off);
         let phi_a = body_slots_potential(&c_a, &slots);
         let phi_f = body_slots_potential(&f_pt, &slots);
         let phi_e = body_slots_potential(&c_e, &slots);
@@ -1433,6 +1450,7 @@ pub fn wb_band_encode_gv(ndim: usize, n_bodies: usize, normal: usize) -> KernelP
             &rho_at,
             &x_lo,
             &dx,
+            &off,
             &slots,
             WB_BAND_CHAIN_MAX,
             &vary,
@@ -1458,7 +1476,7 @@ pub fn wb_band_encode_gv(ndim: usize, n_bodies: usize, normal: usize) -> KernelP
 /// toward the seam reached, read at the reference row) then dst (the fine departure) and eq (the
 /// chained equilibrium), the outputs. ints: lo_{ax}, hi_{ax} (the
 /// reference clamp: the row beside the cut on the seam's normal axis, the interior elsewhere).
-/// scalars: x_lo_{ax}, dx_{ax} (fine), then the body slots.
+/// scalars: x_lo_{ax}, dx_{ax}, idx_off_{ax} (fine), then the body slots.
 pub fn wb_band_encode_anchored_gv(ndim: usize, n_bodies: usize, normal: usize) -> KernelProgram {
     assert!(
         (1..=3).contains(&ndim),
@@ -1474,6 +1492,7 @@ pub fn wb_band_encode_anchored_gv(ndim: usize, n_bodies: usize, normal: usize) -
             .map(|ax| cx.scalar(&format!("x_lo_{ax}")))
             .collect();
         let dx: Vec<Gv> = (0..ndim).map(|ax| cx.scalar(&format!("dx_{ax}"))).collect();
+        let off = declare_index_offsets(cx, ndim, "");
         let slots = declare_body_slots(cx, ndim, n_bodies);
 
         // registration order pins the buffer order: fine rho, fine pre, the anchor, then the
@@ -1497,6 +1516,7 @@ pub fn wb_band_encode_anchored_gv(ndim: usize, n_bodies: usize, normal: usize) -
             &rho_at,
             &x_lo,
             &dx,
+            &off,
             &slots,
             WB_BAND_CHAIN_MAX,
             &vary,

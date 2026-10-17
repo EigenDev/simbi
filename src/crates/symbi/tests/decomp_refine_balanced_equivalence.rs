@@ -10,7 +10,11 @@
 // seventy-five root steps on layouts keeping each seam band on one tile (one
 // cut through the patch, cuts on the band edges, cuts crossing the seams
 // transversely, ragged cuts off the bands) and on layouts cutting a band once
-// and twice, whose far tiles resume the chains across each cut. the balance
+// and twice, whose far tiles resume the chains across each cut. with a cut on
+// a patch face the fine ghosts past it prolong through the balanced transfer
+// from a parent stencil gathered across the cut, and the tile across the cut
+// refluxes and recovers the band's uncovered cell before the band chains from
+// it; those layouts match too, and after a rejected fine stage. the balance
 // changes the run.
 //
 // run: cargo test -p symbi --test decomp_refine_balanced_equivalence
@@ -58,11 +62,13 @@ fn kset(balanced: bool) -> impl Fn(&Sim) -> Kern + Copy {
     move |s: &Sim| Kern::new(GAMMA, CFL, &s.geom.allocated).reconstruction(Recon::Plm).well_balanced_reconstruction(balanced)
 }
 
-fn root(cells: [usize; 2], offset: [usize; 2], bnd: Boundaries<2>) -> Sim {
+/// the production plm halo
+const NG: usize = 2;
+fn root(cells: [usize; 2], offset: [usize; 2], bnd: Boundaries<2>, ng: usize) -> Sim {
     Sim::build(Newtonian, IdealGas { gamma: GAMMA }, Cartesian)
         .cells(cells).spacing([DX; 2]).origin([0.0; 2])
         .index_offset(std::array::from_fn(|a| offset[a] as isize))
-        .boundaries(bnd).cfl(CFL).ghosts(2).timestepping(Timestepping::Rk2)
+        .boundaries(bnd).cfl(CFL).ghosts(ng).timestepping(Timestepping::Rk2)
         .allocate().unwrap().set_initial(atmosphere).build()
 }
 
@@ -75,7 +81,7 @@ fn region() -> RefinementRegion<2> {
 }
 
 fn mono(balanced: bool) -> Hier {
-    let r = root([N, N], [0, 0], Boundaries::uniform(BoundaryType::Outflow));
+    let r = root([N, N], [0, 0], Boundaries::uniform(BoundaryType::Outflow), NG);
     let k = kset(balanced)(&r);
     let h = Hier::with_refinement(r, k, &[region()], ProlongOrder::Ppm, kset(balanced)).unwrap();
     h.seed_fine_from_coarse().unwrap();
@@ -84,7 +90,7 @@ fn mono(balanced: bool) -> Hier {
     h
 }
 
-fn tiles(partition: &Partition<2>) -> Vec<Hier> {
+fn tiles(partition: &Partition<2>, ng: usize) -> Vec<Hier> {
     let counts = partition.counts();
     let mut tiles = Vec::new();
     for flat in 0..partition.n_tiles() {
@@ -96,7 +102,7 @@ fn tiles(partition: &Partition<2>) -> Vec<Hier> {
             let face = |edge: bool| if edge { BoundaryType::Outflow } else { BoundaryType::CoarseFine };
             [face(tc[a] == 0), face(tc[a] == counts[a] - 1)]
         }));
-        let r = root(m, off, bnd);
+        let r = root(m, off, bnd, ng);
         let lo: [f64; 2] = std::array::from_fn(|a| off[a] as f64 * DX);
         let hi: [f64; 2] = std::array::from_fn(|a| (off[a] + m[a]) as f64 * DX);
         let w = region();
@@ -105,7 +111,7 @@ fn tiles(partition: &Partition<2>) -> Vec<Hier> {
         let k = kset(true)(&r);
         let h = if cx[0] < cx[1] && cy[0] < cy[1] {
             let c = RefinementRegion { x_lo: [cx[0], cy[0]], x_hi: [cx[1], cy[1]] };
-            Hier::with_refinement_of_contributing(r, k, &[c], &[w], ProlongOrder::Ppm, kset(true)).unwrap()
+            Hier::with_refinement_of_donating(r, k, &[c], &[w], ProlongOrder::Ppm, kset(true)).unwrap()
         } else {
             match receiving_faces_of_tile(partition, PATCH, TileId(flat as u32)) {
                 Some((p, f)) => Hier::single(r, k).with_receiving_register(&p, f).unwrap(),
@@ -115,19 +121,42 @@ fn tiles(partition: &Partition<2>) -> Vec<Hier> {
         tiles.push(h);
     }
     seed_decomposed_fine_from_coarse(&tiles, counts, &vec![0; tiles.len()], &LocalCopy).unwrap();
-    tiles.into_iter().map(|h| { let mut h = h.with_bodies(bodies()); h.prime(); h }).collect()
+    let mut tiles: Vec<Hier> = tiles.into_iter().map(|h| { let mut h = h.with_bodies(bodies()); h.prime(); h }).collect();
+    symbi::sim::refinement::prime_prim_stencils(&mut tiles, &vec![0; partition.n_tiles()], &LocalCopy).expect("prim stencil prime");
+    tiles
 }
 
-fn densities(h: &Hier, level: usize, origin: [isize; 2]) -> Vec<([isize; 2], u64)> {
+/// every conserved component of every interior cell of `level`, keyed by global cell: the density,
+/// the two momenta and the energy (the band rewrite rebuilds the energy from its pressure)
+fn densities(h: &Hier, level: usize, origin: [isize; 2]) -> Vec<([isize; 2], [u64; 4])> {
     let s = &h.levels[level].state;
-    let v = s.fields.cons.den.view();
+    let cons = &s.fields.cons;
+    let (den, m0, m1, nrg) = (cons.den.view(), cons.mom[0].view(), cons.mom[1].view(), cons.nrg_field().expect("an energy").view());
     let lo = [s.geom.interior.spaces[0].lo, s.geom.interior.spaces[1].lo];
-    s.geom.interior.iter().map(|c| ([origin[0] + c[0] - lo[0], origin[1] + c[1] - lo[1]], v.at(c).to_bits())).collect()
+    s.geom
+        .interior
+        .iter()
+        .map(|c| {
+            let bits = [den.at(c).to_bits(), m0.at(c).to_bits(), m1.at(c).to_bits(), nrg.at(c).to_bits()];
+            ([origin[0] + c[0] - lo[0], origin[1] + c[1] - lo[1]], bits)
+        })
+        .collect()
 }
 
 fn assert_tiles_match(cuts: [Vec<usize>; 2], want: &Hier) {
+    assert_tiles_match_rejecting(cuts, want, None);
+}
+
+/// `assert_tiles_match` with the fine stage `(substep, stage)` of the first root step rejected once
+/// on every refined tile, as on the single hierarchy `want`
+fn assert_tiles_match_rejecting(cuts: [Vec<usize>; 2], want: &Hier, reject: Option<(u8, usize)>) {
     let partition = Partition::explicit([N, N], cuts.clone()).unwrap();
-    let mut t = tiles(&partition);
+    let mut t = tiles(&partition, NG);
+    if let Some((substep, stage)) = reject {
+        for h in t.iter_mut().filter(|h| h.levels.len() > 1) {
+            h.reject_fine_once_at(0, substep, stage);
+        }
+    }
     let devices = vec![0; t.len()];
     evolve_hierarchy_decomposed(&mut t, partition.counts(), &devices, &LocalCopy, Timestepping::Rk2, 0.0, T_FINAL, u64::MAX, |_, _, _| std::ops::ControlFlow::Continue(()));
     let root: std::collections::HashMap<_, _> = densities(want, 0, [0, 0]).into_iter().collect();
@@ -136,6 +165,7 @@ fn assert_tiles_match(cuts: [Vec<usize>; 2], want: &Hier) {
     let (mut roots, mut fines) = (0, 0);
     for (flat, h) in t.iter().enumerate() {
         assert!(h.crash.is_none(), "cuts {cuts:?}: tile {flat} crashed: {:?}", h.crash);
+        assert!(!h.forced_fine_rejection_pending(), "cuts {cuts:?}: tile {flat} never reached the forced rejection");
         assert_eq!(h.levels[0].state.iteration, want.levels[0].state.iteration, "cuts {cuts:?}: tile {flat} stopped short");
         let ext = partition.tile_extents(unflatten(flat, partition.counts()));
         for (g, bits) in densities(h, 0, [ext[0].0 as isize, ext[1].0 as isize]) {
@@ -200,5 +230,41 @@ fn balanced_refined_tiles_match_the_single_hierarchy_with_two_cuts_inside_a_seam
     // the patch spans root cells 8..24 on both axes, the bands 8..12 and 20..24
     for cuts in [[vec![9, 11], vec![]], [vec![21, 23], vec![]], [vec![9, 11], vec![21, 23]]] {
         assert_tiles_match(cuts, &want);
+    }
+}
+
+/// a cut on a patch face under the production halo: the fine ghosts past the face prolong
+/// through the balanced transfer from the parent stencil gathered across the cut, and the band's
+/// uncovered cell lies on the tile across the cut, which refluxes and recovers it before the band
+/// on the patch tile chains from it, as the single hierarchy's does; the tiles equal the single
+/// hierarchy bit for bit. the layouts cut the low and the high face of each axis and a corner
+#[test]
+fn balanced_refined_tiles_match_the_single_hierarchy_with_a_cut_on_a_patch_face() {
+    let want = { let mut h = mono(true); h.evolve(T_FINAL).unwrap(); h };
+    // the patch spans root cells 8..24 on both axes
+    for cuts in [[vec![8], vec![]], [vec![24], vec![]], [vec![], vec![8]], [vec![], vec![24]], [vec![8], vec![24]]] {
+        let partition = Partition::explicit([N, N], cuts.clone()).unwrap();
+        let t = tiles(&partition, NG);
+        assert!(t.iter().any(|h| h.prim_stencil().is_some()), "cuts {cuts:?}: no tile reads a prim stencil; the gate is vacuous");
+        assert!(t.iter().any(|h| h.band_starts_across_cut(0)), "cuts {cuts:?}: no band starts across the cut; the gate is vacuous");
+        assert_tiles_match(cuts, &want);
+    }
+}
+
+/// a fine stage rejected in the second substep of the first root step with the patch face on a
+/// cut: the replay restores every tile's entry, regathers the prim stencil, refluxes and recovers
+/// the uncovered cells again before the band, and the tiles equal the single hierarchy rejected
+/// the same way, bit for bit
+#[test]
+fn balanced_refined_tiles_on_a_cut_patch_face_match_after_a_rejected_fine_stage() {
+    let want = {
+        let mut h = mono(true);
+        h.reject_fine_once_at(0, 1, 1);
+        h.evolve(T_FINAL).unwrap();
+        assert!(!h.forced_fine_rejection_pending(), "the single hierarchy never reached the forced rejection");
+        h
+    };
+    for cuts in [[vec![8], vec![]], [vec![8], vec![24]]] {
+        assert_tiles_match_rejecting(cuts, &want, Some((1, 1)));
     }
 }
