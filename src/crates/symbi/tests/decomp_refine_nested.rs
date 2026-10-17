@@ -18,14 +18,22 @@
 // tile holding the root alone of a two-level run, add no reaction, so the
 // accreted mass and the force history equal the single hierarchy's bit for bit
 // (both arms failed before: the short tile added its own gas's pull). a level-2
-// patch face lying on a cut is refused by name.
+// patch face lying on a cut is refused by name on a build carrying no register
+// unit across cuts; on one that does, under a root halo deep enough for the
+// nested prolongation reach, the face's units cross the level-1 cut to the tile
+// holding the cells they correct, which refluxes and recovers them before the
+// level's halos cross, and the tiles equal the single hierarchy in every
+// conserved component, also after a rejected level-2 stage; under the
+// production halo the same face is refused by name.
 //
 // run: cargo test -p symbi --test decomp_refine_nested
 // =============================================================================
 use std::collections::HashMap;
 
 use symbi::regimes::substrate_newton::AdiabaticSubstrateKernelSet;
-use symbi::sim::decomp::{LocalCopy, Partition, unflatten};
+use symbi::sim::decomp::{FinePartition, LocalCopy, Partition, flatten, unflatten};
+use symbi::sim::refinement::launched::receiving_faces_of_tile;
+use symbi_sim::atlas::TileId;
 use symbi::sim::refinement::{
     Hierarchy, ProlongOrder, RefinementRegion, evolve_hierarchy_decomposed,
     seed_decomposed_fine_from_coarse,
@@ -66,12 +74,18 @@ fn bump(x: f64, y: f64) -> f64 {
 /// a root tile of `cells` placed as production places it: the whole grid's origin and the index
 /// offset of its first cell
 fn build_root(cells: [usize; 2], offset: [usize; 2], bnd: Boundaries<2>) -> Sim {
+    build_root_with(cells, offset, bnd, 2)
+}
+
+/// `build_root` with `ng` ghost cells
+fn build_root_with(cells: [usize; 2], offset: [usize; 2], bnd: Boundaries<2>, ng: usize) -> Sim {
     Sim::build(Newtonian, IdealGas { gamma: GAMMA }, Cartesian)
         .cells(cells)
         .spacing([DX; 2])
         .origin([0.0; 2])
         .index_offset([offset[0] as isize, offset[1] as isize])
         .boundaries(bnd)
+        .ghosts(ng)
         .cfl(CFL)
         .timestepping(Timestepping::Rk2)
         .allocate()
@@ -360,4 +374,175 @@ fn an_unrefined_tile_adds_no_reaction_to_a_refined_sink() {
             assert_eq!(a.to_bits(), b.to_bits(), "tile {k}: force entry {ii} is {a:e} against {b:e}");
         }
     }
+}
+
+/// a root halo of five cells: a nested level's ghosts (six) reach five parent cells past a face, inside
+/// the parent level's halo of six
+const NG_DEEP: usize = 5;
+
+fn region_cells(r: &RefinementRegion<2>) -> [(usize, usize); 2] {
+    std::array::from_fn(|a| ((r.x_lo[a] / DX).round() as usize, (r.x_hi[a] / DX).round() as usize))
+}
+
+/// the single hierarchy over `whole` with a root halo of `ng`
+fn build_single_over(whole: &[RefinementRegion<2>], ng: usize) -> Hier {
+    let root = build_root_with([N, N], [0, 0], Boundaries::uniform(BoundaryType::Outflow), ng);
+    let k = kset(&root);
+    let mut h = Hier::with_refinement(root, k, whole, ProlongOrder::Ppm, kset).expect("single hierarchy");
+    h.seed_fine_from_coarse().expect("seed fine");
+    h.prime();
+    h
+}
+
+/// tiles carrying register units across cuts: a patch face of level 2 on a cut of level 1 contributes
+/// its units to the level-1 tile across the cut, which carries the receiving register of the level-1
+/// cells they correct; the root register carries the level-1 faces on root cuts the same way
+fn build_tiles_contributing(partition: &Partition<2>, whole: &[RefinementRegion<2>], ng: usize) -> symbi_xpu::Result<Vec<Hier>> {
+    let counts = partition.counts();
+    let (p1, p2) = (region_cells(&whole[0]), region_cells(&whole[1]));
+    let fine = FinePartition::of(partition, p1, 2).expect("level-1 partition");
+    let fine_counts = fine.partition.counts();
+    // level 2's patch in level-1 cells from level 1's origin
+    let rel: [(usize, usize); 2] = std::array::from_fn(|a| (2 * (p2[a].0 - p1[a].0), 2 * (p2[a].1 - p1[a].0)));
+    let mut tiles = Vec::with_capacity(partition.n_tiles());
+    for flat in 0..partition.n_tiles() {
+        let tc = unflatten(flat, counts);
+        let ext = partition.tile_extents(tc);
+        let m: [usize; 2] = [ext[0].1, ext[1].1];
+        let offset: [usize; 2] = [ext[0].0, ext[1].0];
+        let lo: [f64; 2] = std::array::from_fn(|a| offset[a] as f64 * DX);
+        let hi: [f64; 2] = std::array::from_fn(|a| lo[a] + m[a] as f64 * DX);
+        let bnd = Boundaries(std::array::from_fn(|a| {
+            let face = |edge: bool| if edge { BoundaryType::Outflow } else { BoundaryType::CoarseFine };
+            [face(tc[a] == 0), face(tc[a] == counts[a] - 1)]
+        }));
+        let root = build_root_with(m, offset, bnd, ng);
+        let clipped: Vec<RefinementRegion<2>> = whole
+            .iter()
+            .map(|r| RefinementRegion {
+                x_lo: std::array::from_fn(|a| r.x_lo[a].max(lo[a])),
+                x_hi: std::array::from_fn(|a| r.x_hi[a].min(hi[a])),
+            })
+            .take_while(|r| (0..2).all(|a| r.x_lo[a] < r.x_hi[a]))
+            .collect();
+        let k = kset(&root);
+        let mut h = if clipped.is_empty() {
+            match receiving_faces_of_tile(partition, p1, TileId(flat as u32)) {
+                Some((p, f)) => Hier::single(root, k).with_receiving_register(&p, f).expect("root receiving register"),
+                None => Hier::single(root, k),
+            }
+        } else {
+            Hier::with_refinement_of_contributing(root, k, &clipped, &whole[..clipped.len()], ProlongOrder::Ppm, kset)?
+        };
+        // a tile holding level 1 and not level 2, beside level 2's face on a level-1 cut
+        if h.levels.len() == 2 {
+            let ftc = fine.fine_tile_of(tc).expect("a tile holding level 1 lies under its patch");
+            let ftile = TileId(flatten(ftc, fine_counts) as u32);
+            if let Some((p, f)) = receiving_faces_of_tile(&fine.partition, rel, ftile) {
+                if f.iter().flatten().any(|&x| x) {
+                    // from the level-1 tile's own origin to this tile's level-1 index frame
+                    let frame: [isize; 2] = std::array::from_fn(|a| (2 * p1[a].0.saturating_sub(ext[a].0)) as isize);
+                    let p = symbi_algebra::Domain::new(std::array::from_fn(|a| symbi_algebra::Space {
+                        name: p.spaces[a].name,
+                        lo: p.spaces[a].lo + frame[a],
+                        hi: p.spaces[a].hi + frame[a],
+                    }));
+                    h = h.with_receiving_register_at(1, &p, f).expect("level-1 receiving register");
+                }
+            }
+        }
+        tiles.push(h);
+    }
+    seed_decomposed_fine_from_coarse(&tiles, counts, &vec![0; tiles.len()], &LocalCopy).expect("decomposed fine seed");
+    for h in tiles.iter_mut() {
+        h.prime();
+    }
+    Ok(tiles)
+}
+
+/// (level, centroid, component) -> bits of every conserved component of every interior cell
+fn interior_conserved(tiles: &[Hier]) -> HashMap<(usize, [i64; 2], usize), u64> {
+    let mut out = HashMap::new();
+    for h in tiles {
+        for (ll, level) in h.levels.iter().enumerate() {
+            let s = &level.state;
+            let cons = &s.fields.cons;
+            let fields = [&cons.den, &cons.mom[0], &cons.mom[1], cons.nrg_field().expect("an energy")];
+            let scale = (N << ll) as f64;
+            for c in s.geom.interior.iter() {
+                let x = s.geom.centroid(c);
+                let at: [i64; 2] = std::array::from_fn(|a| (x[a] * scale * 2.0).round() as i64);
+                for (q, f) in fields.iter().enumerate() {
+                    let previous = out.insert((ll, at, q), f.view().at(c).to_bits());
+                    assert!(previous.is_none(), "level {ll} cell {at:?} is held by two tiles");
+                }
+            }
+        }
+    }
+    out
+}
+
+/// a level-2 patch face on a level-1 cut: the single hierarchy and the tiles carrying the units
+/// across the cut, the tiles rejecting the level-2 stage `reject` once as the single hierarchy does,
+/// equal in every conserved component of every level after several root steps
+fn assert_nested_face_on_cut_matches(cuts: [Vec<usize>; 2], whole: [RefinementRegion<2>; 2], reject: Option<(u64, usize)>) {
+    let partition = Partition::explicit([N, N], cuts.clone()).expect("cuts inside the grid");
+    let mut single = build_single_over(&whole, NG_DEEP);
+    let mut tiles = build_tiles_contributing(&partition, &whole, NG_DEEP).expect("tile hierarchies");
+    let contributing = tiles.iter().any(|h| h.flux_registers.get(1).is_some_and(|r| r.has_contributing()));
+    let receiving = tiles.iter().any(|h| h.levels.len() == 2 && h.flux_registers.get(1).is_some_and(|r| r.has_receiving()));
+    assert!(contributing && receiving, "cuts {cuts:?}: no level-2 face contributes across a level-1 cut; the gate is vacuous");
+    if let Some((substep, stage)) = reject {
+        single.reject_level_once_at(0, 2, substep, stage);
+        for h in tiles.iter_mut().filter(|h| h.levels.len() > 2) {
+            h.reject_level_once_at(0, 2, substep, stage);
+        }
+    }
+    single.evolve(T_FINAL).expect("single evolve");
+    evolve_tiles(&mut tiles, &partition);
+    assert!(!single.forced_fine_rejection_pending(), "the single hierarchy never reached the forced rejection");
+    for (i, h) in tiles.iter().enumerate() {
+        assert!(h.crash.is_none(), "cuts {cuts:?}: tile {i} crashed: {:?}", h.crash);
+        assert!(!h.forced_fine_rejection_pending(), "cuts {cuts:?}: tile {i} never reached the forced rejection");
+    }
+    assert!(single.levels[0].state.iteration >= 2, "fewer than two root steps");
+    let (want, got) = (interior_conserved(std::slice::from_ref(&single)), interior_conserved(&tiles));
+    assert_eq!(got.len(), want.len(), "cuts {cuts:?}: the tiles hold a different set of cells");
+    let differing: Vec<_> = want.iter().filter(|(k, v)| got.get(k) != Some(v)).map(|(k, _)| *k).collect();
+    assert!(differing.is_empty(), "cuts {cuts:?}: {} values differ, first {:?}", differing.len(), differing.iter().min());
+}
+
+/// level 2 over [0.5, 0.625] x [0.375, 0.625]: its low x face lies on the cut at x = 0.5, inside level 1
+#[test]
+fn a_level_2_face_on_a_level_1_cut_matches_the_single_hierarchy() {
+    let low = [regions()[0].clone(), RefinementRegion { x_lo: [0.5, 0.375], x_hi: [0.625, 0.625] }];
+    assert_nested_face_on_cut_matches([vec![16], vec![]], low, None);
+    // the high x face on the cut
+    let high = [regions()[0].clone(), RefinementRegion { x_lo: [0.375, 0.375], x_hi: [0.5, 0.625] }];
+    assert_nested_face_on_cut_matches([vec![16], vec![]], high, None);
+    // the low x face and the high y face on the cuts of both axes
+    let corner = [regions()[0].clone(), RefinementRegion { x_lo: [0.5, 0.375], x_hi: [0.625, 0.5] }];
+    assert_nested_face_on_cut_matches([vec![16], vec![16]], corner, None);
+}
+
+/// a level-2 stage rejected in its second substep after the first substep's units folded across the
+/// level-1 cut: the replay starts from clean registers and matches the single hierarchy rejected alike
+#[test]
+fn a_level_2_face_on_a_level_1_cut_matches_after_a_rejected_level_2_stage() {
+    let low = [regions()[0].clone(), RefinementRegion { x_lo: [0.5, 0.375], x_hi: [0.625, 0.625] }];
+    assert_nested_face_on_cut_matches([vec![16], vec![]], low, Some((1, 1)));
+}
+
+/// under the production halo (two root ghost cells, three on level 1) a level-2 face on a level-1 cut
+/// prolongs its fine ghosts four level-1 cells past the face, one past level 1's halo: refused by name
+#[test]
+fn a_level_2_face_on_a_level_1_cut_under_the_production_halo_is_refused_by_name() {
+    let partition = Partition::explicit([N, N], [vec![16], vec![]]).expect("cuts inside the grid");
+    let low = [regions()[0].clone(), RefinementRegion { x_lo: [0.5, 0.375], x_hi: [0.625, 0.625] }];
+    let err = build_tiles_contributing(&partition, &low, 2).err().expect("a level-2 face on a level-1 cut was admitted");
+    assert!(
+        err.detail.contains("lies on a cut of level 1 and its prolongation stencil reaches 1 beyond that level's halo of 3 cells"),
+        "the refusal names another reason: {}",
+        err.detail
+    );
 }

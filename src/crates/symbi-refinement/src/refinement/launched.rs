@@ -368,6 +368,14 @@ where
     assert_eq!(held.nested.len(), plans.nested.len(), "one held level per nested plan");
     // the levels of the session: the root, the fine level, and every nested one
     let depth = 2 + plans.nested.len();
+    // the launched workers carry register units across the root's cuts alone: a nested patch face on
+    // a cut of its parent level contributes units no plan moves
+    if tiles.iter().any(|h| h.flux_registers.iter().skip(1).any(|r| r.has_contributing() || r.has_receiving())) {
+        return Err(fail(
+            fabric,
+            WorkerError::Refused("a nested patch face on a cut of its parent level carries register units no launched plan moves".into()),
+        ));
+    }
     // a gas run refluxes the tiles beside a neighbor's patch before the root's bands; a
     // magnetized run applies its units around the corrected-faces exchange after the subcycle
     let gas_reflux_first = plans.emf.is_none() && plans.corrected.is_none() && tiles.iter().all(|h| h.levels[0].state.fields.mhd.is_none());

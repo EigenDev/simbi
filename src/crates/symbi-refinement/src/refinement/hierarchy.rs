@@ -1488,6 +1488,40 @@ where
         Ok(self)
     }
 
+    /// a tile holding levels `0..=level` beside a neighbor's level-`level + 1` patch, whose face
+    /// lies on a cut of level `level`: this tile holds the level-`level` cells that face's fine
+    /// units correct. `patch` is the finer patch in this tile's level-`level` index space; a gas
+    /// level alone (a magnetized face on a nested cut carries no EMF transport)
+    pub fn with_receiving_register_at(mut self, level: usize, patch: &Domain<NDIM>, faces: [[bool; 2]; NDIM]) -> symbi_xpu::Result<Self> {
+        if level == 0 {
+            return self.with_receiving_register(patch, faces);
+        }
+        assert_eq!(self.levels.len(), level + 1, "a receiving register at level {level} lives on a tile holding no finer level");
+        assert_eq!(self.flux_registers.len(), level, "the receiving register follows the registers of every coarser interface");
+        let state = &self.levels[level].state;
+        assert!(state.fields.mhd.is_none(), "level {level}: a magnetized face on a nested cut carries no EMF transport");
+        let cons = &state.fields.cons;
+        self.flux_registers.push(FluxRegister::receiving_on(patch, faces, cons.has_energy(), cons.chi_field().is_some(), 0)?);
+        self.emf_registers.push(None);
+        Ok(self)
+    }
+
+    /// apply the received register units of level `level >= 1` of a tile beside a neighbor's
+    /// nested patch, then recover the level as the single hierarchy's restriction recovers it
+    pub fn reflux_received_at(&self, level: usize) {
+        assert!(level >= 1, "the root's received units apply through reflux_received");
+        assert_eq!(self.levels.len(), level + 1, "a tile beside a neighbor's nested patch holds no finer level");
+        let l = &self.levels[level];
+        let reg = &self.flux_registers[level];
+        if uniform_cartesian(&l.state) {
+            reg.apply_uniform(&l.state.fields.cons, &l.state.geom.dx);
+        } else {
+            let geo = l.state.geom.block_geometry(l.state.physics.metric);
+            reg.apply(&l.state.fields.cons, &geo);
+        }
+        self.recover_level(level);
+    }
+
     /// apply the received register units of a tile beside a neighbor's patch in the single
     /// hierarchy's order: the EMF register to the outside faces this tile holds, cell B and
     /// the magnetic energy over the shell those faces bound, then the flux register to the
@@ -1637,8 +1671,9 @@ where
         // per level, the axes its whole region spans along a root axis that wraps across the tiles;
         // the root's entry is empty
         let mut level_spans: Vec<[bool; NDIM]> = vec![[false; NDIM]];
-        // the root patch's real faces lying on a cut: contributing register faces
-        let mut contributing = [[false; 2]; NDIM];
+        // per interface, the patch's real faces lying on a cut of the coarser level: contributing
+        // register faces of that interface's register
+        let mut contributing: Vec<[[bool; 2]; NDIM]> = Vec::new();
         let mut whole_coverages: Vec<Domain<NDIM>> = Vec::with_capacity(regions.len());
         let root_ng = coarse.geom.ng;
         let mut levels = vec![LevelData {
@@ -1775,36 +1810,40 @@ where
                         });
                     }
                 }
-                contributing = real_on_cut;
+                contributing.push(real_on_cut);
             } else {
                 // a deeper patch face on a cut of its parent level: the parent cell its reflux
-                // corrects is on the neighbor tile, and register contributions cross root cuts
-                // alone
+                // corrects is on the neighbor tile, which receives this face's units across the
+                // parent level's cut on a gas level; a magnetized face carries no EMF transport there
                 let parent_cuts = levels.last().unwrap().cut_sides;
                 let level = levels.len();
                 for ax in (0..NDIM).filter(|&ax| !this_spans[ax]) {
                     let whole_face = &whole_coverages.last().unwrap().spaces[ax];
-                    let on_cut = (coverage.spaces[ax].lo == parent.geom.interior.spaces[ax].lo
+                    real_on_cut[ax][0] = coverage.spaces[ax].lo == parent.geom.interior.spaces[ax].lo
                         && whole_face.lo == coverage.spaces[ax].lo
-                        && parent_cuts[ax][0])
-                        || (coverage.spaces[ax].hi == parent.geom.interior.spaces[ax].hi
-                            && whole_face.hi == coverage.spaces[ax].hi
-                            && parent_cuts[ax][1]);
-                    if on_cut {
+                        && parent_cuts[ax][0];
+                    real_on_cut[ax][1] = coverage.spaces[ax].hi == parent.geom.interior.spaces[ax].hi
+                        && whole_face.hi == coverage.spaces[ax].hi
+                        && parent_cuts[ax][1];
+                    let on_cut = real_on_cut[ax][0] || real_on_cut[ax][1];
+                    if on_cut && (cut_faces == CutFaces::Refuse || parent.fields.mhd.is_some()) {
                         return Err(symbi_xpu::XpuError {
                             operation: "refinement region",
                             code: 0,
                             detail: format!(
                                 "a level-{level} refinement patch face on axis {ax} lies on a decomposition \
-                                 cut: the level-{} cell its reflux corrects is on the neighbor tile, and \
-                                 register contributions cross root cuts alone; move the cut or the patch \
-                                 face by at least one cell of level {}",
+                                 cut: the level-{} cell its reflux corrects is on the neighbor tile, and this \
+                                 driver carries no register unit across a cut of level {} for a magnetized \
+                                 or a non-contributing build; move the cut or the patch face by at least one \
+                                 cell of level {}",
+                                level - 1,
                                 level - 1,
                                 level - 1
                             ),
                         });
                     }
                 }
+                contributing.push(real_on_cut);
             }
             // fine ghost depth: one above the root's (the prolongation stencil
             // is one order above the evolution reconstruction).
@@ -1817,7 +1856,7 @@ where
             let reach = (ng.div_ceil(RATIO) + prolong_order.ghost_width()) as isize;
             let donated: [[bool; 2]; NDIM] = std::array::from_fn(|ax| {
                 let halo = parent.geom.interior.spaces[ax].lo - parent.geom.allocated.spaces[ax].lo;
-                let short = cut_faces == CutFaces::Donate && reach > halo;
+                let short = cut_faces == CutFaces::Donate && levels.len() == 1 && reach > halo;
                 [real_on_cut[ax][0] && short, real_on_cut[ax][1] && short]
             });
             let donates = donated.iter().flatten().any(|&d| d);
@@ -1841,7 +1880,7 @@ where
             }
             let unmet: [[bool; 2]; NDIM] =
                 std::array::from_fn(|ax| [real_on_cut[ax][0] && !donated[ax][0], real_on_cut[ax][1] && !donated[ax][1]]);
-            validate_coverage(&coverage, parent, ng, prolong_order, unmet).map_err(|detail| {
+            validate_coverage(&coverage, parent, ng, prolong_order, unmet, levels.len() - 1).map_err(|detail| {
                 symbi_xpu::XpuError { operation: "refinement region", code: 0, detail }
             })?;
             let stencil_domain = donates.then(|| {
@@ -2026,14 +2065,16 @@ where
             let coverage = levels[ll].coverage.as_ref().unwrap();
             let mut register =
                 FluxRegister::new(coverage, &levels[ll].state.geom.interior, has_energy, has_dye, oop_components)?;
-            if ll == 0 && contributing.iter().flatten().any(|&c| c) {
-                register = register.with_contributing_faces(coverage, contributing, has_energy, has_dye, oop_components)?;
+            let faces = contributing.get(ll).copied().unwrap_or([[false; 2]; NDIM]);
+            if faces.iter().flatten().any(|&c| c) {
+                register = register.with_contributing_faces(coverage, faces, has_energy, has_dye, oop_components)?;
             }
             flux_registers.push(register);
             emf_registers.push(if levels[ll].state.fields.mhd.is_some() {
                 let mut register = EmfRegister::new(coverage, &levels[ll].state.geom.interior)?;
-                if ll == 0 && contributing.iter().flatten().any(|&c| c) {
-                    register = register.with_contributing_planes(coverage, contributing)?;
+                let faces = contributing.get(ll).copied().unwrap_or([[false; 2]; NDIM]);
+                if ll == 0 && faces.iter().flatten().any(|&c| c) {
+                    register = register.with_contributing_planes(coverage, faces)?;
                 }
                 Some(register)
             } else {
@@ -5812,6 +5853,7 @@ fn validate_coverage<R, const D: usize, const DOF: usize, M, E, S, Mem>(
     fine_ng: usize,
     order: ProlongOrder,
     real_on_cut: [[bool; 2]; D],
+    parent_level: usize,
 ) -> Result<(), String>
 where
     R: Regime<f64, D>,
@@ -5836,11 +5878,20 @@ where
         // the patch's real face on a cut: its fine ghosts are prolonged from the root halo
         // alone, so the stencil has to fit inside it
         if (real_on_cut[ax][0] || real_on_cut[ax][1]) && clearance > 0 {
-            return Err(format!(
-                "the refinement patch's real face on axis {ax} lies on a decomposition cut and its \
-                 prolongation stencil reaches {clearance} beyond the root halo; give the root {reach} \
-                 ghost cells or move the face off the cut"
-            ));
+            return Err(if parent_level == 0 {
+                format!(
+                    "the refinement patch's real face on axis {ax} lies on a decomposition cut and its \
+                     prolongation stencil reaches {clearance} beyond the root halo; give the root {reach} \
+                     ghost cells or move the face off the cut"
+                )
+            } else {
+                format!(
+                    "the level-{} refinement patch's real face on axis {ax} lies on a cut of level \
+                     {parent_level} and its prolongation stencil reaches {clearance} beyond that level's \
+                     halo of {ng} cells; deepen the halo or move the face off the cut",
+                    parent_level + 1
+                )
+            });
         }
         if clo != int.lo && clo - reach < alloc.lo {
             return Err(format!(
@@ -6797,13 +6848,16 @@ where
     Ok(())
 }
 
-/// the register units of one fine stage across the root cuts: each root tile's contributing face
-/// (a patch face on a cut) lands in the inbox of the same patch face on the root tile across the
-/// cut, which holds the coarse cells its reflux corrects; every contributing face is then cleared
-/// for the next stage and every landed unit folded into its receiving face, in the order the
-/// single hierarchy's register accumulates. root tile `i` sits at flat position `i` of `counts`
+/// the register units of one stage of level `level + 1` across the cuts of level `level`: each
+/// tile's contributing face (a patch face of level `level + 1` on a cut of level `level`) lands in
+/// the inbox of the same patch face on the level-`level` tile across the cut, which holds the cells
+/// its reflux corrects; every contributing face is then cleared for the next stage and every landed
+/// unit folded into its receiving face, in the order the single hierarchy's register accumulates.
+/// the level's tile at position `k` of `order` sits at flat position `k` of `counts`
 fn exchange_flux_contributions<R, const NDIM: usize, const DOF: usize, M, E, S, Mem, K, T>(
     tiles: &[Hierarchy<R, NDIM, DOF, M, E, S, Mem, K>],
+    level: usize,
+    order: &[usize],
     counts: [usize; NDIM],
     devices: &[i32],
     transport: &T,
@@ -6816,40 +6870,41 @@ fn exchange_flux_contributions<R, const NDIM: usize, const DOF: usize, M, E, S, 
     K: KernelSet<NDIM, DOF, Mem, f64>,
     T: HaloTransport,
 {
-    if !tiles.iter().any(Hierarchy::transports_registers) {
+    if !order.iter().any(|&i| tiles[i].flux_registers.get(level).is_some_and(|r| r.has_contributing() || r.has_receiving())) {
         return;
     }
     drain_devices::<Mem>(devices);
-    for (i, src) in tiles.iter().enumerate() {
-        let Some(reg) = src.flux_registers.first() else { continue };
+    for (k, &i) in order.iter().enumerate() {
+        let Some(reg) = tiles[i].flux_registers.get(level) else { continue };
         for (idx, faces, src_region) in reg.contributing() {
             let (ax, side) = (idx / 2, idx % 2);
-            let mut tc = unflatten(i, counts);
+            let mut tc = unflatten(k, counts);
             tc[ax] = match side {
                 0 => tc[ax].checked_sub(1),
                 _ => Some(tc[ax] + 1).filter(|&c| c < counts[ax]),
             }
             .unwrap_or_else(|| {
                 panic!(
-                    "root tile {i}'s patch face {idx} lies on the periodic seam of axis {ax}: register units cross \
-                     the root cuts inside the domain alone"
+                    "level-{level} tile {i}'s patch face {idx} lies on the periodic seam of axis {ax}: register units \
+                     cross the cuts inside the domain alone"
                 )
             });
-            let j = flatten(tc, counts);
+            let kk = flatten(tc, counts);
+            let j = order[kk];
             let (_, units, dst_region) = tiles[j]
                 .flux_registers
-                .first()
-                .and_then(|r| r.inboxes().into_iter().find(|(k, _, _)| *k == idx))
-                .unwrap_or_else(|| panic!("root tile {j} across the cut holds no receiving face {idx} for tile {i}'s patch face"));
+                .get(level)
+                .and_then(|r| r.inboxes().into_iter().find(|(f, _, _)| *f == idx))
+                .unwrap_or_else(|| panic!("level-{level} tile {j} across the cut holds no receiving face {idx} for tile {i}'s patch face"));
             for (face, unit) in faces.iter().zip(&units) {
-                transport.copy_region(face, src_region, unit, dst_region, devices[i], devices[j]);
+                transport.copy_region(face, src_region, unit, dst_region, devices[k], devices[kk]);
             }
         }
     }
     drain_devices::<Mem>(devices);
-    for (i, tile) in tiles.iter().enumerate() {
-        if let Some(reg) = tile.flux_registers.first() {
-            symbi_xpu::with_device(devices[i], || {
+    for (k, &i) in order.iter().enumerate() {
+        if let Some(reg) = tiles[i].flux_registers.get(level) {
+            symbi_xpu::with_device(devices[k], || {
                 reg.zero_contributions();
                 reg.fold_inboxes();
             });
@@ -7803,8 +7858,13 @@ where
             }
             exchange_level_tracers(tiles, level, jj);
             exchange_level_halos(tiles, level, &fg.order, fg.counts, &fg.devices, transport);
+            // the register units of this stage across the cuts of the parent level
             if parent == 0 {
-                exchange_flux_contributions(tiles, root.0, root.1, transport);
+                let order: Vec<usize> = (0..tiles.len()).collect();
+                exchange_flux_contributions(tiles, 0, &order, root.0, root.1, transport);
+            } else {
+                let pg = &fine[parent - 1];
+                exchange_flux_contributions(tiles, parent, &pg.order, pg.counts, &pg.devices, transport);
             }
             for &i in &fg.order {
                 phase_probe::set_tile(i);
@@ -7836,14 +7896,22 @@ where
                 phase_probe::set_tile(i);
                 symbi_xpu::with_device(finer.devices[k], || tiles[i].level_restrict_cells(level));
             }
+            // a tile beside a neighbor's finer patch whose face lies on a cut of this level applies
+            // the units it received and recovers the level, as the single hierarchy refluxes and
+            // recovers every uncovered cell before its bands
+            for (k, &i) in fg.order.iter().enumerate() {
+                if tiles[i].levels.len() == level + 1 && tiles[i].has_flux_register(level) {
+                    symbi_xpu::with_device(fg.devices[k], || tiles[i].reflux_received_at(level));
+                }
+            }
             decomposed_bands(tiles, level, (&fg.order, fg.counts, &fg.devices), finer, transport);
             for (k, &i) in finer.order.iter().enumerate() {
                 symbi_xpu::with_device(finer.devices[k], || tiles[i].level_restrict_finish(level, alpha));
             }
-            // a tile holding this level and none finer recovers it as the restriction recovers the
-            // single hierarchy's
+            // every other tile holding this level and none finer recovers it as the restriction
+            // recovers the single hierarchy's
             for (k, &i) in fg.order.iter().enumerate() {
-                if tiles[i].levels.len() == level + 1 {
+                if tiles[i].levels.len() == level + 1 && !tiles[i].has_flux_register(level) {
                     symbi_xpu::with_device(fg.devices[k], || tiles[i].recover_level(level));
                 }
             }
