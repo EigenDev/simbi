@@ -601,6 +601,7 @@ fn run_worker(arm: &Arm, me: WorkerId, out: PathBuf) -> Result<(), WorkerError> 
         invalid_level_cfl_at: bad_cfl_from_env(me),
         fine_trouble_at: fine_trouble_from_env(),
         contribution_fault: contribution_fault_from_env(me),
+        nested_contribution_fault: None,
         restart: std::env::var_os("W_RESTART_FROM").is_some(),
         perturb_fine_face_after: env_perturb(),
         clock_fault: env_clock_fault(),

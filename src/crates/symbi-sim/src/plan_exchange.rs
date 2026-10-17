@@ -61,6 +61,14 @@ pub enum PlanRole {
     /// nested level `level`'s parent face stencil gathered from the faces' owners on the parent's
     /// partition: every transfer moves at the parent's last stage point of each of its substeps
     NestedFaceStencil { level: u8 },
+    /// the flux-register contributions of nested level `level`'s patch faces lying on cuts of
+    /// level `level - 1`, on that level's partition: every transfer moves at every stage point of
+    /// level `level`
+    NestedFluxContribution { level: u8 },
+    /// nested level `level`'s parent prim stencil gathered from the cells' owners on the parent's
+    /// partition: every transfer moves at the parent's last stage point of each of its substeps,
+    /// and at the primed point
+    NestedPrimStencil { level: u8 },
     /// the continuous-tracer coefficients of level `level` on a refined run: every transfer moves
     /// at the level's coefficient point (the root after its stages, a refined level in each of its
     /// substeps)
@@ -237,6 +245,18 @@ impl<'p, const D: usize> PlanExchange<'p, D> {
                     ExchangePoint::Nested { level: l, point: FinePoint::Stage(k), .. } => l + 1 == level && k == last,
                     _ => false,
                 }
+            }
+            PlanRole::NestedPrimStencil { level } => {
+                let last = self.table.fine_stages().saturating_sub(1);
+                match point {
+                    ExchangePoint::Fine { point: FinePoint::Stage(k), .. } => level == 2 && k == last,
+                    ExchangePoint::Nested { level: l, point: FinePoint::Stage(k), .. } => l + 1 == level && k == last,
+                    ExchangePoint::Primed => true,
+                    _ => false,
+                }
+            }
+            PlanRole::NestedFluxContribution { level } => {
+                matches!(point, ExchangePoint::Nested { level: l, point: FinePoint::Stage(_), .. } if l == level)
             }
             PlanRole::FluxContribution => matches!(point, ExchangePoint::Fine { point: FinePoint::Stage(_), .. }),
             PlanRole::EmfContribution => matches!(point, ExchangePoint::Fine { point: FinePoint::PostTail, .. }),

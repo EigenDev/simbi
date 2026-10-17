@@ -572,6 +572,7 @@ fn run_worker(arm: &Arm, me: WorkerId, out: PathBuf) -> Result<(), WorkerError> 
             (p.len() == 5).then(|| (p[0], p[1] as u8, p[2] as usize, [p[3] as isize, p[4] as isize, 0]))
         },
         contribution_fault: None,
+        nested_contribution_fault: None,
         restart: std::env::var_os("W_RESTART_FROM").is_some(),
         perturb_fine_face_after: env_perturb(),
         clock_fault: env_clock_fault(),

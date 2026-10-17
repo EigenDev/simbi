@@ -487,10 +487,10 @@ where
     /// face stencil of a neighbor's fine level gathers; held on every tile of a run whose
     /// fine levels read that stencil
     face_entry: Option<Vec<Field<f64, NDIM, Mem>>>,
-    /// the root primitives this tile gives to the parent prim stencils of other workers' tiles, at
-    /// every attempt's entry, over the smallest box holding them: the old-time source of a launched
-    /// stencil gather. `None` on a tile giving none
-    prim_entry: Option<PrimFieldsGeneric<NDIM, DOF, Mem>>,
+    /// per level, the primitives this tile gives to the parent prim stencils of other workers'
+    /// tiles at the entry of every step of the level, over the smallest box holding them: the
+    /// old-time source of a launched stencil gather. `None` on a level giving none
+    prim_entry: Vec<Option<PrimFieldsGeneric<NDIM, DOF, Mem>>>,
     /// per refined level that parents a finer level of the run, its faces at its current
     /// substep's start: the old-time source of the finer level's parent face stencil, kept on
     /// every tile holding the level whether or not the tile holds the finer one
@@ -1368,7 +1368,7 @@ where
             forced_dt_cap: None,
             forced_level_rejection: None,
             face_entry: None,
-            prim_entry: None,
+            prim_entry: Vec::new(),
             level_face_entry: Vec::new(),
             priming: false,
             closure_prescribed: false,
@@ -2137,7 +2137,7 @@ where
             forced_dt_cap: None,
             forced_level_rejection: None,
             face_entry: None,
-            prim_entry: None,
+            prim_entry: Vec::new(),
             level_face_entry: Vec::new(),
             priming: false,
             closure_prescribed: false,
@@ -2980,23 +2980,44 @@ where
     /// keep the root primitives over `cells` (this tile's index space) at every attempt's entry,
     /// the old-time source of the parent prim stencils this tile gives to
     pub fn enable_prim_entry(&mut self, cells: &Domain<NDIM>) -> symbi_xpu::Result<()> {
-        let prim = &self.levels[0].state.fields.prim;
+        self.enable_prim_entry_at(0, cells)
+    }
+
+    /// keep level `level`'s primitives over `cells` (the level's index space on this tile) at the
+    /// entry of every step of the level, the old-time source of the finer level's parent prim
+    /// stencils this tile gives to
+    pub fn enable_prim_entry_at(&mut self, level: usize, cells: &Domain<NDIM>) -> symbi_xpu::Result<()> {
+        let prim = &self.levels[level].state.fields.prim;
         let mut entry = PrimFieldsGeneric::zeros_with_pressure(cells, prim.pre_field().is_some())?;
         if prim.chi_field().is_some() {
             entry.alloc_chi(cells)?;
         }
-        self.prim_entry = Some(entry);
+        if self.prim_entry.len() <= level {
+            self.prim_entry.resize_with(level + 1, || None);
+        }
+        self.prim_entry[level] = Some(entry);
         Ok(())
     }
 
     /// the root primitives this tile gives to parent prim stencils, at the attempt's entry
     pub fn prim_entry(&self) -> Option<&PrimFieldsGeneric<NDIM, DOF, Mem>> {
-        self.prim_entry.as_ref()
+        self.prim_entry_at(0)
+    }
+
+    /// level `level`'s primitives this tile gives to the finer level's parent prim stencils, at
+    /// the entry of the level's current step
+    pub fn prim_entry_at(&self, level: usize) -> Option<&PrimFieldsGeneric<NDIM, DOF, Mem>> {
+        self.prim_entry.get(level).and_then(Option::as_ref)
     }
 
     /// the first refined level's prim stencil holds both gathered time levels of this attempt
     pub fn mark_prim_stencil_filled(&self) {
-        if let Some(stencil) = self.prim_stencil() {
+        self.mark_prim_stencil_filled_of(1);
+    }
+
+    /// level `level`'s prim stencil holds both gathered time levels of the parent's current step
+    pub fn mark_prim_stencil_filled_of(&self, level: usize) {
+        if let Some(stencil) = self.prim_stencil_at(level) {
             stencil.old_filled.set(true);
             stencil.new_filled.set(true);
         }
@@ -3006,15 +3027,21 @@ where
     /// roots: each level prolonged at the current state and physically filled coarsest-first, as the
     /// single hierarchy's prime does, when `prolong`; the stencil is invalidated after
     pub fn prolong_from_prim_stencil(&mut self, prolong: bool) {
+        self.prolong_from_prim_stencil_at(1, prolong);
+    }
+
+    /// `prolong_from_prim_stencil` for the stencil of level `level`: the levels from `level` down
+    /// prolonged and filled coarsest-first when `prolong`, the stencil invalidated after
+    pub fn prolong_from_prim_stencil_at(&mut self, level: usize, prolong: bool) {
         if prolong {
             self.priming = true;
-            for ll in 1..self.levels.len() {
+            for ll in level..self.levels.len() {
                 self.prolong_cf(ll, 1.0);
                 self.fill_physical_ghosts(ll);
             }
             self.priming = false;
         }
-        if let Some(stencil) = self.prim_stencil() {
+        if let Some(stencil) = self.prim_stencil_at(level) {
             stencil.invalidate();
         }
     }
@@ -3623,8 +3650,8 @@ where
         if let Some(stencil) = self.levels.get(level + 1).and_then(|l| l.prim_stencil.as_ref()) {
             stencil.invalidate();
         }
-        if let (0, Some(entry)) = (level, self.prim_entry.as_ref()) {
-            let prim = &self.levels[0].state.fields.prim;
+        if let Some(entry) = self.prim_entry_at(level) {
+            let prim = &self.levels[level].state.fields.prim;
             let cells = entry.rho.domain().clone();
             for (src, dst) in PrimStencil::<NDIM, DOF, Mem>::components(prim).into_iter().zip(PrimStencil::<NDIM, DOF, Mem>::components(entry)) {
                 copy_field_region(src, dst, &cells);

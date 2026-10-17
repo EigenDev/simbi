@@ -913,9 +913,24 @@ impl<const D: usize> ExchangePlan<D> {
         ng: usize,
         n_comp: usize,
     ) -> Result<Self, PlanError> {
+        Self::flux_contributions_shifted(partition, topology, patch, ng, n_comp, &|_| [0; D])
+    }
+
+    /// `flux_contributions` for tiles whose stores index their cells from `interior_lo(tile)` in
+    /// place of zero: a refined parent level, whose tiles live in their own parents' index frames.
+    /// `patch` is the finer patch in the level's cells from the partition's origin
+    pub fn flux_contributions_shifted(
+        partition: &Partition<D>,
+        topology: &Topology<D>,
+        patch: [(usize, usize); D],
+        ng: usize,
+        n_comp: usize,
+        interior_lo: &dyn Fn(TileId) -> [isize; D],
+    ) -> Result<Self, PlanError> {
         let counts = partition.counts();
         let n_tiles = partition.n_tiles();
-        let tiles: Vec<TileLayout<D>> = (0..n_tiles).map(|t| TileLayout::of_partition(partition, TileId(t as u32), ng)).collect();
+        let tiles: Vec<TileLayout<D>> =
+            (0..n_tiles).map(|t| TileLayout::of_partition(partition, TileId(t as u32), ng).shifted(interior_lo(TileId(t as u32)))).collect();
         let mut schema = FieldSchema::new();
         for idx in 0..2 * D {
             for comp in 0..n_comp {
@@ -957,8 +972,12 @@ impl<const D: usize> ExchangePlan<D> {
                             }
                         })
                     };
-                    let src_region = slab(ext, face_pos as isize - ext[ax].0 as isize);
-                    let dst_region = slab(dst_ext, face_pos as isize - dst_ext[ax].0 as isize);
+                    let frame = |region: [Span; D], t: usize| -> [Span; D] {
+                        let lo = interior_lo(TileId(t as u32));
+                        std::array::from_fn(|aa| Span { lo: region[aa].lo + lo[aa], hi: region[aa].hi + lo[aa] })
+                    };
+                    let src_region = frame(slab(ext, face_pos as isize - ext[ax].0 as isize), src);
+                    let dst_region = frame(slab(dst_ext, face_pos as isize - dst_ext[ax].0 as isize), dst);
                     for comp in 0..n_comp {
                         let f = (2 * ax + side) * n_comp + comp;
                         fields[src][f] = FieldLayout { interior: src_region, allocated: src_region, halo: [0; D] };
@@ -1360,17 +1379,33 @@ impl<const D: usize> ExchangePlan<D> {
         schema: &FieldSchema,
         ng: usize,
     ) -> Result<Self, PlanError> {
+        Self::cell_stencil_shifted(partition, topology, boxes, schema, ng, &|_| [0; D])
+    }
+
+    /// `cell_stencil` for tiles whose stores index their cells from `interior_lo(tile)` in place of
+    /// zero: a refined parent level. the boxes stay in whole-level cell indices from the
+    /// partition's origin; sources and destinations land in each tile's own frame
+    pub fn cell_stencil_shifted(
+        partition: &Partition<D>,
+        topology: &Topology<D>,
+        boxes: &[Option<[Span; D]>],
+        schema: &FieldSchema,
+        ng: usize,
+        interior_lo: &dyn Fn(TileId) -> [isize; D],
+    ) -> Result<Self, PlanError> {
         let counts = partition.counts();
         let n_tiles = partition.n_tiles();
         assert_eq!(boxes.len(), n_tiles, "one stencil entry per tile");
         assert!(schema.entries.iter().all(|e| e.kind == FieldKind::Cell), "a prim stencil gathers cell fields");
-        let tiles: Vec<TileLayout<D>> = (0..n_tiles).map(|t| TileLayout::of_partition(partition, TileId(t as u32), ng)).collect();
+        let tiles: Vec<TileLayout<D>> =
+            (0..n_tiles).map(|t| TileLayout::of_partition(partition, TileId(t as u32), ng).shifted(interior_lo(TileId(t as u32)))).collect();
         let n_fields = schema.entries.len();
         let exts: Vec<[(usize, usize); D]> = (0..n_tiles).map(|t| partition.tile_extents(unflatten(t, counts))).collect();
         let mut fields: Vec<Vec<FieldLayout<D>>> =
             (0..n_tiles).map(|t| (0..n_fields).map(|_| FieldLayout::of(&tiles[t], FieldKind::Cell)).collect()).collect();
         let local = |g: &[Span; D], t: usize| -> [Span; D] {
-            std::array::from_fn(|a| Span { lo: g[a].lo - exts[t][a].0 as isize, hi: g[a].hi - exts[t][a].0 as isize })
+            let frame = interior_lo(TileId(t as u32));
+            std::array::from_fn(|a| Span { lo: g[a].lo - exts[t][a].0 as isize + frame[a], hi: g[a].hi - exts[t][a].0 as isize + frame[a] })
         };
         let (_, owned, images) = Self::stencil_owners(partition, topology, ng);
         let mut transfers = Vec::new();
@@ -1470,6 +1505,19 @@ impl<const D: usize> ExchangePlan<D> {
         ng: usize,
         tile: TileId,
     ) -> Option<[Span; D]> {
+        Self::cell_stencil_sources_shifted(partition, topology, boxes, ng, tile, [0; D])
+    }
+
+    /// `cell_stencil_sources` for a tile whose store indexes its cells from `interior_lo` in place
+    /// of zero (`cell_stencil_shifted`)
+    pub fn cell_stencil_sources_shifted(
+        partition: &Partition<D>,
+        topology: &Topology<D>,
+        boxes: &[Option<[Span; D]>],
+        ng: usize,
+        tile: TileId,
+        interior_lo: [isize; D],
+    ) -> Option<[Span; D]> {
         let (_, owned, images) = Self::stencil_owners(partition, topology, ng);
         let own = &owned[tile.0 as usize];
         let lo = partition.tile_extents(unflatten(tile.0 as usize, partition.counts()));
@@ -1477,8 +1525,8 @@ impl<const D: usize> ExchangePlan<D> {
         for gbox in boxes.iter().flatten() {
             for image in &images {
                 let piece: [Span; D] = std::array::from_fn(|a| Span {
-                    lo: gbox[a].lo.max(own[a].lo + image[a]) - image[a] - lo[a].0 as isize,
-                    hi: gbox[a].hi.min(own[a].hi + image[a]) - image[a] - lo[a].0 as isize,
+                    lo: gbox[a].lo.max(own[a].lo + image[a]) - image[a] - lo[a].0 as isize + interior_lo[a],
+                    hi: gbox[a].hi.min(own[a].hi + image[a]) - image[a] - lo[a].0 as isize + interior_lo[a],
                 });
                 if piece.iter().any(|s| s.hi <= s.lo) {
                     continue;

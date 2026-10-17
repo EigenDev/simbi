@@ -6510,6 +6510,7 @@ where
         || fault.perturb_face_after.is_some()
         || fault.injection.cap_dt_at.is_some()
         || fault.injection.trouble_at.is_some()
+        || fault.nested_contribution.is_some()
     {
         return Err("SIMBI_FABRIC_INJECT: an in-process tiled run takes reject_level alone".into());
     }
@@ -11117,6 +11118,9 @@ struct WorkerLaunch {
 /// any partition. `reject_level:WORKER:STEP:LEVEL:SUBSTEP:STAGE` rejects a stage of a refined
 /// level on that worker's tiles holding the level, the substeps counted across the root step; an
 /// in-process tiled run takes it as worker 0 and refuses the other faults.
+/// `nested_contribution:WORKER:STEP:LEVEL:PATH:STAGE:dup|drop` lists that worker's sends of the
+/// nested level's flux contributions twice, or none, at that stage of the level's substep `PATH`
+/// on the first attempt: the exactly-once rule ends the session.
 /// `cap:STEP:BITS` caps the agreed timestep of that step at the f64 of those bits on every
 /// worker, the clean control of a rejection. unset, every worker runs clean.
 #[derive(Default)]
@@ -11128,6 +11132,8 @@ struct LaunchFault {
     perturb_face_after: Option<u64>,
     /// a rejection of a refined level's stage on this worker's tiles: (step, level, substep, stage)
     level_rejection: Option<(u64, usize, u64, usize)>,
+    /// a staging fault in this worker's nested flux contributions: (step, level, path, stage, fault)
+    nested_contribution: Option<(u64, u8, u32, usize, symbi_sim::plan_exchange::StagingFault)>,
 }
 
 impl LaunchFault {
@@ -11160,7 +11166,7 @@ impl LaunchFault {
         }
         if number(1)? as usize != me {
             match parts[0] {
-                "reject" | "reject_level" | "bad_cfl" | "exit" | "face" => return Ok(fault),
+                "reject" | "reject_level" | "bad_cfl" | "exit" | "face" | "nested_contribution" => return Ok(fault),
                 other => return Err(format!("SIMBI_FABRIC_INJECT: unknown fault '{other}'")),
             }
         }
@@ -11168,6 +11174,14 @@ impl LaunchFault {
             "reject" => fault.injection.reject_at = vec![(number(2)?, number(3)? as usize)],
             "reject_level" => {
                 fault.level_rejection = Some((number(2)?, number(3)? as usize, number(4)?, number(5)? as usize))
+            }
+            "nested_contribution" => {
+                let kind = match parts.get(6).copied() {
+                    Some("dup") => symbi_sim::plan_exchange::StagingFault::Duplicate,
+                    Some("drop") => symbi_sim::plan_exchange::StagingFault::Drop,
+                    _ => return Err(format!("SIMBI_FABRIC_INJECT='{spec}': field 6 is neither dup nor drop")),
+                };
+                fault.nested_contribution = Some((number(2)?, number(3)? as u8, number(4)? as u32, number(5)? as usize, kind));
             }
             "bad_cfl" => fault.injection.invalid_cfl_at = Some(number(2)?),
             "exit" => fault.exit_after = Some(number(2)?),
@@ -11793,6 +11807,50 @@ where
         if let Some(cells) = symbi_sim::atlas::ExchangePlan::cell_stencil_sources(&layout.partition, &ring, &boxes, ng, TileId(flat as u32)) {
             let cells = symbi_algebra::Domain::new(std::array::from_fn(|ax| symbi_algebra::Space { name: symbi_sim::state::axis_name(ax), lo: cells[ax].lo, hi: cells[ax].hi }));
             h.enable_prim_entry(&cells).map_err(|e| format!("tile {flat} prim entry: {e:?}"))?;
+        }
+    }
+    // the nested levels: a tile whose finest level lies beside a finer patch face on a cut of that
+    // level holds the receiving register of the cells the face's units correct, and each nested
+    // level's parent prim stencils, derived from the level partitions alone, equal the builder's on
+    // this tile while the parent cells this tile gives to any of them are kept at every parent step's
+    // entry
+    {
+        use symbi::sim::decomp::unflatten;
+        use symbi::sim::refinement::launched::{nested_partitions, nested_receiving_faces_of_tile, nested_tile_of, prim_stencil_boxes};
+        let patches = nested_patches::<D>(cfg)?;
+        let parts = nested_partitions(&layout.partition, &patches)?;
+        let finest = h.levels.len() - 1;
+        if finest >= 1 && finest < patches.len() {
+            if let Some((patch_local, faces)) = nested_receiving_faces_of_tile(&layout.partition, &parts, &patches, TileId(flat as u32), finest) {
+                h = h
+                    .with_receiving_register_at(finest, &patch_local, faces)
+                    .map_err(|e| format!("tile {flat} level-{finest} receiving register: {e:?}"))?;
+            }
+        }
+        let ng = h.levels[0].state.geom.ng + 1;
+        let open = symbi::sim::decomp::Topology::open();
+        for parent in 1..patches.len() {
+            let Some((t, frame)) = nested_tile_of(&layout.partition, &parts, &patches, TileId(flat as u32), parent) else { continue };
+            let part = &parts[parent - 1].partition;
+            let boxes = prim_stencil_boxes(part, patches[parent], ng, prolong_order_for(&cfg.reconstruction_name), [false; D]);
+            let ext = part.tile_extents(unflatten(t.0 as usize, part.counts()));
+            let held = h.prim_stencil_at(parent + 1).map(|st| -> [symbi_sim::atlas::Span; D] {
+                std::array::from_fn(|ax| {
+                    let shift = ext[ax].0 as isize - frame[ax];
+                    symbi_sim::atlas::Span { lo: st.domain.spaces[ax].lo + shift, hi: st.domain.spaces[ax].hi + shift }
+                })
+            });
+            if held != boxes[t.0 as usize] {
+                return Err(format!(
+                    "tile {flat}: its level-{} parent prim stencil {held:?} differs from the session's {:?}",
+                    parent + 1,
+                    boxes[t.0 as usize]
+                ));
+            }
+            if let Some(cells) = symbi_sim::atlas::ExchangePlan::cell_stencil_sources_shifted(part, &open, &boxes, ng, t, frame) {
+                let cells = symbi_algebra::Domain::new(std::array::from_fn(|ax| symbi_algebra::Space { name: symbi_sim::state::axis_name(ax), lo: cells[ax].lo, hi: cells[ax].hi }));
+                h.enable_prim_entry_at(parent, &cells).map_err(|e| format!("tile {flat} level-{parent} prim entry: {e:?}"))?;
+            }
         }
     }
     // immersed bodies at their global positions: the finest level owns the full bodies, coarser
@@ -12453,10 +12511,40 @@ where
                 .map_err(|e| e.to_string())
         })
         .collect::<Result<_, String>>()?;
-    for ((state, seed), stencil) in nested_state_plans.iter().zip(&nested_seed_plans).zip(&nested_stencil_plans) {
+    // a gas nested level's patch faces on cuts of its parent: their flux-register units cross on the
+    // parent's partition, and where the face's prolongation reaches past the parent's halo the level
+    // reads a parent prim stencil gathered there
+    let mut nested_flux_plans: Vec<Option<ExchangePlan<D>>> = Vec::with_capacity(nested_parts.len());
+    let mut nested_prim_plans: Vec<Option<ExchangePlan<D>>> = Vec::with_capacity(nested_parts.len());
+    for i in 0..nested_parts.len() {
+        let (parent_part, frames) =
+            if i == 0 { (&fine_partition.partition, &fine_frames) } else { (&nested_parts[i - 1].partition, &nested_frames[i - 1]) };
+        let rel = nested_parts[i].patch;
+        if magnetized {
+            nested_flux_plans.push(None);
+            nested_prim_plans.push(None);
+            continue;
+        }
+        let flux = ExchangePlan::flux_contributions_shifted(parent_part, &open, rel, ng + 1, cons_schema.len(), &|t: TileId| frames[t.0 as usize])
+            .map_err(|e| e.to_string())?;
+        nested_flux_plans.push((flux.transfers().count() > 0).then_some(flux));
+        let boxes = symbi::sim::refinement::launched::prim_stencil_boxes(parent_part, rel, ng + 1, prolong_order_for(&cfg.reconstruction_name), [false; D]);
+        nested_prim_plans.push(if boxes.iter().any(Option::is_some) {
+            let schema = (0..cons_schema.len()).fold(symbi_sim::atlas::FieldSchema::new(), |schema, k| schema.cell(&format!("prim_stencil_{k}")));
+            Some(
+                ExchangePlan::cell_stencil_shifted(parent_part, &open, &boxes, &schema, ng + 1, &|t: TileId| frames[t.0 as usize])
+                    .map_err(|e| e.to_string())?,
+            )
+        } else {
+            None
+        });
+    }
+    for ((((state, seed), stencil), flux), prim) in
+        nested_state_plans.iter().zip(&nested_seed_plans).zip(&nested_stencil_plans).zip(&nested_flux_plans).zip(&nested_prim_plans)
+    {
         digests.extend([state.digest, seed.digest]);
-        if let Some(stencil) = stencil {
-            digests.push(stencil.digest);
+        for plan in [stencil, flux, prim].into_iter().flatten() {
+            digests.push(plan.digest);
         }
     }
     // each held root tile's tile on every nested level, when the level reaches it
@@ -12540,7 +12628,13 @@ where
             let new = next(plan, parent_placement, PlanRole::NestedFaceStencil { level });
             (old, new)
         });
-        nested_plans.push(NestedPlans { state, seed, stencil });
+        let flux = nested_flux_plans[i].as_ref().map(|plan| next(plan, parent_placement, PlanRole::NestedFluxContribution { level }));
+        let prim_stencil = nested_prim_plans[i].as_ref().map(|plan| {
+            let old = next(plan, parent_placement, PlanRole::NestedPrimStencil { level });
+            let new = next(plan, parent_placement, PlanRole::NestedPrimStencil { level });
+            (old, new)
+        });
+        nested_plans.push(NestedPlans { state, seed, stencil, flux, prim_stencil });
     }
     // the coefficient plans take the ids after every level's plans
     let coefficients: Vec<_> = coefficient_plans
@@ -12617,6 +12711,10 @@ where
     for level in &nested_plans {
         all.extend([&level.state, &level.seed]);
         if let Some((old, new)) = level.stencil.as_ref() {
+            all.extend([old, new]);
+        }
+        all.extend(level.flux.as_ref());
+        if let Some((old, new)) = level.prim_stencil.as_ref() {
             all.extend([old, new]);
         }
     }
@@ -12702,6 +12800,7 @@ where
         invalid_level_cfl_at: None,
         fine_trouble_at: None,
         contribution_fault: None,
+        nested_contribution_fault: fault.nested_contribution,
         restart,
         perturb_fine_face_after: None,
         clock_fault: None,

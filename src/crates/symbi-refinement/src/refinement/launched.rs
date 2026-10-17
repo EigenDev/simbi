@@ -99,8 +99,7 @@ pub struct RefinedPlans<'p, const D: usize> {
     pub slip_cells: Option<PlanExchange<'p, D>>,
 }
 
-/// the plans of one nested refined level (two or deeper): its patch faces lie off every cut,
-/// so its register corrections stay on the tile holding both sides
+/// the plans of one nested refined level (two or deeper)
 pub struct NestedPlans<'p, const D: usize> {
     /// the level's state at its own points, after the priming, after the restriction of the
     /// level below it, and at the rollback
@@ -111,6 +110,15 @@ pub struct NestedPlans<'p, const D: usize> {
     /// gathered at the parent's last stage point: two instances of one plan on the parent's
     /// partition, present on a magnetized run
     pub stencil: Option<(PlanExchange<'p, D>, PlanExchange<'p, D>)>,
+    /// the flux-register contributions of the level's patch faces lying on cuts of its parent, at
+    /// every stage point of the level, on the parent's partition: absent when no such face lies on
+    /// a cut
+    pub flux: Option<PlanExchange<'p, D>>,
+    /// the level's parent prim stencils at the parent substep's start and after its stages,
+    /// gathered at the parent's last stage point and at the primed point: two instances of one
+    /// cell-stencil plan on the parent's partition, present on a gas run whose level face on a
+    /// parent cut prolongs past the parent's halo
+    pub prim_stencil: Option<(PlanExchange<'p, D>, PlanExchange<'p, D>)>,
 }
 
 /// the tiles of one nested level this worker holds, parallel over the held root tiles
@@ -221,6 +229,112 @@ where
     Ok(())
 }
 
+/// the parent prim stencil fields of refined level `level >= 2`, per tile of its parent level: the
+/// cells each parent tile gives at the parent step's entry, its current primitives, and the
+/// stencil's old and new time levels
+#[allow(clippy::type_complexity)]
+fn nested_prim_stencil_lists<'t, R, const D: usize, const DOF: usize, M, E, S, Mem, K>(
+    tiles: &'t [Hierarchy<R, D, DOF, M, E, S, Mem, K>],
+    held: &Held<'_>,
+    level: usize,
+) -> [Vec<Vec<&'t Field<f64, D, Mem>>>; 4]
+where
+    R: Regime<f64, D> + Copy,
+    M: Metric<f64, D> + Copy + Send + Sync,
+    E: symbi_hydro::eos::EosFor<f64, <R as Regime<f64, D>>::Energy> + Copy + Send + Sync,
+    S: ExecutionSpace,
+    Mem: MemorySpace + Sync,
+    K: KernelSet<D, DOF, Mem, f64>,
+{
+    let parent = level - 1;
+    let n = held.level_tiles(parent);
+    let mut lists: [Vec<Vec<&Field<f64, D, Mem>>>; 4] = std::array::from_fn(|_| (0..n).map(|_| Vec::new()).collect());
+    for (k, h) in tiles.iter().enumerate() {
+        let Some(id) = held.level_ids(parent)[k] else { continue };
+        let t = id.0 as usize;
+        if let Some(entry) = h.prim_entry_at(parent) {
+            lists[0][t] = PrimStencil::components(entry);
+        }
+        lists[1][t] = PrimStencil::components(&h.levels[parent].state.fields.prim);
+        if let Some(stencil) = h.prim_stencil_at(level) {
+            lists[2][t] = PrimStencil::components(&stencil.old);
+            lists[3][t] = PrimStencil::components(&stencil.new);
+        }
+    }
+    lists
+}
+
+/// the register slabs of level `parent`'s flux registers (its interface with the finer level), per
+/// tile of level `parent >= 1`
+fn level_flux_lists<'t, R, const D: usize, const DOF: usize, M, E, S, Mem, K>(
+    tiles: &'t [Hierarchy<R, D, DOF, M, E, S, Mem, K>],
+    held: &Held<'_>,
+    parent: usize,
+) -> Vec<Vec<&'t Field<f64, D, Mem>>>
+where
+    R: Regime<f64, D> + Copy,
+    M: Metric<f64, D> + Copy + Send + Sync,
+    E: symbi_hydro::eos::EosFor<f64, <R as Regime<f64, D>>::Energy> + Copy + Send + Sync,
+    S: ExecutionSpace,
+    Mem: MemorySpace + Sync,
+    K: KernelSet<D, DOF, Mem, f64>,
+{
+    let mut lists: Vec<Vec<&Field<f64, D, Mem>>> = (0..held.level_tiles(parent)).map(|_| Vec::new()).collect();
+    for (k, h) in tiles.iter().enumerate() {
+        if let (Some(id), true) = (held.level_ids(parent)[k], h.has_flux_register(parent)) {
+            lists[id.0 as usize] = h.flux_registers[parent].plan_fields(&h.levels[parent].state.fields.cons.den);
+        }
+    }
+    lists
+}
+
+/// after a stage's units crossed the cuts of level `parent >= 1`: every contributing face of the
+/// level's registers cleared for the next stage and every landed unit folded into its receiving
+/// face, in the order the register's owner accumulates
+fn fold_level_contributions<R, const D: usize, const DOF: usize, M, E, S, Mem, K>(
+    tiles: &[Hierarchy<R, D, DOF, M, E, S, Mem, K>],
+    held: &Held<'_>,
+    parent: usize,
+) where
+    R: Regime<f64, D> + Copy,
+    M: Metric<f64, D> + Copy + Send + Sync,
+    E: symbi_hydro::eos::EosFor<f64, <R as Regime<f64, D>>::Energy> + Copy + Send + Sync,
+    S: ExecutionSpace,
+    Mem: MemorySpace + Sync,
+    K: KernelSet<D, DOF, Mem, f64>,
+{
+    for (k, h) in tiles.iter().enumerate() {
+        if let (Some(id), true) = (held.level_ids(parent)[k], h.has_flux_register(parent)) {
+            with_device(held.level_devices(parent)[id.0 as usize], || {
+                h.flux_registers[parent].zero_contributions();
+                h.flux_registers[parent].fold_inboxes();
+            });
+        }
+    }
+}
+
+/// the tiles holding level `level >= 1` and none finer beside a finer patch face on a cut of the
+/// level apply the units they received and recover the level, once, before the level's restriction
+/// and bands, as the single hierarchy refluxes and recovers every uncovered cell before its bands
+fn reflux_received_nested<R, const D: usize, const DOF: usize, M, E, S, Mem, K>(
+    tiles: &[Hierarchy<R, D, DOF, M, E, S, Mem, K>],
+    held: &Held<'_>,
+    level: usize,
+) where
+    R: Regime<f64, D> + Copy,
+    M: Metric<f64, D> + Copy + Send + Sync,
+    E: symbi_hydro::eos::EosFor<f64, <R as Regime<f64, D>>::Energy> + Copy + Send + Sync,
+    S: ExecutionSpace,
+    Mem: MemorySpace + Sync,
+    K: KernelSet<D, DOF, Mem, f64>,
+{
+    for (k, h) in tiles.iter().enumerate() {
+        if let (Some(id), true) = (held.level_ids(level)[k], h.levels.len() == level + 1 && h.has_flux_register(level)) {
+            with_device(held.level_devices(level)[id.0 as usize], || h.reflux_received_at(level));
+        }
+    }
+}
+
 /// the tiles this worker holds: parallel over the held root tiles
 pub struct Held<'a> {
     pub root_ids: &'a [TileId],
@@ -265,6 +379,9 @@ pub struct RefinedConfig {
     /// a fault in this worker's flux contributions at (step, substep, stage) on the first
     /// attempt, for the exactly-once gates
     pub contribution_fault: Option<(u64, u8, usize, StagingFault)>,
+    /// a fault in this worker's flux contributions of nested level `level` at (step, level, path,
+    /// stage) on the first attempt, the path numbering the level's substeps across the root step
+    pub nested_contribution_fault: Option<(u64, u8, u32, usize, StagingFault)>,
     /// move one copy of a fine shared face on a fine cut by one unit in the last place after
     /// this many accepted steps (after the initialization at zero, before the prime audit), on
     /// the first held tile whose fine level has a cut on its low side of axis 0: the next audit
@@ -364,16 +481,54 @@ where
     for (i, nested) in plans.nested.iter().enumerate() {
         let level = (i + 2) as u8;
         assert_eq!((nested.state.role(), nested.seed.role()), (PlanRole::Nested { level }, PlanRole::NestedSeed { level }));
+        if let Some(flux) = nested.flux.as_ref() {
+            assert_eq!(flux.role(), PlanRole::NestedFluxContribution { level });
+        }
+        if let Some((old, new)) = nested.prim_stencil.as_ref() {
+            assert_eq!((old.role(), new.role()), (PlanRole::NestedPrimStencil { level }, PlanRole::NestedPrimStencil { level }));
+        }
     }
     assert_eq!(held.nested.len(), plans.nested.len(), "one held level per nested plan");
     // the levels of the session: the root, the fine level, and every nested one
     let depth = 2 + plans.nested.len();
-    // the launched workers carry register units across the root's cuts alone: a nested patch face on
-    // a cut of its parent level contributes units no plan moves
-    if tiles.iter().any(|h| h.flux_registers.iter().skip(1).any(|r| r.has_contributing() || r.has_receiving())) {
+    // a nested patch face on a cut of its parent level carries its flux-register units on the level's
+    // contribution plan; its edge-field units ride no launched plan
+    let unplanned = tiles.iter().any(|h| {
+        h.flux_registers.iter().enumerate().skip(1).any(|(parent, r)| {
+            (r.has_contributing() || r.has_receiving()) && plans.nested.get(parent - 1).is_none_or(|n| n.flux.is_none())
+        }) || h.emf_registers.iter().skip(1).flatten().any(|r| r.has_contributing() || r.has_receiving())
+    });
+    if unplanned {
         return Err(fail(
             fabric,
             WorkerError::Refused("a nested patch face on a cut of its parent level carries register units no launched plan moves".into()),
+        ));
+    }
+    // a nested level reading a parent prim stencil gathers it on its level's plan; the primed point
+    // gathers every stencil in one phase, so the session carries them on one level alone: a finer
+    // stencil reads its parent's coarse-fine ghosts, which a coarser stencil re-prolongs after it
+    let unplanned_stencil = tiles
+        .iter()
+        .any(|h| (2..h.levels.len()).any(|level| h.prim_stencil_at(level).is_some() && plans.nested[level - 2].prim_stencil.is_none()));
+    if unplanned_stencil {
+        return Err(fail(
+            fabric,
+            WorkerError::Refused(
+                "a nested tile reads a parent prim stencil the session carries no plan for: its patch face on a cut of \
+                 its parent level prolongs past that level's halo"
+                    .into(),
+            ),
+        ));
+    }
+    let stencil_levels = usize::from(plans.prim_stencil.is_some()) + plans.nested.iter().filter(|n| n.prim_stencil.is_some()).count();
+    if stencil_levels > 1 {
+        return Err(fail(
+            fabric,
+            WorkerError::Refused(format!(
+                "parent prim stencils on {stencil_levels} levels of one launched session: the primed point gathers \
+                 them in one phase, before a finer stencil's parent level holds the coarse-fine ghosts a coarser \
+                 stencil prolongs; keep the patch faces of all but one level off the cuts"
+            )),
         ));
     }
     // a gas run refluxes the tiles beside a neighbor's patch before the root's bands; a
@@ -851,10 +1006,22 @@ where
             } else {
                 (Vec::new(), Vec::new(), Vec::new(), Vec::new())
             };
+            // and the level-2 parent prim stencils: level 1's cells at the substep's start and after
+            // its stages
+            let nested_prim = plans.nested.first().and_then(|n| n.prim_stencil.as_ref()).filter(|_| $stage + 1 == nstages);
+            let [prim_entry, prim_now, prim_old, prim_new] = if nested_prim.is_some() {
+                nested_prim_stencil_lists(tiles, held, 2)
+            } else {
+                std::array::from_fn(|_| Vec::new())
+            };
             let mut parts = vec![PlanPart { plan: &plans.fine, fields: &fields, devices: held.fine_devices, fault: None, dst_fields: None }];
             if let Some((old, new)) = nested_stencil {
                 parts.push(PlanPart { plan: old, fields: &old_src, devices: held.fine_devices, fault: None, dst_fields: Some(&old_dst) });
                 parts.push(PlanPart { plan: new, fields: &new_src, devices: held.fine_devices, fault: None, dst_fields: Some(&new_dst) });
+            }
+            if let Some((old, new)) = nested_prim {
+                parts.push(PlanPart { plan: old, fields: &prim_entry, devices: held.fine_devices, fault: None, dst_fields: Some(&prim_old) });
+                parts.push(PlanPart { plan: new, fields: &prim_now, devices: held.fine_devices, fault: None, dst_fields: Some(&prim_new) });
             }
             if let Some(flux) = plans.flux.as_ref() {
                 let fault = cfg.contribution_fault.and_then(|(at_step, at_sub, at_stage, fault)| {
@@ -871,6 +1038,11 @@ where
             if nested_stencil.is_some() {
                 for h in tiles.iter() {
                     h.mark_face_stencil_filled_of(2);
+                }
+            }
+            if nested_prim.is_some() {
+                for h in tiles.iter() {
+                    h.mark_prim_stencil_filled_of(2);
                 }
             }
             if plans.flux.is_some() {
@@ -956,6 +1128,11 @@ where
             for (i, nested) in plans.nested.iter().enumerate() {
                 if let Some((old, new)) = nested.stencil.as_ref() {
                     let (_, _, old_dst, new_dst) = nested_stencil_lists!(i + 2);
+                    checks.push(old.check_destinations(&old_dst));
+                    checks.push(new.check_destinations(&new_dst));
+                }
+                if let Some((old, new)) = nested.prim_stencil.as_ref() {
+                    let [_, _, old_dst, new_dst] = nested_prim_stencil_lists(tiles, held, i + 2);
                     checks.push(old.check_destinations(&old_dst));
                     checks.push(new.check_destinations(&new_dst));
                 }
@@ -1079,6 +1256,17 @@ where
                 parts.push(PlanPart { plan: old, fields: &now, devices: held.root_devices, fault: None, dst_fields: Some(&stencil_old) });
                 parts.push(PlanPart { plan: new, fields: &now, devices: held.root_devices, fault: None, dst_fields: Some(&stencil_new) });
             }
+            // and the primed parent level into a nested level's prim stencil
+            let nested_prim: Vec<[Vec<Vec<&Field<f64, D, Mem>>>; 4]> =
+                (0..plans.nested.len()).map(|i| if plans.nested[i].prim_stencil.is_some() { nested_prim_stencil_lists(tiles, held, i + 2) } else { std::array::from_fn(|_| Vec::new()) }).collect();
+            for (i, nested) in plans.nested.iter().enumerate() {
+                if let Some((old, new)) = nested.prim_stencil.as_ref() {
+                    let [_, now, old_dst, new_dst] = &nested_prim[i];
+                    let devices = held.level_devices(i + 1);
+                    parts.push(PlanPart { plan: old, fields: now, devices, fault: None, dst_fields: Some(old_dst) });
+                    parts.push(PlanPart { plan: new, fields: now, devices, fault: None, dst_fields: Some(new_dst) });
+                }
+            }
             exchange_point_plans(&parts, transport, fabric, ExchangePoint::Primed, 0, 0, deadline, &mut timing.exchange)
                 .map_err(|e| fail(fabric, e.into()))?;
             for (k, h) in tiles.iter().enumerate() {
@@ -1090,9 +1278,9 @@ where
             // primed roots, as the single hierarchy's prime does; a resumed run keeps the loaded
             // coarse-fine ghosts. the stencil is invalid again until the first attempt gathers it
             for (k, h) in tiles.iter_mut().enumerate() {
-                if h.prim_stencil().is_some() {
-                    h.mark_prim_stencil_filled();
-                    with_device(root_dev(k), || h.prolong_from_prim_stencil(!cfg.restart));
+                if let Some(level) = (1..h.levels.len()).find(|&level| h.prim_stencil_at(level).is_some()) {
+                    h.mark_prim_stencil_filled_of(level);
+                    with_device(root_dev(k), || h.prolong_from_prim_stencil_at(level, !cfg.restart));
                 }
             }
         }
@@ -1446,11 +1634,12 @@ where
                                     )
                                     .map_err(|e| fail(fabric, e.into()))?;
                                 }
-                                let nested = NestedStep { held, plans, transport, deadline, nstages, depth, audit_every: base.audit_every_point, step: iter, attempt, atlas: atlas.as_ref(), discrete: discrete_atlas.is_some() };
+                                let nested = NestedStep { held, plans, transport, deadline, nstages, depth, audit_every: base.audit_every_point, step: iter, attempt, atlas: atlas.as_ref(), discrete: discrete_atlas.is_some(), nested_contribution_fault: cfg.nested_contribution_fault };
                                 if nested_subcycle(tiles, &nested, fabric, &mut timing, &mut report, 2, sub as u32, fine_dt)? {
                                     rejected = true;
                                     break 'subcycle;
                                 }
+                                reflux_received_nested(tiles, held, 1);
                                 restrict_with_bands(tiles, held, plans, 1, sub as u32, alpha, iter, attempt, transport, fabric, deadline, &mut timing.exchange)
                                     .map_err(|e| fail(fabric, e.into()))?;
                                 {
@@ -1757,15 +1946,17 @@ struct NestedStep<'a, 'p, const D: usize, T> {
     atlas: Option<&'a LevelAtlas<D>>,
     /// the run carries a discrete population, whose stages exchange and spawn here
     discrete: bool,
+    /// a fault in this worker's nested flux contributions, for the exactly-once gates
+    nested_contribution_fault: Option<(u64, u8, u32, usize, StagingFault)>,
 }
 
 /// the subcycle of nested level `level >= 2` across its tiles within one step `dt` of its parent's
 /// substep `parent_path`: each of the ratio substeps prolongs the coarse-fine ghosts at the
 /// substep's time fraction, runs the stages with the troubled marks crossing the cuts, the tail
 /// ahead of the level below, that level's subcycle with its restriction into this one and this
-/// level's exchange after it, and the tail after it, then the post-tail exchange. the patch faces
-/// of a nested level lie off every cut, so its register corrections stay on the tile holding both
-/// sides. returns whether some worker rejected the step
+/// level's exchange after it, and the tail after it, then the post-tail exchange. the units of the
+/// level's patch faces on its parent's cuts cross at each stage point to the parent tiles holding
+/// the cells they correct. returns whether some worker rejected the step
 #[allow(clippy::too_many_arguments)]
 fn nested_subcycle<R, const D: usize, const DOF: usize, M, E, S, Mem, K, T, L>(
     tiles: &mut [Hierarchy<R, D, DOF, M, E, S, Mem, K>],
@@ -1875,10 +2066,16 @@ where
             if let Some(atlas) = cx.atlas.filter(|_| cx.discrete) {
                 exchange_level_tracers(tiles, cx.held, atlas, level, jj, fabric, deadline).map_err(|e| fail(fabric, e.into()))?;
             }
-            let child_stencil = cx.plans.nested.get(level - 1).and_then(|n| n.stencil.as_ref()).filter(|_| jj + 1 == cx.nstages);
-            if let Some((old, new)) = child_stencil {
-                // the last stage also gathers the next level's parent face stencils from this
-                // level's faces at the substep's start and after its stages
+            let last = jj + 1 == cx.nstages;
+            let child_stencil = cx.plans.nested.get(level - 1).and_then(|n| n.stencil.as_ref()).filter(|_| last);
+            let child_prim = cx.plans.nested.get(level - 1).and_then(|n| n.prim_stencil.as_ref()).filter(|_| last);
+            let own_flux = cx.plans.nested[level - 2].flux.as_ref();
+            if child_stencil.is_none() && child_prim.is_none() && own_flux.is_none() {
+                exchange(tiles, fabric, timing, at(FinePoint::Stage(jj as u8)))?;
+            } else {
+                // the stage point also carries, on the last stage, the next level's parent face and
+                // prim stencils from this level's state at the substep's start and after its stages,
+                // and at every stage the units of this level's patch faces on its parent's cuts
                 let n = plan.plan().n_tiles();
                 let mut state: Vec<Vec<&Field<f64, D, Mem>>> = (0..n).map(|_| Vec::new()).collect();
                 let mut old_src: Vec<Vec<&Field<f64, D, Mem>>> = (0..n).map(|_| Vec::new()).collect();
@@ -1889,33 +2086,57 @@ where
                     let t = ids[r].0 as usize;
                     let h = &tiles[k];
                     state[t] = plan_fields(&h.levels[level].state);
-                    if let Some(entry) = h.level_face_entry(level) {
-                        old_src[t] = entry.iter().collect();
-                    }
-                    if let Some(mhd) = h.levels[level].state.fields.mhd.as_ref() {
-                        new_src[t] = mhd.bface.b.iter().collect();
-                    }
-                    if let Some(stencil) = h.face_stencil_of(level + 1) {
-                        old_dst[t] = stencil.old.iter().collect();
-                        new_dst[t] = stencil.new.iter().collect();
+                    if child_stencil.is_some() {
+                        if let Some(entry) = h.level_face_entry(level) {
+                            old_src[t] = entry.iter().collect();
+                        }
+                        if let Some(mhd) = h.levels[level].state.fields.mhd.as_ref() {
+                            new_src[t] = mhd.bface.b.iter().collect();
+                        }
+                        if let Some(stencil) = h.face_stencil_of(level + 1) {
+                            old_dst[t] = stencil.old.iter().collect();
+                            new_dst[t] = stencil.new.iter().collect();
+                        }
                     }
                 }
-                let parts = [
-                    PlanPart { plan, fields: &state, devices, fault: None, dst_fields: None },
-                    PlanPart { plan: old, fields: &old_src, devices, fault: None, dst_fields: Some(&old_dst) },
-                    PlanPart { plan: new, fields: &new_src, devices, fault: None, dst_fields: Some(&new_dst) },
-                ];
+                let [prim_entry, prim_now, prim_old, prim_new] = if child_prim.is_some() {
+                    nested_prim_stencil_lists(tiles, cx.held, level + 1)
+                } else {
+                    std::array::from_fn(|_| Vec::new())
+                };
+                let flux_fields = if own_flux.is_some() { level_flux_lists(tiles, cx.held, level - 1) } else { Vec::new() };
+                let mut parts = vec![PlanPart { plan, fields: &state, devices, fault: None, dst_fields: None }];
+                if let Some((old, new)) = child_stencil {
+                    parts.push(PlanPart { plan: old, fields: &old_src, devices, fault: None, dst_fields: Some(&old_dst) });
+                    parts.push(PlanPart { plan: new, fields: &new_src, devices, fault: None, dst_fields: Some(&new_dst) });
+                }
+                if let Some((old, new)) = child_prim {
+                    parts.push(PlanPart { plan: old, fields: &prim_entry, devices, fault: None, dst_fields: Some(&prim_old) });
+                    parts.push(PlanPart { plan: new, fields: &prim_now, devices, fault: None, dst_fields: Some(&prim_new) });
+                }
+                if let Some(flux) = own_flux {
+                    let fault = cx.nested_contribution_fault.and_then(|(at_step, at_level, at_path, at_stage, fault)| {
+                        (attempt == 0 && (at_step, at_level as usize, at_path, at_stage) == (step, level, path, jj)).then_some(fault)
+                    });
+                    parts.push(PlanPart { plan: flux, fields: &flux_fields, devices: cx.held.level_devices(level - 1), fault, dst_fields: None });
+                }
                 exchange_point_plans(&parts, cx.transport, fabric, at(FinePoint::Stage(jj as u8)), step, attempt, deadline, &mut timing.exchange)
                     .map_err(|e| fail(fabric, e.into()))?;
                 for (r, &k) in mine.iter().enumerate() {
                     let h = &tiles[k];
                     with_device(dev(r), || {
                         h.fill_physical_ghosts(level);
-                        h.mark_face_stencil_filled_of(level + 1);
+                        if child_stencil.is_some() {
+                            h.mark_face_stencil_filled_of(level + 1);
+                        }
+                        if child_prim.is_some() {
+                            h.mark_prim_stencil_filled_of(level + 1);
+                        }
                     });
                 }
-            } else {
-                exchange(tiles, fabric, timing, at(FinePoint::Stage(jj as u8)))?;
+                if own_flux.is_some() {
+                    fold_level_contributions(tiles, cx.held, level - 1);
+                }
             }
             audit(tiles, fabric, report, at(FinePoint::Audit(jj as u8)))?;
         }
@@ -1935,12 +2156,13 @@ where
             if nested_subcycle(tiles, cx, fabric, timing, report, level + 1, path, level_dt)? {
                 return Ok(true);
             }
-            // a tile holding this level and none finer recovers it as the restriction recovers the
-            // single hierarchy's
+            reflux_received_nested(tiles, cx.held, level);
             restrict_with_bands(tiles, cx.held, cx.plans, level, path, alpha, step, attempt, cx.transport, fabric, deadline, &mut timing.exchange)
                 .map_err(|e| fail(fabric, e.into()))?;
+            // every other tile holding this level and none finer recovers it as the restriction
+            // recovers the single hierarchy's
             for (r, &k) in mine.iter().enumerate() {
-                if tiles[k].levels.len() <= level + 1 {
+                if tiles[k].levels.len() <= level + 1 && !tiles[k].has_flux_register(level) {
                     with_device(dev(r), || tiles[k].recover_level(level));
                 }
             }
@@ -2984,12 +3206,38 @@ pub fn nested_partitions<const D: usize>(
     Ok(out)
 }
 
+/// root tile `root_tile`'s tile on refined level `level` (>= 1) and that tile's index frame: its
+/// id in `fine[level - 1]`'s partition and the level index (whole-grid level index less the root
+/// tile's origin times `2^level`) of its first interior cell. `None` for a root tile holding no
+/// part of the level. `fine` is `nested_partitions(root, patches)`
+pub fn nested_tile_of<const D: usize>(
+    root: &symbi_sim::decomp::Partition<D>,
+    fine: &[symbi_sim::decomp::FinePartition<D>],
+    patches: &[[(usize, usize); D]],
+    root_tile: TileId,
+    level: usize,
+) -> Option<(TileId, [isize; D])> {
+    use symbi_sim::decomp::{flatten, unflatten};
+    let root_tc = unflatten(root_tile.0 as usize, root.counts());
+    let mut tc = root_tc;
+    for f in &fine[..level] {
+        tc = f.fine_tile_of(tc)?;
+    }
+    let part = &fine[level - 1].partition;
+    // the level-`level` patch's whole-grid origin: each level doubles its parent's index and adds
+    // its patch's offset in the parent's cells
+    let origin: [isize; D] = std::array::from_fn(|a| patches[..level].iter().fold(0isize, |o, p| 2 * (o + p[a].0 as isize)));
+    let ext = part.tile_extents(tc);
+    let root_ext = root.tile_extents(root_tc);
+    let frame = std::array::from_fn(|a| origin[a] + ext[a].0 as isize - ((root_ext[a].0 as isize) << level));
+    Some((TileId(flatten(tc, part.counts()) as u32), frame))
+}
+
 /// the receiving register of root tile `root_tile` on refined level `level` (>= 1), which it
 /// holds while holding none of level `level + 1`: the level-`level + 1` patch box in the tile's
-/// own level-`level` index frame (whole-grid level-`level` index less the tile's root origin
-/// times `2^level`) and the patch faces on cuts of level `level` it sits beside. `None` for a
-/// tile holding no part of level `level` or beside no such face. `fine` is
-/// `nested_partitions(root, patches)`
+/// own level-`level` index frame (`nested_tile_of`) and the patch faces on cuts of level `level`
+/// it sits beside. `None` for a tile holding no part of level `level` or beside no such face.
+/// `fine` is `nested_partitions(root, patches)`
 pub fn nested_receiving_faces_of_tile<const D: usize>(
     root: &symbi_sim::decomp::Partition<D>,
     fine: &[symbi_sim::decomp::FinePartition<D>],
@@ -2997,27 +3245,14 @@ pub fn nested_receiving_faces_of_tile<const D: usize>(
     root_tile: TileId,
     level: usize,
 ) -> Option<(symbi_algebra::Domain<D>, [[bool; 2]; D])> {
-    use symbi_sim::decomp::{flatten, unflatten};
     assert!(level >= 1 && level < patches.len(), "a nested receiving register lies on a refined level with a finer patch");
-    let root_tc = unflatten(root_tile.0 as usize, root.counts());
-    let mut tc = root_tc;
-    for f in &fine[..level] {
-        tc = f.fine_tile_of(tc)?;
-    }
+    let (tile, frame) = nested_tile_of(root, fine, patches, root_tile, level)?;
     let part = &fine[level - 1].partition;
-    let (patch_local, faces) = receiving_faces_of_tile(part, patches[level], TileId(flatten(tc, part.counts()) as u32))?;
+    let (patch_local, faces) = receiving_faces_of_tile(part, patches[level], tile)?;
     if !faces.iter().flatten().any(|&f| f) {
         return None;
     }
-    // the level-`level` patch's whole-grid origin: each level doubles its parent's index and adds
-    // its patch's offset in the parent's cells
-    let origin: [isize; D] = std::array::from_fn(|a| {
-        patches[..level].iter().fold(0isize, |o, p| 2 * (o + p[a].0 as isize))
-    });
-    let ext = part.tile_extents(tc);
-    let root_ext = root.tile_extents(root_tc);
-    let frame: [isize; D] =
-        std::array::from_fn(|a| origin[a] + ext[a].0 as isize - ((root_ext[a].0 as isize) << level));
+    // from the tile's partition-local cells to its own level frame
     let shifted = symbi_algebra::Domain::new(std::array::from_fn(|a| symbi_algebra::Space {
         name: patch_local.spaces[a].name,
         lo: patch_local.spaces[a].lo + frame[a],

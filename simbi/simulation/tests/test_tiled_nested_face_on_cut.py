@@ -16,12 +16,17 @@
 #   once the first substep's units crossed the cut: the run cut on the face
 #   equals the run cut clear of it, and both differ from the run rejecting
 #   nothing.
-# every arm runs as a fresh process, the tiled ones as host tiles on a cpu
-# build.
+# a launch publishes the same state: the faces on two and four workers, a
+# two-worker checkpoint resumed on four, and the rejected stage replayed alike
+# on and clear of the face with the rejection counted once on every worker. a
+# nested unit listed twice ends the session before any output, and a launch
+# carrying parent prim stencils on two levels is refused by name. every arm
+# runs as a fresh process, the tiled ones as host tiles on a cpu build.
 #
 # run: pytest -m simulation simbi/simulation/tests/test_tiled_nested_face_on_cut.py
 # =============================================================================
 import os
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -31,6 +36,7 @@ import numpy as np
 import pytest
 
 from simbi.simulation.tests.checkpoint_compare import assert_same_checkpoint
+from simbi.simulation.tests.test_launch import EXIT, _layout, bounded_processes  # noqa: F401  the autouse process guard
 
 pytestmark = pytest.mark.simulation
 
@@ -48,7 +54,7 @@ FACES = {
 NESTED_REACH = 4
 
 
-def _script(path: Path, level_2: list[float]) -> str:
+def _script(path: Path, level_2: list[float], level_1: list[float] = LEVEL_1) -> str:
     path.write_text(
         "from typing import Annotated\n"
         "from simbi import ProblemParam\n"
@@ -57,7 +63,7 @@ def _script(path: Path, level_2: list[float]) -> str:
         "    refinement_max_levels: Annotated[int, ProblemParam(3, description='coarse + 2 fine')]\n"
         "    refinement_regions: Annotated[\n"
         "        list[list[float]],\n"
-        f"        ProblemParam([{LEVEL_1!r}, {level_2!r}], description='nested patches'),\n"
+        f"        ProblemParam([{level_1!r}, {level_2!r}], description='nested patches'),\n"
         "    ]\n"
         "    refinement_ratios: Annotated[list[int], ProblemParam([2, 2], description='ratio per jump')]\n"
     )
@@ -141,3 +147,102 @@ def test_a_rejected_level_2_stage_after_booked_units_replays_alike(tmp_path: Pat
         assert not np.array_equal(a["level_2/conserved/den"][()], b["level_2/conserved/den"][()]), (
             "the rejection left level 2 unchanged; the replay is never exercised"
         )
+
+
+REJECTIONS = re.compile(r"SIMBI launch: worker=\d+/\d+ steps=\d+ rejections=(\d+)")
+
+
+def _launch(script: str, out: Path, layout: Path, steps: int, checkpoint: Path | None = None,
+            inject: str | None = None) -> subprocess.CompletedProcess:
+    cmd = [sys.executable, "-m", "simbi.cli", "launch", script, "--layout", str(layout), "--max-steps", str(steps),
+           "--resolution", "32,32,1", "--data-directory", str(out), "--checkpoint-interval", "1e9"]
+    if checkpoint is not None:
+        cmd += ["--checkpoint", str(checkpoint)]
+    env = dict(os.environ, PYTHONPATH=os.pathsep.join([str(Path(script).parent), os.getcwd(), os.environ.get("PYTHONPATH", "")]))
+    env.pop("SIMBI_FABRIC_INJECT", None)
+    env.pop("SIMBI_LAUNCH_EXPERIMENTAL", None)
+    if inject is not None:
+        env["SIMBI_FABRIC_INJECT"] = inject
+    return subprocess.run(cmd, capture_output=True, text=True, timeout=600, env=env)
+
+
+def _launched(done: subprocess.CompletedProcess, out: Path, workers: int) -> Path:
+    assert done.returncode == 0, f"launch failed:\nstdout:\n{done.stdout[-3000:]}\nstderr:\n{done.stderr[-3000:]}"
+    exits = {int(w): int(c) for w, c in EXIT.findall(done.stdout)}
+    assert sorted(exits) == list(range(workers)) and all(c == 0 for c in exits.values()), f"worker exit codes {exits}"
+    (final,) = sorted(out.glob("*final*.h5"))
+    return final
+
+
+@pytest.mark.parametrize(("face", "cuts"), [("low", [[16], []]), ("high", [[16], []]), ("corner", [[16], [16]])])
+def test_a_level_2_face_on_a_level_1_cut_matches_the_single_grid_on_launch(tmp_path: Path, face: str, cuts: list[list[int]]) -> None:
+    """the launched workers carry the face's units on level 1's partition and gather its level-1
+    stencil there, the worker across the cut holding level 1 alone"""
+    script = _script(tmp_path / f"{face}.py", FACES[face])
+    one = _capped(script, tmp_path / "one", 1, STEPS)
+    _assert_premises(one)
+    workers = int(np.prod([len(c) + 1 for c in cuts]))
+    layout = _layout(tmp_path / "layout.toml", workers=workers, cuts=cuts)
+    launched = _launched(_launch(script, tmp_path / "launched", layout, STEPS), tmp_path / "launched", workers)
+    assert_same_checkpoint(launched, one, f"a level-2 {face} face on a level-1 cut on {workers} workers", expect=["level_1", "level_2"])
+
+
+def test_a_level_2_face_on_a_level_1_cut_resumes_on_more_workers(tmp_path: Path) -> None:
+    script = _script(tmp_path / "low.py", FACES["low"])
+    one = _capped(script, tmp_path / "one", 1, STEPS)
+    _assert_premises(one)
+    two = _layout(tmp_path / "two.toml", workers=2, cuts=[[16], []])
+    half = _launched(_launch(script, tmp_path / "half", two, STEPS // 2), tmp_path / "half", 2)
+    four = _layout(tmp_path / "four.toml", workers=4, cuts=[[16], [16]])
+    resumed = _launched(_launch(script, tmp_path / "resumed", four, STEPS, checkpoint=half), tmp_path / "resumed", 4)
+    assert_same_checkpoint(resumed, one, "a level-2 face on a level-1 cut resumed on four workers", expect=["level_1", "level_2"])
+
+
+def test_a_rejected_level_2_stage_after_booked_units_replays_alike_on_launch(tmp_path: Path) -> None:
+    """worker 1, holding level 2, rejects a stage of the second level-2 substep of root step 2 after
+    the first substep's units crossed the level-1 cut: the launch cut on the face equals the launch
+    cut clear of it, every worker counts the rejection once, and the state differs from the clean
+    launch"""
+    script = _script(tmp_path / "low.py", FACES["low"])
+    reject = "reject_level:1:2:2:1:1"
+    finals = {}
+    for cut in (16, 12):
+        layout = _layout(tmp_path / f"cut{cut}.toml", workers=2, cuts=[[cut], []])
+        out = tmp_path / f"rejecting_{cut}"
+        done = _launch(script, out, layout, STEPS, inject=reject)
+        finals[cut] = _launched(done, out, 2)
+        counts = {int(r) for r in REJECTIONS.findall(done.stderr)}
+        assert counts == {1}, f"cut at {cut}: the rejection was not counted once on every worker: {counts}"
+    assert_same_checkpoint(finals[16], finals[12], "a rejected level-2 stage launched cut on and clear of the face", expect=["level_1", "level_2"])
+    layout = _layout(tmp_path / "clean.toml", workers=2, cuts=[[16], []])
+    clean = _launched(_launch(script, tmp_path / "clean", layout, STEPS), tmp_path / "clean", 2)
+    with h5py.File(finals[16], "r") as a, h5py.File(clean, "r") as b:
+        assert not np.array_equal(a["level_2/conserved/den"][()], b["level_2/conserved/den"][()]), (
+            "the rejection left level 2 unchanged; the replay is never exercised"
+        )
+
+
+def test_a_duplicated_nested_unit_ends_the_launch(tmp_path: Path) -> None:
+    """worker 1 lists its sends of the level-2 face's units twice at the first stage of root step 2:
+    the receiving worker's grant counts the plan's sends, and the session ends before any final
+    output"""
+    script = _script(tmp_path / "low.py", FACES["low"])
+    layout = _layout(tmp_path / "two.toml", workers=2, cuts=[[16], []])
+    out = tmp_path / "dup"
+    done = _launch(script, out, layout, STEPS, inject="nested_contribution:1:2:2:0:0:dup")
+    assert done.returncode != 0, "the launch with a duplicated nested unit succeeded"
+    assert not list(out.glob("*final*.h5")), "the launch published a final checkpoint"
+    assert "this phase sends it" in done.stderr + done.stdout, (done.stderr + done.stdout)[-3000:]
+
+
+def test_parent_prim_stencils_on_two_levels_are_refused_on_launch(tmp_path: Path) -> None:
+    """level 1's low x face lies on the root cut at x = 0 and level 2's low y face on level 1's cut
+    at y = 0, each past its parent's halo: the launch gathers every stencil at the primed point in
+    one phase, so it refuses the second level by name before any output"""
+    script = _script(tmp_path / "two_levels.py", [0.0625, 0.1875, 0.0, 0.125], [0.0, 0.25, -0.25, 0.25])
+    layout = _layout(tmp_path / "four.toml", workers=4, cuts=[[16], [16]])
+    out = tmp_path / "out"
+    done = _launch(script, out, layout, STEPS)
+    assert done.returncode != 0, "the launch with stencils on two levels ran"
+    assert not list(out.glob("*.h5")), "output was written before the refusal"
+    assert "parent prim stencils on 2 levels of one launched session" in " ".join((done.stderr + done.stdout).split()), done.stderr[-3000:]
