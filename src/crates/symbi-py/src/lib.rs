@@ -6501,6 +6501,23 @@ where
     for tile in &tiles {
         tile.prim_stencil_admission()?;
     }
+    // a refined stage rejection injected as on a launch (`SIMBI_FABRIC_INJECT`), the process
+    // acting as worker 0; the other launch faults act on the launched workers alone
+    let fault = LaunchFault::from_env(0)?;
+    if !fault.injection.reject_at.is_empty()
+        || fault.injection.invalid_cfl_at.is_some()
+        || fault.exit_after.is_some()
+        || fault.perturb_face_after.is_some()
+        || fault.injection.cap_dt_at.is_some()
+        || fault.injection.trouble_at.is_some()
+    {
+        return Err("SIMBI_FABRIC_INJECT: an in-process tiled run takes reject_level alone".into());
+    }
+    if let Some((step, level, substep, stage)) = fault.level_rejection {
+        for h in tiles.iter_mut().filter(|h| h.levels.len() > level) {
+            h.reject_level_once_at(step, level, substep, stage);
+        }
+    }
 
     let ntiles = tiles.len();
     let devices: Vec<i32> = (0..ntiles as i32).collect();
@@ -6888,8 +6905,11 @@ macro_rules! build_and_run_hydro_decomposed_refined {
         let ntiles: usize = counts.iter().product();
         let prolong = prolong_order_for(&cfg.reconstruction_name);
         let regions = refinement_regions_nd::<$d>(&cfg.refinement_regions)?;
-        // the level-1 patch in root cells, whose faces on cuts carry register units across them
+        // the level-1 patch in root cells, whose faces on cuts carry register units across them,
+        // and every level's patch in its parent's cells with the tile grid of each refined level
         let root_patch = launch_patch::<$d>(cfg)?;
+        let patches = nested_patches::<$d>(cfg)?;
+        let level_partitions = symbi::sim::refinement::launched::nested_partitions(&partition, &patches)?;
         // immersed bodies give each tile's own deepest level the full bodies; the body couples to
         // the run's finest level alone, so a tile holding fewer levels adds no reaction
 
@@ -6962,6 +6982,22 @@ macro_rules! build_and_run_hydro_decomposed_refined {
                     Hierarchy::with_refinement_placed(sim, sub, &clipped, &whole_patch, prolong, make, n, std::array::from_fn(|ax| ring.is_periodic(ax)), symbi::sim::refinement::CutFaces::Donate)
                         .map_err(|e| format!("tile {flat} refinement build: {e:?}"))?
                 };
+                // a tile whose finest level lies beside a finer patch face on a cut of that level
+                // holds the receiving register of the cells the face's units correct
+                let finest = h.levels.len() - 1;
+                if finest >= 1 && finest < patches.len() {
+                    if let Some((patch_local, faces)) = symbi::sim::refinement::launched::nested_receiving_faces_of_tile(
+                        &partition,
+                        &level_partitions,
+                        &patches,
+                        TileId(flat as u32),
+                        finest,
+                    ) {
+                        h = h
+                            .with_receiving_register_at(finest, &patch_local, faces)
+                            .map_err(|e| format!("tile {flat} level-{finest} receiving register: {e:?}"))?;
+                    }
+                }
                 // immersed bodies on every tile hierarchy at their global positions: the finest
                 // level owns the full (accreting) bodies, coarser levels a gravity-only proxy —
                 // finest-owns-bodies per tile. the decomposed driver sums the backward feedback
@@ -7005,13 +7041,27 @@ macro_rules! build_and_run_hydro_decomposed_refined {
                 &seed_transport,
             )
             .map_err(|e| format!("decomposed fine seed: {e:?}"))?;
-            // the in-process tiled driver carries register units across the root's cuts alone: a
-            // nested patch face on a cut of its parent level contributes units no tile receives
-            if tiles.iter().any(|h| h.flux_registers.iter().skip(1).any(|r| r.has_contributing() || r.has_receiving())) {
-                return Err("a nested refinement patch face lies on a decomposition cut of its parent level, and \
-                            the tiled driver carries register units across the root's cuts alone; move the face \
-                            off the cut by at least one cell of its parent level"
-                    .into());
+            // every unit a nested patch face on a cut contributes lands on a tile holding its
+            // receiving face
+            for (i, h) in tiles.iter().enumerate() {
+                for (level, reg) in h.flux_registers.iter().enumerate().skip(1) {
+                    for (idx, _, _) in reg.contributing() {
+                        let (ax, side) = (idx / 2, idx % 2);
+                        let mut tc = unflatten(i, counts);
+                        tc[ax] = if side == 0 { tc[ax].wrapping_sub(1) } else { tc[ax] + 1 };
+                        let received = (tc[ax] < counts[ax])
+                            .then(|| &tiles[symbi::sim::decomp::flatten(tc, counts)])
+                            .and_then(|j| j.flux_registers.get(level))
+                            .is_some_and(|r| r.inboxes().into_iter().any(|(f, _, _)| f == idx));
+                        if !received {
+                            return Err(format!(
+                                "tile {i}'s level-{} patch face {idx} lies on a cut of level {level} and no tile \
+                                 across the cut holds its receiving face",
+                                level + 1
+                            ));
+                        }
+                    }
+                }
             }
             // the declared stationary target on every level of every tile, its imbalance read off
             // the tiled probe per level; a fresh run seeded from it starts there, as the single
@@ -11065,7 +11115,8 @@ struct WorkerLaunch {
 /// the last place after that step so the next audit names it. `trouble:STEP:STAGE:I:J[:K]` names a global cell and no worker: whichever worker
 /// holds the cell raises its troubled flag at that stage, so the same value drives a run on
 /// any partition. `reject_level:WORKER:STEP:LEVEL:SUBSTEP:STAGE` rejects a stage of a refined
-/// level on that worker's tiles holding the level, the substeps counted across the root step.
+/// level on that worker's tiles holding the level, the substeps counted across the root step; an
+/// in-process tiled run takes it as worker 0 and refuses the other faults.
 /// `cap:STEP:BITS` caps the agreed timestep of that step at the f64 of those bits on every
 /// worker, the clean control of a rejection. unset, every worker runs clean.
 #[derive(Default)]
@@ -11164,8 +11215,9 @@ fn validate_tiled_balance(cfg: &Config) -> Result<(), String> {
         };
         // the tiles carry a band's chains across every cut inside it, hop by hop from the seam, and
         // from a root cut on the patch face, where the tile across the cut refluxes and recovers the
-        // uncovered cell the chains start from before the band; a nested patch face on a cut of its
-        // parent level carries no register across that cut
+        // uncovered cell the chains start from before the band; the band at a nested patch face on
+        // a cut of its parent level starts across a refined level's cut, which the gated runs keep
+        // off the face
         if let Some(c) = crossings.iter().find(|c| c.on_face && c.level > 0) {
             let (level, ax, cut, face, band) = (c.level, c.axis, c.cut, c.face, c.band);
             let at = if level == 0 {
@@ -11578,6 +11630,24 @@ fn launch_patch<const D: usize>(cfg: &Config) -> Result<[(usize, usize); D], Str
     let r = &regions[0];
     let cell = |x: f64, ax: usize| ((x - cfg.x_lo[ax]) / cfg.dx[ax]).round();
     Ok(std::array::from_fn(|ax| (cell(r.x_lo[ax], ax) as usize, cell(r.x_hi[ax], ax) as usize)))
+}
+
+/// every refined level's patch in its parent's cells: the level-1 patch in root cells, then each
+/// deeper patch from its parent patch's origin. region `k` refines level `k`, whose cells split the
+/// root cells by `2^k`
+fn nested_patches<const D: usize>(cfg: &Config) -> Result<Vec<[(usize, usize); D]>, String> {
+    let regions = refinement_regions_nd::<D>(&cfg.refinement_regions)?;
+    let cell = |x: f64, ax: usize, level: usize| ((x - cfg.x_lo[ax]) / cfg.dx[ax] * (1usize << level) as f64).round() as usize;
+    Ok(regions
+        .iter()
+        .enumerate()
+        .map(|(k, r)| {
+            std::array::from_fn(|ax| {
+                let origin = if k == 0 { 0 } else { cell(regions[k - 1].x_lo[ax], ax, k) };
+                (cell(r.x_lo[ax], ax, k) - origin, cell(r.x_hi[ax], ax, k) - origin)
+            })
+        })
+        .collect())
 }
 
 /// the root tiling of a refined launch as this worker sees it: the partition, the owners of its

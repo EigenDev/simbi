@@ -35,8 +35,8 @@
 use std::collections::HashMap;
 
 use symbi::regimes::substrate_newton::AdiabaticSubstrateKernelSet;
-use symbi::sim::decomp::{FinePartition, LocalCopy, Partition, flatten, unflatten};
-use symbi::sim::refinement::launched::receiving_faces_of_tile;
+use symbi::sim::decomp::{LocalCopy, Partition, unflatten};
+use symbi::sim::refinement::launched::{nested_partitions, nested_receiving_faces_of_tile, receiving_faces_of_tile};
 use symbi_sim::atlas::TileId;
 use symbi::sim::refinement::{
     CutFaces, Hierarchy, ProlongOrder, RefinementRegion, evolve_hierarchy_decomposed, prime_prim_stencils,
@@ -406,10 +406,10 @@ fn build_single_over(whole: &[RefinementRegion<2>], ng: usize) -> Hier {
 fn build_tiles_contributing(partition: &Partition<2>, whole: &[RefinementRegion<2>], ng: usize, donate: bool) -> symbi_xpu::Result<Vec<Hier>> {
     let counts = partition.counts();
     let (p1, p2) = (region_cells(&whole[0]), region_cells(&whole[1]));
-    let fine = FinePartition::of(partition, p1, 2).expect("level-1 partition");
-    let fine_counts = fine.partition.counts();
     // level 2's patch in level-1 cells from level 1's origin
     let rel: [(usize, usize); 2] = std::array::from_fn(|a| (2 * (p2[a].0 - p1[a].0), 2 * (p2[a].1 - p1[a].0)));
+    let patches = [p1, rel];
+    let fine = nested_partitions(partition, &patches).expect("level partitions");
     let mut tiles = Vec::with_capacity(partition.n_tiles());
     for flat in 0..partition.n_tiles() {
         let tc = unflatten(flat, counts);
@@ -444,19 +444,8 @@ fn build_tiles_contributing(partition: &Partition<2>, whole: &[RefinementRegion<
         };
         // a tile holding level 1 and not level 2, beside level 2's face on a level-1 cut
         if h.levels.len() == 2 {
-            let ftc = fine.fine_tile_of(tc).expect("a tile holding level 1 lies under its patch");
-            let ftile = TileId(flatten(ftc, fine_counts) as u32);
-            if let Some((p, f)) = receiving_faces_of_tile(&fine.partition, rel, ftile) {
-                if f.iter().flatten().any(|&x| x) {
-                    // from the level-1 tile's own origin to this tile's level-1 index frame
-                    let frame: [isize; 2] = std::array::from_fn(|a| (2 * p1[a].0.saturating_sub(ext[a].0)) as isize);
-                    let p = symbi_algebra::Domain::new(std::array::from_fn(|a| symbi_algebra::Space {
-                        name: p.spaces[a].name,
-                        lo: p.spaces[a].lo + frame[a],
-                        hi: p.spaces[a].hi + frame[a],
-                    }));
-                    h = h.with_receiving_register_at(1, &p, f).expect("level-1 receiving register");
-                }
+            if let Some((p, f)) = nested_receiving_faces_of_tile(partition, &fine, &patches, TileId(flat as u32), 1) {
+                h = h.with_receiving_register_at(1, &p, f).expect("level-1 receiving register");
             }
         }
         tiles.push(h);

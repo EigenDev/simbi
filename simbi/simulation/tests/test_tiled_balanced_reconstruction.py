@@ -18,7 +18,8 @@
 # band's chains across each cut. a cut on a patch face matches on host tiles
 # and launch, fresh and after a rejected step, the tile across it refluxing and
 # recovering the band's uncovered cell before the band chains from it. a chart
-# outside that scope (the (r, z) plane) is refused by name before any output.
+# outside that scope (the (r, z) plane) and a cut on a level-2 patch face, whose
+# band starts across a cut of level 1, are refused by name before any output.
 #
 # run: pytest -m simulation simbi/simulation/tests/test_tiled_balanced_reconstruction.py
 # =============================================================================
@@ -495,6 +496,8 @@ def _run_steps(fixture: Path, cls: str, out: Path, gpus: int, extra: str, steps:
     ("cls", "decompose", "reason"),
     [
         ("CylindricalPlaneAtmosphere", None, "wb_reconstruction on the 2-dimensional (r, z) cylindrical grid with several tiles is outside the gated tiled runs"),
+        # root cut x = 9 falls on level-1 cell 18, level 2's low x face: its band starts across a cut of level 1
+        ("NestedBalancedAtmosphere", [[9], []], "crosses the 4-cell balanced restriction band inside the level-2 patch face at level-1 cell 18"),
     ],
 )
 def test_the_balanced_reconstruction_outside_the_gated_scope_is_refused_on_host_tiles(tmp_path: Path, fixture: Path, cls: str, decompose, reason: str) -> None:

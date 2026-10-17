@@ -2968,6 +2968,64 @@ pub fn receiving_faces_of_tile<const D: usize>(
     Some((patch_local, faces))
 }
 
+/// the tile grids of the refined levels: entry `k` partitions level `k + 1`'s patch by the cuts
+/// of the root falling inside it. `patches[0]` is the level-1 patch in root cells, `patches[k]`
+/// the level-`k + 1` patch in level-`k` cells from the level-`k` patch's origin; every level
+/// refines its parent by a ratio of two
+pub fn nested_partitions<const D: usize>(
+    root: &symbi_sim::decomp::Partition<D>,
+    patches: &[[(usize, usize); D]],
+) -> Result<Vec<symbi_sim::decomp::FinePartition<D>>, String> {
+    let mut out: Vec<symbi_sim::decomp::FinePartition<D>> = Vec::with_capacity(patches.len());
+    for patch in patches {
+        let parent = out.last().map_or(root, |f| &f.partition);
+        out.push(symbi_sim::decomp::FinePartition::of(parent, *patch, 2)?);
+    }
+    Ok(out)
+}
+
+/// the receiving register of root tile `root_tile` on refined level `level` (>= 1), which it
+/// holds while holding none of level `level + 1`: the level-`level + 1` patch box in the tile's
+/// own level-`level` index frame (whole-grid level-`level` index less the tile's root origin
+/// times `2^level`) and the patch faces on cuts of level `level` it sits beside. `None` for a
+/// tile holding no part of level `level` or beside no such face. `fine` is
+/// `nested_partitions(root, patches)`
+pub fn nested_receiving_faces_of_tile<const D: usize>(
+    root: &symbi_sim::decomp::Partition<D>,
+    fine: &[symbi_sim::decomp::FinePartition<D>],
+    patches: &[[(usize, usize); D]],
+    root_tile: TileId,
+    level: usize,
+) -> Option<(symbi_algebra::Domain<D>, [[bool; 2]; D])> {
+    use symbi_sim::decomp::{flatten, unflatten};
+    assert!(level >= 1 && level < patches.len(), "a nested receiving register lies on a refined level with a finer patch");
+    let root_tc = unflatten(root_tile.0 as usize, root.counts());
+    let mut tc = root_tc;
+    for f in &fine[..level] {
+        tc = f.fine_tile_of(tc)?;
+    }
+    let part = &fine[level - 1].partition;
+    let (patch_local, faces) = receiving_faces_of_tile(part, patches[level], TileId(flatten(tc, part.counts()) as u32))?;
+    if !faces.iter().flatten().any(|&f| f) {
+        return None;
+    }
+    // the level-`level` patch's whole-grid origin: each level doubles its parent's index and adds
+    // its patch's offset in the parent's cells
+    let origin: [isize; D] = std::array::from_fn(|a| {
+        patches[..level].iter().fold(0isize, |o, p| 2 * (o + p[a].0 as isize))
+    });
+    let ext = part.tile_extents(tc);
+    let root_ext = root.tile_extents(root_tc);
+    let frame: [isize; D] =
+        std::array::from_fn(|a| origin[a] + ext[a].0 as isize - ((root_ext[a].0 as isize) << level));
+    let shifted = symbi_algebra::Domain::new(std::array::from_fn(|a| symbi_algebra::Space {
+        name: patch_local.spaces[a].name,
+        lo: patch_local.spaces[a].lo + frame[a],
+        hi: patch_local.spaces[a].hi + frame[a],
+    }));
+    Some((shifted, faces))
+}
+
 /// the fine level's clock, agreed by every worker and verified: each worker's fine tiles must
 /// share one clock; the words are reduced over the workers holding fine tiles, each 64-bit word
 /// as its two 32-bit halves sent as the exact integers one above them, since the minimum
