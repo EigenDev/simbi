@@ -13,14 +13,23 @@
 // field leaves a measurably different gas. a second level nested in the
 // spanning patch, clear of the periodic faces with the cuts through it,
 // reaches the single hierarchy on the same tiles, and so does a second level
-// spanning the periodic axis too, wrapping across the tiles at the seam.
+// spanning the periodic axis too, wrapping across the tiles at the seam. the
+// launched driver's parent face stencil plan for that second level lands
+// inside the stencil fields the builder holds, and a plan whose box widens the
+// spanned side by a plane is refused by the pre-exchange check, before any
+// value moves.
 //
 // run: cargo test -p symbi --test decomp_refine_mhd_periodic_span
 // =============================================================================
 use std::collections::HashMap;
 
 use symbi::regimes::substrate_newtonian_mhd::NewtonianMhdSubstrateKernelSet;
-use symbi::sim::decomp::{LocalCopy, Partition, unflatten};
+use symbi::sim::decomp::{FinePartition, LocalCopy, Partition, Topology, flatten, unflatten};
+use symbi::sim::refinement::launched::face_stencil_boxes_of_level_tile;
+use symbi_sim::atlas::{ExchangePlan, Placement, Span, TileId};
+use symbi_sim::phase_table::PhaseTable;
+use symbi_sim::plan_exchange::PlanExchange;
+use symbi_fabric::WorkerId;
 use symbi::sim::refinement::{Hierarchy, ProlongOrder, RefinementRegion, evolve_hierarchy_decomposed, seed_decomposed_fine_from_coarse};
 use symbi::sim::state::*;
 use symbi_algebra::Tensor;
@@ -371,4 +380,67 @@ fn a_nested_magnetized_patch_spanning_a_cut_periodic_axis_matches_the_single_hie
     let single = evolved_nested(&regions);
     assert_tiles_match_over(vec![16], &single, &regions);
     assert_tiles_match_over(vec![10, 21], &single, &regions);
+}
+
+/// the launched driver's parent face stencil plan of the nested level of `regions` over the tiles
+/// of `partition`, its boxes derived as the launch derives them with the spanned axes `spans`,
+/// checked against the stencil fields the builder gives every tile: Ok when every transfer lands
+/// inside its held field
+fn nested_stencil_check(partition: &Partition<2>, tiles: &[Hier], spans: [bool; 2]) -> Result<(), String> {
+    // the first patch spans x (root cells 0..32) over y 12..20; the nested box spans x over root
+    // y 14..18, so level-1 cells 4..12 of the first patch in y
+    let patch = [(0usize, N), (12usize, 20usize)];
+    let rel = [(0usize, 2 * N), (4usize, 12usize)];
+    let fine = FinePartition::of(partition, patch, 2).expect("level-1 partition");
+    let parent = &fine.partition;
+    let (counts, fine_counts) = (partition.counts(), parent.counts());
+    let root_of = |t: usize| flatten(fine.root_tile_of(unflatten(t, fine_counts)), counts);
+    let frame = |t: TileId| -> [isize; 2] {
+        let ext = partition.tile_extents(fine.root_tile_of(unflatten(t.0 as usize, fine_counts)));
+        std::array::from_fn(|a| (2 * patch[a].0.saturating_sub(ext[a].0)) as isize)
+    };
+    let boxes: Vec<Option<Vec<[Span; 2]>>> = (0..parent.n_tiles())
+        .map(|t| {
+            let ext = parent.tile_extents(unflatten(t, fine_counts));
+            face_stencil_boxes_of_level_tile(parent, rel, TileId(t as u32), false, spans).map(|components| {
+                components
+                    .iter()
+                    .map(|d| {
+                        let d = d.as_ref().expect("a face component with a stencil box");
+                        std::array::from_fn(|a| Span { lo: d.spaces[a].lo + ext[a].0 as isize, hi: d.spaces[a].hi + ext[a].0 as isize })
+                    })
+                    .collect()
+            })
+        })
+        .collect();
+    let ng = tiles[0].levels[0].state.geom.ng;
+    let plan = ExchangePlan::face_stencil_shifted(parent, &Topology::wrapping([true, false]), &boxes, ng + 1, &frame)
+        .map_err(|e| e.to_string())?;
+    assert!(plan.transfers().count() > 0, "the nested stencil plan moves nothing; the check is vacuous");
+    let placement = Placement::new(1, vec![WorkerId(0); parent.n_tiles()]).expect("placement");
+    let table = PhaseTable::refined(2, 2, 2).expect("phase table");
+    let exchange = PlanExchange::new(&plan, &placement, WorkerId(0), table);
+    let held: Vec<Vec<&symbi_grid::Field<f64, 2, HostMemory>>> = (0..parent.n_tiles())
+        .map(|t| tiles[root_of(t)].face_stencil_of(2).map(|st| st.old.iter().collect()).unwrap_or_default())
+        .collect();
+    exchange.check_destinations(&held)
+}
+
+/// the nested level spanning the periodic x axis takes its face halo along x from its own wrap,
+/// so its parent face stencil stops at the spanned sides; the plan built that way lands inside the
+/// builder's stencil fields on every tile, and the plan widening those sides by a plane is refused
+/// before any value moves, naming the transfer that would land past its field
+#[test]
+fn a_nested_face_stencil_wider_than_its_held_field_is_refused_before_any_write() {
+    for cuts in [vec![16], vec![10, 21]] {
+        let partition = Partition::explicit([N, N], [cuts.clone(), vec![]]).expect("cuts inside the grid");
+        let mut tiles = build_tiles(&partition, &[whole(), nested_spanning()]);
+        for h in tiles.iter_mut() {
+            h.enable_nested_face_stencils(3).expect("nested face stencils");
+        }
+        assert!(tiles.iter().any(|h| h.face_stencil_of(2).is_some()), "cuts {cuts:?}: no tile holds a nested stencil; the gate is vacuous");
+        nested_stencil_check(&partition, &tiles, [true, false]).unwrap_or_else(|e| panic!("cuts {cuts:?}: the spanned plan is refused: {e}"));
+        let refused = nested_stencil_check(&partition, &tiles, [false, false]).expect_err("the widened plan passed the pre-exchange check");
+        assert!(refused.contains("past the held field's domain"), "cuts {cuts:?}: the refusal names another cause: {refused}");
+    }
 }
