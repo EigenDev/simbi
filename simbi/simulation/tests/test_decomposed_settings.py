@@ -9,8 +9,10 @@
 # gas. a refined patch face on the device cut under the production halo
 # equals the single grid bit for bit, uninterrupted and resumed; a face one
 # cell off the cut, and a magnetized, an isothermal and a relativistic face on
-# the cut are refused by name. every arm runs as a fresh process through the public
-# command, the decomposed ones as host tiles on a cpu build.
+# the cut are refused by name, as is a level-2 face on the cut of level 1, whose
+# register units the tiled driver carries across the root's cuts alone. every
+# arm runs as a fresh process through the public command, the decomposed ones as
+# host tiles on a cpu build.
 # =============================================================================
 import os
 import subprocess
@@ -192,3 +194,31 @@ def test_a_patch_face_on_the_device_cut_prolonging_further_inputs_is_refused_by_
     relativistic = _patch_on_cut_script(tmp_path / "rhd.py", 0.5, "srhd.refined_synge_blast:RefinedSyngeBlast", (0.25, 0.75), 0.75)
     flat = _refused(relativistic, tmp_path / "rhd", ["--resolution", "32,32", "--end-time", "1e-6"])
     assert "lies on a decomposition cut" in flat and "this level is relativistic" in flat, flat[-1500:]
+
+
+def _nested_script(path: Path, x_lo: float) -> str:
+    """the refined blast with a second level over [x_lo, 0.125] x [-0.125, 0.125] inside the first
+    level's [-0.25, 0.25]^2; the two-device cut lies at x = 0"""
+    path.write_text(
+        "from typing import Annotated\n"
+        "from simbi import ProblemParam\n"
+        "from simbi_configs.examples.newtonian.refined_blast import RefinedBlast\n\n\n"
+        "class NestedAgainstTheCut(RefinedBlast):\n"
+        "    refinement_max_levels: Annotated[int, ProblemParam(3, description='coarse + 2 fine')]\n"
+        "    refinement_regions: Annotated[\n"
+        "        list[list[float]],\n"
+        f"        ProblemParam([[-0.25, 0.25, -0.25, 0.25], [{x_lo!r}, 0.125, -0.125, 0.125]], description='nested patches'),\n"
+        "    ]\n"
+        "    refinement_ratios: Annotated[list[int], ProblemParam([2, 2], description='ratio per jump')]\n"
+    )
+    return str(path)
+
+
+def test_a_level_2_face_on_the_cut_of_level_1_is_refused_by_name(tmp_path: Path) -> None:
+    """level 1 spans the device cut and level 2's low x face lies on it: the face's register units
+    would cross a cut of level 1, which the tiled driver carries across the root's cuts alone, so
+    the run is refused by name before any output; the same level 2 one root cell off the cut runs"""
+    flags = ["--resolution", "32,32,1", "--end-time", "1e-6"]
+    flat = _refused(_nested_script(tmp_path / "on_cut.py", 0.0), tmp_path / "on_cut", flags)
+    assert "nested refinement patch face lies on a decomposition cut of its parent level" in flat, flat[-1500:]
+    _run(_nested_script(tmp_path / "off_cut.py", 1.0 / 32.0), tmp_path / "off_cut", 2, flags)

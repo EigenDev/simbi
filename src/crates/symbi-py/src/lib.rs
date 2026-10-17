@@ -7005,11 +7005,19 @@ macro_rules! build_and_run_hydro_decomposed_refined {
                 &seed_transport,
             )
             .map_err(|e| format!("decomposed fine seed: {e:?}"))?;
+            // the in-process tiled driver carries register units across the root's cuts alone: a
+            // nested patch face on a cut of its parent level contributes units no tile receives
+            if tiles.iter().any(|h| h.flux_registers.iter().skip(1).any(|r| r.has_contributing() || r.has_receiving())) {
+                return Err("a nested refinement patch face lies on a decomposition cut of its parent level, and \
+                            the tiled driver carries register units across the root's cuts alone; move the face \
+                            off the cut by at least one cell of its parent level"
+                    .into());
+            }
             // the declared stationary target on every level of every tile, its imbalance read off
             // the tiled probe per level; a fresh run seeded from it starts there, as the single
             // hierarchy does. the probe prolongs the target's coarse-fine ghosts from the root
             // halo, so a tile reading a gathered prim stencil is refused before it
-            if cfg.equilibrium_json.is_some() && tiles.iter().any(|h| h.prim_stencil().is_some()) {
+            if cfg.equilibrium_json.is_some() && tiles.iter().any(|h| h.levels.iter().any(|l| l.prim_stencil.is_some())) {
                 return Err("a refinement patch face on a decomposition cut prolongs its fine ghosts past the root halo \
                             from a gathered parent stencil of the gas primitives and the dye; a declared stationary \
                             target prolongs further parent data past that halo; give the root the full prolongation \

@@ -1610,7 +1610,13 @@ where
     /// the gathered parent stencil of the first refined level, when a patch face on a root cut
     /// prolongs past the root halo
     pub fn prim_stencil(&self) -> Option<&PrimStencil<NDIM, DOF, Mem>> {
-        self.levels.get(1).and_then(|l| l.prim_stencil.as_ref())
+        self.prim_stencil_at(1)
+    }
+
+    /// the gathered parent stencil of refined level `level`, when a patch face of that level on a
+    /// cut of its parent level prolongs past the parent's halo
+    pub fn prim_stencil_at(&self, level: usize) -> Option<&PrimStencil<NDIM, DOF, Mem>> {
+        self.levels.get(level).and_then(|l| l.prim_stencil.as_ref())
     }
 
     /// whether a run of this tile prolongs every input from its gathered prim stencil: the gas
@@ -1619,7 +1625,7 @@ where
     /// stationary target read their parent past the root halo, and a tile carrying one of them
     /// with a stencil is refused by name
     pub fn prim_stencil_admission(&self) -> Result<(), String> {
-        if self.prim_stencil().is_none() {
+        if self.levels.iter().all(|l| l.prim_stencil.is_none()) {
             return Ok(());
         }
         let refusal = |what: &str| {
@@ -1856,10 +1862,27 @@ where
             let reach = (ng.div_ceil(RATIO) + prolong_order.ghost_width()) as isize;
             let donated: [[bool; 2]; NDIM] = std::array::from_fn(|ax| {
                 let halo = parent.geom.interior.spaces[ax].lo - parent.geom.allocated.spaces[ax].lo;
-                let short = cut_faces == CutFaces::Donate && levels.len() == 1 && reach > halo;
+                let short = cut_faces == CutFaces::Donate && reach > halo;
                 [real_on_cut[ax][0] && short, real_on_cut[ax][1] && short]
             });
             let donates = donated.iter().flatten().any(|&d| d);
+            // a deeper level's stencil gathers its parent level's cells, coarse-fine ghosts
+            // included, from the tiles holding them across the cuts inside the domain
+            if donates && levels.len() > 1 && level_spans.last().unwrap().iter().chain(&this_spans).any(|&s| s) {
+                let parent_level = levels.len() - 1;
+                return Err(symbi_xpu::XpuError {
+                    operation: "refinement region",
+                    code: 0,
+                    detail: format!(
+                        "a level-{} refinement patch face lies on a cut of level {parent_level} and its \
+                         prolongation stencil reaches past that level's halo; the gathered parent stencil of \
+                         a deeper level reads a parent level lying inside the domain, and this one spans a \
+                         wrapping axis; deepen the root halo until level {parent_level} holds {reach} ghost \
+                         cells or move the face off the cut",
+                        parent_level + 1
+                    ),
+                });
+            }
             if donates
                 && (parent.fields.mhd.is_some()
                     || parent.physics.regime.is_relativistic()
@@ -6671,11 +6694,13 @@ fn exchange_level_halos<R, const NDIM: usize, const DOF: usize, M, E, S, Mem, K,
     }
 }
 
-/// the root cells tile `tile` holds authoritatively, in whole-grid indices: its interior, grown
-/// into its ghosts across the root's physical faces. the tiles' boxes cover the whole root and
-/// its physical ghost layers once each
-fn root_cells_held<R, const NDIM: usize, const DOF: usize, M, E, S, Mem, K>(
+/// the cells of level `level` tile `tile` holds authoritatively, in whole-grid indices: its
+/// interior, grown into its ghosts across every side lying on no cut and no periodic seam (the
+/// root's physical faces, a refined level's physical and coarse-fine faces). the boxes of the
+/// tiles holding the level cover the whole level and those ghost layers once each
+fn cells_held<R, const NDIM: usize, const DOF: usize, M, E, S, Mem, K>(
     tile: &Hierarchy<R, NDIM, DOF, M, E, S, Mem, K>,
+    level: usize,
 ) -> Domain<NDIM>
 where
     R: Regime<f64, NDIM> + Copy,
@@ -6685,13 +6710,19 @@ where
     Mem: MemorySpace + Sync,
     K: KernelSet<NDIM, DOF, Mem, f64>,
 {
-    let root = &tile.levels[0].state;
-    let physical = |b: BoundaryType| b != BoundaryType::CoarseFine && b != BoundaryType::Periodic;
+    let data = &tile.levels[level];
+    let state = &data.state;
+    // the root's cut sides carry the coarse-fine type; a refined level records its own
+    let grows = |ax: usize, side: usize| {
+        let b = if side == 0 { state.boundaries.lo(ax) } else { state.boundaries.hi(ax) };
+        let cut = if level == 0 { b == BoundaryType::CoarseFine } else { data.cut_sides[ax][side] };
+        !cut && b != BoundaryType::Periodic
+    };
     Domain::new(std::array::from_fn(|ax| {
-        let (int, alloc) = (&root.geom.interior.spaces[ax], &root.geom.allocated.spaces[ax]);
-        let off = root.geom.index_offset[ax];
-        let lo = if physical(root.boundaries.lo(ax)) { alloc.lo } else { int.lo };
-        let hi = if physical(root.boundaries.hi(ax)) { alloc.hi } else { int.hi };
+        let (int, alloc) = (&state.geom.interior.spaces[ax], &state.geom.allocated.spaces[ax]);
+        let off = state.geom.index_offset[ax];
+        let lo = if grows(ax, 0) { alloc.lo } else { int.lo };
+        let hi = if grows(ax, 1) { alloc.hi } else { int.hi };
         Space { name: int.name, lo: lo + off, hi: hi + off }
     }))
 }
@@ -6703,12 +6734,8 @@ fn shifted<const NDIM: usize>(d: &Domain<NDIM>, by: [isize; NDIM]) -> Domain<NDI
     }))
 }
 
-/// gather the root primitives of time level `time` into every tile's prim stencil: the stencil's
-/// cells inside the tile's root allocation from the tile, the cells past it from the tiles holding
-/// them (`root_cells_held`), across the seam of a periodic root axis by the root's period. the
-/// root primitives read are the current ones, so the old level is gathered at the attempt's entry
-/// and the new one after the root stages and tail. returns the number of values that crossed
-/// between tiles
+/// gather the root primitives of time level `time` into every first refined level's prim
+/// stencil (`gather_prim_stencils_at` of the root)
 pub fn gather_prim_stencils<R, const NDIM: usize, const DOF: usize, M, E, S, Mem, K, T>(
     tiles: &[Hierarchy<R, NDIM, DOF, M, E, S, Mem, K>],
     devices: &[i32],
@@ -6724,20 +6751,50 @@ where
     K: KernelSet<NDIM, DOF, Mem, f64>,
     T: HaloTransport,
 {
-    if tiles.iter().all(|t| t.prim_stencil().is_none()) {
+    gather_prim_stencils_at(tiles, 0, devices, transport, time)
+}
+
+/// gather the primitives of level `level` at time level `time` into the prim stencil of every
+/// tile's level `level + 1`: the stencil's cells inside the tile's level-`level` allocation from
+/// the tile, the cells past it from the tiles holding them (`cells_held`), across the seam of a
+/// periodic root axis by the root's period. the primitives read are the current ones, so the old
+/// level is gathered at the parent step's entry and the new one after the parent's stages and
+/// tail. `devices[i]` is tile `i`'s device. returns the number of values that crossed between
+/// tiles
+pub fn gather_prim_stencils_at<R, const NDIM: usize, const DOF: usize, M, E, S, Mem, K, T>(
+    tiles: &[Hierarchy<R, NDIM, DOF, M, E, S, Mem, K>],
+    level: usize,
+    devices: &[i32],
+    transport: &T,
+    time: StencilTime,
+) -> usize
+where
+    R: Regime<f64, NDIM> + Copy,
+    M: Metric<f64, NDIM> + Copy + Send + Sync,
+    E: symbi_hydro::eos::EosFor<f64, <R as Regime<f64, NDIM>>::Energy> + Copy + Send + Sync,
+    S: ExecutionSpace,
+    Mem: MemorySpace + Sync,
+    K: KernelSet<NDIM, DOF, Mem, f64>,
+    T: HaloTransport,
+{
+    if tiles.iter().all(|t| t.prim_stencil_at(level + 1).is_none()) {
         return 0;
     }
     drain_devices::<Mem>(devices);
-    let held: Vec<Domain<NDIM>> = tiles.iter().map(root_cells_held).collect();
-    let offset = |t: &Hierarchy<R, NDIM, DOF, M, E, S, Mem, K>| t.levels[0].state.geom.index_offset;
+    // the tiles holding the level; a refined level's stencil lies inside the domain (the builder
+    // refuses a level spanning a wrapping axis), so its images are the identity alone
+    let holds = |t: &Hierarchy<R, NDIM, DOF, M, E, S, Mem, K>| t.levels.len() > level;
+    let held: Vec<Option<Domain<NDIM>>> = tiles.iter().map(|t| holds(t).then(|| cells_held(t, level))).collect();
+    let offset = |t: &Hierarchy<R, NDIM, DOF, M, E, S, Mem, K>| t.levels[level].state.geom.index_offset;
     let period: [isize; NDIM] = std::array::from_fn(|ax| {
-        tiles.iter().map(|t| t.levels[0].state.geom.interior.spaces[ax].hi + offset(t)[ax]).max().unwrap_or(0)
+        tiles.iter().filter(|t| holds(t)).map(|t| t.levels[level].state.geom.interior.spaces[ax].hi + offset(t)[ax]).max().unwrap_or(0)
     });
     let periodic: [bool; NDIM] = std::array::from_fn(|ax| {
-        tiles.iter().any(|t| {
-            let b = &t.levels[0].state.boundaries;
-            t.root_wraps[ax] || b.lo(ax) == BoundaryType::Periodic || b.hi(ax) == BoundaryType::Periodic
-        })
+        level == 0
+            && tiles.iter().any(|t| {
+                let b = &t.levels[0].state.boundaries;
+                t.root_wraps[ax] || b.lo(ax) == BoundaryType::Periodic || b.hi(ax) == BoundaryType::Periodic
+            })
     });
     // every image of a cell across the periodic seams: shifts of -1, 0, +1 periods per periodic axis
     let images: Vec<[isize; NDIM]> = (0..3usize.pow(NDIM as u32))
@@ -6747,36 +6804,37 @@ where
         .collect();
     let mut crossed = 0usize;
     for (i, tile) in tiles.iter().enumerate() {
-        let Some(stencil) = tile.prim_stencil() else { continue };
+        let Some(stencil) = tile.prim_stencil_at(level + 1) else { continue };
         let dst = match time {
             StencilTime::Old => &stencil.old,
             StencilTime::New => &stencil.new,
         };
-        let root = &tile.levels[0].state;
-        let src = PrimStencil::<NDIM, DOF, Mem>::components(&root.fields.prim);
+        let parent = &tile.levels[level].state;
+        let src = PrimStencil::<NDIM, DOF, Mem>::components(&parent.fields.prim);
         let dst = PrimStencil::<NDIM, DOF, Mem>::components(dst);
-        assert_eq!(src.len(), dst.len(), "tile {i}: the prim stencil carries the root's primitive components");
-        let own = stencil.domain.intersect(&root.geom.allocated);
+        assert_eq!(src.len(), dst.len(), "tile {i}: the prim stencil carries level {level}'s primitive components");
+        let own = stencil.domain.intersect(&parent.geom.allocated);
         symbi_xpu::with_device(devices[i], || {
             for (s, d) in src.iter().zip(&dst) {
                 copy_field_region(s, d, &own);
             }
         });
         let off_i = offset(tile);
-        for band in stencil.domain.guillotine_difference(&root.geom.allocated) {
+        for band in stencil.domain.guillotine_difference(&parent.geom.allocated) {
             let whole = shifted(&band, off_i);
             let mut covered = 0usize;
             for image in &images {
                 let at = shifted(&whole, *image);
                 for (j, source) in tiles.iter().enumerate() {
-                    if (j == i && image.iter().all(|&k| k == 0)) || !at.overlaps(&held[j]) {
+                    let Some(held_j) = held[j].as_ref() else { continue };
+                    if (j == i && image.iter().all(|&k| k == 0)) || !at.overlaps(held_j) {
                         continue;
                     }
-                    let cells = at.intersect(&held[j]);
+                    let cells = at.intersect(held_j);
                     let off_j = offset(source);
                     let src_region = shifted(&cells, std::array::from_fn(|ax| -off_j[ax]));
                     let dst_region = shifted(&cells, std::array::from_fn(|ax| -image[ax] - off_i[ax]));
-                    let from = PrimStencil::<NDIM, DOF, Mem>::components(&source.levels[0].state.fields.prim);
+                    let from = PrimStencil::<NDIM, DOF, Mem>::components(&source.levels[level].state.fields.prim);
                     for (s, d) in from.iter().zip(&dst) {
                         transport.copy_region(s, &src_region, d, &dst_region, devices[j], devices[i]);
                     }
@@ -6786,14 +6844,14 @@ where
             assert_eq!(
                 covered,
                 band.volume(),
-                "tile {i}: the prim stencil's cells {band:?} past the root allocation are held by no tile once each"
+                "tile {i}: the prim stencil's cells {band:?} past the level-{level} allocation are held by no tile once each"
             );
             crossed += covered * dst.len();
         }
     }
     drain_devices::<Mem>(devices);
     for tile in tiles {
-        if let Some(stencil) = tile.prim_stencil() {
+        if let Some(stencil) = tile.prim_stencil_at(level + 1) {
             match time {
                 StencilTime::Old => stencil.old_filled.set(true),
                 StencilTime::New => stencil.new_filled.set(true),
@@ -6803,13 +6861,13 @@ where
     crossed
 }
 
-/// the prime of the levels below each tile's prim stencil, after every tile primed: a tile primes
-/// before its neighbors hold primed roots, so its first refined level's coarse-fine ghosts wait
-/// for the stencil. the stencil gathers the primed roots at both time levels, each such tile
-/// prolongs and fills its refined levels coarsest-first at the current state, as the single
-/// hierarchy's prime does, and the stencil is invalidated again until the first step gathers it.
-/// a tile prolonging an input beyond the stencil's is refused first
-/// (`Hierarchy::prim_stencil_admission`)
+/// the prime of the levels below each tile's prim stencils, after every tile primed: a tile primes
+/// before its neighbors hold primed parents, so a level reading a prim stencil waits for it with
+/// its coarse-fine ghosts. level by level, coarsest first, the stencils gather the primed parent
+/// level at both time levels, and each tile reading a stencil at the level or re-prolonged above
+/// it prolongs and fills the level at the current state, as the single hierarchy's prime does; the
+/// stencils are invalidated again until the first step gathers them. a tile prolonging an input
+/// beyond the stencil's is refused first (`Hierarchy::prim_stencil_admission`)
 pub fn prime_prim_stencils<R, const NDIM: usize, const DOF: usize, M, E, S, Mem, K, T>(
     tiles: &mut [Hierarchy<R, NDIM, DOF, M, E, S, Mem, K>],
     devices: &[i32],
@@ -6827,22 +6885,29 @@ where
     for tile in tiles.iter() {
         tile.prim_stencil_admission()?;
     }
-    gather_prim_stencils(tiles, devices, transport, StencilTime::Old);
-    gather_prim_stencils(tiles, devices, transport, StencilTime::New);
-    for (k, tile) in tiles.iter_mut().enumerate() {
-        if tile.prim_stencil().is_none() {
-            continue;
-        }
-        symbi_xpu::with_device(devices[k], || {
-            tile.priming = true;
-            for ll in 1..tile.levels.len() {
-                tile.prolong_cf(ll, 1.0);
-                tile.fill_physical_ghosts(ll);
+    let depth = tiles.iter().map(|t| t.levels.len()).max().unwrap_or(1);
+    let mut reprolonged = vec![false; tiles.len()];
+    for level in 1..depth {
+        gather_prim_stencils_at(tiles, level - 1, devices, transport, StencilTime::Old);
+        gather_prim_stencils_at(tiles, level - 1, devices, transport, StencilTime::New);
+        for (k, tile) in tiles.iter_mut().enumerate() {
+            if tile.levels.len() <= level || !(reprolonged[k] || tile.prim_stencil_at(level).is_some()) {
+                continue;
             }
-            tile.priming = false;
-        });
-        if let Some(stencil) = tile.prim_stencil() {
-            stencil.invalidate();
+            reprolonged[k] = true;
+            symbi_xpu::with_device(devices[k], || {
+                tile.priming = true;
+                tile.prolong_cf(level, 1.0);
+                tile.fill_physical_ghosts(level);
+                tile.priming = false;
+            });
+        }
+    }
+    for tile in tiles.iter() {
+        for level in &tile.levels {
+            if let Some(stencil) = level.prim_stencil.as_ref() {
+                stencil.invalidate();
+            }
         }
     }
     Ok(())
@@ -7852,6 +7917,8 @@ where
             phase_probe::set_tile(i);
             phase_probe::sample("begin", level, &tiles[i].levels[level].state);
         }
+        // the level at its substep's entry, the old time level of a finer patch face on its cut
+        gather_prim_stencils_at(tiles, level, root.1, transport, StencilTime::Old);
         for jj in 0..nstages {
             if decomposed_level_stage(tiles, level, &fg.order, fg.counts, &fg.devices, transport, jj, fine_dt, alpha) {
                 return true;
@@ -7889,6 +7956,8 @@ where
             exchange_level_ito(tiles, level, &fg.order, fg.counts, &fg.devices, transport);
         }
         if let Some(finer) = fine.get(level) {
+            // the level after its stages and tail, the new time level of a finer patch face on its cut
+            gather_prim_stencils_at(tiles, level, root.1, transport, StencilTime::New);
             if decomposed_subcycle(tiles, level, fine, root, transport, nstages, fine_dt) {
                 return true;
             }
