@@ -333,6 +333,10 @@ pub enum ExchangePoint {
     /// `axis` (its `high` side) of the finer level's patch, the start the far tiles resume their
     /// chains from, across the `hop`-th cut from the seam
     BandSeam { level: u8, path: u32, axis: u8, high: bool, hop: u8 },
+    /// inside the restriction into level `level` along its substep path `path`, before its bands:
+    /// the level's halos carry the uncovered cells the tiles beside a neighbor's patch refluxed and
+    /// recovered, the start of a band whose patch face lies on a cut
+    BandStart { level: u8, path: u32 },
     Rollback,
     /// after the named exchange: each tile below a cut sends its copy of the shared
     /// interface face to the tile above, which compares it with its own bit for bit. the
@@ -530,6 +534,7 @@ impl ExchangePoint {
             ExchangePoint::BandSeam { level, path, axis, high, hop } => {
                 (37, (level as u32) << 24 | path, (hop as u32) << 3 | (axis as u32) << 1 | high as u32)
             }
+            ExchangePoint::BandStart { level, path } => (43, (level as u32) << 24 | path, 0),
         };
         kind << 56 | (a as u64) << 16 | (b as u64 & 0xffff)
     }
@@ -544,6 +549,7 @@ impl ExchangePoint {
             ExchangePoint::Nested { level, point, .. } => ExchangePoint::Nested { level, path: 0, point },
             ExchangePoint::NestedRestrict { level, .. } => ExchangePoint::NestedRestrict { level, path: 0 },
             ExchangePoint::BandSeam { level, axis, high, hop, .. } => ExchangePoint::BandSeam { level, path: 0, axis, high, hop },
+            ExchangePoint::BandStart { level, .. } => ExchangePoint::BandStart { level, path: 0 },
             other => other,
         }
     }

@@ -66,6 +66,7 @@ fn moving(point: ExchangePoint) -> Vec<(TransferId, WorkerId, WorkerId)> {
         | ExchangePoint::EquilibriumLevel { .. }
         | ExchangePoint::RootCoefficients
         | ExchangePoint::BandSeam { .. }
+        | ExchangePoint::BandStart { .. }
         | ExchangePoint::SlipDrain { .. }
         | ExchangePoint::SlipSolve { .. }
         | ExchangePoint::SlipCommit { .. }

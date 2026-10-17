@@ -329,9 +329,15 @@ pub struct BandHops {
     pub axis: u8,
     pub high: bool,
     pub distances: Vec<isize>,
+    /// a cut lies on the seam's patch face: the band starts from an uncovered cell the tile across
+    /// the cut refluxes and recovers, carried at the level's band start point
+    pub start_across_cut: bool,
 }
 
 fn push_band_points(phases: &mut Vec<Phase>, bands: &[BandHops], level: u8, path: u32) {
+    if bands.iter().any(|b| b.level == level && b.start_across_cut) {
+        phases.push(Phase { point: ExchangePoint::BandStart { level, path }, skippable: false, init_only: false });
+    }
     for band in bands.iter().filter(|b| b.level == level) {
         for hop in 0..band.distances.len() as u8 {
             let point = ExchangePoint::BandSeam { level, path, axis: band.axis, high: band.high, hop };

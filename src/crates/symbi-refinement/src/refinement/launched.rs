@@ -368,6 +368,17 @@ where
     assert_eq!(held.nested.len(), plans.nested.len(), "one held level per nested plan");
     // the levels of the session: the root, the fine level, and every nested one
     let depth = 2 + plans.nested.len();
+    // a gas run refluxes the tiles beside a neighbor's patch before the root's bands; a
+    // magnetized run applies its units around the corrected-faces exchange after the subcycle
+    let gas_reflux_first = plans.emf.is_none() && plans.corrected.is_none() && tiles.iter().all(|h| h.levels[0].state.fields.mhd.is_none());
+    let band_start = plans.band_seams.iter().any(|b| b.level == 0 && b.start_across_cut);
+    if band_start && !gas_reflux_first {
+        return Err(fail(
+            fabric,
+            WorkerError::Refused("a balanced band starting across a cut on a magnetized refined launch".into()),
+        ));
+    }
+
     let base = &cfg.base;
     let deadline = base.deadline;
     let stages = base.timestepping.stages();
@@ -1477,6 +1488,22 @@ where
                             // post-tail exchange, so the staggered faces it carries to the neighbors
                             // across the cuts are the corrected ones
                             if sub + 1 == RATIO {
+                                // a gas run: the tiles beside a neighbor's patch apply their received
+                                // units and recover their cells beside the patch now, as the single
+                                // hierarchy refluxes every uncovered cell before its bands, and a band
+                                // whose patch face lies on a cut takes its start cell from the root
+                                // halos at the band start point
+                                if gas_reflux_first {
+                                    for k in (0..n).filter(|&k| tiles[k].levels.len() == 1 && tiles[k].has_flux_register(0)) {
+                                        with_device(root_dev(k), || {
+                                            tiles[k].reflux_received();
+                                            tiles[k].recover_beside_patch();
+                                        });
+                                    }
+                                    if band_start {
+                                        root_point!(ExchangePoint::BandStart { level: 0, path: 0 }, iter, attempt);
+                                    }
+                                }
                                 restrict_with_bands(tiles, held, plans, 0, 0, 0.0, iter, attempt, transport, fabric, deadline, &mut timing.exchange)
                                     .map_err(|e| fail(fabric, e.into()))?;
                             }
@@ -1490,7 +1517,11 @@ where
                         // the tiles beside a neighbor's patch apply their received units, the faces
                         // that application wrote on their own cuts reach the tiles across them, and
                         // every such tile then recovers its cells beside the patch
-                        let beside: Vec<usize> = (0..n).filter(|&k| tiles[k].levels.len() == 1 && tiles[k].has_flux_register(0)).collect();
+                        let beside: Vec<usize> = if gas_reflux_first {
+                            Vec::new()
+                        } else {
+                            (0..n).filter(|&k| tiles[k].levels.len() == 1 && tiles[k].has_flux_register(0)).collect()
+                        };
                         for &k in &beside {
                             with_device(root_dev(k), || tiles[k].reflux_received());
                         }

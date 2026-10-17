@@ -15,10 +15,10 @@
 # inside each seam from the uncovered cell beyond it: refined host tiles and a
 # refined launch publish the single grid's state whether the cuts keep every
 # band on one tile or cross a band once or twice, the far tiles resuming the
-# band's chains across each cut. a cut on a patch face matches on host tiles,
-# the tile across it refluxing and recovering the band's uncovered cell before
-# the band chains from it, and is refused by name on launch. a chart outside
-# that scope (the (r, z) plane) is refused by name before any output.
+# band's chains across each cut. a cut on a patch face matches on host tiles
+# and launch, fresh and after a rejected step, the tile across it refluxing and
+# recovering the band's uncovered cell before the band chains from it. a chart
+# outside that scope (the (r, z) plane) is refused by name before any output.
 #
 # run: pytest -m simulation simbi/simulation/tests/test_tiled_balanced_reconstruction.py
 # =============================================================================
@@ -344,27 +344,21 @@ def test_the_balanced_reconstruction_on_refined_tiles_matches_the_single_grid(tm
         _assert_same_state(got, want, f"refined launch on {workers} workers cut at {cuts}")
 
 
-def test_a_balanced_patch_face_on_a_cut_matches_on_host_tiles_and_is_refused_on_launch(tmp_path: Path, fixture: Path) -> None:
+def test_a_balanced_patch_face_on_a_cut_matches_on_host_tiles_and_launch(tmp_path: Path, fixture: Path) -> None:
     # the patch spans root cells 6..18 in x and 8..24 in y: a cut at x = 6 lies on the low x face and
     # x = 18 with y = 24 on the high faces of both axes. the fine ghosts past each face prolong
     # through the balanced transfer from a parent stencil gathered across the cut, and the tile
-    # across it refluxes and recovers the band's uncovered cell before the band chains from it
+    # across it refluxes and recovers the band's uncovered cell before the band chains from it; on
+    # launch the start cell reaches the patch's worker at the band start point
     want = _final(_run(fixture, "RefinedBalancedAtmosphere", tmp_path / "single"), tmp_path / "single", "the refined single grid")
     for cuts in [[[6], []], [[18], [24]]]:
         gpus = int(np.prod([len(c) + 1 for c in cuts]))
         out = tmp_path / f"tiles{gpus}_{cuts[0]}_{cuts[1]}"
         got = _final(_run(fixture, "RefinedBalancedAtmosphere", out, gpus, f", decompose={cuts!r}"), out, f"refined host tiles cut on a patch face at {cuts}")
         _assert_same_state(got, want, f"refined host tiles cut on a patch face at {cuts}")
-    env = dict(os.environ, **_launch_env(fixture))
-    env.pop("SIMBI_LAUNCH_EXPERIMENTAL", None)
-    out = tmp_path / "launched"
-    cmd = [sys.executable, "-m", "simbi.cli", "launch", str(_launch_script(fixture, "RefinedBalancedAtmosphere")),
-           "--layout", str(_layout(tmp_path / "two.toml", workers=2, cuts=[[6], []])), "--max-steps", "1",
-           "--data-directory", str(out), "--checkpoint-interval", "1e9"]
-    done = subprocess.run(cmd, capture_output=True, text=True, timeout=600, env=env)
-    assert done.returncode != 0, f"the launch succeeded:\n{done.stdout}"
-    assert "a balanced restriction band whose patch face at root cell 6 on axis 0 lies on a cut" in " ".join(done.stderr.split()), done.stderr[-1500:]
-    assert not (out.exists() and list(out.glob("*.h5"))), "a checkpoint was published"
+        layout = _layout(tmp_path / f"launch_{cuts[0]}_{cuts[1]}.toml", workers=gpus, cuts=cuts)
+        got = _script_launch(str(_launch_script(fixture, "RefinedBalancedAtmosphere")), (24, 32), tmp_path / f"launched_{cuts[0]}_{cuts[1]}", layout, STEPS, workers=gpus, env=_launch_env(fixture))
+        _assert_same_state(got, want, f"refined launch on {gpus} workers cut on a patch face at {cuts}")
 
 
 def test_the_balanced_reconstruction_on_nested_refined_tiles_matches_the_single_grid(tmp_path: Path, fixture: Path, monkeypatch) -> None:
@@ -434,12 +428,14 @@ def test_a_rejection_after_a_band_exchange_replays_the_band_on_launch(tmp_path: 
     _assert_same_state(published[10], capped, "the run replaying a step after its band exchange against the capped clean run")
 
 
-def test_a_rejected_balanced_refined_step_replays_to_the_capped_clean_run_on_launch(tmp_path: Path, fixture: Path) -> None:
+@pytest.mark.parametrize("cut", [12, 6], ids=["clear", "on-face"])
+def test_a_rejected_balanced_refined_step_replays_to_the_capped_clean_run_on_launch(tmp_path: Path, fixture: Path, cut: int) -> None:
     # the root step's band rewrite leaves the root's band pressure off the recovery of its
     # conserved state; worker 1 rejects a stage of the second fine substep of step 2, and the
-    # replay enters from the rejected attempt's entry, that pressure included
+    # replay enters from the rejected attempt's entry, that pressure included. a cut at x = 6 lies
+    # on the patch's low x face: the replay refluxes, recovers and carries the band's start again
     step = 2
-    layout = _layout(tmp_path / "two.toml", workers=2, cuts=[[12], []])
+    layout = _layout(tmp_path / "two.toml", workers=2, cuts=[[cut], []])
     rejecting, counts = _launch_to(fixture, "RefinedBalancedAtmosphere", tmp_path / "rejecting", layout, 2, step + 1, f"reject_level:1:{step}:1:1:1")
     assert counts == {1}, f"the rejection was not counted once on every worker: {counts}"
     clean, _ = _launch_to(fixture, "RefinedBalancedAtmosphere", tmp_path / "clean", layout, 2, step + 1, None)

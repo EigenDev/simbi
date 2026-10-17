@@ -11184,13 +11184,21 @@ fn launched_band_seams<const D: usize>(cfg: &Config) -> Result<Vec<symbi_sim::ph
         return Ok(Vec::new());
     }
     let mut seams: Vec<symbi_sim::phase_table::BandHops> = Vec::new();
-    for c in cuts_in_balanced_bands::<D>(cfg)?.iter().filter(|c| !c.on_face) {
-        let at = c.cut << c.level;
-        let distance = if c.high { c.face - at } else { at - c.face } as isize;
+    for c in cuts_in_balanced_bands::<D>(cfg)?.iter() {
         let (level, axis) = (c.level as u8, c.axis as u8);
-        match seams.iter_mut().find(|s| (s.level, s.axis, s.high) == (level, axis, c.high)) {
-            Some(s) => s.distances.push(distance),
-            None => seams.push(symbi_sim::phase_table::BandHops { level, axis, high: c.high, distances: vec![distance] }),
+        let i = match seams.iter().position(|s| (s.level, s.axis, s.high) == (level, axis, c.high)) {
+            Some(i) => i,
+            None => {
+                seams.push(symbi_sim::phase_table::BandHops { level, axis, high: c.high, distances: Vec::new(), start_across_cut: false });
+                seams.len() - 1
+            }
+        };
+        // a cut on the patch face carries the band's start; a cut inside the band, a hop
+        if c.on_face {
+            seams[i].start_across_cut = true;
+        } else {
+            let at = c.cut << c.level;
+            seams[i].distances.push(if c.high { c.face - at } else { at - c.face } as isize);
         }
     }
     for s in seams.iter_mut() {
@@ -11488,20 +11496,6 @@ fn validate_refined_launch_scope(cfg: &Config) -> Result<(), String> {
     }
     if cfg.coord_system != "cartesian" {
         return refused(&format!("the {} chart", cfg.coord_system));
-    }
-    // the launched workers rewrite a balanced band from the cells their own tiles hold; a root cut on
-    // the patch face puts the band's uncovered cell on the worker across the cut
-    if cfg.wb_reconstruction && cfg.refinement_enabled {
-        let crossings = match cfg.dims {
-            2 => cuts_in_balanced_bands::<2>(cfg)?,
-            _ => cuts_in_balanced_bands::<3>(cfg)?,
-        };
-        if let Some(c) = crossings.iter().find(|c| c.on_face && c.level == 0) {
-            return refused(&format!(
-                "a balanced restriction band whose patch face at root cell {} on axis {} lies on a cut",
-                c.face, c.axis
-            ));
-        }
     }
     let mapped = axis_maps_any(cfg);
     if mapped {
