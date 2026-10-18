@@ -7110,8 +7110,9 @@ macro_rules! build_and_run_hydro_decomposed_refined {
                 }
                 symbi::symbi_xpu::with_device(devices[k], || h.prime());
             }
-            // a patch face on a root cut prolongs past the root halo from the primed neighbors
-            symbi::sim::refinement::prime_prim_stencils(&mut tiles, &devices, &seed_transport)?;
+            // each refined level primes again from its parent's crossed cut halos, a patch face on a
+            // cut prolonging past the parent's halo from the primed neighbors
+            symbi::sim::refinement::prime_decomposed_levels(&mut tiles, counts, &devices, &seed_transport)?;
         }
 
         // the full-size output hierarchy (root + the full region): gather scatters each level's tile

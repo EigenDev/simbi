@@ -6888,15 +6888,18 @@ where
     crossed
 }
 
-/// the prime of the levels below each tile's prim stencils, after every tile primed: a tile primes
-/// before its neighbors hold primed parents, so a level reading a prim stencil waits for it with
-/// its coarse-fine ghosts. level by level, coarsest first, the stencils gather the primed parent
-/// level at both time levels, and each tile reading a stencil at the level or re-prolonged above
-/// it prolongs and fills the level at the current state, as the single hierarchy's prime does; the
-/// stencils are invalidated again until the first step gathers them. a tile prolonging an input
-/// beyond the stencil's is refused first (`Hierarchy::prim_stencil_admission`)
-pub fn prime_prim_stencils<R, const NDIM: usize, const DOF: usize, M, E, S, Mem, K, T>(
+/// the decomposed prime of the refined levels, after every tile primed itself: a tile primes each
+/// level from its parent's cells as the tile holds them, and a parent's cells past a cut are the
+/// neighbor's interior only once the parent's cut halo has crossed. level by level, coarsest first,
+/// each level's prim stencils gather the primed parent at both time levels, every tile holding the
+/// level prolongs and fills it at the current state, as the single hierarchy's prime does, and the
+/// level's cut halos cross, so the next level prolongs from the neighbors' interiors; the stencils
+/// are invalidated again until the first step gathers them. a tile prolonging an input beyond the
+/// stencil's is refused first (`Hierarchy::prim_stencil_admission`). `counts` is the root tile grid,
+/// `devices[i]` tile `i`'s device
+pub fn prime_decomposed_levels<R, const NDIM: usize, const DOF: usize, M, E, S, Mem, K, T>(
     tiles: &mut [Hierarchy<R, NDIM, DOF, M, E, S, Mem, K>],
+    counts: [usize; NDIM],
     devices: &[i32],
     transport: &T,
 ) -> Result<(), String>
@@ -6913,21 +6916,22 @@ where
         tile.prim_stencil_admission()?;
     }
     let depth = tiles.iter().map(|t| t.levels.len()).max().unwrap_or(1);
-    let mut reprolonged = vec![false; tiles.len()];
     for level in 1..depth {
         gather_prim_stencils_at(tiles, level - 1, devices, transport, StencilTime::Old);
         gather_prim_stencils_at(tiles, level - 1, devices, transport, StencilTime::New);
         for (k, tile) in tiles.iter_mut().enumerate() {
-            if tile.levels.len() <= level || !(reprolonged[k] || tile.prim_stencil_at(level).is_some()) {
+            if tile.levels.len() <= level {
                 continue;
             }
-            reprolonged[k] = true;
             symbi_xpu::with_device(devices[k], || {
                 tile.priming = true;
                 tile.prolong_cf(level, 1.0);
                 tile.fill_physical_ghosts(level);
                 tile.priming = false;
             });
+        }
+        if let Some(grid) = fine_subgrid_of_level(tiles, counts, devices, level) {
+            exchange_level_halos(tiles, level, &grid.order, grid.counts, &grid.devices, transport);
         }
     }
     for tile in tiles.iter() {

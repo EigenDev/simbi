@@ -37,7 +37,7 @@ pub use equilibrium::EquilibriumFlux;
 pub use flux_register::{FaceRole, FluxRegister};
 pub use hierarchy::{
     CutFaces, FineSubgrid, Hierarchy, LevelData, PrimStencil, RefinementRegion, StencilTime, evolve_hierarchy_decomposed,
-    fine_subgrid, fine_subgrid_of_level, gather_decomposed_hierarchy_tracers, gather_prim_stencils, gather_prim_stencils_at, prime_prim_stencils,
+    fine_subgrid, fine_subgrid_of_level, gather_decomposed_hierarchy_tracers, gather_prim_stencils, gather_prim_stencils_at, prime_decomposed_levels,
     seed_decomposed_fine_from_coarse, seed_held_hierarchy_tracers, with_equilibrium_decomposed,
     seed_decomposed_hierarchy_tracers,
 };

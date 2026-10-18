@@ -122,7 +122,7 @@ fn tiles(partition: &Partition<2>, ng: usize) -> Vec<Hier> {
     }
     seed_decomposed_fine_from_coarse(&tiles, counts, &vec![0; tiles.len()], &LocalCopy).unwrap();
     let mut tiles: Vec<Hier> = tiles.into_iter().map(|h| { let mut h = h.with_bodies(bodies()); h.prime(); h }).collect();
-    symbi::sim::refinement::prime_prim_stencils(&mut tiles, &vec![0; partition.n_tiles()], &LocalCopy).expect("prim stencil prime");
+    symbi::sim::refinement::prime_decomposed_levels(&mut tiles, partition.counts(), &vec![0; partition.n_tiles()], &LocalCopy).expect("decomposed prime");
     tiles
 }
 

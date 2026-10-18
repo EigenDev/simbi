@@ -26,7 +26,7 @@ use symbi::regimes::substrate_newton::AdiabaticSubstrateKernelSet;
 use symbi::sim::decomp::{LocalCopy, Partition, unflatten};
 use symbi::sim::refinement::launched::receiving_faces_of_tile;
 use symbi::sim::refinement::{
-    Hierarchy, PrimStencil, ProlongOrder, RefinementRegion, evolve_hierarchy_decomposed, prime_prim_stencils,
+    Hierarchy, PrimStencil, ProlongOrder, RefinementRegion, evolve_hierarchy_decomposed, prime_decomposed_levels,
     seed_decomposed_fine_from_coarse,
 };
 use symbi::sim::state::*;
@@ -167,7 +167,7 @@ fn build_tiles(partition: &Partition<2>, scheme: Scheme) -> Vec<Hier> {
     for h in tiles.iter_mut() {
         h.prime();
     }
-    prime_prim_stencils(&mut tiles, &vec![0; partition.n_tiles()], &LocalCopy).expect("prim stencil prime");
+    prime_decomposed_levels(&mut tiles, partition.counts(), &vec![0; partition.n_tiles()], &LocalCopy).expect("decomposed prime");
     tiles
 }
 
