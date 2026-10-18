@@ -186,7 +186,7 @@ impl Arm {
 
 /// the session's parent prim stencils, from the partition alone as the launched driver derives them
 fn prim_stencil_boxes_of(partition: &Partition<2>, patch: [(usize, usize); 2], ng: usize) -> Vec<Option<[Span; 2]>> {
-    prim_stencil_boxes(partition, patch, ng, ProlongOrder::Ppm, [false; 2])
+    prim_stencil_boxes(partition, patch, ng, ng + 1, ProlongOrder::Ppm, [false; 2])
 }
 
 /// a tile keeping, at every attempt's entry, the root cells it gives to the session's prim stencils;

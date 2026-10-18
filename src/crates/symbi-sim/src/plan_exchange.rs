@@ -67,7 +67,7 @@ pub enum PlanRole {
     NestedFluxContribution { level: u8 },
     /// nested level `level`'s parent prim stencil gathered from the cells' owners on the parent's
     /// partition: every transfer moves at the parent's last stage point of each of its substeps,
-    /// and at the primed point
+    /// and at the parent level's primed point
     NestedPrimStencil { level: u8 },
     /// the continuous-tracer coefficients of level `level` on a refined run: every transfer moves
     /// at the level's coefficient point (the root after its stages, a refined level in each of its
@@ -204,7 +204,7 @@ impl<'p, const D: usize> PlanExchange<'p, D> {
                 ExchangePoint::EquilibriumLevel { level: 1, .. } => self.plan.moves_at(t, point),
                 // the primed fine state, the fine state after a nested level restricted into it,
                 // and the fine state the second level's seed prolongs from
-                ExchangePoint::Primed | ExchangePoint::NestedRestrict { level: 1, .. } | ExchangePoint::Seed { level: 2 } => {
+                ExchangePoint::PrimedLevel { level: 1 } | ExchangePoint::NestedRestrict { level: 1, .. } | ExchangePoint::Seed { level: 2 } => {
                     self.plan.moves_at(t, ExchangePoint::Stage(0))
                 }
                 // the fine level's shared faces are audited with the root's after the prime and
@@ -228,7 +228,7 @@ impl<'p, const D: usize> PlanExchange<'p, D> {
                 // the level's state the next level's seed prolongs from
                 ExchangePoint::Seed { level: l } if l == level + 1 => self.plan.moves_at(t, ExchangePoint::Stage(0)),
                 ExchangePoint::EquilibriumLevel { level: l, .. } if l == level => self.plan.moves_at(t, point),
-                ExchangePoint::Primed => self.plan.moves_at(t, ExchangePoint::Stage(0)),
+                ExchangePoint::PrimedLevel { level: l } if l == level => self.plan.moves_at(t, ExchangePoint::Stage(0)),
                 ExchangePoint::Rollback => self.plan.moves_at(t, ExchangePoint::Rollback),
                 ExchangePoint::Audit(AuditAt::Prime) | ExchangePoint::Audit(AuditAt::Checkpoint) => {
                     self.plan.moves_at(t, point)
@@ -251,7 +251,7 @@ impl<'p, const D: usize> PlanExchange<'p, D> {
                 match point {
                     ExchangePoint::Fine { point: FinePoint::Stage(k), .. } => level == 2 && k == last,
                     ExchangePoint::Nested { level: l, point: FinePoint::Stage(k), .. } => l + 1 == level && k == last,
-                    ExchangePoint::Primed => true,
+                    ExchangePoint::PrimedLevel { level: l } => l + 1 == level,
                     _ => false,
                 }
             }

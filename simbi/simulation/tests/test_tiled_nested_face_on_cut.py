@@ -21,8 +21,10 @@
 # on and clear of the face, counted once on every worker, equal to the capped
 # clean launch. a nested unit listed twice ends the session before any output,
 # and a launch carrying parent prim stencils on two levels is refused by name.
-# every arm runs as a fresh process, the tiled ones as host tiles on a cpu
-# build.
+# a ppm level-2 face and a plm level-3 face on cuts prime from their parents'
+# crossed cut halos: their step-zero and evolved checkpoints equal the single
+# grid's on host tiles and launch. every arm runs as a fresh process, the tiled
+# ones as host tiles on a cpu build.
 #
 # run: pytest -m simulation simbi/simulation/tests/test_tiled_nested_face_on_cut.py
 # =============================================================================
@@ -56,17 +58,24 @@ NESTED_REACH = 4
 
 
 def _script(path: Path, level_2: list[float], level_1: list[float] = LEVEL_1) -> str:
+    return _nested_script(path, [level_1, level_2])
+
+
+def _nested_script(path: Path, regions: list[list[float]], order: int | None = None) -> str:
+    """the refined blast over the nested `regions`, each [x_lo, x_hi, y_lo, y_hi] refining the one
+    before it by two; `order` 3 runs ppm with rk3"""
     path.write_text(
         "from typing import Annotated\n"
         "from simbi import ProblemParam\n"
         "from simbi_configs.examples.newtonian.refined_blast import RefinedBlast\n\n\n"
         "class NestedFaceOnCut(RefinedBlast):\n"
-        "    refinement_max_levels: Annotated[int, ProblemParam(3, description='coarse + 2 fine')]\n"
+        f"    refinement_max_levels: Annotated[int, ProblemParam({len(regions) + 1}, description='levels')]\n"
         "    refinement_regions: Annotated[\n"
         "        list[list[float]],\n"
-        f"        ProblemParam([{level_1!r}, {level_2!r}], description='nested patches'),\n"
+        f"        ProblemParam({regions!r}, description='nested patches'),\n"
         "    ]\n"
-        "    refinement_ratios: Annotated[list[int], ProblemParam([2, 2], description='ratio per jump')]\n"
+        f"    refinement_ratios: Annotated[list[int], ProblemParam({[2] * len(regions)!r}, description='ratio per jump')]\n"
+        + (f"    order: Annotated[int, ProblemParam({order}, description='order of accuracy')]\n" if order is not None else "")
     )
     return str(path)
 
@@ -267,3 +276,39 @@ def test_parent_prim_stencils_on_two_levels_are_refused_on_launch(tmp_path: Path
     assert done.returncode != 0, "the launch with stencils on two levels ran"
     assert not list(out.glob("*.h5")), "output was written before the refusal"
     assert "parent prim stencils on 2 levels of one launched session" in " ".join((done.stderr + done.stdout).split()), done.stderr[-3000:]
+
+
+@pytest.mark.parametrize(
+    ("regions", "order"),
+    [
+        # ppm: a level-2 face on the level-1 cut at x = 0 reads level 1's exchanged halo
+        ([LEVEL_1, FACES["low"]], 3),
+        # plm: a level-3 face on the level-2 cut at x = 0 reads a level-2 prim stencil
+        ([LEVEL_1, [-0.125, 0.125, -0.125, 0.125], [0.0, 0.0625, -0.0625, 0.0625]], None),
+        # ppm: levels 1 and 2 span the cut, no face on it; level 2's coarse-fine ghosts beside the
+        # cut prolong from level 1's cells across it
+        ([LEVEL_1, [-0.125, 0.125, -0.125, 0.125]], 3),
+    ],
+    ids=["ppm-level-2", "plm-level-3", "ppm-spanning"],
+)
+def test_the_primed_state_of_a_nested_face_on_a_cut_matches_the_single_grid(tmp_path: Path, regions: list[list[float]], order: int | None) -> None:
+    """every level primes from its parent's crossed cut halos, coarsest first: the step-zero
+    checkpoint of host tiles and of a launch, the deepest patch's coarse-fine ghosts beside the cut
+    included, equals the single grid's bit for bit, and so does the state after several steps"""
+    script = _nested_script(tmp_path / "nested.py", regions, order)
+    deepest = f"level_{len(regions)}"
+    layout = _layout(tmp_path / "two.toml", workers=2, cuts=[[16], []])
+    one = _capped(script, tmp_path / "one", 1, STEPS)
+    tiles = _capped(script, tmp_path / "tiles", 2, STEPS, [[16], []])
+    launched = _launched(_launch(script, tmp_path / "launched", layout, STEPS), tmp_path / "launched", 2)
+
+    def initial(final: Path) -> Path:
+        (first,) = sorted(final.parent.glob("*.chkpt.000_000.h5"))
+        return first
+
+    with h5py.File(initial(one), "r") as f:
+        assert deepest in f, f"the single grid wrote no {deepest}; the gate is vacuous"
+        assert int(f["level_0"].attrs["iteration"]) == 0, "the first checkpoint is not the primed state"
+    for label, run in (("host tiles", tiles), ("a launch", launched)):
+        assert_same_checkpoint(initial(run), initial(one), f"{label} at step zero", expect=["level_1", deepest])
+        assert_same_checkpoint(run, one, f"{label} after {STEPS} steps", expect=["level_1", deepest])

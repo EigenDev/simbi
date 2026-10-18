@@ -147,6 +147,10 @@ impl PhaseTable {
         }
         if substeps > 0 {
             phases.push(Phase { point: ExchangePoint::Primed, skippable: false, init_only: true });
+            // each refined level's primed state across its cuts, coarsest first, on every worker
+            for level in 1..depth {
+                phases.push(Phase { point: ExchangePoint::PrimedLevel { level }, skippable: false, init_only: true });
+            }
         }
         phases.push(Phase { point: ExchangePoint::Audit(AuditAt::Prime), skippable: true, init_only: true });
         // a flat run's horizon excision refreshes the cut halos after its sweep and its rebuild,
@@ -487,12 +491,16 @@ mod tests {
         assert!(bytes(ExchangePoint::TracerCoefficients) < bytes(ExchangePoint::PostStep));
         assert!(bytes(ExchangePoint::PostStep) < bytes(ExchangePoint::PostBody));
         assert!(bytes(ExchangePoint::PostBody) < bytes(ExchangePoint::Rollback));
-        // the primed root crosses the cuts after the prime and before the prime audit, once
+        // the primed root crosses the cuts after the prime, then the primed fine level, both before
+        // the prime audit, once
         assert!(bytes(ExchangePoint::Prime) < bytes(ExchangePoint::Primed));
-        assert!(bytes(ExchangePoint::Primed) < bytes(ExchangePoint::Audit(AuditAt::Prime)));
+        assert!(bytes(ExchangePoint::Primed) < bytes(ExchangePoint::PrimedLevel { level: 1 }));
+        assert!(bytes(ExchangePoint::PrimedLevel { level: 1 }) < bytes(ExchangePoint::Audit(AuditAt::Prime)));
         let r = t.rules();
         let b = |p| t.byte_of(p).unwrap() as usize;
         assert!(r.init_only[b(ExchangePoint::Primed)] && !r.skippable[b(ExchangePoint::Primed)]);
+        let primed_fine = b(ExchangePoint::PrimedLevel { level: 1 });
+        assert!(r.init_only[primed_fine] && !r.skippable[primed_fine], "every worker walks the primed fine level");
         assert_eq!(PhaseTable::flat(2).unwrap().byte_of(ExchangePoint::Primed), None, "a flat table primes no refined level");
         // a declared target's probe on each level, after the seeds and before the primed root:
         // every level's halos coarsest first, then every level's probe flags
@@ -512,8 +520,9 @@ mod tests {
             assert!(coefficients < bytes(ExchangePoint::Fine { substep: s, point: FinePoint::PostTail }));
             assert!(r.skippable[coefficients as usize]);
         }
-        // 5 + 2 * 2 + 3 * 2 + 1 + 2 * (1 + 3 * 2 + 1 + 2) + 3 + 6
-        assert_eq!(t.len(), 45);
+        // 5 + 2 * 2 + 3 * 2 + 1 + 1 + 2 * (1 + 3 * 2 + 1 + 2) + 3 + 6: the primed root, then the
+        // primed fine level
+        assert_eq!(t.len(), 46);
         let flat = PhaseTable::flat(2).unwrap();
         assert_ne!(flat.digest(), t.digest());
         assert_eq!(PhaseTable::flat(2).unwrap().digest(), flat.digest());
@@ -525,9 +534,15 @@ mod tests {
         let bytes = |p| t.byte_of(p).unwrap_or_else(|| panic!("the table holds no {p:?}"));
         assert!(bytes(ExchangePoint::Prime) < bytes(ExchangePoint::Seed { level: 2 }));
         assert!(bytes(ExchangePoint::Seed { level: 2 }) < bytes(ExchangePoint::Primed));
+        // each refined level's primed state crosses its cuts after its parent's, coarsest first
+        assert!(bytes(ExchangePoint::Primed) < bytes(ExchangePoint::PrimedLevel { level: 1 }));
+        assert!(bytes(ExchangePoint::PrimedLevel { level: 1 }) < bytes(ExchangePoint::PrimedLevel { level: 2 }));
+        assert!(bytes(ExchangePoint::PrimedLevel { level: 2 }) < bytes(ExchangePoint::Audit(AuditAt::Prime)));
+        assert_eq!(t.byte_of(ExchangePoint::PrimedLevel { level: 3 }), None, "a three-level table primes levels 1 and 2");
         let r = t.rules();
         let b = |p| t.byte_of(p).unwrap() as usize;
         assert!(r.init_only[b(ExchangePoint::Seed { level: 2 })] && r.skippable[b(ExchangePoint::Seed { level: 2 })]);
+        assert!(!r.skippable[b(ExchangePoint::PrimedLevel { level: 2 })], "every worker walks the primed level 2");
         for s in 0..2u32 {
             let fine = |point| ExchangePoint::Fine { substep: s as u8, point };
             let nested = |path, point| ExchangePoint::Nested { level: 2, path, point };

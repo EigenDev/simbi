@@ -3023,22 +3023,16 @@ where
         }
     }
 
-    /// the refined levels of a tile reading a prim stencil, from the stencil gathered over the primed
-    /// roots: each level prolonged at the current state and physically filled coarsest-first, as the
-    /// single hierarchy's prime does, when `prolong`; the stencil is invalidated after
-    pub fn prolong_from_prim_stencil(&mut self, prolong: bool) {
-        self.prolong_from_prim_stencil_at(1, prolong);
-    }
-
-    /// `prolong_from_prim_stencil` for the stencil of level `level`: the levels from `level` down
-    /// prolonged and filled coarsest-first when `prolong`, the stencil invalidated after
-    pub fn prolong_from_prim_stencil_at(&mut self, level: usize, prolong: bool) {
+    /// prime refined level `level` again once its parent's cut halos crossed: the level prolonged
+    /// at the current state, from its gathered prim stencil when it reads one, and physically filled,
+    /// as the single hierarchy's prime does, when `prolong`; a resumed level keeps the coarse-fine
+    /// ghosts it loaded. the level's stencil is invalidated after
+    pub fn reprime_level(&mut self, level: usize, prolong: bool) {
+        self.mark_prim_stencil_filled_of(level);
         if prolong {
             self.priming = true;
-            for ll in level..self.levels.len() {
-                self.prolong_cf(ll, 1.0);
-                self.fill_physical_ghosts(ll);
-            }
+            self.prolong_cf(level, 1.0);
+            self.fill_physical_ghosts(level);
             self.priming = false;
         }
         if let Some(stencil) = self.prim_stencil_at(level) {

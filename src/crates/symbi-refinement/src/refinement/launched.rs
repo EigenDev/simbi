@@ -1240,47 +1240,51 @@ where
         // stage reads those cells across the cuts (an edge EMF differences the faces there). a
         // resumed run exchanges its loaded root here as well, so every worker walks one table
         {
-            let prims = root_fields!();
-            let fine = fine_fields!();
-            let nested: Vec<_> = (2..depth).map(|level| level_fields!(level, plan_fields)).collect();
-            let mut parts = vec![
-                PlanPart { plan: &plans.root, fields: &prims, devices: held.root_devices, fault: None, dst_fields: None },
-                PlanPart { plan: &plans.fine, fields: &fine, devices: held.fine_devices, fault: None, dst_fields: None },
-            ];
-            for (i, level) in plans.nested.iter().enumerate() {
-                parts.push(PlanPart { plan: &level.state, fields: &nested[i], devices: held.level_devices(i + 2), fault: None, dst_fields: None });
-            }
-            // the primed roots into every refined tile's prim stencil at both time levels
-            let (_, now, stencil_old, stencil_new) = prim_stencil_fields!();
-            if let Some((old, new)) = plans.prim_stencil.as_ref() {
-                parts.push(PlanPart { plan: old, fields: &now, devices: held.root_devices, fault: None, dst_fields: Some(&stencil_old) });
-                parts.push(PlanPart { plan: new, fields: &now, devices: held.root_devices, fault: None, dst_fields: Some(&stencil_new) });
-            }
-            // and the primed parent level into a nested level's prim stencil
-            let nested_prim: Vec<[Vec<Vec<&Field<f64, D, Mem>>>; 4]> =
-                (0..plans.nested.len()).map(|i| if plans.nested[i].prim_stencil.is_some() { nested_prim_stencil_lists(tiles, held, i + 2) } else { std::array::from_fn(|_| Vec::new()) }).collect();
-            for (i, nested) in plans.nested.iter().enumerate() {
-                if let Some((old, new)) = nested.prim_stencil.as_ref() {
-                    let [_, now, old_dst, new_dst] = &nested_prim[i];
-                    let devices = held.level_devices(i + 1);
-                    parts.push(PlanPart { plan: old, fields: now, devices, fault: None, dst_fields: Some(old_dst) });
-                    parts.push(PlanPart { plan: new, fields: now, devices, fault: None, dst_fields: Some(new_dst) });
+            // the primed root across its cuts, and into every refined tile's level-1 prim stencil at
+            // both time levels
+            {
+                let prims = root_fields!();
+                let (_, now, stencil_old, stencil_new) = prim_stencil_fields!();
+                let mut parts = vec![PlanPart { plan: &plans.root, fields: &prims, devices: held.root_devices, fault: None, dst_fields: None }];
+                if let Some((old, new)) = plans.prim_stencil.as_ref() {
+                    parts.push(PlanPart { plan: old, fields: &now, devices: held.root_devices, fault: None, dst_fields: Some(&stencil_old) });
+                    parts.push(PlanPart { plan: new, fields: &now, devices: held.root_devices, fault: None, dst_fields: Some(&stencil_new) });
+                }
+                exchange_point_plans(&parts, transport, fabric, ExchangePoint::Primed, 0, 0, deadline, &mut timing.exchange)
+                    .map_err(|e| fail(fabric, e.into()))?;
+                for (k, h) in tiles.iter().enumerate() {
+                    with_device(root_dev(k), || h.levels[0].kernels.ghost_fill(&h.levels[0].state));
                 }
             }
-            exchange_point_plans(&parts, transport, fabric, ExchangePoint::Primed, 0, 0, deadline, &mut timing.exchange)
-                .map_err(|e| fail(fabric, e.into()))?;
-            for (k, h) in tiles.iter().enumerate() {
-                for level in &h.levels {
-                    with_device(root_dev(k), || level.kernels.ghost_fill(&level.state));
+            // level by level, coarsest first, on every worker: a fresh gas level primes again from its
+            // parent's crossed cut halos (and its gathered prim stencil), as the single hierarchy's
+            // prime prolongs from its parent's interior, a resumed level keeping the coarse-fine ghosts
+            // it loaded; then the level's cut halos cross, and the next level's prim stencils gather
+            // from its primed cells
+            for level in 1..depth {
+                for (k, h) in tiles.iter_mut().enumerate() {
+                    if h.levels.len() > level {
+                        let gas = h.levels[level].state.fields.mhd.is_none();
+                        with_device(root_dev(k), || h.reprime_level(level, gas && !cfg.restart));
+                    }
                 }
-            }
-            // a fresh start prolongs the refined levels of each stencil tile from the gathered
-            // primed roots, as the single hierarchy's prime does; a resumed run keeps the loaded
-            // coarse-fine ghosts. the stencil is invalid again until the first attempt gathers it
-            for (k, h) in tiles.iter_mut().enumerate() {
-                if let Some(level) = (1..h.levels.len()).find(|&level| h.prim_stencil_at(level).is_some()) {
-                    h.mark_prim_stencil_filled_of(level);
-                    with_device(root_dev(k), || h.prolong_from_prim_stencil_at(level, !cfg.restart));
+                let state = level_fields!(level, plan_fields);
+                let state_plan = if level == 1 { &plans.fine } else { &plans.nested[level - 2].state };
+                let devices = held.level_devices(level);
+                let child = plans.nested.get(level - 1).and_then(|n| n.prim_stencil.as_ref());
+                let [_, now, old_dst, new_dst] =
+                    if child.is_some() { nested_prim_stencil_lists(tiles, held, level + 1) } else { std::array::from_fn(|_| Vec::new()) };
+                let mut parts = vec![PlanPart { plan: state_plan, fields: &state, devices, fault: None, dst_fields: None }];
+                if let Some((old, new)) = child {
+                    parts.push(PlanPart { plan: old, fields: &now, devices, fault: None, dst_fields: Some(&old_dst) });
+                    parts.push(PlanPart { plan: new, fields: &now, devices, fault: None, dst_fields: Some(&new_dst) });
+                }
+                exchange_point_plans(&parts, transport, fabric, ExchangePoint::PrimedLevel { level: level as u8 }, 0, 0, deadline, &mut timing.exchange)
+                    .map_err(|e| fail(fabric, e.into()))?;
+                for (k, h) in tiles.iter().enumerate() {
+                    if h.levels.len() > level {
+                        with_device(root_dev(k), || h.levels[level].kernels.ghost_fill(&h.levels[level].state));
+                    }
                 }
             }
         }
@@ -3101,23 +3105,26 @@ pub fn face_stencil_boxes_of_level_tile<const D: usize>(
     Some(super::transfer::face_stencil_boxes(&interior, &boundaries))
 }
 
-/// the parent prim stencil of the fine level of every root tile, in whole-grid root cell indices,
-/// derived from the partition and the patch alone as the hierarchy's builder derives it: a tile
-/// holding a real patch face on a cut, under a root halo of `ng` cells shallower than the
-/// prolongation reach, holds the patch coverage grown by that reach, past its allocation on those
-/// sides and clipped to it elsewhere; every other tile holds none. `wraps` names the root axes
+/// the parent prim stencil of the fine level of every tile of a partition, in whole-partition cell
+/// indices, derived from the partition and the patch alone as the hierarchy's builder derives it:
+/// a tile holding a real patch face on a cut, under a parent halo of `ng` cells shallower than the
+/// prolongation reach of the fine level's `fine_ng` ghosts, holds the patch coverage grown by that
+/// reach, past its allocation on those sides and clipped to it elsewhere; every other tile holds
+/// none. every refined level carries one ghost cell more than the root, so a first level's
+/// `fine_ng` is the root's `ng + 1` and a nested level's equals its parent's `ng`. `wraps` names the root axes
 /// closed into a ring, where a cut domain face is a seam and a patch spanning the axis wraps across it.
 /// `Hierarchy::prim_stencil` of a held tile equals its entry, in the tile's own index space
 pub fn prim_stencil_boxes<const D: usize>(
     partition: &symbi_sim::decomp::Partition<D>,
     patch: [(usize, usize); D],
     ng: usize,
+    fine_ng: usize,
     order: super::transfer::ProlongOrder,
     wraps: [bool; D],
 ) -> Vec<Option<[symbi_sim::atlas::Span; D]>> {
     use symbi_sim::atlas::Span;
     let counts = partition.counts();
-    let reach = ((ng + 1).div_ceil(RATIO) + order.ghost_width()) as isize;
+    let reach = (fine_ng.div_ceil(RATIO) + order.ghost_width()) as isize;
     let cells: [usize; D] = std::array::from_fn(|a| {
         (0..counts[a]).map(|ii| { let mut tc = [0; D]; tc[a] = ii; partition.tile_extents(tc)[a].1 }).sum()
     });

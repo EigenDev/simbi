@@ -11798,7 +11798,7 @@ where
         let ng = h.levels[0].state.geom.ng;
         let ring = grid.topology(layout.partition.counts());
         let wraps: [bool; D] = std::array::from_fn(|ax| ring.is_periodic(ax));
-        let boxes = symbi::sim::refinement::launched::prim_stencil_boxes(&layout.partition, layout.patch, ng, prolong_order_for(&cfg.reconstruction_name), wraps);
+        let boxes = symbi::sim::refinement::launched::prim_stencil_boxes(&layout.partition, layout.patch, ng, ng + 1, prolong_order_for(&cfg.reconstruction_name), wraps);
         let held = h.prim_stencil().map(|st| -> [symbi_sim::atlas::Span; D] {
             std::array::from_fn(|ax| symbi_sim::atlas::Span { lo: st.domain.spaces[ax].lo + tile.offset[ax] as isize, hi: st.domain.spaces[ax].hi + tile.offset[ax] as isize })
         });
@@ -11833,7 +11833,7 @@ where
         for parent in 1..patches.len() {
             let Some((t, frame)) = nested_tile_of(&layout.partition, &parts, &patches, TileId(flat as u32), parent) else { continue };
             let part = &parts[parent - 1].partition;
-            let boxes = prim_stencil_boxes(part, patches[parent], ng, prolong_order_for(&cfg.reconstruction_name), [false; D]);
+            let boxes = prim_stencil_boxes(part, patches[parent], ng, ng, prolong_order_for(&cfg.reconstruction_name), [false; D]);
             let ext = part.tile_extents(unflatten(t.0 as usize, part.counts()));
             let held = h.prim_stencil_at(parent + 1).map(|st| -> [symbi_sim::atlas::Span; D] {
                 std::array::from_fn(|ax| {
@@ -12331,7 +12331,7 @@ where
     let prim_stencil_plan = if magnetized {
         None
     } else {
-        let boxes = symbi::sim::refinement::launched::prim_stencil_boxes(partition, patch, ng, prolong_order_for(&cfg.reconstruction_name), std::array::from_fn(|ax| wrap.is_periodic(ax)));
+        let boxes = symbi::sim::refinement::launched::prim_stencil_boxes(partition, patch, ng, ng + 1, prolong_order_for(&cfg.reconstruction_name), std::array::from_fn(|ax| wrap.is_periodic(ax)));
         if boxes.iter().any(Option::is_some) {
             let schema = (0..cons_schema.len()).fold(symbi_sim::atlas::FieldSchema::new(), |schema, k| schema.cell(&format!("prim_stencil_{k}")));
             let plan = ExchangePlan::cell_stencil(partition, &wrap, &boxes, &schema, ng).map_err(|e| e.to_string())?;
@@ -12529,7 +12529,7 @@ where
         let flux = ExchangePlan::flux_contributions_shifted(parent_part, &open, rel, ng + 1, cons_schema.len(), &|t: TileId| frames[t.0 as usize])
             .map_err(|e| e.to_string())?;
         nested_flux_plans.push((flux.transfers().count() > 0).then_some(flux));
-        let boxes = symbi::sim::refinement::launched::prim_stencil_boxes(parent_part, rel, ng + 1, prolong_order_for(&cfg.reconstruction_name), [false; D]);
+        let boxes = symbi::sim::refinement::launched::prim_stencil_boxes(parent_part, rel, ng + 1, ng + 1, prolong_order_for(&cfg.reconstruction_name), [false; D]);
         nested_prim_plans.push(if boxes.iter().any(Option::is_some) {
             let schema = (0..cons_schema.len()).fold(symbi_sim::atlas::FieldSchema::new(), |schema, k| schema.cell(&format!("prim_stencil_{k}")));
             Some(

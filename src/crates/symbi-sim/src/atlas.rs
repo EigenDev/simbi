@@ -362,6 +362,10 @@ pub enum ExchangePoint {
     NestedRestrict { level: u8, path: u32 },
     /// at initialization, before level `level >= 2` is seeded by prolongation: the conserved
     /// halos of level `level - 1` cross its cuts
+    /// refined level `level`'s state after the prime, its cut halos crossing coarsest level
+    /// first: each level primes from its parent's crossed halos before its own cross, and the next
+    /// level's parent prim stencils gather from it here
+    PrimedLevel { level: u8 },
     Seed { level: u8 },
     /// after the horizon-excision sweep of stage `k`, or of the accepted step's post-step
     /// operations when `k` is the stage count: the cut halos carry the swept cells before the
@@ -473,7 +477,11 @@ impl ExchangePoint {
     pub fn is_fine(self) -> bool {
         matches!(
             self,
-            ExchangePoint::Fine { .. } | ExchangePoint::Nested { .. } | ExchangePoint::NestedRestrict { .. } | ExchangePoint::Seed { .. }
+            ExchangePoint::Fine { .. }
+                | ExchangePoint::Nested { .. }
+                | ExchangePoint::NestedRestrict { .. }
+                | ExchangePoint::Seed { .. }
+                | ExchangePoint::PrimedLevel { .. }
         )
     }
 
@@ -535,6 +543,7 @@ impl ExchangePoint {
                 (37, (level as u32) << 24 | path, (hop as u32) << 3 | (axis as u32) << 1 | high as u32)
             }
             ExchangePoint::BandStart { level, path } => (43, (level as u32) << 24 | path, 0),
+            ExchangePoint::PrimedLevel { level } => (44, level as u32, 0),
         };
         kind << 56 | (a as u64) << 16 | (b as u64 & 0xffff)
     }
@@ -1621,6 +1630,7 @@ impl<const D: usize> ExchangePlan<D> {
             | ExchangePoint::Nested { .. }
             | ExchangePoint::NestedRestrict { .. }
             | ExchangePoint::Seed { .. }
+            | ExchangePoint::PrimedLevel { .. }
             | ExchangePoint::TracerCoefficients
             | ExchangePoint::RootCoefficients
             | ExchangePoint::BandSeam { .. } => false,

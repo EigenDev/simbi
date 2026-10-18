@@ -801,3 +801,44 @@ fn primed_cut_ghosts_hold_the_neighbors_interior() {
         assert!(differing.is_empty(), "ng {ng}: {} of {} cut ghosts differ from the neighbor's interior, first {:?}", differing.len(), ghosts.len(), differing.first());
     }
 }
+
+/// the session's parent prim stencil boxes, derived from the level partitions alone, equal each
+/// tile's built stencil on every nested level: under ppm (root ng 3, every refined level ng 4) a
+/// level-2 face on a level-1 cut reads none, the reach of level 2's four ghosts lying inside level
+/// 1's halo of four; under plm a level-3 face on a level-2 cut reads one
+#[test]
+fn nested_stencil_boxes_match_the_built_stencils() {
+    use symbi::sim::refinement::launched::{nested_tile_of, prim_stencil_boxes};
+    let partition = Partition::explicit([N, N], [vec![16], vec![]]).expect("cuts inside the grid");
+    let ppm = vec![regions()[0].clone(), RefinementRegion { x_lo: [0.5, 0.375], x_hi: [0.625, 0.625] }];
+    let plm3 = vec![
+        regions()[0].clone(),
+        RefinementRegion { x_lo: [0.375, 0.375], x_hi: [0.625, 0.625] },
+        RefinementRegion { x_lo: [0.5, 0.4375], x_hi: [0.5625, 0.5625] },
+    ];
+    for (label, whole, scheme, stencils) in [("ppm level 2", ppm, PPM, 0), ("plm level 3", plm3, plm(2), 1)] {
+        let tiles = build_tiles_contributing(&partition, &whole, scheme, true).expect("tile hierarchies");
+        let patches = nested_patches(&whole);
+        let fine = nested_partitions(&partition, &patches).expect("level partitions");
+        let ng = scheme.ng + 1;
+        let mut held = 0;
+        for parent in 1..patches.len() {
+            let part = &fine[parent - 1].partition;
+            let boxes = prim_stencil_boxes(part, patches[parent], ng, ng, scheme.prolong, [false; 2]);
+            for (flat, h) in tiles.iter().enumerate() {
+                let Some((t, frame)) = nested_tile_of(&partition, &fine, &patches, TileId(flat as u32), parent) else { continue };
+                let ext = part.tile_extents(unflatten(t.0 as usize, part.counts()));
+                let built = h.prim_stencil_at(parent + 1).map(|st| -> [(isize, isize); 2] {
+                    std::array::from_fn(|a| {
+                        let shift = ext[a].0 as isize - frame[a];
+                        (st.domain.spaces[a].lo + shift, st.domain.spaces[a].hi + shift)
+                    })
+                });
+                let session = boxes[t.0 as usize].map(|b| -> [(isize, isize); 2] { std::array::from_fn(|a| (b[a].lo, b[a].hi)) });
+                assert_eq!(built, session, "{label}: level-{} stencil of root tile {flat}", parent + 1);
+                held += usize::from(built.is_some());
+            }
+        }
+        assert_eq!(held, stencils, "{label}: {held} nested stencils");
+    }
+}
