@@ -118,7 +118,57 @@ def test_negative_checkpoint_theta_maps_back_to_vanleer():
     _Meta.plm_theta = 1.8
     config = metadata_to_config_dict(_Meta(), (128,))
     assert config["plm_theta"] == 1.8
-    assert "limiter" not in config
+    # a nonnegative recorded theta names the minmod family: a config declaring van leer
+    # resumes the recorded minmod series
+    assert config["limiter"] == Limiter.MINMOD
+
+
+def test_the_backend_receives_the_selected_limiter():
+    # the backend selects van leer from plm_theta < 0 and reads no limiter field, so the
+    # execution dict carries the selection in plm_theta; minmod passes its compression through
+    from simbi.simulation.runner import to_execution_dict
+
+    vanleer = to_execution_dict(GrBondiKS.from_cli(["--limiter", "vanleer"]))
+    assert vanleer["plm_theta"] < 0.0, "van leer reached the backend as the minmod family"
+    minmod = to_execution_dict(GrBondiKS.from_cli(["--plm-theta", "1.8"]))
+    assert minmod["plm_theta"] == 1.8
+
+
+def test_a_vanleer_checkpoint_resumes_under_vanleer_at_the_backend(monkeypatch, tmp_path):
+    # the recorded -1 restores the limiter selection and the resumed run's execution dict
+    # carries it back to the backend
+    from simbi.simulation import checkpoint as cp
+    from simbi.simulation.runner import to_execution_dict
+
+    monkeypatch.setattr(cp, "load_checkpoint_metadata", lambda _p: (_nmhd_meta(plm_theta=-1.0), (32, 32)))
+    from simbi_configs.examples.newtonian.refined_mhd_blast import RefinedMhdBlast
+
+    merged = cp.merge_with_checkpoint(RefinedMhdBlast.from_cli([]), tmp_path / "fake.h5")
+    assert merged.limiter == Limiter.VAN_LEER
+    assert to_execution_dict(merged)["plm_theta"] < 0.0
+
+
+def test_a_ppm_restart_continues_the_recorded_flatten(monkeypatch, tmp_path):
+    # the flatten dials are scheme parameters: a resume without flags continues the recorded
+    # pair, an explicit demand for another pair is refused by name, and a checkpoint predating
+    # the attributes keeps the config's own dials
+    from simbi.simulation import checkpoint as cp
+    from simbi_configs.examples.newtonian.refined_mhd_blast import RefinedMhdBlast
+
+    recorded = _nmhd_meta(reconstruction="ppm", ppm_flatten_onset=0.015, ppm_flatten_full=0.05)
+    monkeypatch.setattr(cp, "load_checkpoint_metadata", lambda _p: (recorded, (32, 32)))
+    merged = cp.merge_with_checkpoint(RefinedMhdBlast.from_cli(["--reconstruction", "ppm"]), tmp_path / "fake.h5")
+    assert (merged.ppm_flatten_onset, merged.ppm_flatten_full) == (0.015, 0.05), "the resume dropped the recorded flatten"
+    with pytest.raises(ConfigError, match="ppm_flatten_full"):
+        cp.merge_with_checkpoint(
+            RefinedMhdBlast.from_cli(["--reconstruction", "ppm", "--ppm-flatten-full", "0.1"]), tmp_path / "fake.h5"
+        )
+
+    legacy = _nmhd_meta(reconstruction="ppm", ppm_flatten_onset=None, ppm_flatten_full=None)
+    monkeypatch.setattr(cp, "load_checkpoint_metadata", lambda _p: (legacy, (32, 32)))
+    declared = ["--reconstruction", "ppm", "--ppm-flatten-onset", "0.02", "--ppm-flatten-full", "0.04"]
+    merged = cp.merge_with_checkpoint(RefinedMhdBlast.from_cli(declared), tmp_path / "fake.h5")
+    assert (merged.ppm_flatten_onset, merged.ppm_flatten_full) == (0.02, 0.04)
 
 
 def test_checkpoint_restores_every_geometric_spacing_ratio():
@@ -229,6 +279,8 @@ def _nmhd_meta(**overrides):
         level_substeps = ()
         subcycling_mode = "none"
         ct_method = "uct"
+        ppm_flatten_onset = 0.0
+        ppm_flatten_full = 0.0
 
     meta = _Meta()
     for key, value in overrides.items():

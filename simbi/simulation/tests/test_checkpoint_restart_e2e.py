@@ -339,3 +339,50 @@ def test_python_runner_preserves_distinct_body_accretion_reservoirs(tmp_path):
         owners = restarted["tracers/owner"][:]
         assert np.count_nonzero(owners == prefix) > 0
         assert np.count_nonzero(owners == (prefix | np.uint64(1))) > 0
+
+
+def _density(path: Path) -> np.ndarray:
+    with h5py.File(path, "r") as f:
+        return np.concatenate([f[name][...].ravel() for name in _density_datasets(f)])
+
+
+def _density_datasets(f: h5py.File) -> list[str]:
+    names: list[str] = []
+    f.visit(lambda name: names.append(name) if name.endswith("rho") and isinstance(f[name], h5py.Dataset) else None)
+    assert names, "the checkpoint holds no density dataset; the comparison is vacuous"
+    return sorted(names)
+
+
+@pytest.mark.simulation
+def test_the_van_leer_selection_reaches_the_kernel(tmp_path):
+    # the run records the kernel spelling of its limiter and evolves a different state from
+    # the minmod family it was formerly handed
+    from simbi.types.input import Limiter
+
+    run(SodProblem(data_directory=tmp_path / "minmod"), compute_mode="cpu", max_steps=20)
+    run(SodProblem(limiter=Limiter.VAN_LEER, data_directory=tmp_path / "vanleer"), compute_mode="cpu", max_steps=20)
+    with h5py.File(_final(tmp_path / "vanleer"), "r") as f:
+        assert float(f["metadata"].attrs["plm_theta"]) < 0.0, "the run recorded the minmod family"
+    assert not np.array_equal(_density(_final(tmp_path / "minmod")), _density(_final(tmp_path / "vanleer")))
+
+
+@pytest.mark.simulation
+def test_a_ppm_restart_continues_the_recorded_flatten_bitwise(tmp_path):
+    # a flattened ppm run resumed from a config that leaves the dials at their defaults
+    # matches the uninterrupted flattened run exactly
+    from simbi.types.input import Reconstruction
+
+    ppm = {"reconstruction": Reconstruction.PPM}
+    dials = {"ppm_flatten_onset": 0.015, "ppm_flatten_full": 0.05}
+    run(SodProblem(**ppm, data_directory=tmp_path / "plain"), compute_mode="cpu", max_steps=6)
+    run(SodProblem(**ppm, **dials, data_directory=tmp_path / "continuous"), compute_mode="cpu", max_steps=6)
+    assert not np.array_equal(_density(_final(tmp_path / "plain")), _density(_final(tmp_path / "continuous"))), (
+        "the flatten never acted on this setup; the restart comparison is vacuous"
+    )
+    run(SodProblem(**ppm, **dials, data_directory=tmp_path / "split"), compute_mode="cpu", max_steps=3)
+    run(
+        SodProblem(**ppm, data_directory=tmp_path / "restarted", checkpoint_file=_final(tmp_path / "split")),
+        compute_mode="cpu",
+        max_steps=6,
+    )
+    np.testing.assert_array_equal(_density(_final(tmp_path / "continuous")), _density(_final(tmp_path / "restarted")))

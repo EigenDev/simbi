@@ -132,6 +132,12 @@ def to_execution_dict(problem: SimbiProblem) -> dict[str, Any]:
 
     _validate_expression_payloads(model_dict)
 
+    # the backend selects the van leer limiter from plm_theta < 0 and reads no limiter field;
+    # the model keeps the user's positive compression, so the selection is spelled here
+    limiter = model_dict.get("limiter")
+    if getattr(limiter, "value", limiter) == "vanleer":
+        model_dict["plm_theta"] = -1.0
+
     # the problem's class name — shown in the rust run dashboard header.
     model_dict["name"] = type(problem).__name__
     config_source, config_sha256 = _config_source_identity(problem)

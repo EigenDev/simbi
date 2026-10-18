@@ -69,3 +69,19 @@ def test_boundary_conditions_read_from_scalar_metadata(tmp_path) -> None:
         "reflecting",
         "outflow",
     )
+
+
+def test_ppm_flatten_attrs_round_trip(tmp_path) -> None:
+    path = tmp_path / "flatten.h5"
+    _write_meta(path, {"ppm_flatten_onset": 0.015, "ppm_flatten_full": 0.05})
+    with h5py.File(path, "r") as f:
+        meta = read_metadata(f["metadata"]).unwrap()
+    assert (meta.ppm_flatten_onset, meta.ppm_flatten_full) == (0.015, 0.05)
+
+
+def test_missing_ppm_flatten_attrs_read_as_none(tmp_path) -> None:
+    path = tmp_path / "legacy_flatten.h5"
+    _write_meta(path, {})
+    with h5py.File(path, "r") as f:
+        meta = read_metadata(f["metadata"]).unwrap()
+    assert meta.ppm_flatten_onset is None and meta.ppm_flatten_full is None

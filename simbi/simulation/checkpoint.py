@@ -94,7 +94,17 @@ def metadata_to_config_dict(
     if float(metadata.plm_theta) < 0.0:
         config["limiter"] = Limiter.VAN_LEER
     else:
+        config["limiter"] = Limiter.MINMOD
         config["plm_theta"] = float(metadata.plm_theta)
+
+    # the ppm flatten dials shape every face of a ppm run, so a resume continues the recorded
+    # pair. they are recorded on every checkpoint new enough to carry them and act under ppm
+    # alone, where the dials of any other scheme sit at the configuration's inert defaults.
+    if str(metadata.reconstruction) == Reconstruction.PPM.value:
+        for dial in ("ppm_flatten_onset", "ppm_flatten_full"):
+            recorded = getattr(metadata, dial, None)
+            if recorded is not None:
+                config[dial] = float(recorded)
 
     config.update({
         "checkpoint_interval": float(metadata.checkpoint_interval),

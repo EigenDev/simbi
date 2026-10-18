@@ -541,6 +541,12 @@ def read_metadata(meta_group: h5py.Group) -> Result[Metadata, str]:
                 schwarzschild_mass=float(attrs.get("schwarzschild_mass", 0.0)),
                 equilibrium_target=decode_str(attrs.get("equilibrium_target", "")),
                 ct_method=decode_str(attrs.get("ct_method", "")),
+                ppm_flatten_onset=(
+                    float(attrs["ppm_flatten_onset"]) if "ppm_flatten_onset" in attrs else None
+                ),
+                ppm_flatten_full=(
+                    float(attrs["ppm_flatten_full"]) if "ppm_flatten_full" in attrs else None
+                ),
             )
         )
     except Exception as e:

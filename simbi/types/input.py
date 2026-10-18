@@ -377,6 +377,9 @@ class Metadata:
     # the constant sound speed of an isothermal run; None on energy regimes
     # and on isothermal checkpoints written before the attr existed.
     sound_speed: float | None = None
+    # the ppm flatten dials (onset, full); None on checkpoints written before the attrs existed
+    ppm_flatten_onset: float | None = None
+    ppm_flatten_full: float | None = None
 
     # the background spacetime chart
     # (minkowski/schwarzschild/schwarzschild_ks/kerr_ks),
