@@ -11,12 +11,13 @@
 // - corner_predictor / corner_corrector: the same at the corner of four tiles;
 // - freeze: a cell made unrecoverable in the predictor, at least a halo width
 //   from every cut, so its redo cannot land it and the correcting select
-//   freezes it; the freeze is accepted;
-// - rollback: where the regime carries a retry contract (curved GRMHD, under no
-//   retry exclusion), the same freeze rejects the step, which replays at half
-//   the timestep with the hook spent. the other regimes carry none: their
-//   freeze is accepted and counts toward the freeze-streak halt alone, so they
-//   have no rollback event.
+//   freezes it. a gas regime accepts the freeze, and so does curved GRMHD inside
+//   its retry exclusion;
+// - inadmissible freeze: on a flat magnetized regime the frozen cell stays
+//   outside the admissible set, so the same event rejects the step, which
+//   replays at half the timestep with the hook spent;
+// - rollback: curved GRMHD under no retry exclusion rejects the same freeze and
+//   replays the step likewise.
 // per event the decomposed run matches the single-grid run bit for bit in its
 // accepted times, its accepted troubled and frozen cells, every conserved field,
 // and on a magnetized regime every face and cell field; both copies of every
@@ -147,7 +148,7 @@ fn assert_match(label: &str, clean: &Run, one: &Run, many: &Run) {
 /// the events of one regime. the invoking module declares: `D`, `DOF`, `N` (cells per axis), `Sim`,
 /// `build(ext, boundaries, policy) -> Sim`, `kernels(&Sim)`, `DOMAIN` (its boundary per side) and `WRAPS`, the cells
 /// `CUT_CELL`, `CORNER_CELL`, `FREEZE_CELL`, the cut lists `CUTS`, `CORNER_CUTS`, `FREEZE_CUTS`,
-/// and `FREEZE_POLICY`, under which its freeze is accepted
+/// and `FREEZE_POLICY`, the retry exclusion of its freeze event
 macro_rules! matrix_tests {
     () => {
         #[derive(Clone, Copy)]
@@ -260,6 +261,12 @@ macro_rules! matrix_tests {
             flagged("corner, corrector", CORNER_CUTS(), 1, CORNER_CELL);
         }
 
+    };
+}
+
+/// the freeze event of a regime whose correction accepts a freeze under `FREEZE_POLICY`
+macro_rules! freeze_test {
+    () => {
         #[test]
         fn freeze() {
             let clean = single(Hook::Clean, FREEZE_POLICY, 2);
@@ -268,7 +275,23 @@ macro_rules! matrix_tests {
             assert!(one.frozen >= 1, "freeze: the single-grid run accepted no frozen cell; the freeze never happened");
             assert_match("freeze", &clean, &one, &many);
         }
+    };
+}
 
+/// the freeze event of a flat magnetized regime: the poisoned freeze leaves its cell outside the
+/// admissible set, so the attempt is rejected and the step replays at half the timestep with the
+/// hook spent
+macro_rules! inadmissible_freeze_test {
+    () => {
+        #[test]
+        fn inadmissible_freeze() {
+            let clean = single(Hook::Clean, FREEZE_POLICY, 2);
+            let one = single(Hook::Unrecoverable(FREEZE_CELL), FREEZE_POLICY, 2);
+            let many = decomposed(FREEZE_CUTS(), Hook::Unrecoverable(FREEZE_CELL), FREEZE_POLICY, 2);
+            assert_eq!(one.frozen, 0, "inadmissible freeze: the rejected freeze survived into the accepted state");
+            assert_ne!(one.times, clean.times, "inadmissible freeze: the step was not replayed at a smaller timestep");
+            assert_match("inadmissible freeze", &clean, &one, &many);
+        }
     };
 }
 
@@ -350,6 +373,7 @@ mod newtonian {
         s.substrate()
     }
     matrix_tests!();
+    freeze_test!();
 }
 
 mod isothermal {
@@ -382,6 +406,7 @@ mod isothermal {
         s.substrate()
     }
     matrix_tests!();
+    freeze_test!();
 }
 
 mod rhd {
@@ -413,6 +438,7 @@ mod rhd {
         s.substrate()
     }
     matrix_tests!();
+    freeze_test!();
 }
 
 /// the periodic magnetized flow of the square: the wave's gas and a face field B_x(y), B_y(x),
@@ -454,6 +480,7 @@ mod nmhd {
         s.substrate()
     }
     matrix_tests!();
+    inadmissible_freeze_test!();
 }
 
 mod imhd {
@@ -491,6 +518,7 @@ mod imhd {
         s.substrate()
     }
     matrix_tests!();
+    inadmissible_freeze_test!();
 }
 
 mod rmhd {
@@ -523,6 +551,7 @@ mod rmhd {
         s.substrate()
     }
     matrix_tests!();
+    inadmissible_freeze_test!();
 }
 
 /// GR hydro: the cold atmosphere in mach-173 radial infall onto an excised cartesian
@@ -582,6 +611,7 @@ mod grhd {
         RhdSubstrateKernelSet::<HostMemory, f64, 2>::new(4.0 / 3.0, 0.3, &s.geom.allocated).with_excision(0.35, 1.0, 1.0)
     }
     matrix_tests!();
+    freeze_test!();
 }
 
 /// GRMHD: the magnetized cartesian kerr-schild box (mass 1, no excision, UCT, HLLE) on
@@ -646,6 +676,7 @@ mod grmhd {
             .ct_method(CtMethod::Uct)
     }
     matrix_tests!();
+    freeze_test!();
     rollback_test!();
 }
 

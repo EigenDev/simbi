@@ -690,7 +690,8 @@ impl CtHooks<fn(), fn(), fn(), fn()> {
 /// first-order flux where either adjacent cell is flagged, else the saved high-order flux — one flux
 /// per face. (6) the single conservative godunov from the spliced fluxes (+ additive source); c2p.
 /// (7) the freeze tier holds the stage input on any cell the spliced update still left unphysical
-/// (the documented single-cell conservation waiver); c2p to re-derive the primitive. because every
+/// (the documented single-cell conservation waiver); c2p to re-derive the primitive. a frozen
+/// magnetized cell the recovery still finds outside the admissible set rejects the attempt. because every
 /// face carries one flux, the update telescopes exactly across every fallback boundary — the mass /
 /// momentum / energy created at flag boundaries by a per-cell state replacement is gone. the caller
 /// supplies the substrate's own first-order flux (per direction) / c2p / godunov / source_apply.
@@ -750,7 +751,8 @@ pub(crate) fn fofc_orchestrate<const D: usize, const DOF: usize, Mem, Sc>(
     source_replay: impl Fn() -> SourceReplayOutcome,
     // whether an exterior cell the projection could not recover should reject the step (replay it
     // at a smaller dt) rather than freeze. true only where a projection exists to have tried and
-    // failed first; a regime with no projection has no tier below the freeze and must keep it.
+    // failed first. a magnetized regime with no projection keeps a freeze that lands in the
+    // admissible set and rejects one that leaves the cell outside it.
     retry_on_freeze: bool,
 ) -> FofcReport
 where
@@ -923,13 +925,32 @@ where
     // strictly better than the freeze, which holds the cell at that same anchor and waives its
     // conservation. bounded by the same streak the halt uses, so a state no timestep can rescue
     // still fails loudly instead of halving forever.
-    let decision = if exterior_froze > 0 && streak < FOFC_FREEZE_HALT_STREAK && retry_on_freeze {
+    //
+    // a magnetized regime accepts a substage admissible on every exterior cell. a frozen cell
+    // holds its stage-input gas, and under constrained transport its faces carry the redo's curl,
+    // shared with its neighbors; the pair can leave the internal energy negative. such an attempt
+    // is rejected whole, and the driver replays the step from its entry state (gas, cell and face
+    // field, bodies, ledgers) at a smaller timestep, under the same streak and retry bounds.
+    let inadmissible = if frozen > 0 && !retry_on_freeze && sim.fields.mhd.is_some() {
+        troubled_from_status(sim, &ws.fofc_inadmissible);
+        let count = fofc_flag_count(sim, &ws.fofc_inadmissible);
+        if count > 0 {
+            decision_freezes(sim, &ws.fofc_inadmissible, count)
+        } else {
+            0
+        }
+    } else {
+        0
+    };
+    let rejects = (exterior_froze > 0 && retry_on_freeze) || inadmissible > 0;
+    let decision = if rejects && streak < FOFC_FREEZE_HALT_STREAK {
         FofcDecision::RetryStep
     } else {
         FofcDecision::Accept
     };
     if decision == FofcDecision::RetryStep {
-        record_rejection_evidence(sim, freeze, stage);
+        let evidence = if retry_on_freeze { freeze } else { &ws.fofc_inadmissible };
+        record_rejection_evidence(sim, evidence, stage);
     }
     // the horizon subtotals split on the channel masks: the troubled subset from
     // the flag, the frozen subset from the freeze-applied mask.

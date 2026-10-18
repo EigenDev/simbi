@@ -634,19 +634,17 @@ pub struct MhdStaggeredFields<
     M: MemorySpace = DefaultMemory,
     Sc: Scalar + OrderedNumeric = f64,
 > {
-    /// the step-entry rollback state, present only where a step can be rejected: the GRMHD
-    /// physical-constraint-preserving redo halves the timestep and replays when its source-free
-    /// low-order anchor is itself inadmissible. every other MHD regime accepts every step it
-    /// takes, so the snapshot would be a permanently dead allocation the size of the whole
-    /// conserved + magnetic state.
+    /// the step-entry rollback state of every magnetized regime: its first-order correction
+    /// rejects an attempt that leaves a cell outside the admissible set, and the driver replays
+    /// the step from this state at a smaller timestep.
     pub step_snapshot: Option<MhdStepSnapshot<D, DOF, M, Sc>>,
 
     /// FOFC: the excision-vetoed admissibility mask of the source-replay tier —
     /// the anchor-failure flags with causally disconnected cells dropped,
     /// feeding the tier's reject/continue count. a distinct buffer keeps the
     /// masking kernel's input and output on separate allocations. present
-    /// exactly where the tier runs (the same rejectable curved backgrounds
-    /// that carry `step_snapshot`); rewritten on every firing substage.
+    /// exactly where the tier runs (the curved backgrounds with an energy
+    /// equation); rewritten on every firing substage.
     pub exterior_veto: Option<Field<Sc, D, M>>,
 
     /// cell-centered B: bcell[c] on the allocated domain (same as cons/prim), one
@@ -759,11 +757,13 @@ impl<const D: usize, const DOF: usize, M: MemorySpace, Sc: Scalar + OrderedNumer
     /// allocate MHD fields from the cell-centered domains.
     /// allocated_domain: full domain including ghost cells (for bcell, bflux).
     /// interior: interior domain (for bface, efield).
-    /// `rejectable` allocates the step-entry rollback snapshot (see `step_snapshot`).
+    /// `rejectable` allocates the step-entry rollback snapshot (see `step_snapshot`);
+    /// `source_replay` the admissibility mask of the curved source-replay tier (see `exterior_veto`).
     pub fn zeros(
         allocated: &Domain<D>,
         interior: &Domain<D>,
         rejectable: bool,
+        source_replay: bool,
     ) -> symbi_xpu::Result<Self> {
         // cell-centered B: same domain as cons/prim, DOF vector components.
         let bcell = BcellFields {
@@ -827,7 +827,7 @@ impl<const D: usize, const DOF: usize, M: MemorySpace, Sc: Scalar + OrderedNumer
         } else {
             None
         };
-        let exterior_veto = rejectable
+        let exterior_veto = source_replay
             .then(|| Field::zeros(allocated))
             .transpose()?;
 
@@ -1126,6 +1126,10 @@ pub struct RkWorkspaceGeneric<
     /// the freeze acts that count as decision evidence under the store's retry exclusion, written
     /// by the exclusion kernel over the interior and reduced into the decision count
     pub fofc_evidence: Field<Sc, NDIM, M>,
+    /// the cells the correcting select left outside the admissible set, from the recovery's
+    /// status after the select: a frozen cell whose stage-input gas no longer pairs with an
+    /// admissible state, as under constrained transport, where the redo advances the field
+    pub fofc_inadmissible: Field<Sc, NDIM, M>,
     /// the cells whose freeze acts counted toward the last retry request of the first-order
     /// correction, one line each with the stage, written by the correction and taken by the
     /// driver that books the rejection
@@ -3246,16 +3250,17 @@ where
             Some(field)
         };
 
-        // allocate MHD fields if the regime has magnetic fields. only GRMHD (magnetized, with
-        // energy, on a curved background) can reject a step: its physical-constraint-preserving
-        // redo falls back to halving the timestep when the source-free low-order anchor is
-        // itself inadmissible. that alone allocates the step-entry rollback snapshot.
+        // allocate MHD fields if the regime has magnetic fields. every magnetized regime can
+        // reject a step: its first-order correction replays an attempt that leaves a cell outside
+        // the admissible set, so it carries the step-entry rollback snapshot. the source-replay
+        // tier's mask exists on a curved background with an energy equation alone.
         let mhd = if regime.is_mhd() {
-            let rejectable = has_energy && geom.spacetime != symbi_geometry::Spacetime::Minkowski;
+            let source_replay = has_energy && geom.spacetime != symbi_geometry::Spacetime::Minkowski;
             Some(MhdStaggeredFields::zeros(
                 &allocated,
                 &geom.interior,
-                rejectable,
+                true,
+                source_replay,
             )?)
         } else {
             None
@@ -3293,6 +3298,7 @@ where
             fofc_flag: Field::zeros(&allocated)?,
             freeze_applied: Field::zeros(&allocated)?,
             fofc_evidence: Field::zeros(&allocated)?,
+            fofc_inadmissible: Field::zeros(&allocated)?,
             rejection_evidence: std::sync::Mutex::new(Vec::new()),
             unrecoverable_once: std::sync::Mutex::new(Vec::new()),
             troubled_once: std::sync::Mutex::new(None),
@@ -3355,10 +3361,9 @@ where
     }
 
     /// allocate the step-entry rollback snapshot of a magnetized state: the conserved gas,
-    /// cell B and face B a rejected step restores. a curved background allocates it with the
-    /// fields, since its constraint-preserving redo can halve the timestep; on a flat
-    /// background it is a run-level opt-in, which a driver that rejects a step by decree
-    /// (a forced rejection gate) or by a fine level's recovery needs
+    /// cell B and face B a rejected step restores. every magnetized store allocates it with its
+    /// fields, since its first-order correction can reject an attempt; this keeps the call an
+    /// idempotent request for the drivers that state it
     pub fn with_rollback_snapshot(mut self) -> symbi_xpu::Result<Self> {
         let allocated = self.geom.allocated.clone();
         let has_energy = self.fields.cons.has_energy();

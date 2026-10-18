@@ -14,8 +14,10 @@
 //   bit-for-bit (the retried step re-enters at wave_speeds/flux, which
 //   reconstruct from prim, so a conserved-only rollback would replay from the
 //   rejected attempt's primitives);
-// - the rollback storage exists exactly where a step can be rejected: a curved
-//   magnetized background allocates it, and flat MHD leaves it unallocated.
+// - the rollback storage exists exactly where a step can be rejected: every
+//   magnetized store allocates the snapshot (its correction rejects an attempt
+//   that leaves a cell outside the admissible set), and the source-replay veto
+//   scratch exists on a curved background alone.
 // =============================================================================
 
 use std::f64::consts::PI;
@@ -222,9 +224,9 @@ fn rollback_storage_exists_exactly_where_a_step_can_be_rejected() {
         .build();
     let flat_mhd = flat.fields.mhd.as_ref().expect("magnetized run");
     assert!(
-        flat_mhd.step_snapshot.is_none(),
-        "flat MHD accepts every step; the rollback snapshot would be a dead allocation the \
-         size of the whole conserved + magnetic state"
+        flat_mhd.step_snapshot.is_some(),
+        "flat MHD rejects an attempt whose frozen cell stays outside the admissible set and \
+         needs the rollback snapshot to replay it"
     );
     assert!(
         flat_mhd.exterior_veto.is_none(),
