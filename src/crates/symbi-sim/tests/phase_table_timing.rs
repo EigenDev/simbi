@@ -50,8 +50,9 @@ fn moving(point: ExchangePoint) -> Vec<(TransferId, WorkerId, WorkerId)> {
         | ExchangePoint::PostBody
         | ExchangePoint::Rollback
         | ExchangePoint::Restrict => vec![(t(0), A, B), (t(1), B, A), (t(2), B, C), (t(3), C, B)],
-        // the primed root and the primed fine level, before the prime audit
-        ExchangePoint::Primed => vec![(t(0), A, B), (t(1), B, A), (t(2), B, C), (t(3), C, B), (t(4), A, B), (t(5), B, A)],
+        // the primed root, then the primed fine level, coarsest first, before the prime audit
+        ExchangePoint::Primed => vec![(t(0), A, B), (t(1), B, A), (t(2), B, C), (t(3), C, B)],
+        ExchangePoint::PrimedLevel { level: 1 } => vec![(t(4), A, B), (t(5), B, A)],
         ExchangePoint::Troubled(_) | ExchangePoint::EquilibriumTroubled => vec![(t(6), A, B), (t(7), B, A)],
         ExchangePoint::Fine { point: FinePoint::Prolong | FinePoint::Stage(_) | FinePoint::PostTail, .. } => {
             vec![(t(4), A, B), (t(5), B, A)]
@@ -62,6 +63,7 @@ fn moving(point: ExchangePoint) -> Vec<(TransferId, WorkerId, WorkerId)> {
         | ExchangePoint::Nested { .. }
         | ExchangePoint::NestedRestrict { .. }
         | ExchangePoint::Seed { .. }
+        | ExchangePoint::PrimedLevel { .. }
         | ExchangePoint::TracerCoefficients
         | ExchangePoint::EquilibriumLevel { .. }
         | ExchangePoint::RootCoefficients
