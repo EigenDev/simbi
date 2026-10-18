@@ -80,6 +80,13 @@ pub trait Link {
         false
     }
 
+    /// push pending writes alone, reading nothing: a link whose inbound stream failed still
+    /// delivers what this worker queued (an Abort behind earlier frames). a link moving frames
+    /// whole in memory holds nothing to push
+    fn flush_writes(&self) -> Result<(), FabricError> {
+        Ok(())
+    }
+
     /// the bytes this link has read and written so far, a count that only grows. a link
     /// whose frames move whole reports zero and the frame count alone measures progress.
     fn bytes_moved(&self) -> u64 {
@@ -1722,9 +1729,11 @@ impl<L: Link> Fabric<L> {
                 let _ = self.link.send(self.me, peer, header, detail.as_bytes());
             }
         }
+        // writes alone: the failure that ends the session may be this worker's inbound stream,
+        // which a full drive reports again on every pass
         let start = Instant::now();
         while start.elapsed() < Duration::from_millis(200) {
-            if self.link.drive(self.me).is_err() || !self.link.outbound_pending() {
+            if self.link.flush_writes().is_err() || !self.link.outbound_pending() {
                 break;
             }
             std::thread::sleep(POLL_PAUSE);

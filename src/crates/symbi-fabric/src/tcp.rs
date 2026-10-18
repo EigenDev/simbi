@@ -433,7 +433,17 @@ impl TcpLink {
         match wrote {
             Ok(true) => {}
             Ok(false) => stats.partial_writes += 1,
-            Err(e) => return Err(io_to_fabric(e, peer_id)),
+            Err(e) => {
+                // a peer that closed with our bytes unread resets the connection, and every
+                // write fails from then on while the frames it sent before closing stay readable:
+                // a complete frame is handed over first (its last words, an Abort among them),
+                // and the disconnection reported once no complete frame is left
+                let err = io_to_fabric(e, peer_id);
+                if matches!(err, FabricError::Disconnected { .. }) && peer.inbox.is_complete() {
+                    return Ok(());
+                }
+                return Err(err);
+            }
         }
         match read {
             Ok(ReadOutcome::Complete) => Ok(()),
@@ -514,6 +524,24 @@ impl Link for TcpLink {
 
     fn detach(&self, peer: WorkerId) {
         self.peers.borrow_mut()[peer.0 as usize] = None;
+    }
+
+    fn flush_writes(&self) -> Result<(), FabricError> {
+        let mut peers = self.peers.borrow_mut();
+        let mut stats = self.stats.borrow_mut();
+        for (idx, peer) in peers.iter_mut().enumerate() {
+            if let Some(peer) = peer.as_mut() {
+                let before = peer.outbox.written();
+                let wrote = peer.outbox.write_to(&mut peer.stream);
+                stats.bytes_moved += peer.outbox.written() - before;
+                match wrote {
+                    Ok(true) => {}
+                    Ok(false) => stats.partial_writes += 1,
+                    Err(e) => return Err(io_to_fabric(e, WorkerId(idx as u32))),
+                }
+            }
+        }
+        Ok(())
     }
 
     fn outbound_pending(&self) -> bool {
@@ -764,6 +792,91 @@ mod tests {
             busy_before <= 1,
             "{busy_before} frames of the busy peer preceded the quiet peer's one"
         );
+    }
+
+    /// the far end writes its last frame, an Abort, and closes with bytes of ours unread, so the
+    /// close resets the connection; this link is still sending when the reset lands, and its write
+    /// fails. the Abort already in the socket is handed over, and the disconnection follows it
+    #[test]
+    fn a_frame_read_before_a_failed_write_is_handed_over_before_the_disconnection() {
+        use std::net::TcpListener;
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let link = TcpLink::new(WorkerId(1), 2, 64);
+        let mut far = TcpStream::connect(listener.local_addr().unwrap()).unwrap();
+        let (mine, _) = listener.accept().unwrap();
+        link.attach(WorkerId(0), mine).unwrap();
+        // our frames reach the far end, which leaves them unread
+        for k in 0..64 {
+            link.send(WorkerId(1), WorkerId(0), header(Kind::Credit, k, 0), &[]).unwrap();
+            link.drive(WorkerId(1)).unwrap();
+        }
+        assert!(!link.outbound_pending(), "the frames left before the far end closes");
+        far.write_all(&encoded(header(Kind::Abort, 0, 4), b"done")).unwrap();
+        drop(far);
+        // the reset has landed once a write to the far end fails
+        std::thread::sleep(std::time::Duration::from_millis(100));
+        link.send(WorkerId(1), WorkerId(0), header(Kind::Credit, 99, 0), &[]).unwrap();
+        let mut payload = Vec::new();
+        let start = std::time::Instant::now();
+        let delivered = loop {
+            match link.drive(WorkerId(1)) {
+                Ok(()) => {
+                    if let Some((from, h)) = link.poll(WorkerId(1), &mut payload).unwrap() {
+                        break (from, h);
+                    }
+                }
+                Err(e) => panic!("the link reported {e:?} before handing over the Abort"),
+            }
+            assert!(start.elapsed() < std::time::Duration::from_secs(5), "no frame arrived");
+        };
+        assert_eq!((delivered.0, delivered.1.kind), (WorkerId(0), Kind::Abort));
+        assert_eq!(payload, b"done");
+        let after = (0..100).find_map(|_| link.drive(WorkerId(1)).err());
+        assert!(matches!(after, Some(FabricError::Disconnected { .. })), "{after:?}");
+    }
+
+    /// the far end's stream is malformed, so every drive fails on its read; a large frame and an
+    /// Abort queued behind it still leave whole through writes alone
+    #[test]
+    fn writes_alone_deliver_a_queued_abort_past_a_failed_inbound_stream() {
+        use std::net::TcpListener;
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let big = 4 << 20;
+        let link = TcpLink::new(WorkerId(0), 2, big);
+        let mut far = TcpStream::connect(listener.local_addr().unwrap()).unwrap();
+        let (mine, _) = listener.accept().unwrap();
+        link.attach(WorkerId(1), mine).unwrap();
+        far.write_all(b"this is not a frame at all, and it is long enough to cover a header").unwrap();
+        let payload = vec![3u8; big];
+        link.send(WorkerId(0), WorkerId(1), header(Kind::Halo, 1, big as u32), &payload).unwrap();
+        link.send(WorkerId(0), WorkerId(1), header(Kind::Abort, 0, 4), b"done").unwrap();
+        let reader = std::thread::spawn(move || {
+            let mut got = Vec::new();
+            far.set_read_timeout(Some(std::time::Duration::from_secs(5))).unwrap();
+            let mut buf = vec![0u8; 1 << 16];
+            let want = 2 * HEADER_LEN + big + 4;
+            while got.len() < want {
+                match far.read(&mut buf) {
+                    Ok(0) | Err(_) => break,
+                    Ok(n) => got.extend_from_slice(&buf[..n]),
+                }
+            }
+            got
+        });
+        assert!(
+            matches!(link.drive(WorkerId(0)), Err(FabricError::Protocol { .. })),
+            "the malformed inbound stream fails the drive"
+        );
+        assert!(link.outbound_pending(), "one pass leaves the queued frames partly written; the gate is vacuous");
+        let start = std::time::Instant::now();
+        while link.outbound_pending() {
+            link.flush_writes().unwrap();
+            assert!(start.elapsed() < std::time::Duration::from_secs(5), "the queued frames never left");
+        }
+        let got = reader.join().unwrap();
+        let mut want = encoded(header(Kind::Halo, 1, big as u32), &payload);
+        want.extend(encoded(header(Kind::Abort, 0, 4), b"done"));
+        assert!(got == want, "the far end read {} of {} bytes", got.len(), want.len());
     }
 
     #[test]
