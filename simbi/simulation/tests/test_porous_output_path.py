@@ -113,6 +113,7 @@ def test_distinct_supported_configurations_write_distinct_paths(porous_cls, tmp_
         "half, neither": {"porosity": 0.5, "wb_reconstruction": False},
         "half, km": {"porosity": 0.5, "wb_reconstruction": True},
         "half, fixed reference": {"porosity": 0.5, "wb_reconstruction": False, "well_balanced": True},
+        "half, km and fixed reference": {"porosity": 0.5, "wb_reconstruction": True, "well_balanced": True},
     }
     paths = {label: _path(porous_cls, tmp_path, monkeypatch, **kw) for label, kw in points.items()}
     shared = {}

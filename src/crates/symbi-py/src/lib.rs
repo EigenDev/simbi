@@ -11139,7 +11139,12 @@ struct LaunchFault {
 
 impl LaunchFault {
     fn from_env(me: usize) -> Result<Self, String> {
-        let Ok(spec) = std::env::var("SIMBI_FABRIC_INJECT") else {
+        Self::from_spec(std::env::var("SIMBI_FABRIC_INJECT").ok().as_deref(), me)
+    }
+
+    /// the faults `spec` (the variable's value, absent when unset) names for worker `me`
+    fn from_spec(spec: Option<&str>, me: usize) -> Result<Self, String> {
+        let Some(spec) = spec else {
             return Ok(Self::default());
         };
         let parts: Vec<&str> = spec.split(':').collect();
@@ -14785,5 +14790,33 @@ mod kernel_construction_tests {
         }
         assert_eq!(root.excision_radius, 0.25);
         assert_eq!(fine.excision_radius, 0.0);
+    }
+}
+
+#[cfg(test)]
+mod launch_fault_tests {
+    use super::LaunchFault;
+
+    /// unset, the variable activates nothing: every fault of the launch, the in-process tiled run
+    /// and the refined workers is absent, so an ordinary run takes no injected act
+    #[test]
+    fn an_unset_injection_variable_activates_no_fault() {
+        for me in [0, 1, 7] {
+            let f = LaunchFault::from_spec(None, me).expect("an absent variable parses");
+            let i = &f.injection;
+            assert!(i.reject_at.is_empty() && i.cap_dt_at.is_none() && i.invalid_cfl_at.is_none() && i.trouble_at.is_none());
+            assert!(i.hold_before_guard.is_none() && !i.vanish_before_guard);
+            assert!(f.exit_after.is_none() && f.perturb_face_after.is_none());
+            assert!(f.level_rejection.is_none() && f.nested_contribution.is_none());
+        }
+    }
+
+    /// set, a fault names its worker: another worker's fault leaves this one inert
+    #[test]
+    fn a_fault_for_another_worker_leaves_this_one_inert() {
+        let f = LaunchFault::from_spec(Some("reject_level:1:2:2:1:1"), 0).expect("parses");
+        assert!(f.level_rejection.is_none());
+        let g = LaunchFault::from_spec(Some("reject_level:1:2:2:1:1"), 1).expect("parses");
+        assert_eq!(g.level_rejection, Some((2, 2, 1, 1)));
     }
 }
