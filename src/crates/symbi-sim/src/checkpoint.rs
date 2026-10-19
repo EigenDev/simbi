@@ -763,7 +763,56 @@ fn body_state_group<'a, const D: usize>(snap: &'a BodyStateSnap, heat_name: &str
 
 /// restore a bonded assembly's evolving state onto the bond list the configuration rebuilt: the
 /// file's bonds must join the same pairs in the same order, or the restart is refused
+/// every check `restore_fragments` makes, before it writes: the recorded bond list is the run's,
+/// every record the restore indexes is long enough, and the file carries contact state only where
+/// the run configures a contact model
+fn check_fragments(fragments_g: &TreeBuf, physics: &symbi_ib::FragmentPhysics) -> Result<()> {
+    let f64_len = |name: &str| -> Result<usize> {
+        fragments_g
+            .find_dataset(name)
+            .and_then(|d| d.data.as_f64().map(|v| v.len()))
+            .ok_or_else(|| IoError::MissingPath(format!("bodies/fragments/{name}")))
+    };
+    let pairs = fragments_g
+        .find_dataset("bond_pairs")
+        .and_then(|d| d.data.as_u64().map(|v| v.to_vec()))
+        .ok_or_else(|| IoError::MissingPath("bodies/fragments/bond_pairs".into()))?;
+    let configured: Vec<u64> = physics.bonds.iter().flat_map(|b| [b.i as u64, b.j as u64]).collect();
+    if pairs != configured {
+        return Err(IoError::Backend(format!(
+            "the checkpoint records {} bond(s) joining {pairs:?}; this run configures {} joining \
+             {configured:?}. a bonded assembly resumes onto the bond list it was written with",
+            pairs.len() / 2,
+            configured.len() / 2
+        )));
+    }
+    let short = |name: &str, have: usize, want: usize| -> Result<()> {
+        if have < want {
+            return Err(IoError::ShapeMismatch { path: format!("bodies/fragments/{name}"), expected: vec![want], actual: vec![have] });
+        }
+        Ok(())
+    };
+    let n = physics.bonds.len();
+    short("bond_rest_length", f64_len("bond_rest_length")?, n)?;
+    short("bond_slip", f64_len("bond_slip")?, 3 * n)?;
+    let intact = fragments_g
+        .find_dataset("bond_intact")
+        .and_then(|d| d.data.as_u64().map(|v| v.len()))
+        .ok_or_else(|| IoError::MissingPath("bodies/fragments/bond_intact".into()))?;
+    short("bond_intact", intact, n)?;
+    let contact_pairs = fragments_g
+        .find_dataset("contact_pairs")
+        .and_then(|d| d.data.as_u64().map(|v| v.len()))
+        .ok_or_else(|| IoError::MissingPath("bodies/fragments/contact_pairs".into()))?;
+    short("contact_slip", f64_len("contact_slip")?, 3 * (contact_pairs / 2))?;
+    if physics.contacts.is_none() && contact_pairs > 0 {
+        return Err(IoError::Backend("the checkpoint records contact state; this run configures no contact model".into()));
+    }
+    Ok(())
+}
+
 fn restore_fragments(fragments_g: &TreeBuf, physics: &mut symbi_ib::FragmentPhysics) -> Result<()> {
+    check_fragments(fragments_g, physics)?;
     let f64s = |name: &str| -> Result<Vec<f64>> {
         fragments_g
             .find_dataset(name)
@@ -1585,14 +1634,15 @@ fn check_bodies<const D: usize>(bodies_g: &TreeBuf, im: &ImmersedBodies<D>) -> R
             short(name, have, nb * per)?;
         }
     }
-    match (bodies_g.find_group("fragments").is_some(), im.fragment_physics.is_some()) {
-        (false, true) => Err(IoError::Backend(
+    match (bodies_g.find_group("fragments"), im.fragment_physics.as_ref()) {
+        (Some(g), Some(physics)) => check_fragments(g, physics),
+        (None, Some(_)) => Err(IoError::Backend(
             "the checkpoint records no bonded-assembly state; this run configures a bonded \
              assembly, whose bonds and contacts would restart from their formation"
                 .into(),
         )),
-        (true, false) => Err(IoError::Backend("the checkpoint records a bonded assembly; this run configures none".into())),
-        _ => Ok(()),
+        (Some(_), None) => Err(IoError::Backend("the checkpoint records a bonded assembly; this run configures none".into())),
+        (None, None) => Ok(()),
     }
 }
 
