@@ -155,34 +155,28 @@ fn store(cells: usize, origin: f64, lo: BoundaryType, hi: BoundaryType) -> Sim {
         .build()
 }
 
-/// the halt message of a single-grid run: its step transaction restores the entry of a panicked
-/// attempt and reports the panic as an unrecoverable halt
+/// the halt message of a single-grid run (its driver catches a step panic into the crash report)
 fn single(schedule: Schedule) -> Option<String> {
     let sim = store(16, 0.0, BoundaryType::Outflow, BoundaryType::Outflow);
     let mut hier = Hierarchy::single(sim, StreakMock::new(None, schedule));
     hier.evolve_with_callback(1.0, 1, |_| ControlFlow::Continue(())).expect("single-grid run");
-    hier.crash.as_ref().and_then(|c| unrecoverable(c.halt.as_ref()))
+    hier.crash.as_ref().and_then(|c| c.panic.clone())
 }
 
-/// the message of an unrecoverable halt, the halt a panicked attempt ends its step with
-fn unrecoverable(halt: Option<&symbi_sim::step_transaction::StepHalt>) -> Option<String> {
-    match halt {
-        Some(symbi_sim::step_transaction::StepHalt::Unrecoverable { detail }) => Some(detail.clone()),
-        _ => None,
-    }
-}
-
-/// the halt message of a two-tile run: the in-process march restores a panicked attempt's entry
-/// and reports the panic as an unrecoverable halt
+/// the halt message of a two-tile run
 fn tiled(schedule: Schedule) -> Option<String> {
     let mut a = store(8, 0.0, BoundaryType::Outflow, BoundaryType::CoarseFine);
     let mut b = store(8, 0.5, BoundaryType::CoarseFine, BoundaryType::Outflow);
     let (ka, kb) = (StreakMock::new(Some(0), schedule), StreakMock::new(Some(1), schedule));
-    let mut stores = vec![&mut *a, &mut *b];
-    let d = evolve_decomposed(&mut stores, &[&ka, &kb], [2], &[0, 0], Timestepping::Euler, 0.0, 1.0, 1, &LocalCopy, |_, _, _| {
-        ControlFlow::Continue(())
-    });
-    d.halt.and_then(|h| unrecoverable(h.step.as_ref()))
+    let caught = catch_unwind(AssertUnwindSafe(|| {
+        let mut stores = vec![&mut *a, &mut *b];
+        evolve_decomposed(&mut stores, &[&ka, &kb], [2], &[0, 0], Timestepping::Euler, 0.0, 1.0, 1, &LocalCopy, |_, _, _| {
+            ControlFlow::Continue(())
+        });
+    }));
+    caught.err().map(|payload| {
+        payload.downcast_ref::<String>().cloned().or_else(|| payload.downcast_ref::<&str>().map(|s| s.to_string())).unwrap_or_default()
+    })
 }
 
 /// the halt message of a launched worker holding both tiles: the worker's own correction loop,
@@ -276,11 +270,16 @@ fn tiled_after_probe(schedule: Schedule) -> (Option<String>, [u32; 2]) {
         symbi::sim::decomp::probe_stage(&tiles, &[&ka, &kb], &probe, &[0, 0], &LocalCopy, 0.01).expect("the probe stage");
     }
     let after_probe = [ka.freeze_streak(), kb.freeze_streak()];
-    let mut stores = vec![&mut *a, &mut *b];
-    let d = evolve_decomposed(&mut stores, &[&ka, &kb], [2], &[0, 0], Timestepping::Euler, 0.0, 1.0, 1, &LocalCopy, |_, _, _| {
-        ControlFlow::Continue(())
+    let caught = catch_unwind(AssertUnwindSafe(|| {
+        let mut stores = vec![&mut *a, &mut *b];
+        evolve_decomposed(&mut stores, &[&ka, &kb], [2], &[0, 0], Timestepping::Euler, 0.0, 1.0, 1, &LocalCopy, |_, _, _| {
+            ControlFlow::Continue(())
+        });
+    }));
+    let halt = caught.err().map(|payload| {
+        payload.downcast_ref::<String>().cloned().or_else(|| payload.downcast_ref::<&str>().map(|s| s.to_string())).unwrap_or_default()
     });
-    (d.halt.and_then(|h| unrecoverable(h.step.as_ref())), after_probe)
+    (halt, after_probe)
 }
 
 #[test]
@@ -289,4 +288,16 @@ fn an_equilibrium_probe_leaves_every_tile_s_freeze_count_where_it_found_it() {
     let (many, after_probe) = tiled_after_probe(Schedule::FirstTile);
     assert_eq!(after_probe, [0, 0], "the probe's freeze moved a tile's count");
     assert_eq!(many.as_deref(), Some(one.as_str()), "the march after a probe halted elsewhere than the single grid");
+}
+
+#[test]
+fn a_panic_the_restore_cannot_cover_leaves_a_crash_that_is_not_restartable() {
+    // the mock's kernels restore no field, so its attempt contains no panic: the crash keeps the
+    // panic and the state it fired on, which no restart may resume
+    let sim = store(16, 0.0, BoundaryType::Outflow, BoundaryType::Outflow);
+    let mut hier = Hierarchy::single(sim, StreakMock::new(None, Schedule::FirstTile));
+    hier.evolve_with_callback(1.0, 1, |_| ControlFlow::Continue(())).expect("single-grid run");
+    let crash = hier.crash.as_ref().expect("the streak never halted the run");
+    assert!(crash.panic.is_some() && crash.halt.is_none(), "the uncovered panic was reported as a restored halt: {crash:?}");
+    assert!(!crash.restartable(), "a crash that kept its mid-step state was published as restartable");
 }

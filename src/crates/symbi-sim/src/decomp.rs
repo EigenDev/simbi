@@ -3346,7 +3346,9 @@ where
     }
 
     fn contains_panics(&self) -> bool {
-        true
+        // the flat march restores fields and tracer transport alone, so a panicked attempt ends
+        // at its restored entry only where every store's snapshot covers its whole state
+        self.stores.iter().zip(self.kernels.iter()).all(|(store, kernels)| kernels.rollback_snapshot_is_complete(&**store))
     }
 
     fn severe_streak(&mut self) -> u32 {

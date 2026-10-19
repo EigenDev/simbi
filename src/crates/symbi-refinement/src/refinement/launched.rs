@@ -26,7 +26,7 @@ use std::time::{Duration, Instant};
 
 use symbi_fabric::{CHECKPOINT_ATTEMPT, Fabric, Link, OpKind, WorkerId};
 use symbi_sim::checkpoint::{
-    GlobalGrid, LevelHeader, LevelTiles, PhysicsIdentity, TileView, checkpoint_level_count, load_partitioned_level,
+    GlobalGrid, LevelHeader, LevelTiles, PhysicsIdentity, TileView, checkpoint_level_count, partitioned_level_pass as restore_partitioned, RestorePass,
 };
 use symbi_sim::distributed_checkpoint::{CheckpointRequest, LevelPlan, distributed_checkpoint_levels};
 use symbi_grid::Field;
@@ -3023,19 +3023,25 @@ where
             "{path} carries {stored} level(s); a refined session of {depth} levels may add levels to a checkpoint, never drop them"
         )));
     }
-    for (k, h) in tiles.iter_mut().enumerate() {
-        let root_offset = plans.root.plan().tiles[held.root_ids[k].0 as usize].offset;
-        load_partitioned_level(&mut h.levels[0].state, path, 0, root_offset, &grids.root).map_err(err)?;
-        for level in 1..stored {
-            if let Some(id) = held.level_ids(level)[k] {
-                let plan = if level == 1 { &plans.fine } else { &plans.nested[level - 2].state };
-                let grid = grids.level(level);
-                let layout = &plan.plan().tiles[id.0 as usize];
-                let offset: [isize; D] = std::array::from_fn(|a| grid.interior_lo[a] + layout.offset[a]);
-                load_partitioned_level(&mut h.levels[level].state, path, level, offset, grid).map_err(err)?;
+    // every level of every held tile is checked before any is written, so a refused restart
+    // leaves the session's stores as they were built
+    for pass in [RestorePass::Check, RestorePass::Apply] {
+        for (k, h) in tiles.iter_mut().enumerate() {
+            let root_offset = plans.root.plan().tiles[held.root_ids[k].0 as usize].offset;
+            restore_partitioned(&mut h.levels[0].state, path, 0, root_offset, &grids.root, pass).map_err(err)?;
+            for level in 1..stored {
+                if let Some(id) = held.level_ids(level)[k] {
+                    let plan = if level == 1 { &plans.fine } else { &plans.nested[level - 2].state };
+                    let grid = grids.level(level);
+                    let layout = &plan.plan().tiles[id.0 as usize];
+                    let offset: [isize; D] = std::array::from_fn(|a| grid.interior_lo[a] + layout.offset[a]);
+                    restore_partitioned(&mut h.levels[level].state, path, level, offset, grid, pass).map_err(err)?;
+                }
+            }
+            if pass == RestorePass::Apply {
+                h.inject_levels_from(stored).map_err(WorkerError::Refused)?;
             }
         }
-        h.inject_levels_from(stored).map_err(WorkerError::Refused)?;
     }
     Ok(())
 }

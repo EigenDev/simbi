@@ -968,6 +968,22 @@ fn read_str_dataset(tree: &TreeBuf, name: &str) -> Result<String> {
     }
 }
 
+/// a restart loader's pass over a checkpoint: `Check` reads and checks everything the load reads
+/// and writes nothing; `Apply` performs the same reads and checks and writes the store. every
+/// restart runs `Check` over every store it loads before any `Apply`, so a refused restart leaves
+/// its stores as it found them.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum RestorePass {
+    Check,
+    Apply,
+}
+
+impl RestorePass {
+    fn writes(self) -> bool {
+        self == RestorePass::Apply
+    }
+}
+
 pub fn read_checkpoint_meta(path: &str) -> Result<CheckpointMeta> {
     let tree = Hdf5Backend.read(Path::new(path))?;
     read_meta_from(&tree)
@@ -1027,6 +1043,28 @@ pub fn restore_census_state(
     levels: usize,
     restart_time: f64,
 ) -> Result<Vec<String>> {
+    census_pass(path, censuses, levels, restart_time, RestorePass::Check)?;
+    census_pass(path, censuses, levels, restart_time, RestorePass::Apply)
+}
+
+/// every read and check `restore_census_state` performs, the accumulated rows restored onto copies
+/// of the histories, with no write to the registrations
+pub fn check_census_state(
+    path: &str,
+    censuses: &mut [crate::census::RegisteredCensus],
+    levels: usize,
+    restart_time: f64,
+) -> Result<()> {
+    census_pass(path, censuses, levels, restart_time, RestorePass::Check).map(|_| ())
+}
+
+fn census_pass(
+    path: &str,
+    censuses: &mut [crate::census::RegisteredCensus],
+    levels: usize,
+    restart_time: f64,
+    pass: RestorePass,
+) -> Result<Vec<String>> {
     if censuses.is_empty() {
         return Ok(Vec::new());
     }
@@ -1045,7 +1083,7 @@ pub fn restore_census_state(
                     Some(a) => a.as_u64(&format!("census_schedule/{name}/levels"))? as usize,
                     None => 0,
                 };
-                registered.last_sample = (0..stored)
+                let last_sample = (0..stored)
                     .map(|level| {
                         schedule
                             .find_attr(&format!("last_sample_{level}"))
@@ -1053,9 +1091,14 @@ pub fn restore_census_state(
                             .transpose()
                     })
                     .collect::<Result<Vec<_>>>()?;
+                if pass.writes() {
+                    registered.last_sample = last_sample;
+                }
             }
             None if registered.evaluator.spec().sample_interval().is_some() => {
-                registered.last_sample = vec![Some(restart_time); levels];
+                if pass.writes() {
+                    registered.last_sample = vec![Some(restart_time); levels];
+                }
                 warnings.push(format!(
                     "census '{name}': checkpoint '{path}' records no sampling schedule; the next \
                      sample falls one interval after the restart time {restart_time}, and the \
@@ -1078,10 +1121,11 @@ pub fn restore_census_state(
                      accumulation cannot continue"
                 )));
             };
-            registered
-                .history
-                .restore_rows(&time, &level, &values, &dropped, &n_samples, &t_start)
-                .map_err(|e| IoError::Backend(format!("census '{name}' in '{path}': {e}")))?;
+            let restored = match pass {
+                RestorePass::Check => registered.history.clone().restore_rows(&time, &level, &values, &dropped, &n_samples, &t_start),
+                RestorePass::Apply => registered.history.restore_rows(&time, &level, &values, &dropped, &n_samples, &t_start),
+            };
+            restored.map_err(|e| IoError::Backend(format!("census '{name}' in '{path}': {e}")))?;
         }
     }
     Ok(warnings)
@@ -1247,6 +1291,39 @@ where
     S: ExecutionSpace,
     Mem: MemorySpace,
 {
+    checkpoint_level_pass(sim, path, level_index, RestorePass::Check)?;
+    checkpoint_level_pass(sim, path, level_index, RestorePass::Apply)
+}
+
+/// every read and check `load_checkpoint_level` performs, with no write to the store
+pub fn check_checkpoint_level<R, const D: usize, const DOF: usize, M, E, S, Mem>(
+    sim: &mut SimStateGeneric<R, D, DOF, M, E, S, Mem>,
+    path: &str,
+    level_index: usize,
+) -> Result<()>
+where
+    R: Regime<f64, D>,
+    M: Metric<f64, D> + Copy,
+    E: Eos<f64>,
+    S: ExecutionSpace,
+    Mem: MemorySpace,
+{
+    checkpoint_level_pass(sim, path, level_index, RestorePass::Check).map(|_| ())
+}
+
+fn checkpoint_level_pass<R, const D: usize, const DOF: usize, M, E, S, Mem>(
+    sim: &mut SimStateGeneric<R, D, DOF, M, E, S, Mem>,
+    path: &str,
+    level_index: usize,
+    pass: RestorePass,
+) -> Result<CheckpointMeta>
+where
+    R: Regime<f64, D>,
+    M: Metric<f64, D> + Copy,
+    E: Eos<f64>,
+    S: ExecutionSpace,
+    Mem: MemorySpace,
+{
     let tree = Hdf5Backend.read(Path::new(path))?;
     // the conserved group is the restart primary, so its measure must match what this run
     // evolves. a densitized GR-hydro run reading an undensitized file (or the reverse) differs by
@@ -1265,11 +1342,13 @@ where
         )));
     }
     let meta = read_meta_from(&tree)?;
-    sim.time = meta.time;
-    sim.dt = meta.dt;
-    sim.iteration = meta.iteration;
+    if pass.writes() {
+        sim.time = meta.time;
+        sim.dt = meta.dt;
+        sim.iteration = meta.iteration;
+    }
     if let Some(group) = tree.find_group("metadata") {
-        restore_retry_guard(&mut sim.store, |name| group.find_attr(name).cloned())?;
+        restore_retry_guard(&mut sim.store, |name| group.find_attr(name).cloned(), pass)?;
     }
 
     let level_name = format!("level_{level_index}");
@@ -1278,19 +1357,28 @@ where
         .ok_or_else(|| IoError::MissingPath(level_name.clone()))?;
     // the level's own clock, when the file carries one; older files hold the root's clock alone.
     if let Some(a) = level_0.find_attr("time") {
-        sim.time = a.as_f64(&format!("{level_name}/time"))?;
+        let time = a.as_f64(&format!("{level_name}/time"))?;
+        if pass.writes() {
+            sim.time = time;
+        }
     }
     if let Some(a) = level_0.find_attr("dt") {
-        sim.dt = a.as_f64(&format!("{level_name}/dt"))?;
+        let dt = a.as_f64(&format!("{level_name}/dt"))?;
+        if pass.writes() {
+            sim.dt = dt;
+        }
     }
     if let Some(a) = level_0.find_attr("iteration") {
-        sim.iteration = a.as_u64(&format!("{level_name}/iteration"))?;
+        let iteration = a.as_u64(&format!("{level_name}/iteration"))?;
+        if pass.writes() {
+            sim.iteration = iteration;
+        }
     }
     // the isothermal closure's cs^2(x), when the file carries it; older files leave the
     // constructor's uniform value.
     if let Some(cs2) = sim.fields.cs2.as_ref() {
         if level_0.find_dataset("iso_cs2").is_some() {
-            restore_field(level_0, "iso_cs2", cs2, cs2.domain())?;
+            restore_field(level_0, "iso_cs2", cs2, cs2.domain(), pass)?;
         }
     }
     let interior = sim.geom.interior.clone();
@@ -1308,22 +1396,22 @@ where
                     cons,
                     &name,
                     &sim.fields.cons.den,
-                    sim.fields.cons.den.domain(),
+                    sim.fields.cons.den.domain(), pass,
                 )?,
                 "mom" => restore_field(
                     cons,
                     &name,
                     &sim.fields.cons.mom[idx],
-                    sim.fields.cons.mom[idx].domain(),
+                    sim.fields.cons.mom[idx].domain(), pass,
                 )?,
                 "nrg" => {
                     if let Some(nrg) = sim.fields.cons.nrg_field() {
-                        restore_field(cons, &name, nrg, nrg.domain())?;
+                        restore_field(cons, &name, nrg, nrg.domain(), pass)?;
                     }
                 }
                 "mag" => {
                     if let Some(ref mhd) = sim.fields.mhd {
-                        restore_field(cons, &name, &mhd.bcell[idx], mhd.bcell[idx].domain())?;
+                        restore_field(cons, &name, &mhd.bcell[idx], mhd.bcell[idx].domain(), pass)?;
                     }
                 }
                 other => panic!("checkpoint read: unknown conserved field '{other}'"),
@@ -1340,7 +1428,7 @@ where
                  which would restart from its initial concentration over the restored gas"
             )));
         }
-        restore_field(cons, "chi", chi, chi.domain())?;
+        restore_field(cons, "chi", chi, chi.domain(), pass)?;
     }
 
     // primitives (optional). the canonical v2 tree nests visualization fields
@@ -1361,17 +1449,17 @@ where
                         prim,
                         &name,
                         &sim.fields.prim.rho,
-                        sim.fields.prim.rho.domain(),
+                        sim.fields.prim.rho.domain(), pass,
                     )?,
                     "vel" => restore_field(
                         prim,
                         &name,
                         &sim.fields.prim.vel[idx],
-                        sim.fields.prim.vel[idx].domain(),
+                        sim.fields.prim.vel[idx].domain(), pass,
                     )?,
                     "pre" => {
                         if let Some(pre) = sim.fields.prim.pre_field() {
-                            restore_field(prim, &name, pre, pre.domain())?;
+                            restore_field(prim, &name, pre, pre.domain(), pass)?;
                         }
                     }
                     "bcell" => {
@@ -1381,7 +1469,7 @@ where
                                     prim,
                                     &name,
                                     &mhd.bcell[idx],
-                                    mhd.bcell[idx].domain(),
+                                    mhd.bcell[idx].domain(), pass,
                                 )?;
                             }
                         }
@@ -1394,7 +1482,7 @@ where
         // conserved counterpart.
         if let Some(chi) = sim.fields.prim.chi_field() {
             if prim.find_dataset("chi").is_some() {
-                restore_field(prim, "chi", chi, chi.domain())?;
+                restore_field(prim, "chi", chi, chi.domain(), pass)?;
             }
         }
     }
@@ -1410,14 +1498,14 @@ where
                 let face_dom = interior.extend(d, 0, 1);
                 let name = format!("B{}", d + 1);
                 let restored = mag.find_group(&name).map_or_else(
-                    || restore_field(mag, &name, &mhd.bface[d], &face_dom),
-                    |face| restore_field(face, "data", &mhd.bface[d], &face_dom),
+                    || restore_field(mag, &name, &mhd.bface[d], &face_dom, pass),
+                    |face| restore_field(face, "data", &mhd.bface[d], &face_dom, pass),
                 );
                 if restored.is_err() {
                     all_ok = false;
                 }
             }
-            if all_ok {
+            if all_ok && pass.writes() {
                 mhd.bface_initialized
                     .store(true, std::sync::atomic::Ordering::Relaxed);
             }
@@ -1433,10 +1521,17 @@ where
     // the run continues the previous population (flags, ids, weight intact)
     // regardless of what the fresh-run config would have seeded.
     if let Some(tg) = tree.find_group("tracers") {
-        sim.tracers = Some(read_tracer_population::<D>(tg)?);
+        let population = read_tracer_population::<D>(tg)?;
+        if !pass.writes() {
+            return finish_check(&tree, sim.immersed.as_ref(), meta);
+        }
+        sim.tracers = Some(population);
         let geometry = sim.geom.block_geometry(sim.physics.metric);
         let layout = symbi_sim_tracers::TransportLayout::single(&sim.geom.interior);
         symbi_sim_tracers::refresh_derived_positions_store(&mut sim.store, &geometry, layout);
+    }
+    if !pass.writes() {
+        return finish_check(&tree, sim.immersed.as_ref(), meta);
     }
     if let Some(group) = tree.find_group("continuous_tracers") {
         sim.continuous_tracers = Some(read_continuous_population::<D, Mem>(group)?);
@@ -1447,6 +1542,58 @@ where
     }
 
     Ok(meta)
+}
+
+/// the reads of a check pass past the fields: the continuous tracer population and the body
+/// records parse, onto a copy of the bodies where the store carries them
+fn finish_check<const D: usize>(tree: &TreeBuf, immersed: Option<&ImmersedBodies<D>>, meta: CheckpointMeta) -> Result<CheckpointMeta> {
+    if let Some(group) = tree.find_group("continuous_tracers") {
+        read_continuous_population::<D, symbi_xpu::HostMemory>(group)?;
+    }
+    if let (Some(bodies_g), Some(im)) = (tree.find_group("bodies"), immersed) {
+        check_bodies::<D>(bodies_g, im)?;
+    }
+    Ok(meta)
+}
+
+/// every check `restore_bodies` makes before it writes: the records it indexes are present and
+/// long enough for the run's bodies, and the file and the run carry a bonded assembly together
+fn check_bodies<const D: usize>(bodies_g: &TreeBuf, im: &ImmersedBodies<D>) -> Result<()> {
+    let len = |name: &str| -> Option<usize> { bodies_g.find_dataset(name).and_then(|d| d.data.as_f64().map(|v| v.len())) };
+    let need = |name: &str| -> Result<usize> { len(name).ok_or_else(|| IoError::MissingPath(format!("bodies/{name}"))) };
+    let nb = im.bodies.len().min(need("mass")?);
+    let short = |name: &str, have: usize, want: usize| -> Result<()> {
+        if have < want {
+            return Err(IoError::ShapeMismatch { path: format!("bodies/{name}"), expected: vec![want], actual: vec![have] });
+        }
+        Ok(())
+    };
+    for (name, per) in [("position", D), ("velocity", D), ("total_accreted_mass", 1), ("accretion_rate", 1)] {
+        short(name, need(name)?, nb * per)?;
+    }
+    for (name, per) in [
+        ("magnetic_slip_heating", 1),
+        ("exported_slip_heat", 1),
+        ("magnetic_slip_heating_rate", 1),
+        ("exported_slip_heat_rate", 1),
+        ("total_accreted_energy", 1),
+        ("accretion_energy_rate", 1),
+        ("orientation", 9),
+        ("omega", 3),
+    ] {
+        if let Some(have) = len(name) {
+            short(name, have, nb * per)?;
+        }
+    }
+    match (bodies_g.find_group("fragments").is_some(), im.fragment_physics.is_some()) {
+        (false, true) => Err(IoError::Backend(
+            "the checkpoint records no bonded-assembly state; this run configures a bonded \
+             assembly, whose bonds and contacts would restart from their formation"
+                .into(),
+        )),
+        (true, false) => Err(IoError::Backend("the checkpoint records a bonded assembly; this run configures none".into())),
+        _ => Ok(()),
+    }
 }
 
 /// the discrete tracer population recorded under `tracers`: ids, cohorts, owners, flags and the
@@ -1777,6 +1924,7 @@ fn restore_field<const D: usize, Mem: MemorySpace>(
     name: &str,
     field: &symbi_grid::Field<f64, D, Mem>,
     domain: &symbi_algebra::Domain<D>,
+    pass: RestorePass,
 ) -> Result<()> {
     let ds = tree
         .find_dataset(name)
@@ -1793,6 +1941,9 @@ fn restore_field<const D: usize, Mem: MemorySpace>(
             expected: vec![vol],
             actual: vec![data.len()],
         });
+    }
+    if !pass.writes() {
+        return Ok(());
     }
     let view = field.view_mut();
     // same axis-0-fastest walk as `extract_field` — written-then-loaded is the identity by
@@ -3687,24 +3838,55 @@ fn read_region<const D: usize, Mem: MemorySpace>(
     Ok(())
 }
 
+/// the read `read_region` makes, checked without reading: the dataset holds every file index the
+/// region maps to
+fn check_region<const D: usize>(
+    path: &Path,
+    dataset_path: &str,
+    region: &symbi_algebra::Domain<D>,
+    file_of: &dyn Fn(usize, isize) -> usize,
+) -> Result<()> {
+    let shape = dataset_shape(path, dataset_path)?;
+    if region.volume() == 0 {
+        return Ok(());
+    }
+    let (start, count) = slab_start_and_count(region, file_of);
+    let fits = shape.len() == start.len() && start.iter().zip(&count).zip(&shape).all(|((s, c), n)| s + c <= *n);
+    if !fits {
+        return Err(IoError::ShapeMismatch {
+            path: dataset_path.into(),
+            expected: start.iter().zip(&count).map(|(s, c)| s + c).collect(),
+            actual: shape,
+        });
+    }
+    Ok(())
+}
+
 /// the retry guard state a checkpoint recorded: the consecutive severely reduced root steps onto
 /// the store, and the thresholds as the recorded ones the opening report compares with the
 /// configured ones. a file written before the guard existed records neither: the streak starts at 0
 fn restore_retry_guard<const D: usize, const DOF: usize, Mem: MemorySpace>(
     store: &mut FieldStore<D, DOF, Mem, f64>,
     get: impl Fn(&str) -> Option<Attr>,
+    pass: RestorePass,
 ) -> Result<()> {
     if let Some(a) = get("retry_severe_streak") {
-        store.severe_streak = a.as_u64("metadata/retry_severe_streak")? as u32;
+        let streak = a.as_u64("metadata/retry_severe_streak")? as u32;
+        if pass.writes() {
+            store.severe_streak = streak;
+        }
     }
     if let (Some(max), Some(ratio), Some(steps)) =
         (get("retry_max_rejections"), get("retry_severe_ratio"), get("retry_sustained_steps"))
     {
-        store.retry_guard_recorded = Some(crate::retry_guard::RetryGuard {
+        let recorded = crate::retry_guard::RetryGuard {
             max_rejections: max.as_u64("metadata/retry_max_rejections")? as u32,
             severe_ratio: ratio.as_f64("metadata/retry_severe_ratio")?,
             sustained_steps: steps.as_u64("metadata/retry_sustained_steps")? as u32,
-        });
+        };
+        if pass.writes() {
+            store.retry_guard_recorded = Some(recorded);
+        }
     }
     Ok(())
 }
@@ -3733,6 +3915,46 @@ where
     S: ExecutionSpace,
     Mem: MemorySpace,
 {
+    partitioned_level_pass(sim, path, level_index, offset, grid, RestorePass::Check)?;
+    partitioned_level_pass(sim, path, level_index, offset, grid, RestorePass::Apply)
+}
+
+/// every read and check `load_partitioned_level` performs, with no write to the tile: the
+/// datasets' extents are checked against the tile's region in place of streaming them
+pub fn check_partitioned_level<R, const D: usize, const DOF: usize, M, E, S, Mem>(
+    sim: &mut SimStateGeneric<R, D, DOF, M, E, S, Mem>,
+    path: &str,
+    level_index: usize,
+    offset: [isize; D],
+    grid: &GlobalGrid<D>,
+) -> Result<()>
+where
+    R: Regime<f64, D>,
+    M: Metric<f64, D> + Copy,
+    E: Eos<f64>,
+    S: ExecutionSpace,
+    Mem: MemorySpace,
+{
+    partitioned_level_pass(sim, path, level_index, offset, grid, RestorePass::Check)
+}
+
+/// one pass of the partitioned load: `Check` reads and checks, `Apply` also writes. a caller that
+/// loads several tiles or levels runs `Check` over all of them before `Apply` over any
+pub fn partitioned_level_pass<R, const D: usize, const DOF: usize, M, E, S, Mem>(
+    sim: &mut SimStateGeneric<R, D, DOF, M, E, S, Mem>,
+    path: &str,
+    level_index: usize,
+    offset: [isize; D],
+    grid: &GlobalGrid<D>,
+    pass: RestorePass,
+) -> Result<()>
+where
+    R: Regime<f64, D>,
+    M: Metric<f64, D> + Copy,
+    E: Eos<f64>,
+    S: ExecutionSpace,
+    Mem: MemorySpace,
+{
     let file = Path::new(path);
     let root = read_attrs(file, "")?;
     let stored = attr_of(&root, CONSERVED_DENSITIZATION_ATTR).map(|a| format!("{a:?}"));
@@ -3752,22 +3974,25 @@ where
             regime_name(&sim.physics.regime)
         )));
     }
-    restore_retry_guard(&mut sim.store, |name| attr_of(&meta, name).cloned())?;
+    restore_retry_guard(&mut sim.store, |name| attr_of(&meta, name).cloned(), pass)?;
     let level_path = format!("level_{level_index}");
     let level_attrs = read_attrs(file, &level_path)?;
-    if let Some(a) = attr_of(&level_attrs, "time") {
-        sim.time = a.as_f64(&format!("{level_path}/time"))?;
-    }
-    if let Some(a) = attr_of(&level_attrs, "iteration") {
-        sim.iteration = a.as_u64(&format!("{level_path}/iteration"))?;
-    }
+    let time = attr_of(&level_attrs, "time").map(|a| a.as_f64(&format!("{level_path}/time"))).transpose()?;
+    let iteration = attr_of(&level_attrs, "iteration").map(|a| a.as_u64(&format!("{level_path}/iteration"))).transpose()?;
     // the last step's timestep, which bounds the next one's growth: the run's, then the level's
     // own where the file carries one, as the single loader restores it
-    if let Some(a) = attr_of(&meta, "dt") {
-        sim.dt = a.as_f64("metadata/dt")?;
-    }
-    if let Some(a) = attr_of(&level_attrs, "dt") {
-        sim.dt = a.as_f64(&format!("{level_path}/dt"))?;
+    let run_dt = attr_of(&meta, "dt").map(|a| a.as_f64("metadata/dt")).transpose()?;
+    let level_dt = attr_of(&level_attrs, "dt").map(|a| a.as_f64(&format!("{level_path}/dt"))).transpose()?;
+    if pass.writes() {
+        if let Some(time) = time {
+            sim.time = time;
+        }
+        if let Some(iteration) = iteration {
+            sim.iteration = iteration;
+        }
+        if let Some(dt) = level_dt.or(run_dt) {
+            sim.dt = dt;
+        }
     }
     let mesh = read_group(file, &format!("{level_path}/mesh"))?;
     let a_checkpoint = match attr_of(&meta, "scale_factor") {
@@ -3813,18 +4038,27 @@ where
         } else {
             format!("{level_path}/{group}/{name}")
         };
-        read_region(file, &dataset_path, field, &cell_region, &cell_file_of, budget)?;
+        match pass {
+            RestorePass::Check => check_region(file, &dataset_path, &cell_region, &cell_file_of)?,
+            RestorePass::Apply => read_region(file, &dataset_path, field, &cell_region, &cell_file_of, budget)?,
+        }
     }
-    sim.store.primitives_loaded = true;
+    if pass.writes() {
+        sim.store.primitives_loaded = true;
+    }
     if let Some(mhd) = sim.fields.mhd.as_ref() {
         let face_file_of = |ax: usize, c: isize| (c + shift[ax]) as usize;
         for d in 0..D {
             let dataset_path = format!("{level_path}/partition_0/hydro/magnetic/B{}/data", d + 1);
-            dataset_shape(file, &dataset_path)?;
             let region = interior.extend(d, 0, 1);
-            read_region(file, &dataset_path, &mhd.bface[d], &region, &face_file_of, budget)?;
+            match pass {
+                RestorePass::Check => check_region(file, &dataset_path, &region, &face_file_of)?,
+                RestorePass::Apply => read_region(file, &dataset_path, &mhd.bface[d], &region, &face_file_of, budget)?,
+            }
         }
-        mhd.bface_initialized.store(true, std::sync::atomic::Ordering::Relaxed);
+        if pass.writes() {
+            mhd.bface_initialized.store(true, std::sync::atomic::Ordering::Relaxed);
+        }
     }
     // the tracer populations: the tile keeps the tracers whose owner cell it holds, in stored
     // order; a tracer owned by no cell (escaped, or in a sink reservoir) rides the first tile
@@ -3861,7 +4095,9 @@ where
                 own.step_flags.push(all.step_flags[ii]);
             }
         }
-        sim.tracers = Some(own);
+        if pass.writes() {
+            sim.tracers = Some(own);
+        }
         let geometry = sim.geom.block_geometry(sim.physics.metric);
         // the derived positions resolve each owner to its cell; the wrap flags take no part
         let layout = symbi_sim_tracers::TransportLayout {
@@ -3870,7 +4106,9 @@ where
             wraps: [false; D],
             level: level_index as u8,
         };
-        symbi_sim_tracers::refresh_derived_positions_store(&mut sim.store, &geometry, layout);
+        if pass.writes() {
+            symbi_sim_tracers::refresh_derived_positions_store(&mut sim.store, &geometry, layout);
+        }
     }
     if let Ok(group) = read_group(file, "continuous_tracers") {
         let mut all = read_continuous_population::<D, Mem>(&group)?;
@@ -3889,11 +4127,16 @@ where
                 own.push_host(record).map_err(IoError::Backend)?;
             }
         }
-        sim.continuous_tracers = Some(own);
+        if pass.writes() {
+            sim.continuous_tracers = Some(own);
+        }
     }
     if let Some(im) = sim.immersed.as_mut() {
         if let Ok(bodies) = read_group(file, "bodies") {
-            restore_bodies::<D>(&bodies, im)?;
+            match pass {
+                RestorePass::Check => check_bodies::<D>(&bodies, im)?,
+                RestorePass::Apply => restore_bodies::<D>(&bodies, im)?,
+            }
         }
     }
     Ok(())
@@ -3953,6 +4196,67 @@ mod partitioned_restart_tests {
         let mut classic = blank([0, 0], [8, 6]);
         load_checkpoint_level(&mut classic, path, 0).unwrap();
         assert_tile_matches_the_function(&classic, [0, 0], &grid, "classic loader");
+    }
+
+    /// the clock, retry streak and every cell and face value of a store, bits
+    fn store_bits(sim: &Sim) -> Vec<u64> {
+        let mut bits = vec![sim.time.to_bits(), sim.dt.to_bits(), sim.iteration, u64::from(sim.store.severe_streak)];
+        for (_, field) in unique_cell_fields(sim) {
+            bits.extend(field.domain().iter().map(|c| field.view().at(c).to_bits()));
+        }
+        let mhd = sim.fields.mhd.as_ref().unwrap();
+        for d in 0..2 {
+            bits.extend(mhd.bface[d].domain().iter().map(|c| mhd.bface[d].view().at(c).to_bits()));
+        }
+        bits
+    }
+
+    /// a destination whose clock and streak differ from any file's, so a write shows
+    fn marked(mut sim: Sim) -> Sim {
+        sim.time = 7.0;
+        sim.dt = 0.5;
+        sim.iteration = 3;
+        sim.store.severe_streak = 2;
+        sim
+    }
+
+    #[test]
+    fn a_refused_partitioned_restart_leaves_the_tile_as_it_found_it() {
+        let dir = scratch("refused_untouched");
+        let path = dir.join("one.h5");
+        let mut source = tile([0, 0], [8, 6]);
+        source.time = 1.25;
+        source.iteration = 40;
+        write_partitioned_checkpoint::<NewtonianMhd, 2, 3, HostMemory>(&PhysicsIdentity::of(&source), &[LevelTiles::whole(&source.store)], path.to_str().unwrap(), &Metadata::new()).unwrap();
+        // a grid one row short: refused by the region check, which reads after the clock
+        let mut other = marked(tile([0, 0], [8, 5]));
+        let wrong = GlobalGrid::of_state(&other.store);
+        let before = store_bits(&other);
+        load_partitioned_level(&mut other, path.to_str().unwrap(), 0, [0, 0], &wrong).unwrap_err();
+        assert!(store_bits(&other) == before, "the refused restart wrote the tile");
+        // the premise: the same tile on the matching grid takes the file's clock
+        let mut fits = marked(tile([0, 0], [8, 6]));
+        let grid = GlobalGrid::of_state(&fits.store);
+        load_partitioned_level(&mut fits, path.to_str().unwrap(), 0, [0, 0], &grid).unwrap();
+        assert_eq!((fits.time, fits.iteration), (1.25, 40), "the file's clock never loads; the gate is vacuous");
+    }
+
+    #[test]
+    fn a_refused_whole_file_restart_leaves_the_store_as_it_found_it() {
+        let dir = scratch("refused_whole_untouched");
+        let path = dir.join("one.h5");
+        let source = tile([0, 0], [8, 6]);
+        write_checkpoint(&source, path.to_str().unwrap(), &Metadata::new()).unwrap();
+        // a dyed run against an undyed file: refused by the passive-scalar check, which reads
+        // after the clock and the conserved fields
+        let mut dyed = marked(tile([0, 0], [8, 6]).with_passive_scalar().unwrap());
+        let before = store_bits(&dyed);
+        let err = load_checkpoint_level(&mut dyed, path.to_str().unwrap(), 0).unwrap_err();
+        assert!(format!("{err}").contains("passive scalar"), "refused for another cause: {err}");
+        assert!(store_bits(&dyed) == before, "the refused restart wrote the store");
+        let mut plain = marked(blank([0, 0], [8, 6]));
+        load_checkpoint_level(&mut plain, path.to_str().unwrap(), 0).unwrap();
+        assert_ne!(store_bits(&plain), store_bits(&marked(blank([0, 0], [8, 6]))), "the file never loads; the gate is vacuous");
     }
 
     #[test]

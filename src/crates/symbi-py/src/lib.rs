@@ -2731,7 +2731,9 @@ where
         // a restart may run deeper than the file it resumes from — the bootstrap ladder, where a
         // rung converges at its own resolution and the next resumes it with one more level. the
         // sequence (count the file's levels, verify their grids, load them, inject the rest) lives
-        // on the hierarchy so it is reachable from a test, not only from here.
+        // on the hierarchy so it is reachable from a test, not only from here. every check runs
+        // before the configured tracer populations make way for the file's.
+        hier.check_restart(path)?;
         for level in hier.levels.iter_mut() {
             level.state.tracers = None;
             level.state.continuous_tracers = None;
@@ -3007,7 +3009,7 @@ where
             table.set_dynamic(false);
             let states: Vec<&_> = h.levels.iter().map(|l| &l.state).collect();
             let crashed = checkpoint_name(cfg, checkpoint_status_tag(CheckpointOutcome::Crashed));
-            let meta = failure_checkpoint_metadata(cfg, cadence.index, c.halt.is_some());
+            let meta = failure_checkpoint_metadata(cfg, cadence.index, c.restartable());
             let _ = write_hierarchy_checkpoint(&states, &crashed, &meta);
             table.post_error(&format!(
                 "crashed at {} (step {}) — state checkpoint {crashed}",
@@ -6152,6 +6154,13 @@ where
     // the file's sampling schedule and accumulations on every tile
     if let Some(path) = cfg.restart_path.as_deref() {
         symbi_sim::checkpoint::require_restartable(path)?;
+        // every tile and census is checked before any tile is written
+        for (flat, (tile, _)) in tiles.iter_mut().enumerate() {
+            symbi_sim::checkpoint::check_partitioned_level(tile, path, 0, offsets[flat], &grid)
+                .map_err(|e| format!("restart of tile {flat} from '{path}': {e}"))?;
+            symbi_sim::checkpoint::check_census_state(path, &mut tile.store.censuses, 1, 0.0)
+                .map_err(|e| format!("census restart of tile {flat} from '{path}': {e}"))?;
+        }
         for (flat, (tile, _)) in tiles.iter_mut().enumerate() {
             load_partitioned_level(tile, path, 0, offsets[flat], &grid)
                 .map_err(|e| format!("restart of tile {flat} from '{path}': {e}"))?;
@@ -6651,6 +6660,19 @@ where
                  {depth}; a restart may add levels to a checkpoint, never drop them"
             ));
         }
+        // every level of every tile and every census is checked before any is written
+        for (i, tile) in tiles.iter_mut().enumerate() {
+            symbi_sim::checkpoint::check_partitioned_level(&mut tile.levels[0].state, path, 0, root_offsets[i], &root_grid)
+                .map_err(|e| format!("restart of tile {i} root from '{path}': {e}"))?;
+            symbi_sim::checkpoint::check_census_state(path, &mut tile.levels[0].state.store.censuses, depth, 0.0)
+                .map_err(|e| format!("census restart of tile {i} from '{path}': {e}"))?;
+        }
+        for (level, (fg, offsets, grid)) in fine.iter().enumerate().map(|(k, f)| (k + 1, f)).take(stored.saturating_sub(1)) {
+            for (k, &i) in fg.order.iter().enumerate() {
+                symbi_sim::checkpoint::check_partitioned_level(&mut tiles[i].levels[level].state, path, level, offsets[k], grid)
+                    .map_err(|e| format!("restart of tile {i} level {level} from '{path}': {e}"))?;
+            }
+        }
         for (i, tile) in tiles.iter_mut().enumerate() {
             load_partitioned_level(&mut tile.levels[0].state, path, 0, root_offsets[i], &root_grid)
                 .map_err(|e| format!("restart of tile {i} root from '{path}': {e}"))?;
@@ -6826,7 +6848,7 @@ where
             crash_cause(c.dt_cfl, c.panic.as_deref(), c.halt.as_ref())
         );
 
-        if let Err(msg) = write_cp(&tiles, &crashed, cadence.index, c.halt.is_some()) {
+        if let Err(msg) = write_cp(&tiles, &crashed, cadence.index, c.restartable()) {
             reporter.fail(&msg);
             return Err(msg);
         }
@@ -12789,9 +12811,15 @@ where
     let restart = cfg.restart_path.is_some();
     if let Some(path) = cfg.restart_path.as_deref() {
         symbi_sim::checkpoint::require_restartable(path)?;
+        // the censuses are checked before the tiles load; the tiles' levels are checked inside
+        // the load before any is written
+        let levels = 2 + plans.nested.len();
+        for tile in tiles.iter_mut() {
+            symbi_sim::checkpoint::check_census_state(path, &mut tile.levels[0].state.store.censuses, levels, 0.0)
+                .map_err(|e| format!("census restart from '{path}': {e}"))?;
+        }
         load_refined_tiles(&mut tiles, &held, &plans, &grids, path).map_err(|e| e.to_string())?;
         // the censuses continue the file's sampling schedule and accumulations on every tile
-        let levels = 2 + plans.nested.len();
         for (k, tile) in tiles.iter_mut().enumerate() {
             let restart_time = tile.levels[0].state.time;
             let warnings = symbi_sim::checkpoint::restore_census_state(path, &mut tile.levels[0].state.store.censuses, levels, restart_time)
@@ -13914,6 +13942,13 @@ where
     // censuses continue the file's sampling schedule and accumulations on every tile
     if let Some(path) = cfg.restart_path.as_deref() {
         symbi_sim::checkpoint::require_restartable(path)?;
+        // every tile and census is checked before any tile is written
+        for (&flat, (sim, _)) in mine.iter().zip(tiles.iter_mut()) {
+            symbi_sim::checkpoint::check_partitioned_level(sim, path, 0, offsets[flat], &restart_grid)
+                .map_err(|e| format!("restart of tile {flat} from '{path}': {e}"))?;
+            symbi_sim::checkpoint::check_census_state(path, &mut sim.store.censuses, 1, 0.0)
+                .map_err(|e| format!("census restart of tile {flat} from '{path}': {e}"))?;
+        }
         for (k, (&flat, (sim, _))) in mine.iter().zip(tiles.iter_mut()).enumerate() {
             symbi_sim::checkpoint::load_partitioned_level(sim, path, 0, offsets[flat], &restart_grid)
                 .map_err(|e| format!("restart of tile {flat} from '{path}': {e}"))?;

@@ -376,6 +376,17 @@ pub struct CrashReport {
     pub halt: Option<symbi_sim::step_transaction::StepHalt>,
 }
 
+impl CrashReport {
+    /// whether the state the crash left is the last accepted one, which a restart may resume: a
+    /// halt is reported only by the step transaction, after the complete restore of the step's
+    /// captured entry (every restore asserts a complete capture, and a panic is contained only
+    /// where the restore covers the whole state). a panic outside a contained attempt and the
+    /// timestep watchdog leave a state no accepted step produced
+    pub fn restartable(&self) -> bool {
+        self.halt.is_some()
+    }
+}
+
 /// A positive CFL estimate may increase by an arbitrary factor after a transient fast cell
 /// disappears; only estimates that cannot advance time are fatal. Keep this predicate separate
 /// from the final-time/user clamps so NaN cannot be hidden by `f64::min`.
@@ -2621,6 +2632,28 @@ where
     /// restart is only meaningful when level `i` occupies the same region regardless of the total
     /// depth, which is a property of a refinement schedule rather than of this code.
     pub fn restore_from_checkpoint(&mut self, path: &str) -> Result<usize, String> {
+        let stored = self.check_restart(path)?;
+        for (level_index, level) in self.levels.iter_mut().enumerate().take(stored) {
+            symbi_sim::checkpoint::load_checkpoint_level(&mut level.state, path, level_index)
+                .map_err(|e| format!("{e}"))?;
+        }
+        self.inject_levels_from(stored)?;
+        // the censuses continue the file's sampling schedule and accumulations; their registrations
+        // live on the root
+        let (levels, restart_time) = (self.levels.len(), self.levels[0].state.time);
+        let warnings = symbi_sim::checkpoint::restore_census_state(path, &mut self.levels[0].state.store.censuses, levels, restart_time)
+            .map_err(|e| format!("{e}"))?;
+        for warning in warnings {
+            eprintln!("warning: {warning}");
+        }
+        Ok(stored)
+    }
+
+    /// every check a restart from `path` makes, run before any of it writes a level: the file is
+    /// restartable, carries no more levels than this run builds, and every level it carries
+    /// matches its grid and reads completely; the censuses' schedules and accumulations read.
+    /// returns the number of levels the file carries
+    pub fn check_restart(&mut self, path: &str) -> Result<usize, String> {
         symbi_sim::checkpoint::require_restartable(path)?;
         let stored =
             symbi_sim::checkpoint::checkpoint_level_count(path).map_err(|e| format!("{e}"))?;
@@ -2634,24 +2667,14 @@ where
             ));
         }
         for (level_index, level) in self.levels.iter_mut().enumerate().take(stored) {
-            symbi_sim::checkpoint::verify_checkpoint_level_geometry(
-                &level.state,
-                path,
-                level_index,
-            )
-            .map_err(|e| format!("{e}"))?;
-            symbi_sim::checkpoint::load_checkpoint_level(&mut level.state, path, level_index)
+            symbi_sim::checkpoint::verify_checkpoint_level_geometry(&level.state, path, level_index)
+                .map_err(|e| format!("{e}"))?;
+            symbi_sim::checkpoint::check_checkpoint_level(&mut level.state, path, level_index)
                 .map_err(|e| format!("{e}"))?;
         }
-        self.inject_levels_from(stored)?;
-        // the censuses continue the file's sampling schedule and accumulations; their registrations
-        // live on the root
-        let (levels, restart_time) = (self.levels.len(), self.levels[0].state.time);
-        let warnings = symbi_sim::checkpoint::restore_census_state(path, &mut self.levels[0].state.store.censuses, levels, restart_time)
+        let levels = self.levels.len();
+        symbi_sim::checkpoint::check_census_state(path, &mut self.levels[0].state.store.censuses, levels, 0.0)
             .map_err(|e| format!("{e}"))?;
-        for warning in warnings {
-            eprintln!("warning: {warning}");
-        }
         Ok(stored)
     }
 
@@ -8126,7 +8149,9 @@ where
     }
 
     fn contains_panics(&self) -> bool {
-        true
+        // a panicked attempt ends at its restored entry only where the restore is complete: every
+        // level's fields by its kernels, every side-car by the hierarchy
+        self.hier.levels.iter().all(|level| level.kernels.field_rollback_is_complete(&level.state))
     }
 
     fn severe_streak(&mut self) -> u32 {
@@ -8498,7 +8523,9 @@ where
     }
 
     fn contains_panics(&self) -> bool {
-        true
+        // a panicked attempt ends at its restored entry only where the restore is complete: every
+        // level's fields on every tile by its kernels, every side-car by the hierarchy
+        self.tiles.iter().all(|tile| tile.levels.iter().all(|level| level.kernels.field_rollback_is_complete(&level.state)))
     }
 
     fn severe_streak(&mut self) -> u32 {

@@ -133,7 +133,9 @@ where
     }
 
     fn contains_panics(&self) -> bool {
-        true
+        // the single grid restores fields and tracer transport alone, so a panicked attempt ends
+        // at its restored entry only where the snapshot covers the store's whole state
+        self.kernels.rollback_snapshot_is_complete(self.sim)
     }
 
     fn severe_streak(&mut self) -> u32 {

@@ -11,9 +11,10 @@
 // each attempt freezes it outside the admissible set, the correction rejects
 // the attempt, and the sixteenth consecutive freeze panics. the gates:
 //   - the step transaction turns that panic into an unrecoverable halt naming
-//     the freeze, and the halted run equals bit for bit a clean run stopped
-//     after step 1: conserved, primitive, cell and face fields, the clock,
-//     the sink's accretion record, and the accepted guard totals;
+//     the freeze, reached through sixteen rollbacks that each kept the streak,
+//     and the halted run equals bit for bit a clean run stopped after step 1:
+//     conserved, primitive, cell and face fields, the clock, the sink's
+//     accretion record, and the accepted guard totals; its crash is restartable;
 //   - a checkpoint whose metadata carries `restartable = false` is refused by
 //     the restart, and the same file without the mark restores.
 //
@@ -40,7 +41,9 @@ const N: usize = 32;
 const H: f64 = 1.0 / N as f64;
 // a cell a quarter box from the sink, outside its drain mask
 const POISONED: [isize; 2] = [8, 24];
-// more armed attempts than the freeze streak allows, fewer than the retry guard's rejections
+// more armed attempts than the freeze streak allows, fewer than the retry guard's rejections. the
+// streak bounding repeated failures survives every rollback: were it restored with the state, the
+// armed slots would run out at attempt 18, attempt 19 would run clean, and the step would pass
 const ARMED_ATTEMPTS: usize = 18;
 
 type Sim = SimStateGeneric<NewtonianMhd, 2, 3, Cartesian, IdealGas<f64>, CpuSpace, HostMemory>;
@@ -117,11 +120,13 @@ fn an_unrecoverable_attempt_halts_at_the_last_accepted_state() {
     assert!(crash.panic.is_none(), "the panic escaped the step transaction: {:?}", crash.panic);
     match &crash.halt {
         Some(StepHalt::Unrecoverable { detail }) => {
-            assert!(detail.contains("FOFC last-resort freeze"), "the halt does not name the freeze: {detail}")
+            assert!(detail.contains("FOFC last-resort freeze"), "the halt does not name the freeze: {detail}");
+            assert!(detail.contains("16 consecutive substages"), "the streak did not carry across the rollbacks: {detail}");
         }
         other => panic!("the run ended on {other:?}, the freeze streak was the armed failure"),
     }
     assert_eq!(crash.iter, 1, "the halt is reported at the entry of root step 2");
+    assert!(crash.restartable(), "a halt at the restored entry was published as not restartable");
 
     let mut clean = build(false);
     let d_clean = clean

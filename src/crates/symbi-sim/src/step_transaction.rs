@@ -47,8 +47,9 @@ pub trait RootAttempt {
     fn restore(&mut self) -> Result<(), Self::Error>;
     /// the consecutive severely reduced root steps the run carries
     fn severe_streak(&mut self) -> u32;
-    /// whether every store of the attempt lives in this thread, so a panic inside it can end the
-    /// step at its restored entry; a march whose peers run elsewhere lets the panic end the session
+    /// whether a panic inside the attempt can end the step at its restored entry: every store
+    /// lives in this thread and the restore covers its whole state. a march whose peers run
+    /// elsewhere, or whose restore leaves state out, lets the panic propagate
     fn contains_panics(&self) -> bool {
         false
     }
