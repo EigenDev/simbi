@@ -16,6 +16,7 @@
 pub mod block;
 pub mod centroid;
 pub mod coord_map;
+pub mod embedding;
 pub mod grhd_source;
 pub mod metric;
 pub mod motion;
@@ -23,6 +24,7 @@ pub mod motion;
 pub use block::{AxisMap, BlockGeometry};
 pub use centroid::volume_weighted_centroid;
 pub use coord_map::{CellInterval, CoordMap, LogMap, UniformMap};
+pub use embedding::{body_cartesian_axes, chart_to_cartesian};
 pub use metric::{
     Cartesian, ComponentBasis, Cylindrical, CylindricalRPhi, DiagonalMetric, Geometry, KerrKS,
     KerrKSCartesian, KerrKSCylindrical, Metric, SchwarzschildKS, SchwarzschildKSCartesian,

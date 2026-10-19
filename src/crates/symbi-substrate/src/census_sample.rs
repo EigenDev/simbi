@@ -336,7 +336,13 @@ fn nonphysical_masks<const D: usize, const DOF: usize, Mem: MemorySpace>(
             if !(body.has_accretion() || body.has_rigid()) {
                 continue;
             }
-            let center: [f64; 3] = std::array::from_fn(|a| if a < D { body.position[a] } else { 0.0 });
+            // the body's position components name the cartesian axes of the grid's plane
+            let mut center = [0.0f64; 3];
+            for (k, &cart) in symbi_geometry::body_cartesian_axes(sim.geom.coords, D, &sim.geom.axes).iter().enumerate() {
+                if k < D && cart < 3 {
+                    center[cart] = body.position[k];
+                }
+            }
             let shape = match immersed.shapes.get(b).and_then(|s| s.as_ref()) {
                 Some(shape) => shape.clone().rotated(body.orientation),
                 None => match body.mask_radius() {
@@ -352,9 +358,12 @@ fn nonphysical_masks<const D: usize, const DOF: usize, Mem: MemorySpace>(
     NonphysicalMasks { excised, bodies, stamp: h.finish() }
 }
 
-/// mark the excised cells and the cells inside a masking body excluded: a cell is out when its
-/// centroid lies strictly inside the excised core (the excision kernels' own predicate) or strictly
-/// inside a body (negative signed distance). a whole-cell rule: a cell is gas or it is not
+/// mark the excised cells and the cells inside a masking body excluded, each by the predicate the
+/// run's own kernels apply: a cell is excised when the excision fill freezes it (on a cartesian
+/// chart its face-midpoint centroid lies strictly inside the kerr-schild radius; on a spherical
+/// chart its radial face midpoint lies inside the excision radius, the fill's sampling point), and
+/// masked when the cartesian image of its volume centroid lies strictly inside a body (negative
+/// signed distance). a whole-cell rule: a cell is gas or it is not
 fn exclude_nonphysical<const D: usize, const DOF: usize, Mem: MemorySpace>(
     sim: &FieldStore<D, DOF, Mem, f64>,
     ev: &symbi_sim::census::CensusEvaluator,
@@ -369,11 +378,30 @@ fn exclude_nonphysical<const D: usize, const DOF: usize, Mem: MemorySpace>(
         "a census over excised or masked cells on device memory awaits its device mask kernel"
     );
     let excluded = ev.spec().excluded_marker();
+    let chart = sim.geom.coords;
     for c in sim.geom.interior.iter() {
-        let x = sim.geom.cell_coord(c);
-        let x3: [f64; 3] = std::array::from_fn(|a| if a < D { x[a] } else { 0.0 });
-        let excised = masks.excised.is_some_and(|(r, a)| symbi_ib::excise::ks_excised(&x3, a, r));
-        if excised || masks.bodies.iter().any(|body| body.dist(x3) < 0.0) {
+        // the volume centroid in natural coordinate order, an ungridded coordinate at zero
+        let centroid = sim.geom.expression_point(c);
+        let mut natural = [0.0f64; 3];
+        for (d, &slot) in sim.geom.axes.iter().enumerate() {
+            if slot < 3 {
+                natural[slot] = centroid[d];
+            }
+        }
+        let excised = masks.excised.is_some_and(|(r, a)| match chart {
+            symbi_geometry::Geometry::Cartesian => symbi_ib::excise::ks_excised(&natural, a, r),
+            symbi_geometry::Geometry::Spherical => {
+                let lo = sim.geom.face_coord(c, 0)[0];
+                let mut upper = c;
+                upper[0] += 1;
+                0.5 * (lo + sim.geom.face_coord(upper, 0)[0]) < r
+            }
+            symbi_geometry::Geometry::Cylindrical => {
+                panic!("a census excision mask on a cylindrical chart, where excision is refused at admission")
+            }
+        });
+        let cartesian = symbi_geometry::chart_to_cartesian(chart, natural);
+        if excised || masks.bodies.iter().any(|body| body.dist(cartesian) < 0.0) {
             segment.view_mut().set(c, excluded);
         }
     }

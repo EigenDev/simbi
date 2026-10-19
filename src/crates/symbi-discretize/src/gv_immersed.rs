@@ -48,37 +48,26 @@ struct BodyContributionGv<'t> {
 }
 
 /// the cartesian axes (0=x,1=y,2=z) a body's ndim-D position/velocity components map to — the
-/// grid-plane convention. identical to `immersed::body_cart_axes`.
+/// grid-plane convention, shared with the host through `symbi_geometry::body_cartesian_axes`.
 pub(crate) fn body_cart_axes(coords: Coords, ndim: usize, axes: &[usize]) -> Vec<usize> {
-    match coords {
-        Coords::Cartesian => (0..ndim).collect(),
-        Coords::Cylindrical => axes.to_vec(),
-        Coords::Spherical => {
-            if ndim >= 3 {
-                vec![0, 1, 2]
-            } else {
-                vec![0, 2]
-            }
-        }
-    }
+    symbi_geometry::body_cartesian_axes(geometry_of(coords), ndim, axes)
 }
 
 // ---- gv coordinate transforms (the metric's to_cartesian / orthonormal frame) --------------
 // only the immersed source uses these; co-located with their consumer.
 
-/// the cell cartesian position from its coordinate-basis position (3D embedding).
+/// the cell cartesian position from its coordinate-basis position (3D embedding), shared with the
+/// host through `symbi_geometry::chart_to_cartesian`.
 pub(crate) fn to_cartesian_gv<'t>(coords: Coords, coord: &[Gv<'t>; 3]) -> [Gv<'t>; 3] {
+    symbi_geometry::chart_to_cartesian(geometry_of(coords), *coord)
+}
+
+/// the geometry tag of a kernel chart
+fn geometry_of(coords: Coords) -> symbi_geometry::Geometry {
     match coords {
-        Coords::Cartesian => *coord,
-        Coords::Cylindrical => {
-            let (r, phi) = (coord[0], coord[1]);
-            [r * phi.cos(), r * phi.sin(), coord[2]]
-        }
-        Coords::Spherical => {
-            let (r, th, phi) = (coord[0], coord[1], coord[2]);
-            let rst = r * th.sin();
-            [rst * phi.cos(), rst * phi.sin(), r * th.cos()]
-        }
+        Coords::Cartesian => symbi_geometry::Geometry::Cartesian,
+        Coords::Cylindrical => symbi_geometry::Geometry::Cylindrical,
+        Coords::Spherical => symbi_geometry::Geometry::Spherical,
     }
 }
 
