@@ -41,19 +41,25 @@ needs_backend = pytest.mark.skipif(
 # truncation residual, short enough that the outer zero-gradient boundary error
 # (inward propagation speed ~ c_inf - |v|) stays confined to the excluded cells.
 _END_TIME = 10.0
+# a safety bound on the steps a run may take to reach `_END_TIME`, several times the ~770
+# (128 zones) and ~1530 (256 zones) the CFL schedule needs; the comparison requires every run to
+# arrive at `_END_TIME`, so a run the bound stops early fails the gate
+_STEP_BOUND = 8000
 
 # interior window for the truncation-level comparison: the innermost cells feel the
 # first-order inner ghost, the outermost the first-order outer ghost.
 _SKIP_INNER = 4
 _SKIP_OUTER = 8
 
-# measured interior L1 relative rho residuals at t = 10: 5.0e-5 (128 zones),
-# 1.6e-5 (256 zones), ratio 0.33. tolerances carry ~3x margin.
-_L1_TOL_128 = 1.5e-4
-_L1_TOL_256 = 5.0e-5
+# measured interior L1 relative residuals with both runs at t = 10: rho 1.43e-6 (128 zones),
+# 3.89e-7 (256 zones), ratio 0.27; v1 1.91e-5 and 4.75e-6, ratio 0.25. the rho tolerances
+# carry ~3x margin.
+_L1_TOL_128 = 4.5e-6
+_L1_TOL_256 = 1.2e-6
 _CONVERGENCE_RATIO = 0.55
 # the boundary cells are first-order (zero-gradient ghosts): measured max relative
-# rho error 2.0e-2 (128) at the innermost cell, halving with resolution.
+# rho error at t = 10 1.88e-2 (128) at the innermost cell, 9.40e-3 (256), halving with
+# resolution.
 _MAX_TOL_128 = 6.0e-2
 
 
@@ -124,7 +130,7 @@ def _held_profile_errors(res: int):
     with tempfile.TemporaryDirectory() as d:
         d = d + "/"
         p = _michel_problem(res, d)
-        runner.run(p, compute_mode="cpu", max_steps=400)
+        runner.run(p, compute_mode="cpu", max_steps=_STEP_BOUND)
         # guard-activation census: michel is smooth, warm and shock-free, so no limiter has any
         # physical business firing. a nonzero count means this gate is passing on life support —
         # the profile would be held by a floor rather than by the scheme. the count covers the whole
@@ -140,6 +146,12 @@ def _held_profile_errors(res: int):
 
         finals = glob.glob(os.path.join(d, "*.chkpt.final*.h5"))
         assert finals, f"michel steady run crashed at {res} zones"
+        with h5py.File(finals[0], "r") as h:
+            reached = float(h["metadata"].attrs["time"])
+        # every resolution is compared at the same prescribed time
+        assert math.isclose(reached, _END_TIME, rel_tol=1e-12), (
+            f"the {res}-zone run stopped at t = {reached}, short of t = {_END_TIME}"
+        )
         rho, pre, v1 = _read_interior(finals[0], res)
 
         sol = p.michel_solution()

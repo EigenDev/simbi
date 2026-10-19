@@ -22,10 +22,11 @@
 # alpha v^r - beta^r = 0, so its den residual is analytically zero) — both
 # invisible to every kernel-vs-kernel and qualitative-infall gate.
 #
-# hold: the equilibrium is held over many dynamical times with drift shrinking
-# under refinement. requires the built cpu_ext backend; skipped otherwise.
+# hold: both resolutions evolve to the same prescribed time and the equilibrium is held with
+# drift shrinking under refinement. requires the built cpu_ext backend; skipped otherwise.
 # =============================================================================
 import glob
+import math
 import os
 import tempfile
 
@@ -62,17 +63,22 @@ _RESID_TOL = {
 # measured 96->192 L1 ratios 3.9-7.1 (a = 0) and 3.6-3.9 (a = 0.9); 2.5 separates
 # a converging truncation residual from a wrong term (ratio ~1) with margin.
 _RESID_CONV = 2.5
-# measured t=100 hold: full-domain L1 rho drift (96x32 -> 192x64) a = 0: 5.4e-2 ->
-# 1.7e-2 (ratio 3.2); a = 0.9: 2.5e-3 -> 7.0e-4 (ratio 3.6). the state carries slow
-# neutrally-stable constant-l modes; convergence is the teeth, the absolute bound
-# the sanity rail. tolerances carry ~3x margin on the measured drift.
-_HOLD_TOL_96 = {0.0: 1.5e-1, 0.9: 8e-3}
+# measured hold, both resolutions at t = 10: full-domain L1 rho drift (96x32 -> 192x64)
+# a = 0: 1.38e-2 -> 2.54e-3 (ratio 5.45); a = 0.9: 5.56e-4 -> 1.35e-4 (ratio 4.12). the state
+# carries slow neutrally-stable constant-l modes; convergence is the teeth, the absolute bound
+# the sanity rail. tolerances carry ~3x margin on the measured drift. a hold to t = 100 takes
+# ~3.4e8 zone-cycles at 192x64, past a python test's per-run budget: it belongs to a campaign.
+_HOLD_TOL_96 = {0.0: 4.2e-2, 0.9: 1.7e-3}
 _HOLD_CONV = 2.0
-_HOLD_TIME = 100.0
+_HOLD_TIME = 10.0
+# a safety bound on the steps a hold may take to reach `_HOLD_TIME` (~1360 at 96x32, ~2730 at
+# 192x64), within the suite's per-run zone-cycle budget at 192x64; a run the bound stops early
+# fails the gate
+_HOLD_STEP_BOUND = 4000
 _SPINS = [0.0, 0.9]
 
 
-def _run(nr: int, npolar: int, t_end: float, spin: float):
+def _run(nr: int, npolar: int, t_end: float, spin: float, max_steps: int = 400):
     from simbi.simulation.tests.fixtures.gr_rotating_equilibrium import (
         GrRotatingEquilibrium,
     )
@@ -84,7 +90,7 @@ def _run(nr: int, npolar: int, t_end: float, spin: float):
     p.end_time = t_end
     p.data_directory = d
     p.checkpoint_interval = max(t_end, 1.0)
-    runner.run(p, compute_mode="cpu", max_steps=400)
+    runner.run(p, compute_mode="cpu", max_steps=max_steps)
     # guard-activation census: this is an exact stationary solution, smooth and warm — no limiter
     # has any physical business firing on it, at either spin. a nonzero count would mean the
     # equilibrium is being held by a floor rather than by the scheme, which would also silently
@@ -139,7 +145,13 @@ def test_stationary_one_step_residual_is_truncation_and_converges(spin) -> None:
 
 
 def _hold_drift(nr: int, npolar: int, spin: float) -> float:
-    p, _, final = _run(nr, npolar, _HOLD_TIME, spin)
+    p, _, final = _run(nr, npolar, _HOLD_TIME, spin, max_steps=_HOLD_STEP_BOUND)
+    with h5py.File(final) as h:
+        reached = float(h["metadata"].attrs["time"])
+    # both resolutions are compared at the same prescribed time
+    assert math.isclose(reached, _HOLD_TIME, rel_tol=1e-12), (
+        f"the {nr}x{npolar} hold stopped at t = {reached}, short of t = {_HOLD_TIME}"
+    )
     with h5py.File(final) as h:
         g = h["level_0/partition_0/hydro/primitives"]
         shp = g["rho"].shape
