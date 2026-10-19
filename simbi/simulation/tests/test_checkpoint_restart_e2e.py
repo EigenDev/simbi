@@ -28,6 +28,7 @@ from simbi.types.typing import GasStateGenerator, InitialStateType
 from simbi.simulation.tests.fixtures.mhd_energy_conservation import (
     MhdEnergyConservation,
 )
+from simbi.types.input import Limiter
 from simbi_configs.examples.newtonian.sod import SodProblem
 
 
@@ -364,6 +365,36 @@ def test_the_van_leer_selection_reaches_the_kernel(tmp_path):
     with h5py.File(_final(tmp_path / "vanleer"), "r") as f:
         assert float(f["metadata"].attrs["plm_theta"]) < 0.0, "the run recorded the minmod family"
     assert not np.array_equal(_density(_final(tmp_path / "minmod")), _density(_final(tmp_path / "vanleer")))
+
+
+class VanLeerSod(SodProblem):
+    """the sod problem declaring the van leer limiter as its own default"""
+
+    limiter: Annotated[
+        Limiter,
+        ProblemParam(Limiter.VAN_LEER, cli=True, description="PLM slope limiter"),
+    ]
+
+
+@pytest.mark.simulation
+@pytest.mark.parametrize(
+    "recorded, resumed",
+    [(VanLeerSod, SodProblem), (SodProblem, VanLeerSod)],
+    ids=["vanleer_file_minmod_config", "minmod_file_vanleer_config"],
+)
+def test_a_restart_continues_the_recorded_limiter_bitwise(tmp_path, recorded, resumed):
+    # a run resumed from a config whose own default is the other limiter family continues the
+    # family its checkpoint recorded, in the solver: it matches the uninterrupted run exactly
+    run(recorded(data_directory=tmp_path / "continuous"), compute_mode="cpu", max_steps=12)
+    run(resumed(data_directory=tmp_path / "other"), compute_mode="cpu", max_steps=12)
+    assert not np.array_equal(_density(_final(tmp_path / "continuous")), _density(_final(tmp_path / "other"))), (
+        "the two limiter families evolve alike on this setup; the restart comparison is vacuous"
+    )
+    run(recorded(data_directory=tmp_path / "split"), compute_mode="cpu", max_steps=6)
+    run(resumed(data_directory=tmp_path / "restarted", checkpoint_file=_final(tmp_path / "split")), compute_mode="cpu", max_steps=12)
+    with h5py.File(_final(tmp_path / "restarted"), "r") as f, h5py.File(_final(tmp_path / "continuous"), "r") as g:
+        assert float(f["metadata"].attrs["plm_theta"]) == float(g["metadata"].attrs["plm_theta"]), "the resumed run recorded another limiter"
+    np.testing.assert_array_equal(_density(_final(tmp_path / "continuous")), _density(_final(tmp_path / "restarted")))
 
 
 @pytest.mark.simulation

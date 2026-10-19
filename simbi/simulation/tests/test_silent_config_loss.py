@@ -148,6 +148,26 @@ def test_a_vanleer_checkpoint_resumes_under_vanleer_at_the_backend(monkeypatch, 
     assert to_execution_dict(merged)["plm_theta"] < 0.0
 
 
+def test_an_explicit_limiter_against_the_recorded_one_is_refused(monkeypatch, tmp_path):
+    # the limiter is a scheme choice the checkpoint records: a resume that names the other
+    # family, either way, is refused by name, as is a minmod compression other than the recorded
+    from simbi.simulation import checkpoint as cp
+    from simbi_configs.examples.newtonian.refined_mhd_blast import RefinedMhdBlast
+
+    monkeypatch.setattr(cp, "load_checkpoint_metadata", lambda _p: (_nmhd_meta(plm_theta=1.5), (32, 32)))
+    with pytest.raises(ConfigError, match="limiter"):
+        cp.merge_with_checkpoint(RefinedMhdBlast.from_cli(["--limiter", "vanleer"]), tmp_path / "fake.h5")
+    with pytest.raises(ConfigError, match="plm_theta"):
+        cp.merge_with_checkpoint(RefinedMhdBlast.from_cli(["--plm-theta", "1.8"]), tmp_path / "fake.h5")
+
+    monkeypatch.setattr(cp, "load_checkpoint_metadata", lambda _p: (_nmhd_meta(plm_theta=-1.0), (32, 32)))
+    with pytest.raises(ConfigError, match="limiter"):
+        cp.merge_with_checkpoint(RefinedMhdBlast.from_cli(["--limiter", "minmod"]), tmp_path / "fake.h5")
+    # naming the recorded family is no conflict, and the model keeps its positive compression
+    merged = cp.merge_with_checkpoint(RefinedMhdBlast.from_cli(["--limiter", "vanleer"]), tmp_path / "fake.h5")
+    assert merged.limiter == Limiter.VAN_LEER and merged.plm_theta > 0.0
+
+
 def test_a_ppm_restart_continues_the_recorded_flatten(monkeypatch, tmp_path):
     # the flatten dials are scheme parameters: a resume without flags continues the recorded
     # pair, an explicit demand for another pair is refused by name, and a checkpoint predating
