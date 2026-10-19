@@ -81,17 +81,17 @@ fn unrecoverable_sink_trips_the_persistent_freeze_halt() {
         .substrate()
         .with_runtime_source(built, cfg.params.clone());
     let mut hier = Hierarchy::single(sim, kset);
-    // the freeze halt panics inside the step; the evolve loop catches it, records
-    // the crash, and ends the march by report — the run must never reach t_final.
+    // the freeze halt panics inside the step; the step transaction restores the step entry
+    // and ends the march with an unrecoverable halt — the run must never reach t_final.
     hier.evolve(0.2).expect("the halted march ends by report");
     let crash = hier
         .crash
         .as_ref()
         .expect("the poisoned run must halt with a crash report");
-    let msg = crash
-        .panic
-        .as_ref()
-        .expect("the freeze halt surfaces as a caught step panic");
+    let msg = match &crash.halt {
+        Some(symbi_sim::step_transaction::StepHalt::Unrecoverable { detail }) => detail,
+        other => panic!("the freeze halt surfaces as an unrecoverable halt, got {other:?}"),
+    };
     assert!(
         msg.to_lowercase().contains("freeze"),
         "expected the persistent-freeze fail-loud, got: {msg}"

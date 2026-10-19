@@ -132,6 +132,10 @@ where
         Ok(())
     }
 
+    fn contains_panics(&self) -> bool {
+        true
+    }
+
     fn severe_streak(&mut self) -> u32 {
         self.sim.severe_streak
     }

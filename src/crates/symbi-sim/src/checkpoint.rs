@@ -1106,6 +1106,22 @@ pub fn checkpoint_level_count(path: &str) -> Result<usize> {
     Ok(n)
 }
 
+/// refuse a checkpoint written as the diagnostic snapshot of a failed step, marked
+/// `restartable = false` in its metadata: it holds the state the failure left, which no accepted
+/// step produced. a file without the attribute is a step-boundary checkpoint.
+pub fn require_restartable(path: &str) -> std::result::Result<(), String> {
+    let attrs = symbi_io::read_attrs(Path::new(path), "metadata").map_err(|e| format!("checkpoint '{path}': {e}"))?;
+    let diagnostic = attrs.iter().any(|(key, value)| key == "restartable" && matches!(value, symbi_io::Attr::Bool(false)));
+    if diagnostic {
+        return Err(format!(
+            "checkpoint '{path}' is the diagnostic snapshot of a failed step (restartable = false): \
+             it holds the state the failure left, which no accepted step produced. resume from the \
+             last step-boundary checkpoint of the run."
+        ));
+    }
+    Ok(())
+}
+
 /// check that a checkpoint's level `level_index` describes the same grid this run built for it.
 ///
 /// a deeper restart only works because level `i` occupies the same region at every depth — true

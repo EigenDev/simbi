@@ -741,6 +741,9 @@ fn a_patch_face_on_the_periodic_seam_is_named_by_the_register_exchange() {
         h.prime();
     }
     run_decomposed(&mut tiles, counts, T_ONE_STEP);
-    let panic = tiles[0].crash.as_ref().and_then(|c| c.panic.clone()).expect("the run ended without a crash");
+    let panic = match tiles[0].crash.as_ref().map(|c| &c.halt) {
+        Some(Some(symbi_sim::step_transaction::StepHalt::Unrecoverable { detail })) => detail.clone(),
+        other => panic!("the run ended without an unrecoverable halt: {other:?}"),
+    };
     assert!(panic.contains("lies on the periodic seam of axis 0"), "the crash names another cause: {panic}");
 }

@@ -2286,7 +2286,10 @@ where
                 report.halt = Some(guard_failure(fabric, failure, &cfg.injection, deadline)?);
                 break;
             }
-            crate::step_transaction::RootStep::Halted(crate::step_transaction::StepHalt::Timestep { detail, .. }) => {
+            crate::step_transaction::RootStep::Halted(
+                crate::step_transaction::StepHalt::Timestep { detail, .. }
+                | crate::step_transaction::StepHalt::Unrecoverable { detail },
+            ) => {
                 report.halt = Some(detail);
                 break;
             }

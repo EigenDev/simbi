@@ -1865,7 +1865,7 @@ where
                 report.halt = Some(symbi_sim::worker::guard_failure(fabric, failure, &base.injection, deadline)?);
                 break;
             }
-            RootStep::Halted(StepHalt::Timestep { detail, .. }) => {
+            RootStep::Halted(StepHalt::Timestep { detail, .. } | StepHalt::Unrecoverable { detail }) => {
                 report.halt = Some(detail);
                 break;
             }

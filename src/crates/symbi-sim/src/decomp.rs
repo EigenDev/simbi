@@ -3345,6 +3345,10 @@ where
         Ok(())
     }
 
+    fn contains_panics(&self) -> bool {
+        true
+    }
+
     fn severe_streak(&mut self) -> u32 {
         self.stores[0].severe_streak
     }
@@ -3554,7 +3558,7 @@ where
             Ok(crate::step_transaction::RootStep::Halted(step)) => {
                 let dt_cfl = match &step {
                     crate::step_transaction::StepHalt::Timestep { dt, .. } => 0.5 * dt,
-                    crate::step_transaction::StepHalt::Guard(_) => f64::NAN,
+                    crate::step_transaction::StepHalt::Guard(_) | crate::step_transaction::StepHalt::Unrecoverable { .. } => f64::NAN,
                 };
                 halt = Some(crate::run_diagnostics::MarchHalt { iter: stores[0].iteration, time: t, dt_cfl, dt_prev, step: Some(step) });
                 break 'march;

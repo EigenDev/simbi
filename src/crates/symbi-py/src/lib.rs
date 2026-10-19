@@ -3000,15 +3000,15 @@ where
             return std::ops::ControlFlow::Break(());
         }
 
-        // fatal crash (set by the evolve loop: the cfl watchdog on a NaN / collapsed wave speed,
-        // or a panic caught inside the step — the FOFC freeze-streak halt): snapshot the last
-        // computed state as a `.crashed` checkpoint so it can be inspected, then stop.
+        // fatal crash (set by the evolve loop: a halted root step, restored to its entry; the cfl
+        // watchdog on a NaN / collapsed wave speed; a panic outside a captured attempt): snapshot
+        // the state as a `.crashed` checkpoint, restartable after a halted step alone, then stop.
         if let Some(c) = &h.crash {
             table.set_dynamic(false);
             let states: Vec<&_> = h.levels.iter().map(|l| &l.state).collect();
             let crashed = checkpoint_name(cfg, checkpoint_status_tag(CheckpointOutcome::Crashed));
-            let _ =
-                write_hierarchy_checkpoint(&states, &crashed, &checkpoint_metadata(cfg, cadence.index));
+            let meta = failure_checkpoint_metadata(cfg, cadence.index, c.halt.is_some());
+            let _ = write_hierarchy_checkpoint(&states, &crashed, &meta);
             table.post_error(&format!(
                 "crashed at {} (step {}) — state checkpoint {crashed}",
                 fmt_time_msg(cfg, c.time),
@@ -3330,7 +3330,7 @@ where
     if !final_finite {
         let states: Vec<&_> = hier.levels.iter().map(|level| &level.state).collect();
         let crashed = checkpoint_name(cfg, checkpoint_status_tag(CheckpointOutcome::Crashed));
-        write_hierarchy_checkpoint(&states, &crashed, &checkpoint_metadata(cfg, cadence.index))?;
+        write_hierarchy_checkpoint(&states, &crashed, &failure_checkpoint_metadata(cfg, cadence.index, false))?;
         screen.leave();
         table.set_dynamic(false);
         let summary = format!(
@@ -6151,6 +6151,7 @@ where
     // wrote it; the exchange rebuilds the cut halos when the march primes. the censuses continue
     // the file's sampling schedule and accumulations on every tile
     if let Some(path) = cfg.restart_path.as_deref() {
+        symbi_sim::checkpoint::require_restartable(path)?;
         for (flat, (tile, _)) in tiles.iter_mut().enumerate() {
             load_partitioned_level(tile, path, 0, offsets[flat], &grid)
                 .map_err(|e| format!("restart of tile {flat} from '{path}': {e}"))?;
@@ -6639,6 +6640,7 @@ where
     }
     // a restart reads every level of every tile from the checkpoint's global grids.
     if let Some(path) = cfg.restart_path.as_deref() {
+        symbi_sim::checkpoint::require_restartable(path)?;
         let stored = symbi_sim::checkpoint::checkpoint_level_count(path).map_err(|e| format!("{e}"))?;
         // a deeper checkpoint would lose the levels it carries beyond this run's, so it is refused
         // before any level is read; a shallower one seeds the levels it lacks from their parents,
@@ -6686,7 +6688,7 @@ where
 
     // gather each level of the decomposed tiles into the global hierarchy (root over `counts`, fine
     // over the fine sub-grid), then write all the global levels through the multi-level writer.
-    let write_cp = |tiles: &[Hierarchy<R, D, DOF, M, E, S, Mem, K>], path: &str, cp_index: u64| {
+    let write_cp = |tiles: &[Hierarchy<R, D, DOF, M, E, S, Mem, K>], path: &str, cp_index: u64, restartable: bool| {
         let mut levels = vec![LevelTiles {
             tiles: tiles
                 .iter()
@@ -6713,7 +6715,8 @@ where
         let halos: Vec<Vec<_>> =
             tiles.iter().map(|h| h.levels.iter().map(|l| l.state.prepare_checkpoint_halo()).collect()).collect();
         let t_io = std::time::Instant::now();
-        let written = write_partitioned_checkpoint::<R, D, DOF, Mem>(&identity, &levels, path, &checkpoint_metadata(cfg, cp_index))
+        let meta = failure_checkpoint_metadata(cfg, cp_index, restartable);
+        let written = write_partitioned_checkpoint::<R, D, DOF, Mem>(&identity, &levels, path, &meta)
             .map_err(|e| checkpoint_write_error(path, e))
             .map(|()| t_io.elapsed().as_secs_f64());
         for (h, tile_halos) in tiles.iter().zip(&halos) {
@@ -6729,7 +6732,7 @@ where
         symbi::sim::decomp::drain_devices::<Mem>(&devices);
         let tag = cadence.tag(cfg, cp_width, cfg.start_time, cfg.checkpoint_index);
         let path = checkpoint_name(cfg, &tag);
-        match write_cp(&tiles, &path, cfg.checkpoint_index) {
+        match write_cp(&tiles, &path, cfg.checkpoint_index, true) {
             Ok(io) => reporter.checkpoint_written(cfg, &path, cfg.start_time, io),
             Err(msg) => {
                 reporter.fail(&msg);
@@ -6785,7 +6788,7 @@ where
             if cadence.due(time) {
                 let tag = cadence.tag(cfg, cp_width, time, cadence.index);
                 let path = checkpoint_name(cfg, &tag);
-                match write_cp(tiles, &path, cadence.index) {
+                match write_cp(tiles, &path, cadence.index, true) {
                     Ok(io) => reporter.checkpoint_written(cfg, &path, time, io),
                     Err(e) => {
                         *cp_error.borrow_mut() = Some(e);
@@ -6823,7 +6826,7 @@ where
             crash_cause(c.dt_cfl, c.panic.as_deref(), c.halt.as_ref())
         );
 
-        if let Err(msg) = write_cp(&tiles, &crashed, cadence.index) {
+        if let Err(msg) = write_cp(&tiles, &crashed, cadence.index, c.halt.is_some()) {
             reporter.fail(&msg);
             return Err(msg);
         }
@@ -6833,7 +6836,7 @@ where
     }
     // canonical final snapshot, after every device drained.
     let final_path = checkpoint_name(cfg, checkpoint_status_tag(CheckpointOutcome::Completed));
-    match write_cp(&tiles, &final_path, cadence.index) {
+    match write_cp(&tiles, &final_path, cadence.index, true) {
         Ok(io) => {
             let root = &tiles[0].levels[0].state;
             let (iter, time) = (root.iteration, root.time);
@@ -9828,6 +9831,14 @@ fn checkpoint_metadata(cfg: &Config, checkpoint_index: u64) -> Metadata {
         .with("ct_method", ct_method_name(cfg))
 }
 
+/// the metadata of a checkpoint that may follow a failure: a halted step restored the state to its
+/// entry, which a restart resumes; any other failure leaves the state it failed on, marked
+/// `restartable = false` so the file serves inspection alone
+fn failure_checkpoint_metadata(cfg: &Config, checkpoint_index: u64, restartable: bool) -> Metadata {
+    let meta = checkpoint_metadata(cfg, checkpoint_index);
+    if restartable { meta } else { meta.with("restartable", false) }
+}
+
 /// the recorded edge-EMF name of a magnetized run, empty for a run without a staggered field
 fn ct_method_name(cfg: &Config) -> &'static str {
     if !cfg.regime.contains("mhd") {
@@ -12777,6 +12788,7 @@ where
     }
     let restart = cfg.restart_path.is_some();
     if let Some(path) = cfg.restart_path.as_deref() {
+        symbi_sim::checkpoint::require_restartable(path)?;
         load_refined_tiles(&mut tiles, &held, &plans, &grids, path).map_err(|e| e.to_string())?;
         // the censuses continue the file's sampling schedule and accumulations on every tile
         let levels = 2 + plans.nested.len();
@@ -13901,6 +13913,7 @@ where
     // the restart from a partitioned checkpoint, after the stationary target's probe; the
     // censuses continue the file's sampling schedule and accumulations on every tile
     if let Some(path) = cfg.restart_path.as_deref() {
+        symbi_sim::checkpoint::require_restartable(path)?;
         for (k, (&flat, (sim, _))) in mine.iter().zip(tiles.iter_mut()).enumerate() {
             symbi_sim::checkpoint::load_partitioned_level(sim, path, 0, offsets[flat], &restart_grid)
                 .map_err(|e| format!("restart of tile {flat} from '{path}': {e}"))?;

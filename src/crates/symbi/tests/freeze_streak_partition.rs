@@ -155,28 +155,34 @@ fn store(cells: usize, origin: f64, lo: BoundaryType, hi: BoundaryType) -> Sim {
         .build()
 }
 
-/// the halt message of a single-grid run (its driver catches a step panic into the crash report)
+/// the halt message of a single-grid run: its step transaction restores the entry of a panicked
+/// attempt and reports the panic as an unrecoverable halt
 fn single(schedule: Schedule) -> Option<String> {
     let sim = store(16, 0.0, BoundaryType::Outflow, BoundaryType::Outflow);
     let mut hier = Hierarchy::single(sim, StreakMock::new(None, schedule));
     hier.evolve_with_callback(1.0, 1, |_| ControlFlow::Continue(())).expect("single-grid run");
-    hier.crash.as_ref().and_then(|c| c.panic.clone())
+    hier.crash.as_ref().and_then(|c| unrecoverable(c.halt.as_ref()))
 }
 
-/// the halt message of a two-tile run
+/// the message of an unrecoverable halt, the halt a panicked attempt ends its step with
+fn unrecoverable(halt: Option<&symbi_sim::step_transaction::StepHalt>) -> Option<String> {
+    match halt {
+        Some(symbi_sim::step_transaction::StepHalt::Unrecoverable { detail }) => Some(detail.clone()),
+        _ => None,
+    }
+}
+
+/// the halt message of a two-tile run: the in-process march restores a panicked attempt's entry
+/// and reports the panic as an unrecoverable halt
 fn tiled(schedule: Schedule) -> Option<String> {
     let mut a = store(8, 0.0, BoundaryType::Outflow, BoundaryType::CoarseFine);
     let mut b = store(8, 0.5, BoundaryType::CoarseFine, BoundaryType::Outflow);
     let (ka, kb) = (StreakMock::new(Some(0), schedule), StreakMock::new(Some(1), schedule));
-    let caught = catch_unwind(AssertUnwindSafe(|| {
-        let mut stores = vec![&mut *a, &mut *b];
-        evolve_decomposed(&mut stores, &[&ka, &kb], [2], &[0, 0], Timestepping::Euler, 0.0, 1.0, 1, &LocalCopy, |_, _, _| {
-            ControlFlow::Continue(())
-        });
-    }));
-    caught.err().map(|payload| {
-        payload.downcast_ref::<String>().cloned().or_else(|| payload.downcast_ref::<&str>().map(|s| s.to_string())).unwrap_or_default()
-    })
+    let mut stores = vec![&mut *a, &mut *b];
+    let d = evolve_decomposed(&mut stores, &[&ka, &kb], [2], &[0, 0], Timestepping::Euler, 0.0, 1.0, 1, &LocalCopy, |_, _, _| {
+        ControlFlow::Continue(())
+    });
+    d.halt.and_then(|h| unrecoverable(h.step.as_ref()))
 }
 
 /// the halt message of a launched worker holding both tiles: the worker's own correction loop,
@@ -270,16 +276,11 @@ fn tiled_after_probe(schedule: Schedule) -> (Option<String>, [u32; 2]) {
         symbi::sim::decomp::probe_stage(&tiles, &[&ka, &kb], &probe, &[0, 0], &LocalCopy, 0.01).expect("the probe stage");
     }
     let after_probe = [ka.freeze_streak(), kb.freeze_streak()];
-    let caught = catch_unwind(AssertUnwindSafe(|| {
-        let mut stores = vec![&mut *a, &mut *b];
-        evolve_decomposed(&mut stores, &[&ka, &kb], [2], &[0, 0], Timestepping::Euler, 0.0, 1.0, 1, &LocalCopy, |_, _, _| {
-            ControlFlow::Continue(())
-        });
-    }));
-    let halt = caught.err().map(|payload| {
-        payload.downcast_ref::<String>().cloned().or_else(|| payload.downcast_ref::<&str>().map(|s| s.to_string())).unwrap_or_default()
+    let mut stores = vec![&mut *a, &mut *b];
+    let d = evolve_decomposed(&mut stores, &[&ka, &kb], [2], &[0, 0], Timestepping::Euler, 0.0, 1.0, 1, &LocalCopy, |_, _, _| {
+        ControlFlow::Continue(())
     });
-    (halt, after_probe)
+    (d.halt.and_then(|h| unrecoverable(h.step.as_ref())), after_probe)
 }
 
 #[test]

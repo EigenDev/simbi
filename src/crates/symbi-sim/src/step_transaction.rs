@@ -16,7 +16,11 @@
 // - a step the guard ends (a rejection past the limit, a sustained reduction)
 //   or whose halved timestep can no longer advance time discards its pending
 //   acts and restores the entry: the state it leaves is the last accepted one,
-//   with that state's clock, and the halt carries the guard's evidence.
+//   with that state's clock, and the halt carries the guard's evidence;
+// - on a march whose attempt runs in this thread (`contains_panics`), an attempt
+//   that panics (the freeze-streak halt, a failed assertion) ends the step the
+//   same way: its pending acts are discarded, the entry restored, and the halt
+//   carries the panic message, which names the failing cell and its state.
 //
 // usage:
 //  match take_root_step(&mut attempt, &guard, candidate, time)? {
@@ -43,6 +47,11 @@ pub trait RootAttempt {
     fn restore(&mut self) -> Result<(), Self::Error>;
     /// the consecutive severely reduced root steps the run carries
     fn severe_streak(&mut self) -> u32;
+    /// whether every store of the attempt lives in this thread, so a panic inside it can end the
+    /// step at its restored entry; a march whose peers run elsewhere lets the panic end the session
+    fn contains_panics(&self) -> bool {
+        false
+    }
     fn set_severe_streak(&mut self, streak: u32);
 }
 
@@ -130,6 +139,8 @@ pub enum StepHalt {
     Guard(RetryGuardFailure),
     /// the rejected timestep halved can no longer advance the clock
     Timestep { dt: f64, detail: String },
+    /// the attempt panicked: a failure no replay at this step resolves, with the panic message
+    Unrecoverable { detail: String },
 }
 
 impl StepHalt {
@@ -137,6 +148,7 @@ impl StepHalt {
         match self {
             StepHalt::Guard(failure) => &failure.detail,
             StepHalt::Timestep { detail, .. } => detail,
+            StepHalt::Unrecoverable { detail } => detail,
         }
     }
 }
@@ -157,6 +169,15 @@ fn discard_pending() {
     if crate::guard_ledger::scope_is_open() {
         crate::guard_ledger::step_discard();
     }
+}
+
+/// the text of a panic payload
+fn panic_message(payload: &(dyn std::any::Any + Send)) -> String {
+    payload
+        .downcast_ref::<&'static str>()
+        .map(|s| s.to_string())
+        .or_else(|| payload.downcast_ref::<String>().cloned())
+        .unwrap_or_else(|| "panic with a non-string payload".to_string())
 }
 
 fn commit_pending() {
@@ -181,7 +202,19 @@ pub fn take_root_step<A: RootAttempt>(
     let restorable = attempt.rejectable() || guard.refuses_unreduced_steps();
     loop {
         attempt.capture(dt, restorable)?;
-        if attempt.run(dt)? {
+        let completed = if restorable && attempt.contains_panics() {
+            match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| attempt.run(dt))) {
+                Ok(completed) => completed?,
+                Err(payload) => {
+                    discard_pending();
+                    attempt.restore()?;
+                    return Ok(RootStep::Halted(StepHalt::Unrecoverable { detail: panic_message(&*payload) }));
+                }
+            }
+        } else {
+            attempt.run(dt)?
+        };
+        if completed {
             break;
         }
         let evidence = attempt.evidence(ledger.rejections());
@@ -227,6 +260,9 @@ mod tests {
         streak: u32,
         log: Vec<String>,
         restorable: bool,
+        /// the attempt that panics after dirtying the state, and whether the march contains it
+        panics_at: Option<usize>,
+        contained: bool,
     }
 
     impl Scripted {
@@ -239,6 +275,8 @@ mod tests {
                 streak: 0,
                 log: Vec::new(),
                 restorable: false,
+                panics_at: None,
+                contained: false,
             }
         }
     }
@@ -259,11 +297,17 @@ mod tests {
             guard_ledger::record(&GuardReceipt::of_pass(1, 0, 0, 0));
             self.state += 100;
             self.log.push(format!("run {dt}"));
+            if self.panics_at == Some(self.attempts) {
+                panic!("attempt {} failed", self.attempts);
+            }
             if self.rejected.contains(&self.attempts) {
                 return Ok(false);
             }
             self.state = self.entry + 1;
             Ok(true)
+        }
+        fn contains_panics(&self) -> bool {
+            self.contained
         }
         fn evidence(&mut self, rejections: u32) -> Vec<String> {
             vec![format!("attempt {} after {rejections}", self.attempts)]
@@ -390,5 +434,27 @@ mod tests {
         );
         assert_eq!(march.state, 0, "the refused step left its completed state");
         assert_eq!(scope.accepted().troubled_cells.total, 0);
+    }
+
+    #[test]
+    fn a_contained_panic_restores_the_entry_and_halts_with_its_message() {
+        let scope = guard_ledger::open_scope();
+        let mut march = Scripted::new(vec![1]);
+        march.panics_at = Some(2);
+        march.contained = true;
+        let step = take_root_step(&mut march, &GUARD, 1.0, 0.0).unwrap();
+        assert_eq!(step, RootStep::Halted(StepHalt::Unrecoverable { detail: "attempt 2 failed".into() }));
+        assert_eq!(march.state, 0, "the halt left the panicked attempt's state");
+        assert_eq!(march.log.last().map(String::as_str), Some("restore"), "the entry was not restored");
+        assert_eq!(scope.accepted().troubled_cells.total, 0, "the panicked step's acts were accepted");
+    }
+
+    #[test]
+    fn a_panic_on_a_march_that_does_not_contain_it_propagates() {
+        let mut march = Scripted::new(Vec::new());
+        march.panics_at = Some(1);
+        march.rejected = vec![2];
+        let caught = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| take_root_step(&mut march, &GUARD, 1.0, 0.0)));
+        assert!(caught.is_err(), "a march whose peers run elsewhere had its panic contained");
     }
 }

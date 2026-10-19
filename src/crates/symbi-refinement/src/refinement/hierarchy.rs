@@ -361,7 +361,8 @@ where
 /// inside the step (the FOFC freeze-streak halt, a poisoned-cell assertion). the evolve loop
 /// halts on the state the crash left and the driver snapshots a `.crashed` checkpoint + reports
 /// it, so every crash reaches the user with its state on disk. a halted root step leaves the
-/// step entry, the last accepted state; a panic leaves the mid-step state it fired on.
+/// step entry, the last accepted state, a panic inside a captured attempt included; a panic
+/// outside a captured attempt leaves the mid-step state it fired on.
 #[derive(Clone, Debug)]
 pub struct CrashReport {
     pub iter: u64,
@@ -370,7 +371,8 @@ pub struct CrashReport {
     pub dt_prev: f64,
     /// the payload of a panic caught inside the step; the dt fields carry NaN in that case
     pub panic: Option<String>,
-    /// the root step the retry guard or the timestep floor ended, with its evidence
+    /// the root step the retry guard, the timestep floor or an unrecoverable attempt ended, with
+    /// its evidence
     pub halt: Option<symbi_sim::step_transaction::StepHalt>,
 }
 
@@ -2619,6 +2621,7 @@ where
     /// restart is only meaningful when level `i` occupies the same region regardless of the total
     /// depth, which is a property of a refinement schedule rather than of this code.
     pub fn restore_from_checkpoint(&mut self, path: &str) -> Result<usize, String> {
+        symbi_sim::checkpoint::require_restartable(path)?;
         let stored =
             symbi_sim::checkpoint::checkpoint_level_count(path).map_err(|e| format!("{e}"))?;
         if stored > self.levels.len() {
@@ -7815,14 +7818,13 @@ where
         let dt_crashed = agreed.is_none();
         let gdt = agreed.unwrap_or(f64::INFINITY);
         if !dt_crashed {
-            // a panic inside the step (the FOFC freeze-streak halt, a poisoned-cell
-            // assertion) carries the same diagnostic value as a watchdog crash and
-            // deserves the same exit: catch it, convert it into a crash report carrying
-            // the panic message, and let the observer snapshot the `.crashed`
-            // checkpoint. the default panic hook has already printed the message and
-            // backtrace to stderr at the panic site, so the report reaches the log and
-            // the state reaches disk. the caught state is the mid-step one the panic
-            // fired on, which is exactly the state worth inspecting.
+            // a panic inside a captured attempt (the FOFC freeze-streak halt, a poisoned-cell
+            // assertion) ends in the step transaction: the entry is restored and the step
+            // reports an unrecoverable halt carrying the message. a panic outside a captured
+            // attempt arrives here: it becomes a crash report carrying the panic message, and
+            // the observer snapshots the state the panic fired on as a `.crashed` checkpoint
+            // marked `restartable = false`, for inspection alone. the default panic hook has
+            // already printed the message and backtrace to stderr at the panic site.
             let step = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                 match decomp {
                     Some((devices, counts, transport)) => {
@@ -8121,6 +8123,10 @@ where
         hier.restore_attempt_entry();
         hier.restore_retry_sidecars(self.sidecars.as_ref().expect("the first attempt captured the side-cars"));
         Ok(())
+    }
+
+    fn contains_panics(&self) -> bool {
+        true
     }
 
     fn severe_streak(&mut self) -> u32 {
@@ -8489,6 +8495,10 @@ where
             exchange_level_halos(self.tiles, k + 1, &fg.order, fg.counts, &fg.devices, self.transport);
         }
         Ok(())
+    }
+
+    fn contains_panics(&self) -> bool {
+        true
     }
 
     fn severe_streak(&mut self) -> u32 {
