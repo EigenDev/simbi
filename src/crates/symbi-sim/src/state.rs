@@ -1810,6 +1810,26 @@ impl<const D: usize> PartitionGeometry<D> {
         self.stagger_coord(coord, std::array::from_fn(|_| Loc::Center))
     }
 
+    /// the point at which a cell-sampled declared expression (a user source, a census, a driven
+    /// boundary) reads its coordinates `x_k`: per grid axis `d`, the first moment of the cell
+    /// over that axis's coordinate `axes[d]` under the chart's volume element, between the cell's
+    /// faces, `volume_weighted_centroid(coords, axes[d], lo, hi)`. spherical r takes
+    /// (3/4)(r_hi^4 - r_lo^4)/(r_hi^3 - r_lo^3), spherical theta the sin-weighted moment,
+    /// cylindrical R (2/3)(R_hi^3 - R_lo^3)/(R_hi^2 - R_lo^2), and every other axis the
+    /// arithmetic midpoint of its faces, on uniform and mapped axes alike. these are chart
+    /// coordinates, the ones the compiled kernels bind from `cell_geometry_gv`. initialization,
+    /// face-located quantities, the metric's sampling point and body or excision geometry keep
+    /// their own points.
+    pub fn expression_point(&self, coord: [isize; D]) -> [f64; D] {
+        std::array::from_fn(|d| {
+            let lo = self.face_coord(coord, d)[d];
+            let mut upper = coord;
+            upper[d] += 1;
+            let hi = self.face_coord(upper, d)[d];
+            symbi_geometry::volume_weighted_centroid(self.coords, self.axes[d], lo, hi)
+        })
+    }
+
     /// the local index of the cell containing `x` on axis `ax`: the whole grid's containing cell
     /// less this tile's index offset, the inverse of `stagger_coord`
     #[inline]

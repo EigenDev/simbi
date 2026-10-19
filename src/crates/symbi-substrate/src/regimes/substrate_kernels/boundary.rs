@@ -197,7 +197,7 @@ fn apply_boundary_dag_cpu<const D: usize, const DOF: usize, Mem, Sc>(
     let fields: Vec<String> = dag.eval.fields().map(|s| s.to_string()).collect();
     let dummy_vel = [0.0f64; DOF]; // Coord prescriptions never read state; rho/vel are never requested.
     for c in band.iter() {
-        let x = sim.geom.cell_coord(c);
+        let x = sim.geom.expression_point(c);
         for field in &fields {
             let params = dag
                 .eval
@@ -301,11 +301,15 @@ fn apply_boundary_dag_gpu<const D: usize, const DOF: usize, Mem, Sc>(
                     .get(i as usize)
                     .unwrap_or_else(|| panic!("boundary gpu: param p{i} not provided")),
             ),
-            other => geom_scalar(&sim.geom.x_lo, &sim.geom.dx, &sim.geom.maps, &sim.geom.index_offset, other)
-                .map(Sc::from_f64)
-                .unwrap_or_else(|| {
-                    panic!("boundary gpu: unresolved scalar {other:?} (t | x_lo_k | dx_k | p{{i}})")
-                }),
+            other => {
+                // the map-aware face parameters: on a log axis the decade slope stands in `dx`
+                let (x_lo_k, dx_k) = super::params::kernel_geom(&sim.geom.x_lo, &sim.geom.dx, &sim.geom.maps, sim.geom.coords, sim.motion.a);
+                geom_scalar(&x_lo_k, &dx_k, &sim.geom.maps, &sim.geom.index_offset, other)
+                    .map(Sc::from_f64)
+                    .unwrap_or_else(|| {
+                        panic!("boundary gpu: unresolved scalar {other:?} (t | x_lo_k | dx_k | p{{i}})")
+                    })
+            }
         }
     });
 }

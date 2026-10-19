@@ -112,6 +112,10 @@ where
 
     let t = sim.time;
     let params = ev.params();
+    // the map-aware face parameters the kernel's face map reads: on a log axis the decade slope
+    // stands in the `dx` slot
+    let (x_lo_k, dx_k) =
+        super::params::kernel_geom(&sim.geom.x_lo, &sim.geom.dx, &sim.geom.maps, sim.geom.coords, sim.motion.a);
     let scalars: Vec<f64> = entry
         .scalar_params
         .iter()
@@ -124,7 +128,7 @@ where
                 ScalarRef::UserParam(i) => *params
                     .get(i as usize)
                     .unwrap_or_else(|| panic!("census map: param p{i} not provided")),
-                other => geom_scalar(&sim.geom.x_lo, &sim.geom.dx, &sim.geom.maps, &sim.geom.index_offset, other)
+                other => geom_scalar(&x_lo_k, &dx_k, &sim.geom.maps, &sim.geom.index_offset, other)
                     .unwrap_or_else(|| panic!("census map: unresolved scalar {other:?}")),
             }
         })

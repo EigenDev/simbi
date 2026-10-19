@@ -26,7 +26,7 @@ use symbi_sim::state::FieldStore;
 use super::binding::{bind_manifest, parse_manifest, resolve_path};
 use super::exec::{ExecPolicy, policy_for};
 use super::layout::{alloc_layout, exec_layout};
-use super::params::{ScalarBind, body_scalar, geom_scalar, motion_scalar, physical_geom};
+use super::params::{ScalarBind, body_scalar, geom_scalar, kernel_geom, motion_scalar};
 
 use symbi_ib::collection::MAX_SOURCE_BODIES;
 
@@ -231,6 +231,13 @@ impl RuntimeSource {
     pub fn fused_cpu_state(&self) -> Option<bool> {
         self.fused_cpu.get().map(|o| o.is_some())
     }
+
+    /// withhold the compiled standalone source kernel, so the host pass runs the per-cell
+    /// interpreter, the path a source outside the compiled subset takes: a test facility for
+    /// comparing the two evaluators. false where the compiled kernel was already built
+    pub fn interpret_on_host(&self) -> bool {
+        self.source_cpu.set(None).is_ok()
+    }
 }
 
 /// route a runtime source for one SSP stage: host -> the per-cell IR interpreter, device -> the
@@ -296,7 +303,7 @@ fn apply_runtime_source<const D: usize, const DOF: usize, Mem, Sc>(
         let rho = (*u.den.at(c)).to_f64();
         let vel: [f64; DOF] = std::array::from_fn(|k| (*u.mom[k].at(c)).to_f64() / rho);
         let pre = pre_field.map_or(0.0, |f| (*f.at(c)).to_f64());
-        let x = sim.geom.cell_coord(c);
+        let x = sim.geom.expression_point(c);
         for field in &fields {
             let params = eval.params_for(field).expect("runtime source: params_for");
             // build the param inputs by index into a stack buffer — no per-cell heap alloc on the
@@ -546,8 +553,9 @@ fn dispatch_source_only_cpu<const D: usize, const DOF: usize, Mem, Sc>(
         .map(|&fref| resolve_path(sim, pre, None, 0, fref).as_mut_ptr() as *mut f64)
         .collect();
     let t = sim.time;
+    // the map-aware face parameters: on a log axis the decade slope stands in the `dx` slot
     let (x_lo_phys, dx_phys) =
-        physical_geom(&sim.geom.x_lo, &sim.geom.dx, sim.geom.coords, sim.motion.a);
+        kernel_geom(&sim.geom.x_lo, &sim.geom.dx, &sim.geom.maps, sim.geom.coords, sim.motion.a);
     let scalars: Vec<f64> = sk.scalar_params.iter().map(|bind| {
         let ScalarBind::Ref(sref) = bind else {
             panic!("compiled runtime source: unexpected spec scalar {bind:?}");
@@ -775,8 +783,9 @@ pub(crate) fn dispatch_fused_runtime_cpu<const D: usize, const DOF: usize, Mem, 
     // internally), a0/ac = the SSP convex coefficients, mesh_hdil from the homologous motion, the
     // lazy centroid/spacing geom scalars, t = sim time, and the user knobs p{i}.
     let t = sim.time;
+    // the map-aware face parameters: on a log axis the decade slope stands in the `dx` slot
     let (x_lo_phys, dx_phys) =
-        physical_geom(&sim.geom.x_lo, &sim.geom.dx, sim.geom.coords, sim.motion.a);
+        kernel_geom(&sim.geom.x_lo, &sim.geom.dx, &sim.geom.maps, sim.geom.coords, sim.motion.a);
     // the immersed-body params (packed by the same side-car the standalone `body_source` reads), so the
     // fused body wrap resolves `body_{idx}_{field}` identically to the two-pass. `None` -> body_scalar
     // returns zero (an inert slot), matching the MAX_SOURCE_BODIES bake.

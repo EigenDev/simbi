@@ -1217,7 +1217,7 @@ where
             let vel: [f64; DOF] = std::array::from_fn(|k| *self.fields.prim.vel[k].view().at(c));
             let pre = pre_field.map_or(0.0, |f| *f.view().at(c));
             let dv = bg.labframe_volume(c, a);
-            let x = self.geom.cell_coord(c);
+            let x = self.geom.expression_point(c);
 
             let mut inbuf = [0.0f64; MAX_PARAMS];
             for (i, p) in params.iter().enumerate() {
