@@ -182,6 +182,8 @@ fn a_single_grid_records_the_halt_under_a_positive_cap() {
         .expect("the single grid records the halt");
     assert_eq!(crash.iter, HALT_AT);
     assert!(crash.dt_cfl.is_nan() && crash.panic.is_none(), "{crash:?}");
+    // an accepted state no timestep advances: its crash file serves inspection alone
+    assert!(!crash.restartable(), "a watchdog crash was published as restartable: {crash:?}");
     assert_eq!(
         crash.dt_prev, DT,
         "the previous estimate is the raw one, before the cap"
@@ -223,6 +225,8 @@ fn a_decomposed_march_returns_the_halt_under_a_positive_cap_without_a_panic() {
         .expect("the decomposed march reports the halt");
     assert_eq!(halt.iter, HALT_AT);
     assert!(halt.dt_cfl.is_nan(), "{halt:?}");
+    // the halt names no step the transaction ended, the mark a crash file reads as not restartable
+    assert!(halt.step.is_none(), "a watchdog halt was reported as a halted step: {halt:?}");
     assert_eq!(
         halt.dt_prev, DT,
         "the previous estimate is the raw one, before the cap"

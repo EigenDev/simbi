@@ -117,6 +117,9 @@ pub struct WorkerReport {
     /// invalid timestep candidate on some worker, the retry guard, a retry timestep the clock
     /// cannot represent): the stores hold that step entry, the last accepted state
     pub halt: Option<String>,
+    /// whether the halt ended a root step through the step transaction, its entry restored; false
+    /// for a timestep no worker could take, whose state is accepted but cannot advance
+    pub halt_from_step: bool,
 }
 
 /// where a worker's wall time went. `collectives` and `exchange` include the time spent
@@ -2284,6 +2287,7 @@ where
             // the halted step left every store at its entry, on every worker alike
             crate::step_transaction::RootStep::Halted(crate::step_transaction::StepHalt::Guard(failure)) => {
                 report.halt = Some(guard_failure(fabric, failure, &cfg.injection, deadline)?);
+                report.halt_from_step = true;
                 break;
             }
             crate::step_transaction::RootStep::Halted(
@@ -2291,6 +2295,7 @@ where
                 | crate::step_transaction::StepHalt::Unrecoverable { detail },
             ) => {
                 report.halt = Some(detail);
+                report.halt_from_step = true;
                 break;
             }
         };

@@ -98,3 +98,19 @@ def test_a_later_dump_still_beats_an_earlier_terminator(tmp_path: Path) -> None:
     assert state is not None
     assert state.outcome == "running"
     assert state.path == resumed
+
+
+def test_a_diagnostic_crash_dump_is_never_reported_as_a_continuation(tmp_path: Path) -> None:
+    # a crash file marked restartable = false is the latest state on disk; discovery reports it
+    # as crashed, never as a run to continue
+    write_checkpoint(tmp_path / "run.chkpt.010_000.h5", 10.0, 100)
+    diagnostic = tmp_path / "run.chkpt.crashed.h5"
+    write_checkpoint(diagnostic, 10.5, 105)
+    with h5py.File(diagnostic, "a") as checkpoint:
+        checkpoint["metadata"].attrs["restartable"] = False
+
+    state = latest_checkpoint(tmp_path)
+
+    assert state is not None
+    assert state.path == diagnostic
+    assert state.outcome == "crashed"

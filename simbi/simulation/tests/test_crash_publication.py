@@ -120,13 +120,22 @@ def _launch(probe: Path, out: Path, tmp_path: Path, env: dict) -> subprocess.Com
     return subprocess.run(cmd, capture_output=True, text=True, timeout=600, env=env)
 
 
+def _assert_mark(path: Path, restartable: bool, label: str) -> None:
+    """the crash file's restartable mark: true where the halted step's entry was restored"""
+    with h5py.File(path, "r") as f:
+        assert "restartable" in f["metadata"].attrs, f"{label}: the crash file carries no restartable mark"
+        assert bool(f["metadata"].attrs["restartable"]) is restartable, f"{label}: the crash file is marked restartable={not restartable}"
+
+
 def _assert_crashed(done: subprocess.CompletedProcess, out: Path, label: str, snapshot: bool) -> None:
     flat = " ".join((done.stdout + done.stderr).split())
     assert "freeze fired on 16 consecutive substages" in flat, f"{label}: premise: the step never halted:\n{flat[-1500:]}"
     assert done.returncode != 0, f"{label}: a crashed run exited cleanly"
     assert not list(out.glob("*final*.h5")), f"{label}: a crashed run published a final checkpoint"
     if snapshot:
-        assert list(out.glob("*crashed*.h5")), f"{label}: no crashed snapshot of the last state"
+        crashed = list(out.glob("*crashed*.h5"))
+        assert crashed, f"{label}: no crashed snapshot of the last state"
+        _assert_mark(crashed[0], True, label)
 
 
 @pytest.mark.parametrize("gpus", [1, 2], ids=["single", "host-tiles"])
@@ -156,6 +165,7 @@ def _assert_guard_halt(done: subprocess.CompletedProcess, out: Path, label: str,
     if snapshot:
         crashed = list(out.glob("*crashed*.h5"))
         assert crashed, f"{label}: no crashed snapshot of the step entry"
+        _assert_mark(crashed[0], True, label)
         with h5py.File(crashed[0], "r") as f:
             clock = (int(f["level_0"].attrs["iteration"]), float(f["level_0"].attrs["time"]))
         assert clock == (0, 0.0), f"{label}: the crashed snapshot holds {clock}, past the refused step's entry"
@@ -186,3 +196,21 @@ def test_a_traced_run_the_retry_guard_ends_publishes_the_step_entry(tmp_path: Pa
     else:
         gpus = 1 if driver == "single" else 2
         _assert_guard_halt(_in_process(probe, out, gpus, _refusing(gpus, refined, tracers=200)), out, label, snapshot=True)
+
+
+@pytest.mark.parametrize("refined", [True, False], ids=["refined", "flat"])
+def test_a_launch_no_timestep_can_advance_publishes_a_diagnostic_crash_file(tmp_path: Path, probe: Path, refined: bool) -> None:
+    # worker 0's timestep candidate at step 2 is invalid: the workers agree to halt on an accepted
+    # state no timestep advances, and its crash file serves inspection alone. the in-process
+    # drivers' watchdog mark is gated in timestep_agreement.rs, since no admissible initial state
+    # reaches it from here
+    out = tmp_path / "out"
+    label = f"launch {'refined' if refined else 'flat'}"
+    env = dict(_env(1, refined), POISON_CLEAN="1", SIMBI_FABRIC_INJECT="bad_cfl:0:2")
+    done = _launch(probe, out, tmp_path, env)
+    flat = " ".join((done.stdout + done.stderr).split())
+    assert done.returncode != 0, f"{label}: a run with no valid timestep exited cleanly"
+    assert "invalid CFL candidate" in flat, f"{label}: premise: the watchdog never fired:\n{flat[-1500:]}"
+    crashed = list(out.glob("*crashed*.h5"))
+    assert crashed, f"{label}: no crash file:\n{flat[-1500:]}"
+    _assert_mark(crashed[0], False, label)

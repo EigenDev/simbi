@@ -1863,10 +1863,12 @@ where
             // the halted step left every level of every tile at its entry, on every worker alike
             RootStep::Halted(StepHalt::Guard(failure)) => {
                 report.halt = Some(symbi_sim::worker::guard_failure(fabric, failure, &base.injection, deadline)?);
+                report.halt_from_step = true;
                 break;
             }
             RootStep::Halted(StepHalt::Timestep { detail, .. } | StepHalt::Unrecoverable { detail }) => {
                 report.halt = Some(detail);
+                report.halt_from_step = true;
                 break;
             }
         };

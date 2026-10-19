@@ -1201,16 +1201,33 @@ pub fn checkpoint_level_count(path: &str) -> Result<usize> {
 
 /// refuse a checkpoint written as the diagnostic snapshot of a failed step, marked
 /// `restartable = false` in its metadata: it holds the state the failure left, which no accepted
-/// step produced. a file without the attribute is a step-boundary checkpoint.
-pub fn require_restartable(path: &str) -> std::result::Result<(), String> {
-    let attrs = symbi_io::read_attrs(Path::new(path), "metadata").map_err(|e| format!("checkpoint '{path}': {e}"))?;
-    let diagnostic = attrs.iter().any(|(key, value)| key == "restartable" && matches!(value, symbi_io::Attr::Bool(false)));
-    if diagnostic {
+/// step produced. every loader's check pass applies it; a restart site states it once through
+/// `require_restartable`, which also names an uncertified crash file
+pub fn refuse_diagnostic(path: &str, metadata: &[(String, Attr)]) -> std::result::Result<(), String> {
+    if matches!(attr_of(metadata, "restartable"), Some(Attr::Bool(false))) {
         return Err(format!(
             "checkpoint '{path}' is the diagnostic snapshot of a failed step (restartable = false): \
              it holds the state the failure left, which no accepted step produced. resume from the \
              last step-boundary checkpoint of the run."
         ));
+    }
+    Ok(())
+}
+
+/// the restart site's admission of `path`: a diagnostic snapshot is refused. a crash file that
+/// carries no `restartable` attribute predates the mark, so nothing certifies which state it holds
+/// (a freeze-limit halt or another step panic wrote its mid-attempt state): it is admitted, as
+/// every unmarked file is, with a notice naming it uncertified
+pub fn require_restartable(path: &str) -> std::result::Result<(), String> {
+    let attrs = symbi_io::read_attrs(Path::new(path), "metadata").map_err(|e| format!("checkpoint '{path}': {e}"))?;
+    refuse_diagnostic(path, &attrs)?;
+    let crash_file = Path::new(path).file_name().is_some_and(|name| name.to_string_lossy().to_lowercase().contains(".crashed"));
+    if crash_file && attr_of(&attrs, "restartable").is_none() {
+        eprintln!(
+            "warning: checkpoint '{path}' is a crash file written before crash files were marked; \
+             nothing certifies that it holds the last accepted state rather than a failed step's \
+             mid-attempt state. it is admitted; prefer the last numbered checkpoint of the run."
+        );
     }
     Ok(())
 }
@@ -1390,6 +1407,11 @@ where
             expected.unwrap_or("undensitized"),
         )));
     }
+    let metadata_attrs: Vec<(String, Attr)> = tree
+        .find_group("metadata")
+        .map(|group| group.attrs.iter().map(|(k, v)| (k.clone(), v.clone())).collect())
+        .unwrap_or_default();
+    refuse_diagnostic(path, &metadata_attrs).map_err(IoError::Backend)?;
     let meta = read_meta_from(&tree)?;
     if pass.writes() {
         sim.time = meta.time;
@@ -4015,6 +4037,7 @@ where
         )));
     }
     let meta = read_attrs(file, "metadata")?;
+    refuse_diagnostic(path, &meta).map_err(IoError::Backend)?;
     let regime = attr_of(&meta, "regime")
         .ok_or_else(|| IoError::MissingPath("metadata/regime".into()))?
         .as_str("metadata/regime")?;
@@ -4307,6 +4330,47 @@ mod partitioned_restart_tests {
         let mut plain = marked(blank([0, 0], [8, 6]));
         load_checkpoint_level(&mut plain, path.to_str().unwrap(), 0).unwrap();
         assert_ne!(store_bits(&plain), store_bits(&marked(blank([0, 0], [8, 6]))), "the file never loads; the gate is vacuous");
+    }
+
+    #[test]
+    fn every_loader_refuses_a_diagnostic_snapshot_before_it_writes() {
+        let dir = scratch("diagnostic_refused");
+        let source = tile([0, 0], [8, 6]);
+        let diagnostic = Metadata::new().with("restartable", false);
+        let (partitioned, whole) = (dir.join("partitioned.crashed.h5"), dir.join("whole.crashed.h5"));
+        write_partitioned_checkpoint::<NewtonianMhd, 2, 3, HostMemory>(&PhysicsIdentity::of(&source), &[LevelTiles::whole(&source.store)], partitioned.to_str().unwrap(), &diagnostic).unwrap();
+        write_checkpoint(&source, whole.to_str().unwrap(), &diagnostic).unwrap();
+
+        let mut tile_dest = marked(blank([0, 0], [8, 6]));
+        let grid = GlobalGrid::of_state(&tile_dest.store);
+        let before = store_bits(&tile_dest);
+        let err = load_partitioned_level(&mut tile_dest, partitioned.to_str().unwrap(), 0, [0, 0], &grid).unwrap_err();
+        assert!(format!("{err}").contains("diagnostic snapshot"), "{err}");
+        assert!(store_bits(&tile_dest) == before, "the partitioned loader wrote a diagnostic snapshot");
+
+        let mut whole_dest = marked(blank([0, 0], [8, 6]));
+        let before = store_bits(&whole_dest);
+        let err = load_checkpoint(&mut whole_dest, whole.to_str().unwrap()).unwrap_err();
+        assert!(format!("{err}").contains("diagnostic snapshot"), "{err}");
+        assert!(store_bits(&whole_dest) == before, "the whole-file loader wrote a diagnostic snapshot");
+    }
+
+    #[test]
+    fn a_restart_site_admits_a_marked_or_legacy_crash_file_and_refuses_a_diagnostic_one() {
+        let dir = scratch("crash_admission");
+        let source = tile([0, 0], [8, 6]);
+        let write = |name: &str, meta: &Metadata| {
+            let path = dir.join(name);
+            write_checkpoint(&source, path.to_str().unwrap(), meta).unwrap();
+            path
+        };
+        let restored = write("restored.chkpt.crashed.h5", &Metadata::new().with("restartable", true));
+        let legacy = write("legacy.chkpt.crashed.h5", &Metadata::new());
+        let diagnostic = write("diagnostic.chkpt.crashed.h5", &Metadata::new().with("restartable", false));
+        assert!(require_restartable(restored.to_str().unwrap()).is_ok(), "a restored halt's crash file was refused");
+        // legacy admission is unchanged: the unmarked crash file is admitted, uncertified
+        assert!(require_restartable(legacy.to_str().unwrap()).is_ok(), "a legacy crash file was refused");
+        assert!(require_restartable(diagnostic.to_str().unwrap()).is_err(), "a diagnostic crash file was admitted");
     }
 
     #[test]

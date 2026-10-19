@@ -3009,7 +3009,7 @@ where
             table.set_dynamic(false);
             let states: Vec<&_> = h.levels.iter().map(|l| &l.state).collect();
             let crashed = checkpoint_name(cfg, checkpoint_status_tag(CheckpointOutcome::Crashed));
-            let meta = failure_checkpoint_metadata(cfg, cadence.index, c.restartable());
+            let meta = failure_checkpoint_metadata(cfg, cadence.index, Some(c.restartable()));
             let _ = write_hierarchy_checkpoint(&states, &crashed, &meta);
             table.post_error(&format!(
                 "crashed at {} (step {}) — state checkpoint {crashed}",
@@ -3332,7 +3332,7 @@ where
     if !final_finite {
         let states: Vec<&_> = hier.levels.iter().map(|level| &level.state).collect();
         let crashed = checkpoint_name(cfg, checkpoint_status_tag(CheckpointOutcome::Crashed));
-        write_hierarchy_checkpoint(&states, &crashed, &failure_checkpoint_metadata(cfg, cadence.index, false))?;
+        write_hierarchy_checkpoint(&states, &crashed, &failure_checkpoint_metadata(cfg, cadence.index, Some(false)))?;
         screen.leave();
         table.set_dynamic(false);
         let summary = format!(
@@ -6178,6 +6178,8 @@ where
     // conserved halo published as the conserved state of its halo primitives and restored after
     let identity = symbi_sim::checkpoint::PhysicsIdentity::of(&tiles[0].0);
     let physics = tiles[0].0.physics;
+    // a crash file's restartable mark, set before the crash write; ordinary checkpoints carry none
+    let crash_mark = std::cell::Cell::new(None);
     let write_tile_level = |states: &[&symbi_sim::state::FieldStore<D, DOF, Mem, f64>],
                             path: &str,
                             cp_index: u64|
@@ -6192,7 +6194,7 @@ where
             header: None,
         };
         let t_io = std::time::Instant::now();
-        write_partitioned_checkpoint::<R, D, DOF, Mem>(&identity, &[level], path, &checkpoint_metadata(cfg, cp_index))
+        write_partitioned_checkpoint::<R, D, DOF, Mem>(&identity, &[level], path, &failure_checkpoint_metadata(cfg, cp_index, crash_mark.get()))
             .map_err(|e| checkpoint_write_error(path, e))?;
         Ok(t_io.elapsed().as_secs_f64())
     };
@@ -6411,6 +6413,9 @@ where
     // final snapshot, as the single grid does
     if let Some(h) = diagnostics.halt.clone() {
         let crashed = checkpoint_name(cfg, checkpoint_status_tag(CheckpointOutcome::Crashed));
+        // a halted root step restored its entry; a timestep no tile could take left an accepted
+        // state the run cannot advance
+        crash_mark.set(Some(h.step.is_some()));
         if let Err(msg) = write_tiles(&sh, &crashed, cadence.index) {
             reporter.fail(&msg);
             return Err(msg);
@@ -6710,7 +6715,7 @@ where
 
     // gather each level of the decomposed tiles into the global hierarchy (root over `counts`, fine
     // over the fine sub-grid), then write all the global levels through the multi-level writer.
-    let write_cp = |tiles: &[Hierarchy<R, D, DOF, M, E, S, Mem, K>], path: &str, cp_index: u64, restartable: bool| {
+    let write_cp = |tiles: &[Hierarchy<R, D, DOF, M, E, S, Mem, K>], path: &str, cp_index: u64, crash_mark: Option<bool>| {
         let mut levels = vec![LevelTiles {
             tiles: tiles
                 .iter()
@@ -6737,7 +6742,7 @@ where
         let halos: Vec<Vec<_>> =
             tiles.iter().map(|h| h.levels.iter().map(|l| l.state.prepare_checkpoint_halo()).collect()).collect();
         let t_io = std::time::Instant::now();
-        let meta = failure_checkpoint_metadata(cfg, cp_index, restartable);
+        let meta = failure_checkpoint_metadata(cfg, cp_index, crash_mark);
         let written = write_partitioned_checkpoint::<R, D, DOF, Mem>(&identity, &levels, path, &meta)
             .map_err(|e| checkpoint_write_error(path, e))
             .map(|()| t_io.elapsed().as_secs_f64());
@@ -6754,7 +6759,7 @@ where
         symbi::sim::decomp::drain_devices::<Mem>(&devices);
         let tag = cadence.tag(cfg, cp_width, cfg.start_time, cfg.checkpoint_index);
         let path = checkpoint_name(cfg, &tag);
-        match write_cp(&tiles, &path, cfg.checkpoint_index, true) {
+        match write_cp(&tiles, &path, cfg.checkpoint_index, None) {
             Ok(io) => reporter.checkpoint_written(cfg, &path, cfg.start_time, io),
             Err(msg) => {
                 reporter.fail(&msg);
@@ -6810,7 +6815,7 @@ where
             if cadence.due(time) {
                 let tag = cadence.tag(cfg, cp_width, time, cadence.index);
                 let path = checkpoint_name(cfg, &tag);
-                match write_cp(tiles, &path, cadence.index, true) {
+                match write_cp(tiles, &path, cadence.index, None) {
                     Ok(io) => reporter.checkpoint_written(cfg, &path, time, io),
                     Err(e) => {
                         *cp_error.borrow_mut() = Some(e);
@@ -6848,7 +6853,7 @@ where
             crash_cause(c.dt_cfl, c.panic.as_deref(), c.halt.as_ref())
         );
 
-        if let Err(msg) = write_cp(&tiles, &crashed, cadence.index, c.restartable()) {
+        if let Err(msg) = write_cp(&tiles, &crashed, cadence.index, Some(c.restartable())) {
             reporter.fail(&msg);
             return Err(msg);
         }
@@ -6858,7 +6863,7 @@ where
     }
     // canonical final snapshot, after every device drained.
     let final_path = checkpoint_name(cfg, checkpoint_status_tag(CheckpointOutcome::Completed));
-    match write_cp(&tiles, &final_path, cadence.index, true) {
+    match write_cp(&tiles, &final_path, cadence.index, None) {
         Ok(io) => {
             let root = &tiles[0].levels[0].state;
             let (iter, time) = (root.iteration, root.time);
@@ -9853,12 +9858,16 @@ fn checkpoint_metadata(cfg: &Config, checkpoint_index: u64) -> Metadata {
         .with("ct_method", ct_method_name(cfg))
 }
 
-/// the metadata of a checkpoint that may follow a failure: a halted step restored the state to its
-/// entry, which a restart resumes; any other failure leaves the state it failed on, marked
-/// `restartable = false` so the file serves inspection alone
-fn failure_checkpoint_metadata(cfg: &Config, checkpoint_index: u64, restartable: bool) -> Metadata {
+/// the metadata of a checkpoint, with a crash file's mark: `Some(true)` where a halted step
+/// restored the state to its entry, which a restart resumes; `Some(false)` where the failure left
+/// a state no accepted step produced, or one no timestep advances, so the file serves inspection
+/// alone; `None` for an ordinary checkpoint
+fn failure_checkpoint_metadata(cfg: &Config, checkpoint_index: u64, crash_mark: Option<bool>) -> Metadata {
     let meta = checkpoint_metadata(cfg, checkpoint_index);
-    if restartable { meta } else { meta.with("restartable", false) }
+    match crash_mark {
+        Some(restartable) => meta.with("restartable", restartable),
+        None => meta,
+    }
 }
 
 /// the recorded edge-EMF name of a magnetized run, empty for a run without a staggered field
@@ -12859,10 +12868,12 @@ where
     // the last accepted step whose state an audit certified: the final checkpoint after a cadence
     // write of the same step reuses that certification, its audit epoch being spent
     let certified = std::cell::Cell::new(None::<u64>);
+    // a crash file's restartable mark, set before the crash write; ordinary checkpoints carry none
+    let crash_mark = std::cell::Cell::new(None);
     let write = |tiles: &[Hierarchy<R, D, DOF, M, E, DefaultSpace, DefaultMemory, K>], fabric: &mut symbi_fabric::Fabric<_>, path: &str, cp_index: u64, accepted: u64| -> Result<(), WorkerError> {
         let audit = certified.get() != Some(accepted);
         certified.set(Some(accepted));
-        let extras = checkpoint_metadata(cfg, cp_index);
+        let extras = failure_checkpoint_metadata(cfg, cp_index, crash_mark.get());
         let req = CheckpointRequest {
             path,
             extras: &extras,
@@ -12952,6 +12963,9 @@ where
         // as crashed in place of the final snapshot
         let outcome = if report.halt.is_some() { CheckpointOutcome::Crashed } else { CheckpointOutcome::Completed };
         let final_path = checkpoint_name(cfg, checkpoint_status_tag(outcome));
+        if report.halt.is_some() {
+            crash_mark.set(Some(report.halt_from_step));
+        }
         write(&tiles, &mut fabric, &final_path, cadence.index, report.steps).map_err(|e| e.to_string())?;
         if let Some(r) = reporter.as_mut() {
             r.checkpoint_written(cfg, &final_path, report.time, 0.0);
@@ -13980,7 +13994,8 @@ where
     // the checkpoint schedule the single grid walks
     let mut cadence = CheckpointCadence::of(cfg);
     let cp_width = checkpoint_time_width(cfg);
-    let extras_of = |cp_index: u64| checkpoint_metadata(cfg, cp_index);
+    let crash_mark = std::cell::Cell::new(None);
+    let extras_of = |cp_index: u64| failure_checkpoint_metadata(cfg, cp_index, crash_mark.get());
 
     // one checkpoint through the coordinator from this worker's tiles as they stand: the
     // shared interface faces are audited first when the plan has any, then the file is
@@ -14195,6 +14210,9 @@ where
         // as crashed in place of the final snapshot
         let outcome = if report.halt.is_some() { CheckpointOutcome::Crashed } else { CheckpointOutcome::Completed };
         let final_path = checkpoint_name(cfg, checkpoint_status_tag(outcome));
+        if report.halt.is_some() {
+            crash_mark.set(Some(report.halt_from_step));
+        }
         let io = write(
             &sh,
             &mut fabric,
