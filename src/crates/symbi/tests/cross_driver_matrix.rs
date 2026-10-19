@@ -11,11 +11,11 @@
 // - corner_predictor / corner_corrector: the same at the corner of four tiles;
 // - freeze: a cell made unrecoverable in the predictor, at least a halo width
 //   from every cut, so its redo cannot land it and the correcting select
-//   freezes it. a gas regime accepts the freeze, and so does curved GRMHD inside
-//   its retry exclusion;
-// - inadmissible freeze: on a flat magnetized regime the frozen cell stays
-//   outside the admissible set, so the same event rejects the step, which
-//   replays at half the timestep with the hook spent;
+//   freezes it. curved GRMHD accepts the freeze inside its retry exclusion;
+// - inadmissible freeze: on every other regime, gas and magnetized, flat and
+//   curved, the frozen cell holds the poisoned input outside the admissible
+//   set, so the same event rejects the step, which replays at half the
+//   timestep with the hook spent;
 // - rollback: curved GRMHD under no retry exclusion rejects the same freeze and
 //   replays the step likewise.
 // per event the decomposed run matches the single-grid run bit for bit in its
@@ -278,8 +278,8 @@ macro_rules! freeze_test {
     };
 }
 
-/// the freeze event of a flat magnetized regime: the poisoned freeze leaves its cell outside the
-/// admissible set, so the attempt is rejected and the step replays at half the timestep with the
+/// the freeze event of a regime outside a retry exclusion: the poisoned freeze leaves its cell
+/// outside the admissible set, so the attempt is rejected and the step replays at half the timestep with the
 /// hook spent
 macro_rules! inadmissible_freeze_test {
     () => {
@@ -373,7 +373,7 @@ mod newtonian {
         s.substrate()
     }
     matrix_tests!();
-    freeze_test!();
+    inadmissible_freeze_test!();
 }
 
 mod isothermal {
@@ -406,7 +406,7 @@ mod isothermal {
         s.substrate()
     }
     matrix_tests!();
-    freeze_test!();
+    inadmissible_freeze_test!();
 }
 
 mod rhd {
@@ -438,7 +438,7 @@ mod rhd {
         s.substrate()
     }
     matrix_tests!();
-    freeze_test!();
+    inadmissible_freeze_test!();
 }
 
 /// the periodic magnetized flow of the square: the wave's gas and a face field B_x(y), B_y(x),
@@ -611,7 +611,7 @@ mod grhd {
         RhdSubstrateKernelSet::<HostMemory, f64, 2>::new(4.0 / 3.0, 0.3, &s.geom.allocated).with_excision(0.35, 1.0, 1.0)
     }
     matrix_tests!();
-    freeze_test!();
+    inadmissible_freeze_test!();
 }
 
 /// GRMHD: the magnetized cartesian kerr-schild box (mass 1, no excision, UCT, HLLE) on
