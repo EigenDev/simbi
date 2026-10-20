@@ -10,7 +10,8 @@
 // - on the equatorial face declared `Reflect` the azimuthal components keep the wall's
 //   even continuation, so the two kinds differ only in the out-of-plane sign;
 // - a driven inner-radius face owns its corner with the pole: the corner ghost is the
-//   prescription evaluated at the corner cell's own coordinate;
+//   prescription evaluated at the corner cell's own volume centroid in theta (the
+//   sin(theta)-weighted moment of the cell), the point every cell-sampled expression reads;
 // - a toroidal field B_phi = B0 r sin(theta) balanced by p = p0 - B0^2 r^2 sin^2(theta)
 //   is held through the geometric update with a residual that converges under refinement,
 //   with the axis fill keeping the near-pole residual at the level of the bulk.
@@ -218,9 +219,10 @@ fn a_reflecting_pole_keeps_the_azimuthal_components_even() {
 #[test]
 fn the_driven_face_owns_its_corner_with_the_pole() {
     // the driven pass runs after the lattice sweep over the whole radial ghost band, theta
-    // ghosts included, so the corner holds the prescription at the corner cell's own
-    // coordinate: for this odd-in-theta prescription that is also the axis image of the
-    // driven column, and the two agree.
+    // ghosts included, so the corner holds the prescription at the corner cell's own volume
+    // centroid. the centroid of a cell mirrored through the pole is the negated centroid, so for
+    // this odd-in-theta prescription the corner is also the axis image of the driven column,
+    // and the two agree.
     let (sim, k) = probe_sim([8, 8], BoundaryType::Axis);
     k.c2p(&sim);
     k.ghost_fill(&sim);
@@ -230,7 +232,9 @@ fn the_driven_face_owns_its_corner_with_the_pole() {
     let mut corners = 0;
     for i in alloc.spaces[0].lo..ilo {
         for j in alloc.spaces[1].lo..alloc.spaces[1].hi {
-            let th = ((j - jlo) as f64 + 0.5) * dth;
+            let (a, b) = ((j - jlo) as f64 * dth, (j - jlo + 1) as f64 * dth);
+            // int theta sin(theta) = sin(theta) - theta cos(theta); int sin(theta) = -cos(theta)
+            let th = (b.sin() - b * b.cos() - a.sin() + a * a.cos()) / (a.cos() - b.cos());
             let want = driven_values(th);
             let got = cell(&sim, [i, j]);
             for k in 0..8 {
