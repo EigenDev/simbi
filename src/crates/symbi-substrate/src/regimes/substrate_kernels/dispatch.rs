@@ -2498,6 +2498,10 @@ fn dispatch_penalize_inner<const D: usize, const DOF: usize, Mem, Sc>(
     // wall cell at a different rate than the monolithic run). unset (the monolithic / single-gpu
     // path) => this grid's local max, which is the global max on a single grid.
     let c_a2_max: f64 = im.c_a2_override().unwrap_or(c_a2);
+    // the mask centroid and widths read face positions through the runtime axis map, so a graded
+    // axis binds the map's face-0 start and its decade slope or first width; the positions are
+    // comoving (a = 1), the grid's own values on an axis without a map
+    let (x_lo_k, dx_k) = kernel_geom(&geom.x_lo, &geom.dx, &geom.maps, geom.coords, 1.0);
     let bind_value = |bind: &ScalarBind, b: usize| -> f64 {
         let surface = bodies.get(b).spec.surface;
         match bind {
@@ -2505,7 +2509,7 @@ fn dispatch_penalize_inner<const D: usize, const DOF: usize, Mem, Sc>(
                 ScalarRef::Dt => dt,
                 ScalarRef::Gamma | ScalarRef::Cs => gamma,
                 ScalarRef::Body { idx: 0, field } => body_scalar::<D>(Some(bodies), b as u8, field),
-                other => geom_scalar(&geom.x_lo, &geom.dx, &geom.maps, &geom.index_offset, other)
+                other => geom_scalar(&x_lo_k, &dx_k, &geom.maps, &geom.index_offset, other)
                     .unwrap_or_else(|| panic!("penalize: unexpected scalar param {other:?}")),
             },
             ScalarBind::Spec(spec) if &**spec == "c_drain" => c_drain,

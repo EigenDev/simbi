@@ -19,7 +19,7 @@ use symbi_sim::state::FieldStore;
 
 use super::dispatch::dispatch_named;
 use super::layout::dof_lift_suffix;
-use super::params::{ScalarBind, geom_scalar, physical_geom, resolve_params};
+use super::params::{ScalarBind, geom_scalar, kernel_geom, resolve_params};
 use super::runtime_source::{
     RuntimeSource, dispatch_runtime_ir, gv_kernel_to_ir, resolve_runtime_param, sim_gv_geom,
 };
@@ -412,8 +412,10 @@ pub fn dispatch_gradient_boundaries<const D: usize, const DOF: usize, Mem, Sc>(
     // `pre` is the regime's pressure field (energy: `sim.fields.prim.pre`; iso: the substrate-owned
     // `cs2*rho` field, off the global ABI) — the `dispatch_named` "prim.pre" override.
     let sfx = dof_lift_suffix(sim.geom.coords, DOF, D);
+    // the kernel's `dist` reads face midpoints through the runtime axis map, so a graded axis binds
+    // the map's face-0 start and its decade slope or first width
     let (x_lo_phys, dx_phys) =
-        physical_geom(&sim.geom.x_lo, &sim.geom.dx, sim.geom.coords, sim.motion.a);
+        kernel_geom(&sim.geom.x_lo, &sim.geom.dx, &sim.geom.maps, sim.geom.coords, sim.motion.a);
 
     for axis in 0..D {
         for side in 0..2 {
