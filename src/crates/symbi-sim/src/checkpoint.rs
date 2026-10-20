@@ -670,10 +670,15 @@ fn slip_heat_dataset_name(has_energy: bool) -> &'static str {
     }
 }
 
+/// the frame a body's position and velocity components are written in: cartesian, with the
+/// meridional (x, z) pair on the 2D spherical (r, theta) section
+const BODY_POSITION_FRAME: &str = "meridional";
+
 fn body_state_group<'a, const D: usize>(snap: &'a BodyStateSnap, heat_name: &str) -> Tree<'a> {
     let nb = snap.nb;
     let mut t = Tree::new("bodies")
         .with_attr("n_bodies", nb as u64)
+        .with_attr("position_frame", BODY_POSITION_FRAME)
         .with_dataset(Dataset::new(
             "position",
             vec![nb, D],
@@ -1594,7 +1599,7 @@ where
     if let Some(tg) = tree.find_group("tracers") {
         let population = read_tracer_population::<D>(tg)?;
         if !pass.writes() {
-            return finish_check(&tree, sim.immersed.as_ref(), meta);
+            return finish_check(&tree, sim.immersed.as_ref(), sim.geom.coords, meta);
         }
         sim.tracers = Some(population);
         let geometry = sim.geom.block_geometry(sim.physics.metric);
@@ -1602,7 +1607,7 @@ where
         symbi_sim_tracers::refresh_derived_positions_store(&mut sim.store, &geometry, layout);
     }
     if !pass.writes() {
-        return finish_check(&tree, sim.immersed.as_ref(), meta);
+        return finish_check(&tree, sim.immersed.as_ref(), sim.geom.coords, meta);
     }
     if let Some(group) = tree.find_group("continuous_tracers") {
         sim.continuous_tracers = Some(read_continuous_population::<D, Mem>(group)?);
@@ -1617,19 +1622,24 @@ where
 
 /// the reads of a check pass past the fields: the continuous tracer population and the body
 /// records parse, onto a copy of the bodies where the store carries them
-fn finish_check<const D: usize>(tree: &TreeBuf, immersed: Option<&ImmersedBodies<D>>, meta: CheckpointMeta) -> Result<CheckpointMeta> {
+fn finish_check<const D: usize>(
+    tree: &TreeBuf,
+    immersed: Option<&ImmersedBodies<D>>,
+    chart: symbi_geometry::Geometry,
+    meta: CheckpointMeta,
+) -> Result<CheckpointMeta> {
     if let Some(group) = tree.find_group("continuous_tracers") {
         read_continuous_population::<D, symbi_xpu::HostMemory>(group)?;
     }
     if let (Some(bodies_g), Some(im)) = (tree.find_group("bodies"), immersed) {
-        check_bodies::<D>(bodies_g, im)?;
+        check_bodies::<D>(bodies_g, im, chart)?;
     }
     Ok(meta)
 }
 
 /// every check `restore_bodies` makes before it writes: the records it indexes are present and
 /// long enough for the run's bodies, and the file and the run carry a bonded assembly together
-fn check_bodies<const D: usize>(bodies_g: &TreeBuf, im: &ImmersedBodies<D>) -> Result<()> {
+fn check_bodies<const D: usize>(bodies_g: &TreeBuf, im: &ImmersedBodies<D>, chart: symbi_geometry::Geometry) -> Result<()> {
     let len = |name: &str| -> Option<usize> { bodies_g.find_dataset(name).and_then(|d| d.data.as_f64().map(|v| v.len())) };
     let need = |name: &str| -> Result<usize> { len(name).ok_or_else(|| IoError::MissingPath(format!("bodies/{name}"))) };
     let nb = im.bodies.len().min(need("mass")?);
@@ -1642,6 +1652,7 @@ fn check_bodies<const D: usize>(bodies_g: &TreeBuf, im: &ImmersedBodies<D>) -> R
     for (name, per) in [("position", D), ("velocity", D), ("total_accreted_mass", 1), ("accretion_rate", 1)] {
         short(name, need(name)?, nb * per)?;
     }
+    check_body_frame::<D>(bodies_g, im, chart, nb)?;
     for (name, per) in [
         ("magnetic_slip_heating", 1),
         ("exported_slip_heat", 1),
@@ -1666,6 +1677,41 @@ fn check_bodies<const D: usize>(bodies_g: &TreeBuf, im: &ImmersedBodies<D>) -> R
         (Some(_), None) => Err(IoError::Backend("the checkpoint records a bonded assembly; this run configures none".into())),
         (None, None) => Ok(()),
     }
+}
+
+/// a checkpoint written before its bodies recorded `position_frame` placed a penalizing body
+/// (drain, porous, rigid, torque-free, shaped) on the 2D spherical chart with its two components
+/// read as (z, x); the body source, the feedback and the census read the same pair as (x, z). a
+/// body whose two components agree sits on the symmetry line where both readings coincide, and
+/// restarts unchanged; any other penalizing body is refused by name, since restarting would move it
+fn check_body_frame<const D: usize>(
+    bodies_g: &TreeBuf,
+    im: &ImmersedBodies<D>,
+    chart: symbi_geometry::Geometry,
+    nb: usize,
+) -> Result<()> {
+    if D != 2 || chart != symbi_geometry::Geometry::Spherical || bodies_g.find_attr("position_frame").is_some() {
+        return Ok(());
+    }
+    let values = |name: &str| bodies_g.find_dataset(name).and_then(|d| d.data.as_f64().map(|v| v.to_vec())).unwrap_or_default();
+    let (pos, vel) = (values("position"), values("velocity"));
+    for b in 0..nb {
+        if im.bodies.get(b).mask_radius().is_none() {
+            continue;
+        }
+        let (p, v) = (&pos[b * D..b * D + 2], &vel[b * D..b * D + 2]);
+        if p[0] != p[1] || v[0] != v[1] {
+            return Err(IoError::Backend(format!(
+                "immersed body {b} penalizes the gas on the 2D spherical chart, and this checkpoint \
+                 predates the meridional body frame: its masks placed the body at x = {}, z = {} \
+                 (position components read as (z, x)), while bodies now read (x, z). to keep the \
+                 recorded placement, restart from a fresh run with the body position ({}, {}) and \
+                 velocity ({}, {}), its components swapped",
+                p[1], p[0], p[1], p[0], v[1], v[0]
+            )));
+        }
+    }
+    Ok(())
 }
 
 /// the discrete tracer population recorded under `tracers`: ids, cohorts, owners, flags and the
@@ -4204,10 +4250,11 @@ where
             sim.continuous_tracers = Some(own);
         }
     }
+    let chart = sim.geom.coords;
     if let Some(im) = sim.immersed.as_mut() {
         if let Ok(bodies) = read_group(file, "bodies") {
             match pass {
-                RestorePass::Check => check_bodies::<D>(&bodies, im)?,
+                RestorePass::Check => check_bodies::<D>(&bodies, im, chart)?,
                 RestorePass::Apply => restore_bodies::<D>(&bodies, im)?,
             }
         }

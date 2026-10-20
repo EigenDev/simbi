@@ -52,6 +52,12 @@ use symbi_ir::trace;
 /// the 3-space axes whose torque component can be nonzero at dimension
 /// `ndim`: rotation needs a plane, so 1d carries zero, 2d the z moment alone,
 /// 3d all three.
+/// the world axis a 2D kernel's single torque slot books into: the moment about the y axis on
+/// the meridional (x, z) section of the 2D spherical chart, about z on every other 2D chart
+pub fn planar_torque_world_axis(coords: Coords) -> usize {
+    if coords == Coords::Spherical { 1 } else { 2 }
+}
+
 pub fn torque_axes(ndim: usize) -> std::ops::Range<usize> {
     match ndim {
         3 => 0..3,
@@ -75,6 +81,23 @@ fn is_cyl_rz(coords: Coords, ndim: usize, axes: &[usize]) -> bool {
     coords == Coords::Cylindrical && ndim == 2 && axes[..2] == [0, 2]
 }
 
+/// the 2D spherical (r, theta) section is the meridional x-z plane: a body position or vector
+/// there reads (x, z) = (r sin theta, r cos theta), the reading of the body source, the body
+/// feedback and the census masks. the metric's planar frame orders the same pair as
+/// (r cos theta, r sin theta) = (z, x), so its two components swap at this boundary.
+fn is_sph_meridional(coords: Coords, ndim: usize) -> bool {
+    coords == Coords::Spherical && ndim == 2
+}
+
+/// the metric's planar (z, x) pair in the meridional (x, z) order on the 2D spherical chart;
+/// unchanged on every other chart
+fn meridional_order<'t>(coords: Coords, ndim: usize, mut v: Vec<Gv<'t>>) -> Vec<Gv<'t>> {
+    if is_sph_meridional(coords, ndim) {
+        v.swap(0, 1);
+    }
+    v
+}
+
 fn centroid_to_cartesian<'t>(
     coords: Coords,
     ndim: usize,
@@ -91,7 +114,7 @@ fn centroid_to_cartesian<'t>(
         let xc = m.to_cartesian(Tensor::from_fn(|i| x[i]));
         (0..D).map(|i| xc[i]).collect()
     }
-    match (coords, ndim) {
+    let planar = match (coords, ndim) {
         (Coords::Cartesian, _) => centroid[..ndim].to_vec(),
         (Coords::Spherical, 1) => run::<_, 1>(Spherical, centroid),
         (Coords::Spherical, 2) => run::<_, 2>(Spherical, centroid),
@@ -100,7 +123,8 @@ fn centroid_to_cartesian<'t>(
         (Coords::Cylindrical, 2) => run::<_, 2>(CylindricalRPhi, centroid),
         (Coords::Cylindrical, 3) => run::<_, 3>(Cylindrical, centroid),
         (c, d) => panic!("penalize centroid_to_cartesian: unsupported (coords {c:?}, ndim {d})"),
-    }
+    };
+    meridional_order(coords, ndim, planar)
 }
 
 /// rotate a cartesian vector into the cell's physical (orthonormal) frame — the
@@ -128,6 +152,8 @@ fn vector_from_cartesian<'t>(
         );
         (0..D).map(|i| p[i]).collect()
     }
+    // the cartesian vector arrives in the meridional (x, z) order; the metric reads (z, x)
+    let v_cart = &meridional_order(coords, ndim, v_cart[..ndim].to_vec());
     match (coords, ndim) {
         (Coords::Cartesian, _) => v_cart[..ndim].to_vec(),
         (Coords::Spherical, 1) => run::<_, 1>(Spherical, x, v_cart),
@@ -164,7 +190,7 @@ fn vector_to_cartesian<'t>(
         );
         (0..D).map(|i| e[i]).collect()
     }
-    match (coords, ndim) {
+    let planar = match (coords, ndim) {
         (Coords::Cartesian, _) => v_phys[..ndim].to_vec(),
         (Coords::Spherical, 1) => run::<_, 1>(Spherical, x, v_phys),
         (Coords::Spherical, 2) => run::<_, 2>(Spherical, x, v_phys),
@@ -173,7 +199,8 @@ fn vector_to_cartesian<'t>(
         (Coords::Cylindrical, 2) => run::<_, 2>(CylindricalRPhi, x, v_phys),
         (Coords::Cylindrical, 3) => run::<_, 3>(Cylindrical, x, v_phys),
         (c, d) => panic!("penalize vector_to_cartesian: unsupported (coords {c:?}, ndim {d})"),
-    }
+    };
+    meridional_order(coords, ndim, planar)
 }
 
 /// append the form-drag receipt: the surface force projected onto the outward SDF normal,
@@ -237,6 +264,11 @@ fn cartesian_receipt<'t>(
     }));
     let x_rel = Tensor::<Gv, 3>::new(std::array::from_fn(|a| x_cart[a] - center[a]));
     let torque = symbi_ib::moment(&x_rel, &f);
+    if is_sph_meridional(coords, ndim) {
+        // the meridional section's one torque slot is the moment about the y axis normal to the
+        // x-z plane, L_y = z F_x - x F_z, the negated planar moment of the (x, z) pair
+        return (f, Tensor::new([Gv::ZERO, Gv::ZERO, Gv::ZERO - torque[2]]));
+    }
     (f, torque)
 }
 

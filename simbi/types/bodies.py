@@ -433,6 +433,11 @@ class MagneticSlipProperties:
 
 @dataclass(frozen=True)
 class ImmersedBodyConfig:
+    """an immersed body. `position` and `velocity` are cartesian components on every chart: (x, y, z)
+    on a 3D grid; (x, z) on the 2D spherical (r, theta) and cylindrical (R, z) planes, which are the
+    meridional x-z plane with x = r sin(theta), z = r cos(theta); (x, y) on the cylindrical
+    (R, phi) plane. a centered body is the origin on every chart."""
+
     capability: BodyCapability
     mass: float
     velocity: Sequence[float]

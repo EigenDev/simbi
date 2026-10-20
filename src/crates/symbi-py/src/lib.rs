@@ -4013,10 +4013,11 @@ fn build_bodies<const D: usize>(
     const RIGID: u64 = 1 << 4;
     let mut coll = BodyCollection::new();
     for (idx, b) in params.iter().enumerate() {
-        // the body position is cartesian on every grid: the immersed-body kernels
-        // map the cell centroid to Cartesian and take |x_cart - position|, so a
-        // spherical/cylindrical run gives the body's (x, y, z); the position is
-        // never the native (r, theta, phi) tuple. a centered accretor is the origin (0, 0, 0) either way.
+        // the body position and velocity are cartesian components on every grid: the
+        // immersed-body kernels map the cell centroid to cartesian and take |x_cart - position|.
+        // a 3D spherical or cylindrical run gives (x, y, z); the 2D spherical (r, theta) and
+        // cylindrical (R, z) planes are the meridional x-z plane and give (x, z); the cylindrical
+        // (R, phi) plane gives (x, y). a centered accretor is the origin on every chart.
         let pos = Tensor::new(std::array::from_fn(|ax| {
             b.position.get(ax).copied().unwrap_or(0.0)
         }));

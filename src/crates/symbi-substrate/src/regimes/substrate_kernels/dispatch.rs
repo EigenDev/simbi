@@ -37,6 +37,16 @@ use super::types::Solver;
 
 static CFL_DIAGNOSTIC_CALLS: AtomicU64 = AtomicU64::new(0);
 
+/// the world axis a 2D penalization kernel's single torque slot books into
+fn planar_torque_axis(coords: symbi_geometry::Geometry) -> usize {
+    let coords = match coords {
+        symbi_geometry::Geometry::Cartesian => symbi_discretize::Coords::Cartesian,
+        symbi_geometry::Geometry::Spherical => symbi_discretize::Coords::Spherical,
+        symbi_geometry::Geometry::Cylindrical => symbi_discretize::Coords::Cylindrical,
+    };
+    symbi_discretize::gv_penalize::planar_torque_world_axis(coords)
+}
+
 pub(crate) fn composite_max_reduce<const D: usize, const DOF: usize, Mem, Sc>(
     sim: &FieldStore<D, DOF, Mem, Sc>,
     field: &Field<Sc, D, Mem>,
@@ -2435,7 +2445,7 @@ fn dispatch_penalize_shaped_body<const D: usize, const DOF: usize, Mem, Sc>(
         delta.energy = feedback_sum(&scratch[D + 1], &bbox);
     }
     for k in 0..n_torque {
-        let axis = if n_torque == 1 { 2 } else { k };
+        let axis = if n_torque == 1 { planar_torque_axis(sim.geom.coords) } else { k };
         delta.torque[axis] = feedback_sum(&scratch[n_delta + k], &bbox);
     }
     // the appended form-drag (normal-projected) force from the shaped wall's SDF-gradient normal.
@@ -2739,9 +2749,10 @@ fn dispatch_penalize_inner<const D: usize, const DOF: usize, Mem, Sc>(
         if nrg.is_some() {
             delta.energy = feedback_sum(&scratch[D + 1], &bbox);
         }
-        // torque: the 3d slots are (x, y, z); the single 2d slot is the z moment.
+        // torque: the 3d slots are (x, y, z); the single 2d slot is the moment about the axis
+        // normal to the grid plane (y on the meridional x-z section of the spherical chart).
         for k in 0..n_torque {
-            let axis = if n_torque == 1 { 2 } else { k };
+            let axis = if n_torque == 1 { planar_torque_axis(geom.coords) } else { k };
             delta.torque[axis] = feedback_sum(&scratch[n_delta + k], &bbox);
         }
         // the appended form-drag (normal-projected) force: D slots after the torque block.
