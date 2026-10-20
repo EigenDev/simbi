@@ -23,7 +23,8 @@ fn host_read_barrier<Mem: MemorySpace>() {
     }
 }
 
-/// scan the c2p error field and return the bitwise or of all error codes.
+/// scan the c2p error field over the cells the run-wide decisions read (the interior less a
+/// covered core no evolved cell reads) and return the bitwise or of all error codes.
 /// zero = all cells clean. nonzero = at least one cell had a recovery.
 pub fn scan_c2p_errors<
     const D: usize,
@@ -37,13 +38,13 @@ where
     Mem: Sync,
 {
     let mut combined = 0u8;
-    for coord in sim.geom.interior.iter() {
+    for coord in sim.composite_ownership.decision_regions(&sim.geom.interior).iter().flat_map(|region| region.iter()) {
         combined |= sim.fields.c2p_error.view().at(coord).to_f64() as u8;
     }
     symbi_hydro::c2p_result::ErrorCode(combined)
 }
 
-/// the first failed c2p cell in lexicographic interior order. a fatal-path
+/// the first failed c2p cell of the decision regions, box by box in lexicographic order. a fatal-path
 /// diagnostic: on a device backend it drains the queue and reads the unified
 /// fields from the host, so it is only for call sites about to abort.
 pub fn first_c2p_error<
@@ -58,7 +59,7 @@ where
     Mem: Sync,
 {
     host_read_barrier::<Mem>();
-    for coord in sim.geom.interior.iter() {
+    for coord in sim.composite_ownership.decision_regions(&sim.geom.interior).iter().flat_map(|region| region.iter()) {
         let code = sim.fields.c2p_error.view().at(coord).to_f64() as u8;
         if code != 0 {
             return Some((coord, symbi_hydro::c2p_result::ErrorCode(code)));
@@ -82,7 +83,7 @@ where
     Mem: Sync,
 {
     host_read_barrier::<Mem>();
-    for coord in sim.geom.interior.iter() {
+    for coord in sim.composite_ownership.decision_regions(&sim.geom.interior).iter().flat_map(|region| region.iter()) {
         let status = sim.fields.c2p_error.view().at(coord).to_f64() as u8;
         if status == 0 {
             continue;

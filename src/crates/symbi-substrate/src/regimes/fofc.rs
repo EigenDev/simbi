@@ -186,7 +186,9 @@ where
 
 /// the freeze acts on the interior that count as evidence for rejecting the step or halting the
 /// run under the store's retry exclusion, out of `frozen` acts. the legacy euclidean sphere is
-/// evaluated by a kernel and a reduction, on a host store and a device store alike.
+/// evaluated by a kernel and a reduction, on a host store and a device store alike. a covered core
+/// no evolved cell reads (`CompositeOwnership::decision_excluded`) is left out under either
+/// exclusion: it is restored to the stage input every stage and replaced by the restriction
 fn decision_freezes<const D: usize, const DOF: usize, Mem, Sc>(
     sim: &FieldStore<D, DOF, Mem, Sc>,
     freeze: &Field<Sc, D, Mem>,
@@ -197,22 +199,40 @@ where
     Sc: Scalar + OrderedNumeric,
 {
     match sim.retry_exclusion {
-        RetryExclusion::None => frozen,
+        RetryExclusion::None if sim.composite_ownership.decision_excluded.is_none() => frozen,
+        RetryExclusion::None => decision_flag_count(sim, freeze),
         RetryExclusion::LegacyEuclideanSphere { radius } => {
             if sim.geom.coords != symbi_geometry::Geometry::Cartesian {
-                return frozen;
+                return decision_flag_count(sim, freeze);
             }
             let evidence = &sim.workspace.fofc_evidence;
             crate::regimes::substrate_kernels::dispatch_fofc_evidence_outside_sphere(sim, radius, freeze, evidence);
-            fofc_flag_count(sim, evidence)
+            decision_flag_count(sim, evidence)
         }
     }
 }
 
+/// the flagged cells of `mask` over the interior the run-wide decisions read
+fn decision_flag_count<const D: usize, const DOF: usize, Mem, Sc>(
+    sim: &FieldStore<D, DOF, Mem, Sc>,
+    mask: &Field<Sc, D, Mem>,
+) -> u64
+where
+    Mem: MemorySpace,
+    Sc: Scalar + OrderedNumeric,
+{
+    sim.composite_ownership
+        .decision_regions(&sim.geom.interior)
+        .iter()
+        .map(|region| field_reduce(mask, region, ReductionOp::Add) as u64)
+        .sum()
+}
+
 /// the cells whose freeze acts counted as decision evidence in this pass, written to the store's
 /// rejection evidence for the driver that books the rejection: under no exclusion the freeze mask,
-/// under the legacy sphere the evidence mask the decision reduced, each with the stage tag. at most
-/// eight cells are named, with the count of the rest
+/// under the legacy sphere the evidence mask the decision reduced, each with the stage tag and
+/// each over the interior the decisions read. at most eight cells are named, with the count of
+/// the rest
 fn record_rejection_evidence<const D: usize, const DOF: usize, Mem, Sc>(
     sim: &FieldStore<D, DOF, Mem, Sc>,
     freeze: &Field<Sc, D, Mem>,
@@ -230,11 +250,17 @@ fn record_rejection_evidence<const D: usize, const DOF: usize, Mem, Sc>(
     };
     let mut lines = Vec::new();
     if Mem::IS_DEVICE_ACCESSIBLE {
-        let count = fofc_flag_count(sim, mask);
+        let count = decision_flag_count(sim, mask);
         lines.push(format!("stage tag {stage}: {count} eligible freeze acts, held in device memory"));
     } else {
         let view = mask.view();
-        let cells: Vec<[isize; D]> = sim.geom.interior.iter().filter(|&c| (*view.at(c)).to_f64() > 0.0).collect();
+        let cells: Vec<[isize; D]> = sim
+            .composite_ownership
+            .decision_regions(&sim.geom.interior)
+            .iter()
+            .flat_map(|region| region.iter())
+            .filter(|&c| (*view.at(c)).to_f64() > 0.0)
+            .collect();
         for c in cells.iter().take(NAMED) {
             let x = sim.geom.centroid(*c);
             lines.push(format!("stage tag {stage}: frozen cell {c:?} at {x:?}"));

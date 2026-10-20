@@ -949,11 +949,14 @@ where
     <R as Regime<f64, DOF>>::Prim: symbi_hydro::state::PrimFromSlots<f64, DOF>,
 {
     let saved: Vec<_> = levels.iter().map(|s| s.prepare_checkpoint_halo()).collect();
+    // an excluded covered cell without an admissible recovery is published with NaN primitives
+    let withheld: Vec<_> = levels.iter().map(|s| s.store.withhold_unrecovered_primitives()).collect();
     let tiles: Vec<LevelTiles<'_, D, DOF, Mem>> =
         levels.iter().map(|s| LevelTiles::whole(&s.store)).collect();
     let written = write_partitioned_checkpoint::<R, D, DOF, Mem>(&PhysicsIdentity::of(levels[0]), &tiles, path, extras);
-    for (s, halo) in levels.iter().zip(&saved) {
+    for ((s, halo), primitives) in levels.iter().zip(&saved).zip(&withheld) {
         s.restore_checkpoint_halo(halo);
+        s.store.restore_withheld_primitives(primitives);
     }
     written
 }

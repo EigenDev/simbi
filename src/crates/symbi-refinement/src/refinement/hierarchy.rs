@@ -1661,6 +1661,33 @@ where
         Ok(())
     }
 
+    /// leave out of the run-wide decisions the covered cells no evolved cell reads, on every level
+    /// with a covered core: the inactive core shrunk by the level's ghost width. the core is
+    /// restored to the stage input every stage, so a core cell influences the evolved cells only
+    /// through the stage kernels of the donor shell and the ghost fill, and every stage kernel reads
+    /// within the ghost width (the halo law over the baked kernels' IR); the prolongation reads the
+    /// donor shell alone, and the restriction overwrites the coverage. the scope is a hierarchy
+    /// whose registers cross no cut, with no rigid body (a wall acts on covered coarse cells and
+    /// sums their force onto the body) and no balanced coarse-fine transfer (its band and ghost
+    /// kernels are outside the halo law); elsewhere every cell stays in the decisions. called at
+    /// every root step, so a body attached or a run restarted after construction is judged too
+    pub fn establish_decision_exclusion(&mut self) {
+        let rigid = self.levels.iter().any(|level| {
+            level.state.immersed.as_ref().is_some_and(|immersed| immersed.bodies.rigid_count() > 0)
+        });
+        let balanced = (1..self.levels.len()).any(|level| self.cf_transfer_balanced(level) || self.rewrites_bands(level - 1));
+        let in_scope = !rigid && !balanced && !self.transports_registers();
+        for level in &mut self.levels {
+            let geom = &level.state.geom;
+            let ghost_width = (0..NDIM)
+                .map(|axis| (geom.interior.spaces[axis].lo - geom.allocated.spaces[axis].lo) as usize)
+                .max()
+                .unwrap_or(0);
+            let ownership = &mut level.state.composite_ownership;
+            ownership.decision_excluded = if in_scope { ownership.unread_core(ghost_width) } else { None };
+        }
+    }
+
     /// whether a register of this hierarchy sends or receives a unit across a cut
     pub fn transports_registers(&self) -> bool {
         self.flux_registers.iter().any(|r| r.has_contributing() || r.has_receiving())
@@ -3326,6 +3353,7 @@ where
     /// step entry and records the halt in `crash`. callable with any admissible dt, which is
     /// what lets a multi-tile driver select a global minimum and drive each tile with it.
     pub fn step_root_with_dt(&mut self, candidate: f64) {
+        self.establish_decision_exclusion();
         let time = self.levels[0].state.time;
         let guard = self.levels[0].state.retry_guard;
         let mut attempt = SingleRootAttempt { hier: self, restorable: false, sidecars: None };

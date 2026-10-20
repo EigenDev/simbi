@@ -2238,6 +2238,13 @@ pub struct CompositeOwnership<const D: usize> {
     /// a cut bounding a core cell of the neighbor belongs to it, so both copies of that face
     /// are restored with the core
     pub inactive_faces: [Option<Domain<D>>; D],
+    /// the covered cells no operator of the evolved cells reads: the inactive core shrunk on
+    /// every side by the level's ghost width, the bound on every stage kernel's read reach. the
+    /// core is restored to the stage input every stage and replaced by the restriction, so these
+    /// cells take no part in the run-wide decisions (the freeze streak and halt, the step
+    /// rejection and its evidence, the post-step recovery check, the finiteness backstop).
+    /// `None` keeps every cell in the decisions
+    pub decision_excluded: Option<Domain<D>>,
 }
 
 impl<const D: usize> Default for CompositeOwnership<D> {
@@ -2246,6 +2253,7 @@ impl<const D: usize> Default for CompositeOwnership<D> {
             coverage: None,
             inactive: None,
             inactive_faces: std::array::from_fn(|_| None),
+            decision_excluded: None,
         }
     }
 }
@@ -2305,7 +2313,26 @@ impl<const D: usize> CompositeOwnership<D> {
             });
             (core_holds && faces.iter().all(|space| space.hi > space.lo)).then(|| Domain::new(faces))
         });
-        Self { coverage: Some(coverage), inactive, inactive_faces }
+        Self { coverage: Some(coverage), inactive, inactive_faces, decision_excluded: None }
+    }
+
+    /// the inactive core shrunk by `reach` cells on every side, the covered cells beyond every
+    /// stage kernel's read reach from the evolved cells and the ghost band; `None` when the
+    /// shrunk core is empty
+    pub fn unread_core(&self, reach: usize) -> Option<Domain<D>> {
+        let core = self.inactive.as_ref()?;
+        let reach = reach as isize;
+        let spaces: [Space; D] = std::array::from_fn(|axis| Space {
+            name: core.spaces[axis].name,
+            lo: core.spaces[axis].lo + reach,
+            hi: core.spaces[axis].hi - reach,
+        });
+        spaces.iter().all(|space| space.hi > space.lo).then(|| Domain::new(spaces))
+    }
+
+    /// the disjoint boxes of `whole` the run-wide decisions read: `whole` less the excluded core
+    pub fn decision_regions(&self, whole: &Domain<D>) -> Vec<Domain<D>> {
+        Self::complement_boxes(whole, self.decision_excluded.as_ref())
     }
 
     /// True precisely where this level contributes the physical composite solution.
@@ -2856,6 +2883,44 @@ impl<const D: usize, const DOF: usize, Mem: MemorySpace> FieldStore<D, DOF, Mem,
 }
 
 impl<const D: usize, const DOF: usize, Mem: MemorySpace, Sc: Scalar + OrderedNumeric> FieldStore<D, DOF, Mem, Sc> {
+    /// the primitive fields of every excluded covered cell (`CompositeOwnership::decision_excluded`)
+    /// whose conserved state has no admissible recovery, set to NaN for a checkpoint: such a cell
+    /// holds the restriction of its children, no operator of the evolved cells reads it, and its
+    /// recovered values carry no physical meaning. the conserved state is kept. returns the
+    /// replaced values, which `restore_withheld_primitives` writes back
+    pub fn withhold_unrecovered_primitives(&self) -> Vec<([isize; D], Vec<Sc>)> {
+        let Some(core) = self.composite_ownership.decision_excluded.as_ref() else {
+            return Vec::new();
+        };
+        let prim = &self.fields.prim;
+        let fields: Vec<&Field<Sc, D, Mem>> =
+            std::iter::once(&prim.rho).chain(prim.vel.iter()).chain(prim.pre.as_ref()).collect();
+        let status = self.fields.c2p_error.view();
+        let mut saved = Vec::new();
+        for c in core.iter() {
+            if status.at(c).to_f64() == 0.0 {
+                continue;
+            }
+            saved.push((c, fields.iter().map(|f| *f.view().at(c)).collect()));
+            for f in &fields {
+                f.view_mut().set(c, Sc::from_f64(f64::NAN));
+            }
+        }
+        saved
+    }
+
+    /// write back the primitives `withhold_unrecovered_primitives` replaced
+    pub fn restore_withheld_primitives(&self, saved: &[([isize; D], Vec<Sc>)]) {
+        let prim = &self.fields.prim;
+        let fields: Vec<&Field<Sc, D, Mem>> =
+            std::iter::once(&prim.rho).chain(prim.vel.iter()).chain(prim.pre.as_ref()).collect();
+        for (c, values) in saved {
+            for (f, v) in fields.iter().zip(values) {
+                f.view_mut().set(*c, *v);
+            }
+        }
+    }
+
     /// `SimStateGeneric::seed_cell` on a store under the given physics: the conserved gas state
     /// (and on a magnetized store the cell field) of a primitive at one cell
     pub fn seed_cell_with<R, M, E>(&self, physics: &Physics<R, M, E>, coord: [isize; D], prim: &<R as Regime<Sc, DOF>>::Prim)

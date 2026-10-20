@@ -843,7 +843,9 @@ where
 
 /// probe the density finiteness over the allocated domain (interior + ghosts) via the
 /// `state_finite_{D}d` kernel; returns `false` if any zone is non-finite. the fail-loud backstop that
-/// survives FOFC recovery — FOFC keeps the interior finite, and this covers the ghost band.
+/// survives FOFC recovery — FOFC keeps the interior finite, and this covers the ghost band. the
+/// probe reads the allocated domain less a covered core no evolved cell reads
+/// (`CompositeOwnership::decision_excluded`).
 pub fn state_finite_over_allocated<const D: usize, const DOF: usize, Mem, Sc>(
     sim: &FieldStore<D, DOF, Mem, Sc>,
     pre: &Field<Sc, D, Mem>,
@@ -864,7 +866,12 @@ where
         &[],
         &[],
     );
-    field_max_reduce(scratch, &sim.geom.allocated) <= 0.5
+    sim.composite_ownership
+        .decision_regions(&sim.geom.allocated)
+        .iter()
+        .map(|region| field_max_reduce(scratch, region))
+        .fold(f64::NEG_INFINITY, f64::max)
+        <= 0.5
 }
 
 /// every stage-local field a kernel reads must have been written by an earlier dispatch of the
