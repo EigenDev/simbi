@@ -1867,6 +1867,10 @@ fn dispatch_body_feedback_split<const D: usize, const DOF: usize, Mem, Sc>(
     // `bind_value` is the single bind -> f64 map — the kernel's scalar arguments and
     // the support-ball evaluation below read the same values by construction.
     let bodies = &im.bodies;
+    // the cell centroids read face positions through the runtime axis map, so a graded axis binds
+    // the map's face-0 start and its decade slope or first width; the positions are comoving
+    // (a = 1), the grid's own values on an axis without a map
+    let (x_lo_k, dx_k) = kernel_geom(&geom.x_lo, &geom.dx, &geom.maps, geom.coords, 1.0);
     let bind_value = |bind: &ScalarBind, b: usize| -> f64 {
         let ScalarBind::Ref(sref) = bind else {
             panic!("body kernel: unexpected spec scalar {bind:?}");
@@ -1883,7 +1887,7 @@ fn dispatch_body_feedback_split<const D: usize, const DOF: usize, Mem, Sc>(
                     body_scalar::<D>(Some(bodies), b as u8, field)
                 }
             }
-            other => geom_scalar(&geom.x_lo, &geom.dx, &geom.maps, &geom.index_offset, other)
+            other => geom_scalar(&x_lo_k, &dx_k, &geom.maps, &geom.index_offset, other)
                 .unwrap_or_else(|| panic!("body kernel: unexpected scalar param {other:?}")),
         }
     };
@@ -1944,6 +1948,11 @@ fn dispatch_body_feedback_split<const D: usize, const DOF: usize, Mem, Sc>(
         // declares its support open integrates over the full interior — sound, and
         // conservative of the physics.
         let bbox = body.accretion_radius().and_then(|_| {
+            // the index box below assumes uniform spacing; a graded axis dispatches over the full
+            // interior, where the mask is zero beyond the ball
+            if geom.maps.is_some() {
+                return Some(geom.interior.clone());
+            }
             let names = super::binding::kernel_scalar_names(&drain_name);
             let ball = super::binding::kernel_output_support(&drain_name).and_then(|support| {
                 support.eval_ball(&|pname: &str| {
@@ -2274,7 +2283,8 @@ fn dispatch_penalize_shaped_body<const D: usize, const DOF: usize, Mem, Sc>(
     // the whole interior — the mask is
     // an exact zero outside the physical ball by tanh saturation, so this is correct, just
     // unoptimized (the same choice the AOT sphere path makes off-Cartesian).
-    let bbox = if cartesian {
+    // the index box assumes uniform spacing, so a graded axis dispatches over the whole interior
+    let bbox = if cartesian && sim.geom.maps.is_none() {
         let (lc, lr) = shape.bounding_ball().expect("shaped body must be bounded");
         let pos = im.bodies.get(b).position;
         let min_dx = (0..D).map(|a| sim.geom.dx[a]).fold(f64::INFINITY, f64::min);
@@ -2651,7 +2661,9 @@ fn dispatch_penalize_inner<const D: usize, const DOF: usize, Mem, Sc>(
         // over the full interior — the mask is an exact zero outside the physical
         // ball by tanh saturation, so this is correct, just unoptimized.
         let names = super::binding::kernel_scalar_names(name);
-        let bbox = if coords_g != cart {
+        // the index box assumes uniform spacing, so a graded axis also dispatches over the full
+        // interior
+        let bbox = if coords_g != cart || geom.maps.is_some() {
             Some(geom.interior.clone())
         } else {
             super::binding::kernel_output_support(name)
@@ -3224,12 +3236,15 @@ pub fn dispatch_source_apply<const D: usize, const DOF: usize, Mem, Sc>(
     let geom = &sim.geom;
     let sfx = geom_suffix(geom.coords, DOF, D);
     let name = format!("{prefix}_source_with_{}{sfx}_{D}d", binding.source_id);
+    // the centroid reads face positions through the runtime axis map: the map's face-0 start and
+    // its decade slope or first width, the binding the fused source stage reads
+    let (x_lo_k, dx_k) = kernel_geom(&geom.x_lo, &geom.dx, &geom.maps, geom.coords, sim.motion.a);
     let scalars = scalars_for(&name, |bind| {
         match bind {
             // the name is `dt` but the value is the SSP stage weight ac*dt at this call site.
             ScalarBind::Ref(ScalarRef::Dt) => Sc::from_f64(weight),
             // lazily-declared centroid params (x_lo_k, dx_k).
-            ScalarBind::Ref(sref) => geom_scalar(&geom.x_lo, &geom.dx, &sim.geom.maps, &sim.geom.index_offset, *sref)
+            ScalarBind::Ref(sref) => geom_scalar(&x_lo_k, &dx_k, &sim.geom.maps, &sim.geom.index_offset, *sref)
                 .map(Sc::from_f64)
                 .unwrap_or_else(|| {
                     panic!("dispatch_source_apply: unexpected scalar {sref:?} for kernel '{name}'")

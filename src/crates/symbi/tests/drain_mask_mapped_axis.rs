@@ -7,7 +7,9 @@
 // transition the loss falls to the tail of the profile. one forward-euler step from gas at rest, with the post-step drain,
 // isolates the drain: the density flux vanishes and gravity moves momentum only. the radial axis is
 // log-spaced, where the face map reads the decade slope; a uniform radial axis
-// is the control. the expected geometry is computed here from the face formulas.
+// is the control. a second gate runs the same drain on a 2D cartesian grid with
+// a log-spaced x axis, where the dispatch box follows the mapped cells. the
+// expected geometry is computed here from the face formulas.
 //
 // run: cargo test -p symbi --test drain_mask_mapped_axis
 // =============================================================================
@@ -17,7 +19,7 @@ use symbi::prelude::SimSubstrate;
 use symbi::sim::evolve::evolve_with_callback;
 use symbi::sim::state::*;
 use symbi_algebra::Tensor;
-use symbi_geometry::{AxisMap, Spherical};
+use symbi_geometry::{AxisMap, Cartesian, Spherical};
 use symbi_hydro::eos::IdealGas;
 use symbi_hydro::newtonian::Newtonian;
 use symbi_hydro::quantity::{Density, Pressure};
@@ -125,6 +127,76 @@ fn a_drain_acts_inside_its_accretion_radius_on_a_log_radial_axis() {
         assert!(
             most_outside < 0.02 * least_inside,
             "{label}: a cell well outside the sink lost {most_outside:.3e}, against {least_inside:.3e} inside"
+        );
+    }
+}
+
+type CartSim = SimState<Newtonian, 2, Cartesian, IdealGas<f64>, CpuSpace, HostMemory>;
+
+const NX: usize = 96;
+const NY: usize = 64;
+const Y_HALF: f64 = 3.0;
+const SINK_X: f64 = 4.0;
+
+/// the cells' relative density loss over one drain step on a 2D cartesian grid with an x axis on
+/// [R_LO, R_HI], with each cell's distance from a sink at (SINK_X, 0) and its largest width
+fn cartesian_drain_losses(log: bool) -> Vec<(f64, f64, f64)> {
+    let dy = 2.0 * Y_HALF / NY as f64;
+    let xface = |i: usize| if log { R_LO * (R_HI / R_LO).powf(i as f64 / NX as f64) } else { R_LO + i as f64 * (R_HI - R_LO) / NX as f64 };
+    let maps = log.then(|| {
+        [AxisMap::Log { start: R_LO, log_slope: (R_HI / R_LO).log10() / NX as f64 }, AxisMap::Uniform { start: -Y_HALF, dx: dy }]
+    });
+    let mut s = CartSim::build(Newtonian, IdealGas { gamma: 5.0 / 3.0 }, Cartesian)
+        .cells([NX, NY])
+        .origin([R_LO, -Y_HALF])
+        .spacing([(R_HI - R_LO) / NX as f64, dy])
+        .coord_maps(maps)
+        .boundaries(Boundaries::uniform(BoundaryType::Outflow))
+        .allocate()
+        .expect("cartesian sim")
+        .set_initial(|_| Prim::adiabatic(Density(1.0), Tensor::new([0.0, 0.0]), Pressure(1.0)))
+        .build();
+    s.timestepping = Timestepping::Euler;
+    let sink = Body::black_hole(0, Tensor::new([SINK_X, 0.0]), Tensor::zeros(), 1.0, R_ACC, 0.1, 0.0, 1.0, R_ACC)
+        .with_surface(SurfaceSpec::Drain);
+    let mut s = s.with_bodies(BodyCollection::new().add(sink));
+    let kernels = s.substrate();
+    kernels.c2p(&s);
+    kernels.ghost_fill(&s);
+    let before: Vec<f64> = s.geom.interior.iter().map(|c| *s.fields.cons.den.view().at(c)).collect();
+    evolve_with_callback(&mut s, &kernels, 1e-3, 1, |_| {}).expect("one drain step");
+    assert_eq!(s.time, 1e-3, "the step stopped short of its end time");
+    let lo = [s.geom.interior.spaces[0].lo, s.geom.interior.spaces[1].lo];
+    s.geom
+        .interior
+        .iter()
+        .zip(before)
+        .map(|(c, b)| {
+            let (i, j) = ((c[0] - lo[0]) as usize, (c[1] - lo[1]) as usize);
+            let x = 0.5 * (xface(i) + xface(i + 1));
+            let y = -Y_HALF + (j as f64 + 0.5) * dy;
+            let d = ((x - SINK_X).powi(2) + y * y).sqrt();
+            let width = (xface(i + 1) - xface(i)).max(dy);
+            ((b - *s.fields.cons.den.view().at(c)) / b, d, width)
+        })
+        .collect()
+}
+
+#[test]
+fn a_drain_acts_inside_its_accretion_radius_on_a_log_cartesian_axis() {
+    for (label, log) in [("uniform", false), ("log", true)] {
+        let cells = cartesian_drain_losses(log);
+        let inside: Vec<_> = cells.iter().filter(|(_, d, w)| *d < R_ACC - 2.0 * w).collect();
+        let outside: Vec<_> = cells.iter().filter(|(_, d, w)| *d > R_ACC + 2.0 * w).collect();
+        assert!(inside.len() >= 4, "{label}: {} cells lie well inside the sink; the gate is vacuous", inside.len());
+        let least_inside = inside.iter().map(|(l, _, _)| *l).fold(f64::INFINITY, f64::min);
+        let most_outside = outside.iter().map(|(l, _, _)| l.abs()).fold(0.0f64, f64::max);
+        eprintln!("cartesian {label}: {} cells inside, least loss {least_inside:.3e}; {} outside, largest |loss| {most_outside:.3e}", inside.len(), outside.len());
+        assert!(least_inside > 0.0, "cartesian {label}: a cell well inside the sink lost no mass ({least_inside:.3e})");
+        // the tanh tail bound of the spherical gate
+        assert!(
+            most_outside < 0.02 * least_inside,
+            "cartesian {label}: a cell well outside the sink lost {most_outside:.3e}, against {least_inside:.3e} inside"
         );
     }
 }
