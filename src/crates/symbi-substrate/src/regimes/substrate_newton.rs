@@ -677,14 +677,12 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize, const
         );
 
         // the standard pullback skips any Driven faces (Driven -> BcType::Skip);
-        // prescribe their ghost prim state from the registered boundary DAGs.
-        if !self.boundary_dags.is_empty() {
-            dispatch_driven_boundaries(sim, &self.boundary_dags);
-        }
-        // and the Neumann/Robin gradient faces (also skipped by the pullback), filled from the edge cell.
-        if !self.gradient_bcs.is_empty() {
-            dispatch_gradient_boundaries(sim, pre, &self.gradient_bcs, None);
-        }
+        // prescribe their ghost prim state from the registered boundary DAGs. every fill visits
+        // the faces, so a face naming an unregistered id is refused by name.
+        dispatch_driven_boundaries(sim, &self.boundary_dags);
+        // and the Neumann/Robin gradient faces (also skipped by the pullback), filled from the edge
+        // cell; a face naming an unregistered id is refused by name.
+        dispatch_gradient_boundaries(sim, pre, &self.gradient_bcs, None);
         // the dye concentration ghost band: a true scalar (reflect sign +1)
         // through the field-agnostic single-scalar pullback. gradient faces resolve to a
         // zero-derivative copy here, since a prescribed normal derivative is a per-primitive-variable

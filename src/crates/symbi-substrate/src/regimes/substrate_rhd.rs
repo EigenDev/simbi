@@ -611,14 +611,12 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize, const
         );
 
         // the standard pullback skips any Driven faces (Driven ->
-        // BcType::Skip); prescribe their ghost prim state from the registered boundary DAGs.
-        if !self.boundary_dags.is_empty() {
-            dispatch_driven_boundaries(sim, &self.boundary_dags);
-        }
-        // the Neumann/Robin gradient faces (also skipped by the pullback), filled from the edge cell.
-        if !self.gradient_bcs.is_empty() {
-            dispatch_gradient_boundaries(sim, pre, &self.gradient_bcs, None);
-        }
+        // BcType::Skip); prescribe their ghost prim state from the registered boundary DAGs. every
+        // fill visits the faces, so a face naming an unregistered id is refused by name.
+        dispatch_driven_boundaries(sim, &self.boundary_dags);
+        // the Neumann/Robin gradient faces (also skipped by the pullback), filled from the edge
+        // cell; a face naming an unregistered id is refused by name.
+        dispatch_gradient_boundaries(sim, pre, &self.gradient_bcs, None);
     }
 
     fn snapshot(&self, sim: &FieldStore<D, DOF, Mem, Sc>) {

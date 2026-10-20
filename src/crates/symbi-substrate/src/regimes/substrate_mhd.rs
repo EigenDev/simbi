@@ -106,6 +106,18 @@ pub(crate) fn max_inv_physical_width<const D: usize>(
     max_inv
 }
 
+/// refuse a Neumann or Robin face by name. the magnetized regimes carry no gradient-wall registry,
+/// and the standard fill skips these faces, so such a face would leave its ghost band unwritten.
+fn refuse_gradient_faces<const D: usize>(boundaries: &symbi_sim::state::Boundaries<D>) {
+    for axis in 0..D {
+        for (side, bt) in [(0, boundaries.lo(axis)), (1, boundaries.hi(axis))] {
+            if matches!(bt, symbi_sim::state::BoundaryType::Neumann(_) | symbi_sim::state::BoundaryType::Robin(_)) {
+                panic!("gradient boundary on axis {axis} side {side}: magnetized regimes accept no Neumann or Robin faces");
+            }
+        }
+    }
+}
+
 /// the relativistic driven-inflow CFL bound: `max` over the interior cells adjacent to every
 /// driven boundary face of `1 / (h_d * width_d)` (the inverse physical cell width, the steepest
 /// per-axis). a relativistic signal travels at most `c = 1`, so this is the `lambda` a wind
@@ -1502,10 +1514,10 @@ where
     fn ghost_fill(&self, sim: &FieldStore<D, 3, Mem, Sc>) {
         crate::regimes::mhd_substrate::ghost_fill(sim, R::SPEC.has_energy);
         // the standard fill skips Driven faces (Driven -> Skip); prescribe
-        // their ghost prim state (incl. the cell B_phi) from the registered boundary DAGs.
-        if !self.boundary_dags.is_empty() {
-            dispatch_driven_boundaries(sim, &self.boundary_dags);
-        }
+        // their ghost prim state (incl. the cell B_phi) from the registered boundary DAGs. every
+        // fill visits the faces, so a face naming an unregistered id is refused by name.
+        dispatch_driven_boundaries(sim, &self.boundary_dags);
+        refuse_gradient_faces(&sim.boundaries);
     }
     fn snapshot(&self, sim: &FieldStore<D, 3, Mem, Sc>) {
         crate::regimes::mhd_substrate::snapshot(sim, R::SPEC.has_energy);

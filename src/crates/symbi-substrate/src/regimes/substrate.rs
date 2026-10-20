@@ -535,21 +535,19 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize> Kerne
         );
         // the driven faces (skipped by the pullback: Driven -> Skip): prescribe their ghost
         // [rho, vel..] from the registered boundary DAGs. the pressure is not prescribed —
-        // the eos pass below re-derives it as cs2 * rho over every ghost the fill wrote.
-        if !self.boundary_dags.is_empty() {
-            dispatch_driven_boundaries(sim, &self.boundary_dags);
-        }
+        // the eos pass below re-derives it as cs2 * rho over every ghost the fill wrote. every
+        // fill visits the faces, so a face naming an unregistered id is refused by name.
+        dispatch_driven_boundaries(sim, &self.boundary_dags);
         // the Neumann/Robin gradient faces (skipped by the pullback), filled from the edge cell over
         // the substrate-owned pressure field; Some(cs^2) makes the shared kernel honour the
-        // isothermal closure pre = cs^2*rho at the ghost.
-        if !self.gradient_bcs.is_empty() {
-            dispatch_gradient_boundaries(
-                sim,
-                &self.pre,
-                &self.gradient_bcs,
-                Some(self.cs * self.cs),
-            );
-        }
+        // isothermal closure pre = cs^2*rho at the ghost. a face naming an unregistered id is
+        // refused by name.
+        dispatch_gradient_boundaries(
+            sim,
+            &self.pre,
+            &self.gradient_bcs,
+            Some(self.cs * self.cs),
+        );
         // re-derive the eos law p = cs^2 * rho over the full allocated lattice. the
         // substrate pressure lives outside the prim batch, so the coarse-fine ghost
         // prolongation (which fills prim rho/vel) never writes it, and the pullback above
