@@ -1842,6 +1842,25 @@ pub fn body_resistive_emf<const D: usize, const DOF: usize, Mem, Sc>(
 
 /// `body_resistive_emf` with the current read from `faces`, one field per face axis: the live
 /// faces, or the stage-entry faces a first-order redo recomputes the stage EMF from
+/// refuse a magnetized body operator on a graded (log or geometric) axis by name. the resistive
+/// body EMF and the magnetic slip take the current, the corner shift and the mask width from the
+/// uniform cell width `dx`, which a graded axis does not have
+fn refuse_graded_axes<const D: usize, const DOF: usize, Mem, Sc>(sim: &FieldStore<D, DOF, Mem, Sc>, operator: &str)
+where
+    Mem: MemorySpace,
+    Sc: Scalar + OrderedNumeric,
+{
+    if let Some(maps) = sim.geom.maps.as_ref() {
+        for (axis, map) in maps.iter().enumerate() {
+            assert!(
+                matches!(map, symbi_geometry::AxisMap::Uniform { .. }),
+                "{operator} runs on uniformly spaced axes; axis {axis} is graded ({map:?}). use uniform \
+                 spacing or drop the magnetic coupling"
+            );
+        }
+    }
+}
+
 pub fn body_resistive_emf_on<const D: usize, const DOF: usize, Mem, Sc>(
     sim: &FieldStore<D, DOF, Mem, Sc>,
     faces: &[&Field<Sc, D, Mem>],
@@ -1867,6 +1886,7 @@ pub fn body_resistive_emf_on<const D: usize, const DOF: usize, Mem, Sc>(
              adjoint pair, not yet built. use a cartesian grid or drop the magnetic coupling.",
             sim.geom.coords
         );
+        refuse_graded_axes(sim, "a resistive immersed body (MagneticSpec::Resistive)");
         let mhd = sim.fields.mhd.as_ref().expect("MHD requires mhd fields");
         // the shared body/geom scalar resolver: the body's eta, the body-0 position (mask center), and
         // the geom scalars (dx_a) the mask + current differences read. reused across every edge.
@@ -1996,6 +2016,7 @@ where
     let Some(slip_q) = sim.fields.mhd.as_ref().and_then(|m| m.slip_quadrature.as_ref()) else {
         return None;
     };
+    refuse_graded_axes(sim, "the magnetic slip (MagneticSpec::Slip)");
     let mhd = sim.fields.mhd.as_ref().expect("MHD requires mhd fields");
     let ws = mhd
         .magnetic_slip
@@ -2147,6 +2168,7 @@ where
     let Some(slip_q) = sim.fields.mhd.as_ref().and_then(|m| m.slip_quadrature.as_ref()) else {
         return None;
     };
+    refuse_graded_axes(sim, "the magnetic slip (MagneticSpec::Slip)");
     let mhd = sim.fields.mhd.as_ref().expect("MHD requires mhd fields");
     let ws = mhd
         .magnetic_slip
