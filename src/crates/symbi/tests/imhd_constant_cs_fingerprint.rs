@@ -7,7 +7,8 @@
 // closure carries a prescribed sound-speed field; a run whose field is uniform is this run, so
 // the hashes hold across that field's introduction and any later change to the closure. the
 // slip solver's inner products and body heat are exact sums rounded once, which the 3D hash
-// records.
+// records. the 3D sink's unit mass pulls the gas through the softened body source; the same run
+// with a massless sink hashes to 0x9c1596142a1aee23.
 // =============================================================================
 
 use symbi::regimes::substrate_isothermal_mhd::IsothermalMhdSubstrateKernelSet;
@@ -135,4 +136,4 @@ fn the_3d_isothermal_slip_sink_fingerprint_holds() {
 }
 
 const FINGERPRINT_2P5D: u64 = 0x6dfa4ab720c0cd33;
-const FINGERPRINT_3D: u64 = 0x9c1596142a1aee23;
+const FINGERPRINT_3D: u64 = 0x7653944b06cc6926;

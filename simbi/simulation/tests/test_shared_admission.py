@@ -12,6 +12,9 @@
 # - the balanced reconstruction outside the newtonian regime;
 # - a non-hlle solver on isothermal hydro;
 # - mesh refinement of a one-dimensional magnetized grid;
+# - a gravitating body on a curvilinear magnetized chart (body gravity acts on
+#   magnetized gas on cartesian charts);
+# - a two-way coupled body on magnetized gas (no gas reaction reaches the body);
 # - the balanced reconstruction with an immersed body across a periodic wrap (the
 #   periodic images sit at different body potentials).
 # a driven face whose prescription does not lower against the regime is refused at
@@ -46,7 +49,8 @@ from pydantic import computed_field
 
 from simbi import Neumann, ProblemParam, SimbiProblem
 from simbi.types import BoundaryCondition, CoordSystem, Regime, Solver
-from simbi.types.bodies import BodyCapability, BondedAssembly, BondMaterial, ImmersedBodyConfig, RigidProperties
+from simbi.types.bodies import (BodyCapability, BondedAssembly, BondMaterial, GravitationalProperties, ImmersedBodyConfig,
+                                 RigidProperties)
 
 OV: dict[str, Any] = json.loads(os.environ["ADMISSION_PROBE"])
 RES = tuple(OV.get("res", [16, 16]))
@@ -60,8 +64,8 @@ class Probe(SimbiProblem):
     """a small box whose settings come from ADMISSION_PROBE"""
 
     resolution: Annotated[tuple[int, ...], ProblemParam(RES, cli=True, description="grid")]
-    bounds: Annotated[list[tuple[float, float]], ProblemParam([(0.0, 1.0)] * len(RES), description="box")]
-    coord_system: Annotated[CoordSystem, ProblemParam(CoordSystem.CARTESIAN, description="chart")]
+    bounds: Annotated[list[tuple[float, float]], ProblemParam([tuple(b) for b in OV.get("bounds", [(0.0, 1.0)] * len(RES))], description="box")]
+    coord_system: Annotated[CoordSystem, ProblemParam(CoordSystem(OV.get("chart", "cartesian")), description="chart")]
     regime: Annotated[Regime, ProblemParam(Regime(OV.get("regime", "newtonian")), description="regime")]
     solver: Annotated[Solver, ProblemParam(Solver(OV.get("solver", "hlle")), description="solver")]
     sound_speed: Annotated[float | None, ProblemParam(OV.get("cs"), description="cs")]
@@ -99,8 +103,14 @@ class Probe(SimbiProblem):
     @computed_field
     @property
     def immersed_bodies(self) -> list[Any]:
-        if not OV.get("body"):
+        body = OV.get("body")
+        if not body:
             return []
+        if body in ("mass", "two-way"):
+            return [ImmersedBodyConfig(capability=BodyCapability.GRAVITATIONAL, mass=0.01, radius=0.0,
+                                       position=tuple(OV.get("at", (0.5, 0.5))), velocity=(0.0, 0.0),
+                                       gravitational=GravitationalProperties(softening_length=0.1),
+                                       two_way_coupling=body == "two-way")]
         return [ImmersedBodyConfig(capability=BodyCapability.RIGID, mass=0.0, radius=0.1, position=(0.5, 0.5),
                                    velocity=(0.0, 0.0), rigid=RigidProperties(inertia=1.0, apply_no_slip=True))]
 
@@ -157,6 +167,9 @@ REFUSED = {
     "hllc-isothermal": ({"regime": "isothermal", "cs": 1.0, "row": [1.0, 0.1, 0.0], "solver": "hllc"}, "solver = 'hllc' with the isothermal regime"),
     "balanced-body-periodic": ({"wb": True, "body": True, "bcs": ["periodic"]}, "a periodic axis with an immersed body cannot use the balance-aware reconstruction"),
     "refined-mhd-line": ({"regime": "nmhd", "res": [32], "row": [1.0, 0.1, 0.0, 0.0, 1.0], "regions": [[0.25, 0.75]]}, "mhd refinement requires a 3d or 2.5d cartesian grid"),
+    "gravitating-mhd-spherical": ({**MHD, "chart": "spherical", "bounds": [[0.5, 1.5], [0.1, 3.0], [0.0, 1.0]], "body": "mass", "at": (1.0, 0.0)},
+                                  "a gravitating immersed body on the nmhd regime with the spherical chart"),
+    "two-way-mhd": ({**MHD, "body": "two-way"}, "a two-way coupled immersed body on the nmhd regime"),
 }
 
 

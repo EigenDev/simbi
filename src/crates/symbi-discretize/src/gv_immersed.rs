@@ -790,18 +790,55 @@ pub fn body_source_iso_gv(
     ncomp: usize,
     axes: &[usize],
 ) -> KernelProgram {
+    body_source_iso_program(n_bodies, coords, ndim, ncomp, axes, IsoPressure::PrimPre)
+}
+
+/// the forward iso source of a gas whose isothermal closure is the per-cell field `cs^2(x)`
+/// (`iso.cs2`) and which stores no pressure: the stage-input pressure is `cs^2 rho`. otherwise
+/// identical to [`body_source_iso_gv`].
+pub fn body_source_iso_closure_gv(
+    n_bodies: usize,
+    coords: Coords,
+    ndim: usize,
+    ncomp: usize,
+    axes: &[usize],
+) -> KernelProgram {
+    body_source_iso_program(n_bodies, coords, ndim, ncomp, axes, IsoPressure::Closure)
+}
+
+/// where an isothermal body kernel reads the pressure that sets its sound speed
+#[derive(Clone, Copy, PartialEq)]
+enum IsoPressure {
+    /// the stored `prim.pre`
+    PrimPre,
+    /// `cs^2 rho` from the closure field and the stage-input density
+    Closure,
+}
+
+fn body_source_iso_program(
+    n_bodies: usize,
+    coords: Coords,
+    ndim: usize,
+    ncomp: usize,
+    axes: &[usize],
+    pressure: IsoPressure,
+) -> KernelProgram {
     trace_kernel(|cx| {
         let dt = cx.scalar("dt");
         let den = cx.field("den", FieldRef::cons_den());
         let mom: Vec<Gv> = (0..ncomp)
             .map(|comp| cx.field(&format!("mom_{comp}"), FieldRef::cons_mom(comp as u8)))
             .collect();
-        let pre = cx.field("pre", FieldRef::PrimPre);
+        let stored_pre = (pressure == IsoPressure::PrimPre).then(|| cx.field("pre", FieldRef::PrimPre));
         // evaluated at the stage input, applied to the godunov-advanced cons — see `body_applied_gv`.
         let us_den = cx.field("us_den", FieldRef::ustage_den());
         let us_mom: Vec<Gv> = (0..ncomp)
             .map(|comp| cx.field(&format!("us_mom_{comp}"), FieldRef::ustage_mom(comp as u8)))
             .collect();
+        let pre = match stored_pre {
+            Some(pre) => pre,
+            None => cx.field("cs2", FieldRef::IsoCs2) * us_den,
+        };
         let (den_new, mom_new) = body_applied_iso_gv(
             cx, den, &mom, us_den, &us_mom, pre, dt, n_bodies, coords, ndim, ncomp, axes,
         );

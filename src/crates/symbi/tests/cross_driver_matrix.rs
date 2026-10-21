@@ -483,6 +483,59 @@ mod nmhd {
     inadmissible_freeze_test!();
 }
 
+/// the magnetized gas of `nmhd` pulled by a softened point mass off every cut, so the body
+/// source acts in the stage, in the first-order redo and in the replayed step of every event
+mod nmhd_body {
+    use super::*;
+    use std::cell::Cell;
+    use symbi_hydro::newtonian_mhd::NewtonianMhd;
+    use symbi_ib::{Body, BodyCollection};
+    type Sim = SimStateGeneric<NewtonianMhd, 2, 3, Cartesian, IdealGas<f64>, CpuSpace, HostMemory>;
+    const DOF: usize = 3;
+    periodic_square!();
+    thread_local! {
+        static WITH_BODY: Cell<bool> = const { Cell::new(true) };
+    }
+    fn build(ext: [(usize, usize); 2], bnd: Boundaries<2>, policy: RetryExclusion) -> Sim {
+        let mut s = Sim::build(NewtonianMhd, IdealGas { gamma: 5.0 / 3.0 }, Cartesian)
+            .cells([ext[0].1, ext[1].1])
+            .spacing([H; 2])
+            .origin([0.0; 2])
+            .index_offset([ext[0].0 as isize, ext[1].0 as isize])
+            .boundaries(bnd)
+            .cfl(0.3)
+            .timestepping(Timestepping::Rk2)
+            .allocate()
+            .expect("sim")
+            .set_initial(|[x, y]| {
+                let (rho, v) = wave([x, y]);
+                MhdPrim::new(Prim::adiabatic(Density(rho), Tensor::new([v[0], v[1], 0.0]), Pressure(1.0)), Tensor::new([field_x(y), field_y(x), 0.0]))
+            })
+            .seed_faces(|axis, [x, y]| if axis == 0 { field_x(y) } else { field_y(x) })
+            .build();
+        if WITH_BODY.with(Cell::get) {
+            let mass = Body::gravitational(0, Tensor::new([0.37, 0.61]), Tensor::zeros(), 0.05, 0.0, 0.1);
+            s = s.with_bodies(BodyCollection::new().add(mass));
+        }
+        s.retry_exclusion = policy;
+        s
+    }
+    fn kernels(s: &Sim) -> <Sim as SimSubstrate<HostMemory, f64, 2>>::KernelSet {
+        s.substrate()
+    }
+    matrix_tests!();
+    inadmissible_freeze_test!();
+
+    #[test]
+    fn the_body_acts() {
+        let pulled = single(Hook::Clean, FREEZE_POLICY, 3);
+        WITH_BODY.with(|w| w.set(false));
+        let free = single(Hook::Clean, FREEZE_POLICY, 3);
+        let changed = pulled.state.iter().filter(|(k, v)| (1..=2).contains(&k.0) && free.state.get(k) != Some(v)).count();
+        assert!(changed > N * N, "the body changed {changed} momentum values; the matrix exercises no gravity");
+    }
+}
+
 mod imhd {
     use super::*;
     use symbi_hydro::energy::IsoModel;
@@ -519,6 +572,63 @@ mod imhd {
     }
     matrix_tests!();
     inadmissible_freeze_test!();
+}
+
+/// the isothermal magnetized gas of `imhd` pulled by the softened point mass of `nmhd_body`
+mod imhd_body {
+    use super::*;
+    use std::cell::Cell;
+    use symbi_hydro::energy::IsoModel;
+    use symbi_hydro::isothermal_mhd::IsothermalMhd;
+    use symbi_hydro::mhd_state::MhdPrimG;
+    use symbi_ib::{Body, BodyCollection};
+    type Sim = SimStateGeneric<IsothermalMhd, 2, 3, Cartesian, Isothermal<f64>, CpuSpace, HostMemory>;
+    const DOF: usize = 3;
+    periodic_square!();
+    thread_local! {
+        static WITH_BODY: Cell<bool> = const { Cell::new(true) };
+    }
+    fn build(ext: [(usize, usize); 2], bnd: Boundaries<2>, policy: RetryExclusion) -> Sim {
+        let mut s = Sim::build(IsothermalMhd, Isothermal { cs: 1.0 }, Cartesian)
+            .cells([ext[0].1, ext[1].1])
+            .spacing([H; 2])
+            .origin([0.0; 2])
+            .index_offset([ext[0].0 as isize, ext[1].0 as isize])
+            .boundaries(bnd)
+            .cfl(0.3)
+            .timestepping(Timestepping::Rk2)
+            .allocate()
+            .expect("sim")
+            .set_initial(|[x, y]| {
+                let (rho, v) = wave([x, y]);
+                MhdPrimG::<f64, 3, IsoModel>::new(
+                    PrimG::isothermal(Density(rho), Tensor::new([v[0], v[1], 0.0])),
+                    Tensor::new([field_x(y), field_y(x), 0.0]),
+                )
+            })
+            .seed_faces(|axis, [x, y]| if axis == 0 { field_x(y) } else { field_y(x) })
+            .build();
+        if WITH_BODY.with(Cell::get) {
+            let mass = Body::gravitational(0, Tensor::new([0.37, 0.61]), Tensor::zeros(), 0.05, 0.0, 0.1);
+            s = s.with_bodies(BodyCollection::new().add(mass));
+        }
+        s.retry_exclusion = policy;
+        s
+    }
+    fn kernels(s: &Sim) -> <Sim as SimSubstrate<HostMemory, f64, 2>>::KernelSet {
+        s.substrate()
+    }
+    matrix_tests!();
+    inadmissible_freeze_test!();
+
+    #[test]
+    fn the_body_acts() {
+        let pulled = single(Hook::Clean, FREEZE_POLICY, 3);
+        WITH_BODY.with(|w| w.set(false));
+        let free = single(Hook::Clean, FREEZE_POLICY, 3);
+        let changed = pulled.state.iter().filter(|(k, v)| (1..=2).contains(&k.0) && free.state.get(k) != Some(v)).count();
+        assert!(changed > N * N, "the body changed {changed} momentum values; the matrix exercises no gravity");
+    }
 }
 
 mod rmhd {

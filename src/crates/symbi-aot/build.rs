@@ -2873,6 +2873,21 @@ fn gen_body_source_iso(out_dir: &str, ndim: u8, coords: Coords) {
     emit_gv(out_dir, &name, ndim, &program);
 }
 
+// the isothermal forward source of a gas that stores no pressure (isothermal MHD): the sound speed
+// comes from the closure field `iso.cs2`. cartesian, the charts magnetized body gravity runs on.
+fn gen_body_source_iso_closure(out_dir: &str, ndim: u8) {
+    let name = format!("body_source_iso_closure_{ndim}d");
+    let g = Geom::identity(Coords::Cartesian, ndim);
+    let program = symbi_discretize::body_source_iso_closure_gv(
+        MAX_SOURCE_BODIES,
+        Coords::Cartesian,
+        ndim as usize,
+        g.ncomp as usize,
+        &g.axes,
+    );
+    emit_gv(out_dir, &name, ndim, &program);
+}
+
 fn gen_body_feedback_iso(out_dir: &str, ndim: u8, coords: Coords) {
     let name = format!("body_feedback_iso{}_{ndim}d", coords_suffix(coords));
     let g = Geom::identity(coords, ndim);
@@ -3604,6 +3619,7 @@ fn main() {
     // x geometry matrix, so an iso run with bodies has gravity + accretion + feedback.
     for ndim in 1u8..=3 {
         gen_body_source_iso(&out_dir, ndim, Coords::Cartesian);
+        gen_body_source_iso_closure(&out_dir, ndim);
     }
     gen_body_source_iso(&out_dir, 2, Coords::Cylindrical);
     gen_body_source_iso(&out_dir, 3, Coords::Cylindrical);

@@ -2790,6 +2790,27 @@ pub fn dispatch_body_source_iso<const D: usize, const DOF: usize, Mem, Sc>(
     dispatch_named(sim, pre, None, 0, &name, &sim.geom.interior, &[], &scalars);
 }
 
+/// isothermal forward body source of a gas that stores no pressure (isothermal MHD): like
+/// `dispatch_body_source_iso` with the sound speed read from the closure field `iso.cs2`.
+/// cartesian charts.
+pub fn dispatch_body_source_iso_closure<const D: usize, const DOF: usize, Mem, Sc>(
+    sim: &FieldStore<D, DOF, Mem, Sc>,
+    dt: f64,
+) where
+    Mem: MemorySpace + Sync,
+    Sc: Scalar + OrderedNumeric,
+{
+    assert_eq!(
+        sim.geom.coords,
+        symbi_geometry::Geometry::Cartesian,
+        "the closure-field isothermal body source is baked for cartesian charts"
+    );
+    let name = format!("body_source_iso_closure_{D}d");
+    let scalars = resolve_body_scalars(sim, dt, 0.0, &name);
+    // the kernel reads no prim.pre; pass cons.den as the (unused) pre override.
+    dispatch_named(sim, &sim.fields.cons.den, None, 0, &name, &sim.geom.interior, &[], &scalars);
+}
+
 /// isothermal backward feedback: like `dispatch_body_feedback` but reads `prim.pre`
 /// for the energy slot (manifest order: cons.den, mom_0.., prim.pre).
 pub fn dispatch_body_feedback_iso<const D: usize, const DOF: usize, Mem, Sc>(

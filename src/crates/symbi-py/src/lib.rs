@@ -9452,6 +9452,33 @@ fn validate_run(cfg: &Config) -> Result<(), String> {
             cfg.regime
         ));
     }
+    // body gravity acts on the newtonian magnetized gases on a cartesian chart; a gravitating body
+    // or binary on a curvilinear magnetized chart is refused, since its kernel set would leave the
+    // gas unforced
+    // an accreting body is a black hole and a body that neither accretes nor walls the gas is a bare
+    // point mass; both pull with their mass, while a rigid wall's mass is its inertia
+    const ACCRETION: u64 = 2;
+    const RIGID: u64 = 1 << 4;
+    let pulls = |b: &BodyParams| b.mass != 0.0 && (b.capability & ACCRETION != 0 || b.capability & RIGID == 0);
+    let gravitating = cfg.bodies.iter().any(pulls) || cfg.binary.is_some();
+    let magnetized_gravity = cfg.coord_system == "cartesian";
+    if matches!(cfg.regime.as_str(), "nmhd" | "imhd") && gravitating && !magnetized_gravity {
+        return Err(format!(
+            "a gravitating immersed body on the {} regime with the {} chart is outside the supported \
+             physics: body gravity acts on magnetized gas on a cartesian chart, so the declared mass \
+             would exert no force on the gas",
+            cfg.regime, cfg.coord_system
+        ));
+    }
+    // the magnetized kernel sets reduce no gas force onto a body, so a two-way coupled body would
+    // move as if the gas were absent
+    if matches!(cfg.regime.as_str(), "nmhd" | "imhd") && cfg.bodies.iter().any(|b| b.two_way_coupling) {
+        return Err(format!(
+            "a two-way coupled immersed body on the {} regime is outside the supported physics: the \
+             magnetized gas exerts no reaction force on a body, so it would move as if the gas were absent",
+            cfg.regime
+        ));
+    }
     // the horizon ledger books the flux through the diagnostic shell of an excised cartesian
     // kerr-schild box
     if cfg.horizon_ledger && !builds_horizon_body(cfg) {

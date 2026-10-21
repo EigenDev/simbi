@@ -581,7 +581,9 @@ where
             || self.c2p(sim),
             || self.godunov_stage(sim, dt, a0, ac),
             || self.source_apply(sim, ac * dt),
-            || {}, // MHD has no immersed-body source (trait-default no-op)
+            // the redo rebuilds every cell from the stage input, so the body source is applied
+            // again on the rebuilt state, exactly as the first span applied it.
+            || self.body_source(sim, ac * dt),
             redo_update,
             || {
                 // tier 2, below the conservative source limiter: the limiter scales a source and
@@ -628,7 +630,10 @@ where
                     None
                 }
             },
-            None, // no body-evolved freeze parachute (no MHD body source)
+            // a frozen cell holds its stage input for the substage: the body-evolved freeze
+            // select is baked for the hydro conserved layout alone, so the parachute carries no
+            // gravity on magnetized gas.
+            None,
             crate::regimes::fofc::CtHooks {
                 save: || crate::regimes::mhd_substrate::fofc_ct_save(sim),
                 restore: || crate::regimes::mhd_substrate::fofc_restore_bcell_stage(sim),
@@ -959,6 +964,36 @@ where
         crate::regimes::mhd_substrate::restore_step(sim);
         self.c2p(sim);
         self.ghost_fill(sim);
+    }
+
+    fn body_source(&self, sim: &FieldStore<D, 3, Mem, Sc>, dt: f64) {
+        // softened newtonian body gravity on the magnetized gas: `mom += dt rho g`, and on the
+        // adiabatic gas `nrg += dt m.g`, evaluated at the stage input and applied to the
+        // godunov-advanced state, the same law, softening and stage weighting the hydro gas
+        // receives. the kernels write den, mom and nrg only, so bface, bcell and the magnetic flux
+        // are invariant. the sink rate resolves to zero (the penalization owns accretion), so the
+        // drain factor is exactly 1 and the magnetic part of the total energy passes through
+        // unscaled. the newtonian gases on a cartesian chart carry this operator; a gravitating
+        // body on any other magnetized pairing is refused here and at admission, and a massless
+        // body (a drain, a wall, a slip surface) carries no source.
+        let gravitating = sim.immersed.as_ref().is_some_and(|im| {
+            (0..im.bodies.len()).any(|b| im.bodies.get(b).has_gravity() && im.bodies.get(b).mass != 0.0)
+        });
+        if !gravitating {
+            return;
+        }
+        assert!(
+            matches!(Self::kernel_prefix(), "nmhd" | "imhd") && sim.geom.coords == symbi_geometry::Geometry::Cartesian,
+            "immersed-body gravity on magnetized gas applies to the newtonian regimes on a cartesian \
+             chart; the {} regime on the {:?} chart has no magnetized body operator",
+            Self::kernel_prefix(),
+            sim.geom.coords
+        );
+        if R::SPEC.has_energy {
+            crate::regimes::substrate_kernels::dispatch_body_source(sim, dt, self.eos_param.value());
+        } else {
+            crate::regimes::substrate_kernels::dispatch_body_source_iso_closure(sim, dt);
+        }
     }
 
     fn penalize(&self, sim: &FieldStore<D, 3, Mem, Sc>, dt: f64) {

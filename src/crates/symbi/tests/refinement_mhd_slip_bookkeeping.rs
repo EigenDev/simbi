@@ -85,7 +85,10 @@ fn resolved_slip_sink() -> BodyCollection<f64, 3> {
         field_regularization: 0.1,
         placement: 0.0,
     };
-    BodyCollection::new().add(sink_of_radius(0, [0.0; 3], [0.0; 3], 1.0, 3.0 * DX_FINE, magnetic))
+    // the mass keeps the sink's infall below the drift over the run, so the contact EMF's upwind
+    // selection stays smooth (`assert_drift_holds`); at unit mass the pull reverses the flow over
+    // thousands of fine cells
+    BodyCollection::new().add(sink_of_radius(0, [0.0; 3], [0.0; 3], 1.0e-3, 3.0 * DX_FINE, magnetic))
 }
 
 // a discretely solenoidal field on a 32^3 root over [-1/2, 1/2]^3 refined over `region` (the same
@@ -486,6 +489,16 @@ fn bulk_snapshots(hier: &Hier) -> Vec<(&'static str, Vec<f64>)> {
     vec![("fine density", den), ("fine energy", nrg), ("fine face field", face)]
 }
 
+// the contact EMF's upwind selection is smooth in the state while every mass flux keeps the drift's
+// sign; the sink's pull reverses the flow near it once its infall outruns the drift, and the face
+// field's temporal order then reads the selection's switching instead of the composition.
+fn assert_drift_holds(hier: &Hier) {
+    let sim = &hier.levels[finest(hier)].state;
+    let mom = &sim.fields.cons.mom;
+    let reversed = sim.geom.interior.iter().filter(|c| (0..3).any(|k| *mom[k].at(*c) * VEL[k] <= 0.0)).count();
+    assert_eq!(reversed, 0, "{reversed} fine cells move against the drift; the face field's temporal order is unreadable");
+}
+
 fn l2_rel(a: &[f64], b: &[f64]) -> f64 {
     let num: f64 = a.iter().zip(b).map(|(x, y)| (x - y) * (x - y)).sum();
     let den: f64 = b.iter().map(|y| y * y).sum();
@@ -504,6 +517,7 @@ fn the_refined_coupled_step_is_second_order_in_time_per_field() {
         for _ in 0..nsteps {
             hier.step_root_with_dt(dt);
         }
+        assert_drift_holds(&hier);
         bulk_snapshots(&hier)
     };
     let dt = 2.0 * DT;

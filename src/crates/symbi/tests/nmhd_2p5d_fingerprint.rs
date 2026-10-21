@@ -97,4 +97,4 @@ fn the_2p5d_adiabatic_slip_sink_fingerprint_holds() {
     assert_eq!(h, FINGERPRINT, "the single-grid 2.5D adiabatic slip path changed");
 }
 
-const FINGERPRINT: u64 = 0x1ecd6bd87a501419;
+const FINGERPRINT: u64 = 0x40a8c8427adfde02;
