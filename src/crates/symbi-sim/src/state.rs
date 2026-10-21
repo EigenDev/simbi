@@ -3487,6 +3487,9 @@ where
         self.fields.cons.alloc_chi(&allocated)?;
         self.fields.prim.alloc_chi(&allocated)?;
         self.workspace.u_n.alloc_chi(&allocated)?;
+        // the stage input of the scalar, for an update that rebuilds a stage from its input (the
+        // magnetized dual-energy entropy, rebuilt by the first-order redo)
+        self.workspace.u_stage.alloc_chi(&allocated)?;
         // the per-direction interface dye flux `F_chi = mass_flux * chi_upwind`. materialized
         // rather than folded into the dye update because a coarse-fine reflux corrects the
         // conserved dye from the flux mismatch at the interface, which needs the fine and coarse

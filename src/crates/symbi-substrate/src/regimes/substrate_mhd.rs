@@ -235,6 +235,17 @@ pub struct MhdSubstrateKernelSet<R, Mem: MemorySpace, Sc: Scalar + OrderedNumeri
     /// finite magnetic Prandtl number Pm = nu / eta. cartesian; full 3D (D==DOF), 2.5D via the
     /// DOF-aware kernel. caps dt at C_visc dx^2 / nu.
     pub viscosity: f64,
+    /// the entropy companion of the energy (newtonian adiabatic MHD), off by default
+    pub dual_energy: Option<crate::regimes::dual_energy::DualEnergy>,
+    /// the entropy advanced in this stage awaits its synchronization at the next recovery
+    entropy_fresh: std::sync::atomic::AtomicBool,
+    /// the SSP coefficients (a0, ac) of the stage the entropy last advanced, as bits
+    entropy_stage: std::sync::Mutex<(u64, u64)>,
+    /// the last synchronization's receipt, checked against the budgets once the stage's correction
+    /// ladder has run
+    entropy_receipt: std::sync::Mutex<symbi_sim::dual_energy_ledger::CorrectionReceipt>,
+    /// the transport's convexity evidence over the run
+    entropy_transport: std::sync::Mutex<crate::regimes::dual_energy::TransportStats>,
     _r: PhantomData<R>,
 }
 
@@ -294,7 +305,56 @@ where
             excision_rho: 1.0,
             excision_pre: 1.0,
             alpha: 0.0,
+            dual_energy: None,
+            entropy_fresh: std::sync::atomic::AtomicBool::new(false),
+            entropy_stage: std::sync::Mutex::new((0, 0)),
+            entropy_receipt: std::sync::Mutex::new(Default::default()),
+            entropy_transport: std::sync::Mutex::new(Default::default()),
             _r: PhantomData,
+        }
+    }
+
+    /// carry the entropy companion of the energy (newtonian adiabatic MHD): a cell whose
+    /// conservative thermal energy is too small to hold its truncation error takes its pressure
+    /// from the entropy, and every such correction is booked and budgeted. fluent. the store must
+    /// be built with a passive scalar, which carries the entropy, and seeded by `seed_entropy`
+    pub fn with_dual_energy(mut self, cfg: crate::regimes::dual_energy::DualEnergy) -> Self {
+        assert_eq!(Self::kernel_prefix(), "nmhd", "dual energy applies to the newtonian adiabatic MHD regime");
+        self.dual_energy = Some(cfg);
+        self
+    }
+
+    /// set the entropy from the conservative energy over the interior
+    pub fn seed_entropy(&self, sim: &FieldStore<D, 3, Mem, Sc>) {
+        let cfg = self.dual_energy.expect("seed_entropy needs with_dual_energy");
+        crate::regimes::dual_energy::seed_entropy(sim, cfg.gamma);
+    }
+
+    /// the entropy transport's convexity evidence over the run
+    pub fn entropy_transport(&self) -> crate::regimes::dual_energy::TransportStats {
+        *self.entropy_transport.lock().expect("transport stats")
+    }
+
+    /// the refusals of the dual-energy scope that the kernel set holds: every operator whose
+    /// heating the entropy does not carry
+    fn assert_dual_energy_operators(&self, sim: &FieldStore<D, 3, Mem, Sc>) {
+        crate::regimes::dual_energy::assert_scope(sim);
+        assert!(
+            self.resistivity == 0.0 && self.viscosity == 0.0 && self.alpha == 0.0,
+            "dual energy carries no resistive or viscous heating; refused"
+        );
+        assert!(self.runtime_source.is_none(), "dual energy carries no user source; refused");
+        assert!(self.boundary_dags.is_empty(), "dual energy runs without driven faces");
+        if let Some(im) = sim.immersed.as_ref() {
+            for b in 0..im.bodies.len() {
+                let spec = &im.bodies.get(b).spec;
+                assert!(
+                    matches!(spec.surface, symbi_ib::SurfaceSpec::Drain)
+                        && matches!(spec.magnetic, symbi_ib::MagneticSpec::None),
+                    "immersed body {b}: dual energy carries the drain alone; wall friction heat and magnetic \
+                     coupling heat are refused until the entropy carries them"
+                );
+            }
         }
     }
 
@@ -920,7 +980,24 @@ where
         // report carries this substage's projection receipt, the sim books it
         // into the pending bucket, and the accepted-step boundary commits or the
         // retry discards the whole step's bucket.
-        self.fofc_impl(sim, dt, a0, ac, stage, redo_update)
+        let report = self.fofc_impl(sim, dt, a0, ac, stage, redo_update);
+        if let Some(cfg) = self.dual_energy.as_ref() {
+            // a frozen cell holds its stage-input gas beside the stage's advanced entropy
+            assert_eq!(
+                report.frozen(),
+                0,
+                "dual energy: the correction ladder froze {} cell(s); a frozen cell's entropy and energy \
+                 describe different times, refused",
+                report.frozen()
+            );
+            let receipt = self.entropy_receipt.lock().expect("receipt").clone();
+            let (pending, accepted) =
+                (symbi_sim::dual_energy_ledger::pending(), symbi_sim::dual_energy_ledger::accepted());
+            if let Some(why) = crate::regimes::dual_energy::exceeded_budget(cfg, &receipt, &pending, &accepted) {
+                panic!("dual-energy correction budget exceeded: {why}");
+            }
+        }
+        report
     }
 
     fn fofc_active(&self) -> bool {
@@ -961,6 +1038,7 @@ where
     }
 
     fn restore_step(&self, sim: &FieldStore<D, 3, Mem, Sc>) {
+        self.entropy_fresh.store(false, std::sync::atomic::Ordering::Relaxed);
         crate::regimes::mhd_substrate::restore_step(sim);
         self.c2p(sim);
         self.ghost_fill(sim);
@@ -1006,6 +1084,7 @@ where
         if sim.immersed.is_none() {
             return;
         }
+        let before = self.dual_energy.map(|_| crate::regimes::dual_energy::densities(sim));
         crate::regimes::mhd_substrate::shift_magnetic_energy(sim, -1.0);
         let c_a2 = crate::regimes::mhd_substrate::alfven_stiffness_max(sim, &self.cfl_scratch);
         // eos_param is gamma on an adiabatic gas, cs on an isothermal one; both drain dials use
@@ -1018,6 +1097,9 @@ where
             c_a2,
         );
         crate::regimes::mhd_substrate::shift_magnetic_energy(sim, 1.0);
+        if let (Some(cfg), Some(before)) = (self.dual_energy, before) {
+            crate::regimes::dual_energy::drain_entropy(sim, &before, cfg.gamma);
+        }
     }
 
     fn has_magnetic_slip(&self, sim: &FieldStore<D, 3, Mem, Sc>) -> bool {
@@ -1118,6 +1200,17 @@ where
             &[],
             &scalars,
         );
+        // the first recovery after the entropy advanced synchronizes the two; a later recovery of
+        // the same stage (the redo's restored input, the select) reads states the entropy has not
+        // reached and runs plain
+        if let Some(cfg) = self.dual_energy.as_ref() {
+            if self.entropy_fresh.swap(false, std::sync::atomic::Ordering::Relaxed) {
+                let receipt = crate::regimes::dual_energy::synchronize(sim, cfg);
+                let key = *self.entropy_stage.lock().expect("stage key");
+                symbi_sim::dual_energy_ledger::record_stage(key, &receipt);
+                *self.entropy_receipt.lock().expect("receipt") = receipt;
+            }
+        }
     }
 
     fn wave_speeds(&self, sim: &FieldStore<D, 3, Mem, Sc>) {
@@ -1535,6 +1628,15 @@ where
             a0,
             ac,
         );
+        // the entropy rides the mass flux this update used; a first-order redo calls this again on
+        // the spliced fluxes and rebuilds the stage's entropy from the same stage input
+        if self.dual_energy.is_some() {
+            self.assert_dual_energy_operators(sim);
+            let mut stats = self.entropy_transport.lock().expect("transport stats");
+            crate::regimes::dual_energy::advance_entropy(sim, dt, a0, ac, &mut stats);
+            *self.entropy_stage.lock().expect("stage key") = (a0.to_bits(), ac.to_bits());
+            self.entropy_fresh.store(true, std::sync::atomic::Ordering::Relaxed);
+        }
     }
     fn flip_polar_band(
         &self,

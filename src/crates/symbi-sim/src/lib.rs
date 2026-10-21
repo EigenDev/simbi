@@ -23,6 +23,7 @@ pub mod accepted_tail;
 pub mod atlas;
 pub mod axis_ring;
 pub mod projection_ledger;
+pub mod dual_energy_ledger;
 pub mod guard_ledger;
 pub mod run_diagnostics;
 pub mod census;

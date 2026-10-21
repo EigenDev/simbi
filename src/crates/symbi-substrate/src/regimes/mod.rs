@@ -9,6 +9,7 @@
 // flux, body source/feedback); `substrate_gpu` is the NVRTC runtime path.
 // =============================================================================
 
+pub mod dual_energy;
 pub mod fofc;
 pub mod mhd_substrate;
 pub mod regime_substrate;

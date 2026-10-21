@@ -791,6 +791,10 @@ pub(crate) fn snapshot<const D: usize, const DOF: usize, Mem, Sc>(
         &[],
     );
 
+    // the scalar riding the conserved vector (the dual-energy entropy) joins the step-start state
+    if let (Some(live), Some(kept)) = (sim.fields.cons.chi_field(), sim.workspace.u_n.chi_field()) {
+        fused_save_buffers(&[(live, kept)]);
+    }
     let mhd = sim.fields.mhd.as_ref().expect("MHD requires mhd fields");
     if Mem::IS_DEVICE_ACCESSIBLE {
         // device path: a pointwise GPU copy avoids the unified-pointer page-migration that a
@@ -932,6 +936,9 @@ pub(crate) fn snapshot_stage<const D: usize, const DOF: usize, Mem, Sc>(
                 .expect("MHD with energy requires cons.nrg"),
             u.nrg_field().expect("u_stage with energy requires nrg"),
         ));
+    }
+    if let (Some(live), Some(kept)) = (sim.fields.cons.chi_field(), u.chi_field()) {
+        pairs.push((live, kept));
     }
     // the stage-input cell B -> bcell_stage: the face-based FOFC CT redo restores bcell from it so
     // the recomputed edge EMF reads the stage-input field and the cell-B predictor combines from the

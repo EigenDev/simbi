@@ -21,6 +21,7 @@
 //   that panics (the freeze-streak halt, a failed assertion) ends the step the
 //   same way: its pending acts are discarded, the entry restored, and the halt
 //   carries the panic message, which names the failing cell and its state.
+// the pending acts are those of the guard, projection and dual-energy ledgers.
 //
 // usage:
 //  match take_root_step(&mut attempt, &guard, candidate, time)? {
@@ -164,6 +165,9 @@ pub enum RootStep {
 }
 
 fn discard_pending() {
+    if crate::dual_energy_ledger::scope_is_open() {
+        crate::dual_energy_ledger::step_discard();
+    }
     if crate::projection_ledger::scope_is_open() {
         crate::projection_ledger::step_discard();
     }
@@ -182,6 +186,9 @@ fn panic_message(payload: &(dyn std::any::Any + Send)) -> String {
 }
 
 fn commit_pending() {
+    if crate::dual_energy_ledger::scope_is_open() {
+        crate::dual_energy_ledger::step_commit();
+    }
     if crate::projection_ledger::scope_is_open() {
         crate::projection_ledger::step_commit();
     }
