@@ -3,13 +3,18 @@
 //
 // a resistive immersed body adds the edge EMF eta chi J, so inside the body
 // (chi = 1) the field diffuses as dB/dt = eta laplacian(B). with B_y = 1 + s x^2
-// and no B_x the interior update over one euler step is dB_y = 2 eta s dt on
-// every face, whatever the spacing. the body operators take the current from
+// and no B_x, one euler step from rest changes the field by the ideal scheme's
+// own update plus the resistive part; the ideal part does not depend on eta (it
+// carries the riemann solver's dissipation of B_y at the limiter-clipped minimum on
+// x = 0, which halves with the cell width), so the difference of the steps at eta
+// and at eta = 0 is the resistive part alone. it is compared on every interior face
+// with the discrete masked update written out here, which is 2 eta s dt where the
+// mask is one. the body operators take the current from
 // the uniform cell width, as the cartesian constrained-transport curl does
 // (admission refuses a magnetized run on a graded cartesian axis), so the
 // operators also refuse a graded axis by name for a caller of the library; on a
-// uniform axis the interior update is pinned against 2 eta s dt, away from the
-// two face columns beside the body's center line.
+// uniform axis the resistive part of the interior update is pinned against its
+// discrete expectation.
 //
 // run: cargo test -p symbi --test magnetized_body_graded_axis
 // =============================================================================
@@ -38,9 +43,9 @@ const ETA: f64 = 0.1;
 const R_BODY: f64 = 0.45;
 const DT: f64 = 1e-5;
 
-/// one euler step of a resistive sink at the origin on [-1, 1]^2, the x axis geometric when
-/// `graded`; the largest relative departure of the interior B_y update from 2 eta s dt
-fn interior_departure(graded: bool) -> (f64, usize) {
+/// the B_y update of every face after one euler step of a sink of resistivity `eta` at the
+/// origin on [-1, 1]^2, the x axis geometric when `graded`
+fn face_update(graded: bool, eta: f64) -> (std::collections::HashMap<[isize; 2], f64>, std::collections::HashMap<[isize; 2], f64>) {
     let dx = 2.0 / N as f64;
     let w0 = 2.0 * (RATIO - 1.0) / (RATIO.powi(N as i32) - 1.0);
     let maps = graded.then(|| [AxisMap::Geometric { start: -1.0, width: w0, ratio: RATIO }, AxisMap::Uniform { start: -1.0, dx }]);
@@ -60,7 +65,7 @@ fn interior_departure(graded: bool) -> (f64, usize) {
         .build();
     let sink = Body::black_hole(0, Tensor::new([0.0, 0.0]), Tensor::zeros(), 1e-6, R_BODY, 0.05, 0.0, 1.0, R_BODY)
         .with_surface(SurfaceSpec::Drain)
-        .with_magnetic(MagneticSpec::Resistive { eta: ETA });
+        .with_magnetic(MagneticSpec::Resistive { eta });
     let mut s = s.with_bodies(BodyCollection::new().add(sink));
     s.timestepping = Timestepping::Euler;
     let kernels = Kern::new(5.0 / 3.0, 0.4, 1.0, &s.geom.allocated);
@@ -71,21 +76,38 @@ fn interior_departure(graded: bool) -> (f64, usize) {
     evolve_with_callback(&mut s, &kernels, DT, 1, |_| {}).expect("one step");
     let after = &s.fields.mhd.as_ref().expect("mhd").bface[1];
     let lo = [s.geom.interior.spaces[0].lo, s.geom.interior.spaces[1].lo];
-    let want = 2.0 * ETA * S * DT;
+    let initial = before.iter().map(|(c, b)| ([c[0] - lo[0], c[1] - lo[1]], *b)).collect();
+    let update = before.iter().map(|(c, b)| ([c[0] - lo[0], c[1] - lo[1]], *after.view().at(*c) - b)).collect();
+    (initial, update)
+}
+
+/// the largest departure of the resistive part of the interior B_y update from its discrete
+/// expectation, relative to 2 eta s dt, with the number of faces checked. the resistive EMF at a
+/// cell corner is E_z = eta chi J_z: J_z the difference of the two B_y faces beside the corner over
+/// the cell width (B_x = 0), chi = (1 - tanh(phi / w)) / 2 the body mask at the corner, phi the
+/// corner's distance from the body center less the body radius, w the least cell width. a y-face
+/// changes by dt (E_z right - E_z left) / dx
+fn resistive_departure(graded: bool) -> (f64, usize) {
+    let (initial, with) = face_update(graded, ETA);
+    let (_, without) = face_update(graded, 0.0);
+    let dx = 2.0 / N as f64;
+    let chi = |x: f64, y: f64| 0.5 * (1.0 - (((x * x + y * y).sqrt() - R_BODY) / dx).tanh());
+    // the corner at the lower x face of cell i on the face row j
+    let emf = |i: isize, j: isize| {
+        let (x, y) = (-1.0 + i as f64 * dx, -1.0 + j as f64 * dx);
+        ETA * chi(x, y) * (initial[&[i, j]] - initial[&[i - 1, j]]) / dx
+    };
+    let scale = 2.0 * ETA * S * DT;
     let (mut worst, mut checked) = (0.0f64, 0usize);
     for i in 2..(N as isize - 2) {
         for j in 2..(N as isize - 1) {
             let (x, y) = (-1.0 + (i as f64 + 0.5) * dx, -1.0 + j as f64 * dx);
-            let r = (x * x + y * y).sqrt();
-            // the two face columns beside the body's center line x = 0 update 12.8% above
-            // 2 eta s dt at every y on this grid, an open item of the resistive body EMF; they are
-            // left out of this pin
-            if r > R_BODY - 6.0 * dx || x.abs() < dx {
+            if (x * x + y * y).sqrt() > R_BODY - 6.0 * dx {
                 continue;
             }
-            let c = [i + lo[0], j + lo[1]];
-            let got = *after.view().at(c) - before[&c];
-            worst = worst.max((got - want).abs() / want);
+            let want = DT * (emf(i + 1, j) - emf(i, j)) / dx;
+            let resistive = with[&[i, j]] - without[&[i, j]];
+            worst = worst.max((resistive - want).abs() / scale);
             checked += 1;
         }
     }
@@ -94,14 +116,15 @@ fn interior_departure(graded: bool) -> (f64, usize) {
 
 #[test]
 fn a_resistive_body_diffuses_the_interior_field_on_a_uniform_axis() {
-    let (worst, checked) = interior_departure(false);
+    let (worst, checked) = resistive_departure(false);
     assert!(checked >= 50, "{checked} interior faces; the gate is vacuous");
-    // measured at most 3.4e-4 away from the faces at the body center
-    assert!(worst < 1e-3, "the interior field update departs from 2 eta s dt by {worst:.3e}");
+    // the update is the difference of order-one face values changed by about 1e-6, so round-off
+    // enters at about 1e-10 of 2 eta s dt (measured 1.7e-10)
+    assert!(worst < 1e-9, "the resistive part of the interior field update departs from its discrete expectation by {worst:.3e} of 2 eta s dt");
 }
 
 #[test]
 #[should_panic(expected = "runs on uniformly spaced axes")]
 fn a_resistive_body_on_a_graded_axis_is_refused() {
-    interior_departure(true);
+    let _ = face_update(true, ETA);
 }
