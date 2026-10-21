@@ -654,16 +654,39 @@ def test_a_rejection_on_one_worker_rolls_every_worker_back(tmp_path: Path) -> No
     _assert_same_state(launched, reference, "two workers, rejection on worker 1")
 
 
-def test_a_forced_rejection_on_a_magnetized_launch_is_refused(tmp_path: Path) -> None:
-    """the flat magnetized kernel set keeps no step-entry snapshot, so a magnetized launch that
-    injects a rejection is refused by name before any step is taken."""
-    layout = _layout(tmp_path / "two.toml", workers=2, shape=(2, 1))
-    env = dict(os.environ, SIMBI_FABRIC_INJECT="reject:1:2:0")
-    done = subprocess.run(_mhd_launch_command(tmp_path / "two", layout, MHD_STEPS), capture_output=True, text=True, timeout=600, env=env)
-    assert done.returncode != 0, f"the launch succeeded:\n{done.stdout}"
-    flat = " ".join(done.stderr.split())
-    assert "a forced rejection on a kernel set without a complete rollback snapshot is outside the distributed first release" in flat, done.stderr
+def test_a_rejection_on_a_magnetized_launch_replays_every_worker_from_the_step_entry(tmp_path: Path) -> None:
+    """a magnetized store carries the step-entry snapshot of its conserved state, cell field and
+    face field, so a rejection forced on worker 1 at step 5 in the corrector replays the step on
+    every worker: two workers reach the checkpoint one worker reaches under the same rejection, bit
+    for bit with the staggered faces, the clock and the metadata, both count the rejection, and
+    the rejection changed the run. the single-grid gate establishes that the replayed step equals a
+    clean step at the accepted timestep (mhd_fallback_admissibility.rs)."""
+    one = _layout(tmp_path / "one.toml", workers=1, shape=(1, 1))
+    two = _layout(tmp_path / "two.toml", workers=2, shape=(2, 1))
+    rejections = re.compile(r"SIMBI launch: worker=\d+/\d+ steps=\d+ rejections=(\d+)")
 
+    def launch(out: Path, layout: Path, workers: int, inject: str | None) -> tuple[Path, set[int]]:
+        env = dict(os.environ)
+        if inject is not None:
+            env["SIMBI_FABRIC_INJECT"] = inject
+        done = subprocess.run(_mhd_launch_command(out, layout, MHD_STEPS), capture_output=True, text=True, timeout=600, env=env)
+        assert done.returncode == 0, f"launch failed:\nstdout:\n{done.stdout}\nstderr:\n{done.stderr}"
+        exits = {int(w): int(c) for w, c in EXIT.findall(done.stdout)}
+        assert sorted(exits) == list(range(workers)) and all(c == 0 for c in exits.values()), f"worker exit codes {exits}"
+        files = sorted(out.glob("*final*.h5"))
+        assert len(files) == 1, f"expected one final checkpoint in {out}, found {files}"
+        return files[0], {int(r) for r in rejections.findall(done.stderr)}
+
+    clean, clean_rejections = launch(tmp_path / "clean", one, 1, None)
+    assert clean_rejections == {0}
+    reference, reference_rejections = launch(tmp_path / "one", one, 1, "reject:0:5:1")
+    assert reference_rejections == {1}, "the one-worker run did not count its rejection"
+    launched, launched_rejections = launch(tmp_path / "two", two, 2, "reject:1:5:1")
+    assert launched_rejections == {1}, "a worker did not count the rejection"
+    with h5py.File(clean, "r") as fc, h5py.File(reference, "r") as fr:
+        xs, ys = _interior(fc), _interior(fr)
+        assert any(not np.array_equal(xs[name], ys[name]) for name in xs if "/magnetic/" in name), "the rejection left the faces unchanged; the gate is vacuous"
+    _assert_same_state(launched, reference, "two magnetized workers, rejection on worker 1")
 
 # -----------------------------------------------------------------------------
 # relativistic hydro through the public path, on the two-dimensional riemann problem of
