@@ -3431,7 +3431,21 @@ impl CheckpointStream {
             }
         })
         .collect();
-    for (idx, (level, small)) in levels.iter().zip(&smalls).enumerate() {
+    // the covered cells each level leaves out of the run-wide decisions, as an index box
+    // (`CompositeOwnership::decision_excluded`): a NaN primitive inside it is a covered cell without
+    // an admissible recovery, withheld on purpose
+    let unread_cores: Vec<Option<(Vec<i64>, Vec<i64>)>> = levels
+        .iter()
+        .map(|level| {
+            level.template().composite_ownership.decision_excluded.as_ref().map(|core| {
+                (
+                    (0..D).map(|ax| core.spaces[ax].lo as i64).collect(),
+                    (0..D).map(|ax| core.spaces[ax].hi as i64).collect(),
+                )
+            })
+        })
+        .collect();
+    for (idx, ((level, small), unread_core)) in levels.iter().zip(&smalls).zip(&unread_cores).enumerate() {
         let sim = level.template();
         let (time, dt, iteration) = level.clock();
         let grid = &level.grid;
@@ -3474,10 +3488,17 @@ impl CheckpointStream {
             }
             hydro.push_group(magnetic);
         }
-        let partition_0 = Tree::new("partition_0")
+        let mut partition_0 = Tree::new("partition_0")
             .with_dataset(Dataset::new("owned_start", vec![D], DataRef::I64(&small.owned_start)))
             .with_dataset(Dataset::new("owned_fin", vec![D], DataRef::I64(&small.owned_fin)))
             .with_group(hydro);
+        if let Some((start, fin)) = unread_core {
+            partition_0.push_group(
+                Tree::new("unread_core")
+                    .with_dataset(Dataset::new("start", vec![D], DataRef::I64(start)))
+                    .with_dataset(Dataset::new("fin", vec![D], DataRef::I64(fin))),
+            );
+        }
         root.push_group(
             Tree::new(format!("level_{idx}"))
                 .with_attr("scale_factor_a", sim.motion.a)

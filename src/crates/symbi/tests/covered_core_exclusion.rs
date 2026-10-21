@@ -18,8 +18,8 @@
 //   - an inadmissible state within the read reach still ends the run, and an
 //     inadmissible state in the excluded core changes nothing;
 //   - a checkpoint publishes NaN primitives for an excluded cell without an
-//     admissible recovery, keeps its conserved state, and a restart from it
-//     continues as the uninterrupted run does;
+//     admissible recovery, names the excluded box per level, keeps its conserved
+//     state, and a restart from it continues as the uninterrupted run does;
 //   - with a rigid body, whose wall acts on covered coarse cells and sums their
 //     force onto the body, every covered cell stays in the decisions.
 //
@@ -264,6 +264,15 @@ fn a_checkpoint_withholds_unrecovered_excluded_primitives_and_restarts_identical
         .expect("checkpoint");
     // the live state keeps its recovered values after the write
     assert_eq!(*original.levels[1].state.fields.prim.pre.as_ref().expect("pre").view().at(c), raw_pre);
+    // the file names the box whose NaN primitives are withheld on purpose
+    {
+        let file = hdf5_metno::File::open(&path).expect("open checkpoint");
+        let read = |name: &str| -> Vec<i64> { file.dataset(name).expect(name).read_raw().expect("read") };
+        let core = excluded(&original, 1).expect("excluded core");
+        assert_eq!(read("level_1/partition_0/unread_core/start"), vec![core.spaces[0].lo as i64, core.spaces[1].lo as i64]);
+        assert_eq!(read("level_1/partition_0/unread_core/fin"), vec![core.spaces[0].hi as i64, core.spaces[1].hi as i64]);
+        assert!(file.dataset("level_2/partition_0/unread_core/start").is_err(), "the finest level records an excluded core");
+    }
 
     let mut restarted = build();
     restarted.restore_from_checkpoint(path.to_str().expect("utf-8")).expect("restart");
