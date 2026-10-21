@@ -2909,6 +2909,16 @@ impl<const D: usize, const DOF: usize, Mem: MemorySpace, Sc: Scalar + OrderedNum
         saved
     }
 
+    /// whether an excluded covered cell (`CompositeOwnership::decision_excluded`) holds a conserved
+    /// state without an admissible recovery, the cells a checkpoint publishes with NaN primitives
+    pub fn has_unrecovered_excluded(&self) -> bool {
+        let Some(core) = self.composite_ownership.decision_excluded.as_ref() else {
+            return false;
+        };
+        let status = self.fields.c2p_error.view();
+        core.iter().any(|c| status.at(c).to_f64() != 0.0)
+    }
+
     /// write back the primitives `withhold_unrecovered_primitives` replaced
     pub fn restore_withheld_primitives(&self, saved: &[([isize; D], Vec<Sc>)]) {
         let prim = &self.fields.prim;

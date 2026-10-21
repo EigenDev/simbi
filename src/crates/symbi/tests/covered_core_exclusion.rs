@@ -18,7 +18,8 @@
 //   - an inadmissible state within the read reach still ends the run, and an
 //     inadmissible state in the excluded core changes nothing;
 //   - a checkpoint publishes NaN primitives for an excluded cell without an
-//     admissible recovery, names the excluded box per level, keeps its conserved
+//     admissible recovery, names the excluded box of a level that withholds one
+//     (and of no other level), keeps its conserved
 //     state, and a restart from it continues as the uninterrupted run does;
 //   - with a rigid body, whose wall acts on covered coarse cells and sums their
 //     force onto the body, every covered cell stays in the decisions.
@@ -272,6 +273,9 @@ fn a_checkpoint_withholds_unrecovered_excluded_primitives_and_restarts_identical
         assert_eq!(read("level_1/partition_0/unread_core/start"), vec![core.spaces[0].lo as i64, core.spaces[1].lo as i64]);
         assert_eq!(read("level_1/partition_0/unread_core/fin"), vec![core.spaces[0].hi as i64, core.spaces[1].hi as i64]);
         assert!(file.dataset("level_2/partition_0/unread_core/start").is_err(), "the finest level records an excluded core");
+        // the root excludes cells too, and every one of them recovers: it records no box
+        assert!(excluded(&original, 0).is_some(), "the root excludes no cells; the premise is gone");
+        assert!(file.dataset("level_0/partition_0/unread_core/start").is_err(), "a level whose excluded cells all recover records a box");
     }
 
     let mut restarted = build();

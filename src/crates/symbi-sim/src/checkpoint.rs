@@ -3434,13 +3434,16 @@ impl CheckpointStream {
             }
         })
         .collect();
-    // the covered cells each level leaves out of the run-wide decisions, as an index box
-    // (`CompositeOwnership::decision_excluded`): a NaN primitive inside it is a covered cell without
-    // an admissible recovery, withheld on purpose
+    // the covered cells a level leaves out of the run-wide decisions, as an index box
+    // (`CompositeOwnership::decision_excluded`), on a level that publishes NaN primitives for some of
+    // them: a NaN primitive inside the box is a covered cell without an admissible recovery,
+    // withheld on purpose. a level whose excluded cells all recover writes no box
     let unread_cores: Vec<Option<(Vec<i64>, Vec<i64>)>> = levels
         .iter()
         .map(|level| {
-            level.template().composite_ownership.decision_excluded.as_ref().map(|core| {
+            let store = level.template();
+            let withheld = store.has_unrecovered_excluded();
+            store.composite_ownership.decision_excluded.as_ref().filter(|_| withheld).map(|core| {
                 (
                     (0..D).map(|ax| core.spaces[ax].lo as i64).collect(),
                     (0..D).map(|ax| core.spaces[ax].hi as i64).collect(),
