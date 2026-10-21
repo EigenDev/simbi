@@ -1686,7 +1686,8 @@ fn check_bodies<const D: usize>(bodies_g: &TreeBuf, im: &ImmersedBodies<D>, char
 /// (drain, porous, rigid, torque-free, shaped) on the 2D spherical chart with its two components
 /// read as (z, x); the body source, the feedback and the census read the same pair as (x, z). a
 /// body whose two components agree sits on the symmetry line where both readings coincide, and
-/// restarts unchanged; any other penalizing body is refused by name, since restarting would move it
+/// restarts unchanged; any other penalizing body is refused by name: the run it belongs to placed
+/// one body at two points, which no configuration under the meridional frame reproduces
 fn check_body_frame<const D: usize>(
     bodies_g: &TreeBuf,
     im: &ImmersedBodies<D>,
@@ -1706,11 +1707,13 @@ fn check_body_frame<const D: usize>(
         if p[0] != p[1] || v[0] != v[1] {
             return Err(IoError::Backend(format!(
                 "immersed body {b} penalizes the gas on the 2D spherical chart, and this checkpoint \
-                 predates the meridional body frame: its masks placed the body at x = {}, z = {} \
-                 (position components read as (z, x)), while bodies now read (x, z). to keep the \
-                 recorded placement, restart from a fresh run with the body position ({}, {}) and \
-                 velocity ({}, {}), its components swapped",
-                p[1], p[0], p[1], p[0], v[1], v[0]
+                 predates the meridional body frame: its mask sat at x = {}, z = {} (position read \
+                 as (z, x)) while its gravity and census exclusion sat at x = {}, z = {}. bodies \
+                 now read (x, z) in every operator, so no configuration reproduces that run: \
+                 swapping the components (position ({}, {}), velocity ({}, {})) keeps the mask \
+                 where it was and moves the gravity with it. a run on this body needs review, \
+                 and a restart starts a new run from a fresh configuration",
+                p[1], p[0], p[0], p[1], p[1], p[0], v[1], v[0]
             )));
         }
     }
