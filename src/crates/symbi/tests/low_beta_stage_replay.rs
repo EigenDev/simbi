@@ -12,8 +12,22 @@
 // center cell bit for bit, and its internal energy E - |m|^2 / 2 rho - |B|^2 / 2,
 // positive at entry, is negative after the stage: the total energy the fluxes
 // deliver falls short of the kinetic gain plus the field energy the curl adds.
+// the stage is the update without a body source; the captured run's sink pulled
+// on no gas.
+//
+// the expected values characterize the scheme the block was captured under.
+// a change to the update that leaves this cell admissible changes them, and
+// this test then fails as the record of that change: the entry block stays,
+// the expectation becomes the new scheme's stage. the negative internal energy
+// is the observed failure, never a property to preserve.
+//
+// fixtures/low_beta_stage_reference.py recomputes the same stage from the
+// intended discrete formulas (minmod PLM, HLLE with davis speeds, the contact
+// EMF, the godunov update and the curl), independent of the production
+// kernels, and agrees with the production slots to 4e-16.
 //
 // run: cargo test -p symbi --test low_beta_stage_replay
+//      python3 crates/symbi/tests/fixtures/low_beta_stage_reference.py
 // =============================================================================
 
 use symbi::regimes::substrate_newtonian_mhd::NewtonianMhdSubstrateKernelSet;
