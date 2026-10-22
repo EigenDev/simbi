@@ -30,7 +30,7 @@ use super::binding::{
 use super::exec::{dispatch_fields, dispatch_fields_runtime_ir};
 use super::layout::{geom_suffix, gr_chart_dof_tag, penalize_name, spacetime_slug};
 use super::params::{
-    ScalarBind, body_scalar, geom_scalar, kernel_geom, motion_scalar, resolve_body_scalars,
+    ScalarBind, body_scalar, faces_stationary, geom_scalar, kernel_geom, motion_scalar, resolve_body_scalars,
     scalars_for,
 };
 use super::types::Solver;
@@ -2976,6 +2976,25 @@ impl FluxSpec {
     }
 }
 
+/// whether the face flux of this scheme has a stationary twin (`_stationary`): the plain cartesian
+/// adiabatic HLLE and HLLC fluxes under either reconstruction, on a flat chart-free layout. every
+/// other family evaluates its face velocity in the general kernel
+pub(crate) fn stationary_flux_baked(
+    prefix: &str,
+    solver_sfx: &str,
+    balance: symbi_discretize::coords::Balance,
+    eos: symbi_discretize::EosArm,
+    geom_sfx: &str,
+    spacetime: symbi_geometry::Spacetime,
+) -> bool {
+    prefix == "adiabatic"
+        && matches!(solver_sfx, "" | "_hllc")
+        && balance == symbi_discretize::coords::Balance::Plain
+        && eos == symbi_discretize::EosArm::IdealGamma
+        && geom_sfx.is_empty()
+        && spacetime == symbi_geometry::Spacetime::Minkowski
+}
+
 pub fn dispatch_flux<const D: usize, const DOF: usize, Mem, Sc>(
     sim: &FieldStore<D, DOF, Mem, Sc>,
     pre: &Field<Sc, D, Mem>,
@@ -2987,56 +3006,28 @@ pub fn dispatch_flux<const D: usize, const DOF: usize, Mem, Sc>(
     Mem: MemoryStorage + Sync,
     Sc: Scalar + OrderedNumeric,
 {
-    let FluxSpec {
-        theta,
-        solver,
-        recon,
-        eos,
-        flatten,
-        balance,
-        rusanov,
-    } = spec;
-    if eos == symbi_discretize::EosArm::TaubMathews {
-        // the tm flux twins are chart-free like every DOF == D rhd flux (the
-        // curvilinear factors ride godunov + the wave-speed map), but they are
-        // baked for the flat spacetime and the plain momentum layout only.
-        assert!(
-            prefix == "rhd"
-                && sim.geom.spacetime == symbi_geometry::Spacetime::Minkowski
-                && DOF == D
-                && !rusanov,
-            "the taub-mathews flux twins are baked for the flat rhd family \
-             (minkowski, ncomp == ndim) only"
-        );
-    }
-    // the ppm face pair loads -3..+2 along the sweep and is baked for the flat
-    // cartesian adiabatic family only; anything else must refuse here, loudly,
-    // before an unbaked-kernel panic or a garbage ghost read could occur.
-    if recon == symbi_discretize::Recon::Ppm {
-        assert!(
-            prefix == "adiabatic",
-            "ppm reconstruction is baked for the adiabatic (newtonian ideal-gas) flux only; \
-             the {prefix} flux family has no ppm twin"
-        );
-        assert!(
-            sim.geom.coords == symbi_geometry::Geometry::Cartesian
-                && sim.geom.spacetime == symbi_geometry::Spacetime::Minkowski
-                && !rusanov,
-            "ppm reconstruction is baked for the flat cartesian chart only"
-        );
-        assert!(
-            sim.geom.ng >= 3,
-            "ppm reconstruction loads -3..+2 along the sweep but the allocated ghost \
-             width is {}; build the sim with .ghosts(3)",
-            sim.geom.ng
-        );
-    }
-    // HLLD is MHD-only by physics — the magnetosonic + Alfven + contact wave structure needs the
-    // magnetic field. the (solver, regime) matrix is enforced at bind time in `with_solver`
-    // (every non-MHD substrate set validates `Solver::valid_for` before storing `solver`, and the
-    // iso path here hardcodes HLLE), so a `dispatch_flux` reaching here off MHD already carries an
-    // MHD-free solver and the check is settled upstream.
-    let face = sim.geom.interior.face_domain(dir);
+    let motion = if stationary_flux_applies(sim, prefix, dir, spec) {
+        symbi_discretize::coords::FaceMotion::Stationary
+    } else {
+        symbi_discretize::coords::FaceMotion::Moving
+    };
+    dispatch_flux_with_motion(sim, pre, prefix, dir, primary, spec, motion);
+}
+
+/// the face-flux kernel the dispatch along `dir` runs for scheme `spec` and face motion `motion`:
+/// the name the bake gives it, resolved from the grid's chart, spacetime and momentum layout
+pub fn face_flux_kernel_name<const D: usize, const DOF: usize, Mem, Sc>(
+    sim: &FieldStore<D, DOF, Mem, Sc>,
+    prefix: &str,
+    dir: usize,
+    spec: FluxSpec,
+    face_motion: symbi_discretize::coords::FaceMotion,
+) -> String
+where
+    Mem: MemoryStorage,
+    Sc: Scalar + OrderedNumeric,
+{
+    let FluxSpec { solver, recon, eos, balance, rusanov, .. } = spec;
     // the flux is geometry-independent apart from two things: the axis-role velocity layout
     // (DOF>NDIM, spherical swirl / cyl-axisymmetric) and the cartesian GR chart (`_cart`, an
     // off-diagonal metric with shift on every axis, distinct from the implicit spherical GR
@@ -3079,7 +3070,7 @@ pub fn dispatch_flux<const D: usize, const DOF: usize, Mem, Sc>(
     // spacetime. flat (Minkowski) keeps the unsuffixed flux; `face_flux_name` appends the slug.
     let recon_sfx = recon.suffix();
     let eos_sfx = eos.suffix();
-    let name = symbi_discretize::kernel_slug::FaceFluxName {
+    symbi_discretize::kernel_slug::FaceFluxName {
         prefix,
         solver: solver_sfx,
         recon: recon_sfx,
@@ -3087,12 +3078,103 @@ pub fn dispatch_flux<const D: usize, const DOF: usize, Mem, Sc>(
         chart: wb_chart,
         eos: eos_sfx,
         geom: geom_sfx,
+        motion: face_motion.suffix(),
         spacetime: sim.geom.spacetime,
         ndim: D,
         dir,
         ..Default::default()
     }
-    .build();
+    .build()
+}
+
+/// whether the stationary twin of this flux is baked and the faces swept along `dir` stand still
+pub fn stationary_flux_applies<const D: usize, const DOF: usize, Mem, Sc>(
+    sim: &FieldStore<D, DOF, Mem, Sc>,
+    prefix: &str,
+    dir: usize,
+    spec: FluxSpec,
+) -> bool
+where
+    Mem: MemoryStorage,
+    Sc: Scalar + OrderedNumeric,
+{
+    let geom_sfx = gr_chart_dof_tag(sim.geom.coords, sim.geom.spacetime, DOF, D);
+    let solver_sfx = if spec.rusanov { "_rusanov" } else { spec.solver.kernel_suffix() };
+    stationary_flux_baked(prefix, solver_sfx, spec.balance, spec.eos, geom_sfx, sim.geom.spacetime)
+        && faces_stationary(&sim.motion, sim.geom.coords, D, dir)
+}
+
+/// the face flux along `dir` with the face motion `motion`: the general kernel, which evaluates
+/// the grid velocity at every face, or its stationary twin, which takes it as zero. the twin is
+/// refused unless it is baked for the scheme and the faces stand still
+#[allow(clippy::too_many_arguments)]
+pub fn dispatch_flux_with_motion<const D: usize, const DOF: usize, Mem, Sc>(
+    sim: &FieldStore<D, DOF, Mem, Sc>,
+    pre: &Field<Sc, D, Mem>,
+    prefix: &str,
+    dir: usize,
+    primary: f64,
+    spec: FluxSpec,
+    face_motion: symbi_discretize::coords::FaceMotion,
+) where
+    Mem: MemoryStorage + Sync,
+    Sc: Scalar + OrderedNumeric,
+{
+    assert!(
+        face_motion == symbi_discretize::coords::FaceMotion::Moving || stationary_flux_applies(sim, prefix, dir, spec),
+        "dispatch_flux: the stationary {prefix} flux along axis {dir} applies to a baked scheme on faces that stand \
+         still; this sweep has a nonzero face-velocity scalar or no stationary twin"
+    );
+    let FluxSpec {
+        theta,
+        recon,
+        eos,
+        flatten,
+        rusanov,
+        ..
+    } = spec;
+    if eos == symbi_discretize::EosArm::TaubMathews {
+        // the tm flux twins are chart-free like every DOF == D rhd flux (the
+        // curvilinear factors ride godunov + the wave-speed map), but they are
+        // baked for the flat spacetime and the plain momentum layout only.
+        assert!(
+            prefix == "rhd"
+                && sim.geom.spacetime == symbi_geometry::Spacetime::Minkowski
+                && DOF == D
+                && !rusanov,
+            "the taub-mathews flux twins are baked for the flat rhd family \
+             (minkowski, ncomp == ndim) only"
+        );
+    }
+    // the ppm face pair loads -3..+2 along the sweep and is baked for the flat
+    // cartesian adiabatic family only; anything else must refuse here, loudly,
+    // before an unbaked-kernel panic or a garbage ghost read could occur.
+    if recon == symbi_discretize::Recon::Ppm {
+        assert!(
+            prefix == "adiabatic",
+            "ppm reconstruction is baked for the adiabatic (newtonian ideal-gas) flux only; \
+             the {prefix} flux family has no ppm twin"
+        );
+        assert!(
+            sim.geom.coords == symbi_geometry::Geometry::Cartesian
+                && sim.geom.spacetime == symbi_geometry::Spacetime::Minkowski
+                && !rusanov,
+            "ppm reconstruction is baked for the flat cartesian chart only"
+        );
+        assert!(
+            sim.geom.ng >= 3,
+            "ppm reconstruction loads -3..+2 along the sweep but the allocated ghost \
+             width is {}; build the sim with .ghosts(3)",
+            sim.geom.ng
+        );
+    }
+    // HLLD is MHD-only by physics — the magnetosonic + Alfven + contact wave structure needs the
+    // magnetic field. the (solver, regime) matrix is enforced at bind time in `with_solver`
+    // (every non-MHD substrate set validates `Solver::valid_for` before storing `solver`, and the
+    // iso path here hardcodes HLLE), so a `dispatch_flux` reaching here off MHD already carries an
+    // MHD-free solver and the check is settled upstream.
+    let face = sim.geom.interior.face_domain(dir);
+    let name = face_flux_kernel_name(sim, prefix, dir, spec, face_motion);
     // scalars by name: the regime's `primary` (bound to `gamma`; iso passes ISO_GAMMA) + the
     // regime-generic `theta` (the theta-MC limiter compression; theta == 1 -> plain minmod).
     // name binding keeps a kernel's theta declaration from shifting a positional arg here.
@@ -3158,11 +3240,19 @@ pub fn dispatch_flux<const D: usize, const DOF: usize, Mem, Sc>(
                     .map(|(_, v)| *v)
                     .expect("dispatch_flux: GR flux needs kerr_spin but the metric supplied none"),
             ),
-            other => Sc::from_f64(
-                motion_scalar(&sim.motion, sim.geom.coords, D, other)
-                    .or_else(|| geom_scalar(&x_lo_phys, &dx_phys, &sim.geom.maps, &sim.geom.index_offset, other))
-                    .unwrap_or_else(|| panic!("dispatch_flux: unexpected scalar {other:?}")),
-            ),
+            other => {
+                // the stationary twin traces a zero face velocity and declares no mesh rate and
+                // no axis position; a declared one means the bake and this dispatch disagree
+                assert!(
+                    face_motion == symbi_discretize::coords::FaceMotion::Moving,
+                    "dispatch_flux: the stationary flux '{name}' declares the moving-face scalar {other:?}"
+                );
+                Sc::from_f64(
+                    motion_scalar(&sim.motion, sim.geom.coords, D, other)
+                        .or_else(|| geom_scalar(&x_lo_phys, &dx_phys, &sim.geom.maps, &sim.geom.index_offset, other))
+                        .unwrap_or_else(|| panic!("dispatch_flux: unexpected scalar {other:?}")),
+                )
+            }
         }
     });
     // PoC: drive the flux dispatch over a `BlockGrid` cover of the face domain

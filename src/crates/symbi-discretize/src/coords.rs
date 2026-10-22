@@ -112,6 +112,27 @@ impl Balance {
     }
 }
 
+/// how the faces of a face-flux kernel move. a moving face carries the grid velocity
+/// `vface = mesh_adot * x_face + mesh_vtrans`, its position taken through the runtime axis map;
+/// a stationary face has `vface = 0` and the kernel reads neither the map nor the mesh rates.
+/// the stationary twin applies to a run whose face-velocity scalars bind to zero.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Default)]
+pub enum FaceMotion {
+    #[default]
+    Moving,
+    Stationary,
+}
+
+impl FaceMotion {
+    /// kernel-name suffix. the moving family keeps its unsuffixed names.
+    pub fn suffix(self) -> &'static str {
+        match self {
+            FaceMotion::Moving => "",
+            FaceMotion::Stationary => "_stationary",
+        }
+    }
+}
+
 impl Recon {
     /// kernel-name suffix. the plm family keeps its unsuffixed names, so every
     /// pre-existing baked kernel name is untouched by the reconstruction axis.

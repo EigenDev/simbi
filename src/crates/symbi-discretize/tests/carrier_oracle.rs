@@ -448,7 +448,7 @@ fn adiabatic_flux_matches_native_physics() {
     let eos = IdealGas { gamma: GAMMA };
     let f =
         symbi_hydro::newtonian::Newtonian.to_flux(&prim, &symbi_algebra::Normalized::axis(0), &eos);
-    let out = run_uniform_euler_flux::<2>(adiabatic_flux_gv::<2>(0, Recon::Plm), &prim, GAMMA, 0);
+    let out = run_uniform_euler_flux::<2>(adiabatic_flux_gv::<2>(0, Recon::Plm, symbi_discretize::coords::FaceMotion::Moving), &prim, GAMMA, 0);
     out.expect(
         flux_cell::<2>(0),
         &[
@@ -1045,7 +1045,7 @@ fn adiabatic_hllc_flux_matches_native_physics_on_uniform_state() {
         None,
     );
     let out =
-        run_uniform_euler_flux::<2>(adiabatic_hllc_flux_gv::<2>(0, Recon::Plm), &prim, GAMMA, 0);
+        run_uniform_euler_flux::<2>(adiabatic_hllc_flux_gv::<2>(0, Recon::Plm, symbi_discretize::coords::FaceMotion::Moving), &prim, GAMMA, 0);
     out.expect(
         flux_cell::<2>(0),
         &[
@@ -1178,7 +1178,7 @@ fn rmhd_hlld_flux_matches_native_physics_on_uniform_state() {
 fn hllc_hlld_builders_render_to_cpu_and_cuda() {
     // the lowerability half of the carrier gate: every HLLC/HLLD builder
     // emits non-empty CPU (rust) and CUDA source. an unlowerable op panics here.
-    KernelRun::new(adiabatic_hllc_flux_gv::<2>(0, Recon::Plm))
+    KernelRun::new(adiabatic_hllc_flux_gv::<2>(0, Recon::Plm, symbi_discretize::coords::FaceMotion::Moving))
         .grid([1, NSWEEP])
         .assert_lowers();
     KernelRun::new(rhd_hllc_flux_gv::<2>(0, EosArm::IdealGamma))
@@ -1280,7 +1280,7 @@ fn euler_flux_nonuniform_reconstruction_drives_limiter() {
     // Gv kernel: that same adiabatic flux on the per-cell series, evaluated on the f64
     // interpreter. the kernel reconstructs internally (the non-uniform input drives its
     // select-branches), so its output at fcell must equal the f64 reference.
-    let out = KernelRun::new(adiabatic_flux_gv::<2>(0, Recon::Plm))
+    let out = KernelRun::new(adiabatic_flux_gv::<2>(0, Recon::Plm, symbi_discretize::coords::FaceMotion::Moving))
         .grid([NSWEEP, 1])
         .compute_window([FCELL as i32, 0], [1, 1])
         .field_with("prim_rho", move |c| rho[c[0]])

@@ -5,7 +5,7 @@
 // =============================================================================
 
 use super::*;
-use crate::coords::Balance;
+use crate::coords::{Balance, FaceMotion};
 use symbi_algebra::Matrix;
 use symbi_algebra::{FaceNormal, Normalized, Physical};
 use symbi_geometry::{
@@ -298,7 +298,12 @@ pub fn imhd_hlld_flux_gv(ndim: u8, dir: u8, coord_n: usize) -> KernelProgram {
 /// the cancellation holds while vface and the geometry agree on where the face lies; a linear
 /// position `x_lo + i*dx` on a graded axis breaks it by the amount the two reconstructions
 /// differ, which grows with the grading.
-fn mesh_face_velocity_gv<'t>(cx: TraceCx<'t>, dir: u8) -> Gv<'t> {
+///
+/// a stationary face traces `vface = 0` and registers none of these scalars.
+fn mesh_face_velocity_gv<'t>(cx: TraceCx<'t>, dir: u8, motion: FaceMotion) -> Gv<'t> {
+    if motion == FaceMotion::Stationary {
+        return Gv::ZERO;
+    }
     let mesh_adot = cx.scalar(&MeshScalar::Adot(dir).name());
     let x_face = crate::gv::geometry::gv_axis_face_at(cx, dir as usize, Spacing::Uniform, 0);
     mesh_adot * x_face + cx.scalar(&MeshScalar::Vtrans(dir).name())
@@ -326,6 +331,7 @@ fn euler_reconstruct<'t, const D: usize>(
     coord_n: usize,
     recon: Recon,
     balanced: Option<Balanced<'_>>,
+    motion: FaceMotion,
 ) -> (
     Prim<Gv<'t>, D>,
     Prim<Gv<'t>, D>,
@@ -492,7 +498,7 @@ fn euler_reconstruct<'t, const D: usize>(
     let right =
         Prim::<Gv, D>::adiabatic(Density(rho_lr.1), Tensor::new(vr_arr), Pressure(pre_lr.1));
     let nhat = Normalized::axis(coord_n);
-    let vface = mesh_face_velocity_gv(cx, dir);
+    let vface = mesh_face_velocity_gv(cx, dir, motion);
     (left, right, nhat, vface)
 }
 
@@ -536,6 +542,7 @@ fn euler_hlle_flux_gv<const D: usize, R>(
     coord_n: usize,
     recon: Recon,
     eos_arm: EosArm,
+    motion: FaceMotion,
 ) -> KernelProgram
 where
     R: for<'t> Regime<
@@ -554,7 +561,7 @@ where
         let eos = super::gv_eos(eos_arm, gamma);
         // the single-source physics: reconstructed L/R primitives -> canonical HLLE.
         let (left, right, nhat, vface) =
-            euler_reconstruct::<D>(cx, ndim, dir, coord_n, recon, None);
+            euler_reconstruct::<D>(cx, ndim, dir, coord_n, recon, None, motion);
         let flux = hlle(regime, &eos, &left, &right, &nhat, vface);
         euler_flux_writes(&flux)
     })
@@ -563,7 +570,7 @@ where
 /// the adiabatic (ideal-gas newtonian euler) face flux — `euler_hlle_flux_gv` at the
 /// `Newtonian` regime. replaces the cartesian `hlle_flux(.., has_energy=true)` builder.
 /// cartesian: ncomp == ndim == D, sweep coordinate == grid `dir`.
-pub fn adiabatic_flux_gv<const D: usize>(dir: u8, recon: Recon) -> KernelProgram {
+pub fn adiabatic_flux_gv<const D: usize>(dir: u8, recon: Recon, motion: FaceMotion) -> KernelProgram {
     euler_hlle_flux_gv::<D, _>(
         &Newtonian,
         D as u8,
@@ -571,6 +578,7 @@ pub fn adiabatic_flux_gv<const D: usize>(dir: u8, recon: Recon) -> KernelProgram
         dir as usize,
         recon,
         EosArm::IdealGamma,
+        motion,
     )
 }
 
@@ -579,7 +587,7 @@ pub fn adiabatic_flux_gv<const D: usize>(dir: u8, recon: Recon) -> KernelProgram
 /// axis 1 is the z coordinate). replaces the cyl r-z `hlle_flux` Expr builder.
 pub fn adiabatic_flux_cyl_rz_gv(dir: u8) -> KernelProgram {
     let coord_n = [0usize, 2][dir as usize]; // (r, z) grid axes -> coordinates 0, 2
-    euler_hlle_flux_gv::<3, _>(&Newtonian, 2, dir, coord_n, Recon::Plm, EosArm::IdealGamma)
+    euler_hlle_flux_gv::<3, _>(&Newtonian, 2, dir, coord_n, Recon::Plm, EosArm::IdealGamma, FaceMotion::Moving)
 }
 
 /// the RHD (special-relativistic euler) face flux — `euler_hlle_flux_gv` at the `Rhd`
@@ -587,7 +595,7 @@ pub fn adiabatic_flux_cyl_rz_gv(dir: u8) -> KernelProgram {
 /// Expr builder + `rhd_side`. cartesian-only (the rhd arm bakes on the cartesian chart),
 /// ncomp == ndim == D.
 pub fn rhd_flux_gv<const D: usize>(dir: u8, eos_arm: EosArm) -> KernelProgram {
-    euler_hlle_flux_gv::<D, _>(&Rhd, D as u8, dir, dir as usize, Recon::Plm, eos_arm)
+    euler_hlle_flux_gv::<D, _>(&Rhd, D as u8, dir, dir as usize, Recon::Plm, eos_arm, FaceMotion::Moving)
 }
 
 /// the RHD face flux on a curved spacetime — the `_schw`/`_ks` GR path. PLM-reconstruct the
@@ -624,7 +632,7 @@ where
             gamma: cx.scalar("gamma"),
         };
         let (left, right, _nhat, vface) =
-            euler_reconstruct::<D>(cx, ndim as u8, dir, axes[dir as usize], Recon::Plm, None);
+            euler_reconstruct::<D>(cx, ndim as u8, dir, axes[dir as usize], Recon::Plm, None, FaceMotion::Moving);
         // the in-kernel spatial metric + lapse at the swept-axis face, transverse gridded coordinates at
         // the cell centroid — the correct face-metric position for a `dir` sweep. the spherical metrics
         // read the gridded (r, theta) alone — gamma_{phi phi} = r^2 sin^2(theta) — so an ungridded
@@ -852,7 +860,7 @@ fn iso_hlle_flux_gv<const D: usize>(ndim: u8, dir: u8, coord_n: usize) -> Kernel
         // HLLE arms — same algorithm as `riemann::hlle` (moving-face form: fan
         // comparisons against vface, `f - u*vface` per arm), specialised to iso's
         // (den, mom) tuple. the static binding traces vface = 0*x — exactly zero.
-        let vface = mesh_face_velocity_gv(cx, dir);
+        let vface = mesh_face_velocity_gv(cx, dir, FaceMotion::Moving);
         let inv = Gv::ONE / (s_r - s_l);
         let den_hll = (f_l_den * s_r - f_r_den * s_l + (rho_r - rho_l) * (s_l * s_r)) * inv;
         let den_u_hll = (rho_r * s_r - rho_l * s_l - f_r_den + f_l_den) * inv;
@@ -1411,6 +1419,7 @@ fn adiabatic_hllc_at_arm<const D: usize>(
     balance: Balance,
     coords: Coords,
     axes: &[usize],
+    motion: FaceMotion,
 ) -> KernelProgram {
     trace_kernel(|cx| {
         let eos = IdealGas {
@@ -1425,7 +1434,7 @@ fn adiabatic_hllc_at_arm<const D: usize>(
             }),
         };
         let (left, right, nhat, vface) =
-            euler_reconstruct::<D>(cx, D as u8, dir, axes[dir as usize], recon, balanced);
+            euler_reconstruct::<D>(cx, D as u8, dir, axes[dir as usize], recon, balanced, motion);
         // the neighborhood pressure ratio the transverse shear viscosity is weighted by. only the
         // HLLC+ arm carries that viscosity, so only it pays the off-axis reads the sensor needs.
         let shear = matches!(smoother, ShockwaveLimiter::HllcPlus).then(|| {
@@ -1594,10 +1603,11 @@ pub fn adiabatic_hllc_plus_flux_gv<const D: usize>(
         balance,
         coords,
         axes,
+        FaceMotion::Moving,
     )
 }
 
-pub fn adiabatic_hllc_flux_gv<const D: usize>(dir: u8, recon: Recon) -> KernelProgram {
+pub fn adiabatic_hllc_flux_gv<const D: usize>(dir: u8, recon: Recon, motion: FaceMotion) -> KernelProgram {
     adiabatic_hllc_at_arm::<D>(
         dir,
         recon,
@@ -1605,6 +1615,7 @@ pub fn adiabatic_hllc_flux_gv<const D: usize>(dir: u8, recon: Recon) -> KernelPr
         Balance::Plain,
         Coords::Cartesian,
         &[0, 1, 2][..D],
+        motion,
     )
 }
 
@@ -1630,6 +1641,7 @@ pub fn adiabatic_hllc_wb_flux_gv<const D: usize>(
         Balance::Hydrostatic,
         coords,
         axes,
+        FaceMotion::Moving,
     )
 }
 
@@ -1646,6 +1658,7 @@ pub fn adiabatic_hlle_wb_flux_gv<const D: usize>(
         Balance::Hydrostatic,
         coords,
         axes,
+        FaceMotion::Moving,
     )
 }
 
@@ -1660,7 +1673,7 @@ fn rhd_hllc_at_arm<const D: usize>(
         let gamma = cx.scalar("gamma");
         let eos = super::gv_eos(eos_arm, gamma);
         let (left, right, nhat, vface) =
-            euler_reconstruct::<D>(cx, D as u8, dir, dir as usize, Recon::Plm, None);
+            euler_reconstruct::<D>(cx, D as u8, dir, dir as usize, Recon::Plm, None, FaceMotion::Moving);
         let shear = matches!(smoother, ShockwaveLimiter::HllcPlus).then(|| {
             let eos = eos.clone();
             hllc_plus_sensors(cx, D as u8, dir, &move |rho, pre| {

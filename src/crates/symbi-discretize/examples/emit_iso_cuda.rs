@@ -68,7 +68,7 @@ fn main() {
     // the gv single source. iso (IsoNewtonian, no energy) + adiabatic (newtonian, energy).
     let iso_f = iso_flux_gv::<1>(0);
     emit_gv(&out, "iso_face_flux_1d", 1, iso_f);
-    let adi_f = adiabatic_flux_gv::<1>(0, Recon::Plm);
+    let adi_f = adiabatic_flux_gv::<1>(0, Recon::Plm, symbi_discretize::coords::FaceMotion::Moving);
     emit_gv(&out, "adiabatic_face_flux_1d", 1, adi_f);
 
     // c2p: the EOS closures (reciprocal multiply; adiabatic adds the energy term). both

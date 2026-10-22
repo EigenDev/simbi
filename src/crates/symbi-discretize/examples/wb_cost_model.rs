@@ -82,7 +82,7 @@ fn ablate() {
         } else {
             {
                 let _ = bal;
-                adiabatic_hllc_flux_gv::<3>(0, Recon::Plm)
+                adiabatic_hllc_flux_gv::<3>(0, Recon::Plm, symbi_discretize::coords::FaceMotion::Moving)
             }
         };
         let k = program.kernel();
@@ -189,7 +189,7 @@ fn main() {
 fn emit_probe() {
     use symbi_ir::emit::{Precision, Target, TargetConfig};
     use symbi_ir::{KernelEmitInputs, emit_kernel_from_lowering};
-    let program = adiabatic_hllc_flux_gv::<3>(0, Recon::Plm);
+    let program = adiabatic_hllc_flux_gv::<3>(0, Recon::Plm, symbi_discretize::coords::FaceMotion::Moving);
     let k = program.kernel();
     let w = program.writes();
     let desc = emit_kernel_from_lowering(

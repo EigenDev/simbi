@@ -35,6 +35,7 @@ static REGISTRY: Mutex<Vec<(String, String)>> = Mutex::new(Vec::new());
 // every kernel's construction lives in symbi-discretize as a builder (iso_c2p,
 // hlle_flux, rhd_hlle_flux, godunov_euler/snapshot/rk2, ...). build.rs only
 // drives them: build the graph via a builder, then emit (CPU Rust + CUDA source).
+use symbi_discretize::coords::FaceMotion;
 use symbi_discretize::{
     Coords, EosArm, GeoSource, Recon, Spacetime, Spacing, body_feedback_drain_gv,
     body_feedback_grav_gv, body_feedback_gv, body_feedback_iso_gv, body_source_gv,
@@ -935,12 +936,17 @@ fn gen_iso_face_flux(out_dir: &str, ndim: u8, dir: u8) {
 // the adiabatic face flux: hlle_flux with the energy component (mass + momentum +
 // energy). same EOS-generic body as the iso flux, plus E = p/(gamma-1)+0.5*rho|v|^2
 // and F_E = (E+p)*vn.
-fn gen_adiabatic_face_flux(out_dir: &str, ndim: u8, dir: u8, geom: Geom, recon: Recon) {
-    let name = format!(
-        "adiabatic_face_flux{}{}_{ndim}d_{dir}",
-        recon.suffix(),
-        geom.suffix()
-    );
+fn gen_adiabatic_face_flux(out_dir: &str, ndim: u8, dir: u8, geom: Geom, recon: Recon, motion: FaceMotion) {
+    let name = symbi_discretize::kernel_slug::FaceFluxName {
+        prefix: "adiabatic",
+        recon: recon.suffix(),
+        geom: geom.suffix(),
+        motion: motion.suffix(),
+        ndim: ndim as usize,
+        dir: dir as usize,
+        ..Default::default()
+    }
+    .build();
     // the cartesian adiabatic face flux is the gv single-source physics: PLM reconstruction
     // (a Gv stencil via field_shifted) composed with symbi-hydro's `riemann::hlle` at S=Gv
     // (adiabatic_flux_gv) — replacing the hand-written hlle_flux Expr builder + its
@@ -948,8 +954,9 @@ fn gen_adiabatic_face_flux(out_dir: &str, ndim: u8, dir: u8, geom: Geom, recon: 
     // (ncomp != ndim, non-identity axes) stays on the Expr builder below until the gv flux
     // generalizes over ncomp + the axes mapping (the c2p pattern). numerically equiv (ULP).
     let program = if geom.coords == Coords::Cartesian {
-        gv_dim!(ndim, symbi_discretize::gv::adiabatic_flux_gv, dir, recon)
+        gv_dim!(ndim, symbi_discretize::gv::adiabatic_flux_gv, dir, recon, motion)
     } else {
+        assert!(motion == FaceMotion::Moving, "the stationary flux twin is baked on the cartesian chart");
         // cyl r-z (ncomp=3 swirl on the 2D (r,z) grid): the sweep coordinate is axes[dir].
         assert!(
             geom.ncomp == 3 && ndim == 2,
@@ -1296,13 +1303,23 @@ fn gen_rmhd_face_flux(out_dir: &str, ndim: u8) {
 
 // ---- HLLC variants ---- the contact-resolving 3-wave Riemann solver. iso is
 // HLLE-only by physics (no contact wave). cartesian, one per (ndim, dir).
-fn gen_adiabatic_hllc_face_flux(out_dir: &str, ndim: u8, dir: u8, recon: Recon) {
-    let name = format!("adiabatic_face_flux_hllc{}_{ndim}d_{dir}", recon.suffix());
+fn gen_adiabatic_hllc_face_flux(out_dir: &str, ndim: u8, dir: u8, recon: Recon, motion: FaceMotion) {
+    let name = symbi_discretize::kernel_slug::FaceFluxName {
+        prefix: "adiabatic",
+        solver: "_hllc",
+        recon: recon.suffix(),
+        motion: motion.suffix(),
+        ndim: ndim as usize,
+        dir: dir as usize,
+        ..Default::default()
+    }
+    .build();
     let program = gv_dim!(
         ndim,
         symbi_discretize::gv::adiabatic_hllc_flux_gv,
         dir,
-        recon
+        recon,
+        motion
     );
     emit_gv(out_dir, &name, ndim, &program);
 }
@@ -3433,17 +3450,23 @@ fn main() {
         // one face flux per sweep dir (the reconstruction axis is baked).
         for dir in 0..ndim {
             gen_iso_face_flux(&out_dir, ndim, dir);
-            gen_adiabatic_face_flux(&out_dir, ndim, dir, Geom::cart(ndim), Recon::Plm);
             // the ppm twin of every cartesian adiabatic face flux: same riemann solver,
-            // wider (-3..+2) load stencil, `_ppm`-tagged kernel name.
-            gen_adiabatic_face_flux(&out_dir, ndim, dir, Geom::cart(ndim), Recon::Ppm);
+            // wider (-3..+2) load stencil, `_ppm`-tagged kernel name. each has a stationary
+            // twin (`_stationary`, vface = 0, no axis map or mesh rates) the dispatch selects
+            // when the face-velocity scalars bind to zero.
+            for motion in [FaceMotion::Moving, FaceMotion::Stationary] {
+                gen_adiabatic_face_flux(&out_dir, ndim, dir, Geom::cart(ndim), Recon::Plm, motion);
+                gen_adiabatic_face_flux(&out_dir, ndim, dir, Geom::cart(ndim), Recon::Ppm, motion);
+            }
             gen_rhd_face_flux(&out_dir, ndim, dir, EosArm::IdealGamma);
             gen_rhd_face_flux(&out_dir, ndim, dir, EosArm::TaubMathews);
             // HLLC variants — contact-resolving 3-wave solver, available on every
             // regime that has a contact wave. iso is HLLE-only by physics. cartesian
             // only (curvilinear HLLC is unbaked).
-            gen_adiabatic_hllc_face_flux(&out_dir, ndim, dir, Recon::Plm);
-            gen_adiabatic_hllc_face_flux(&out_dir, ndim, dir, Recon::Ppm);
+            for motion in [FaceMotion::Moving, FaceMotion::Stationary] {
+                gen_adiabatic_hllc_face_flux(&out_dir, ndim, dir, Recon::Plm, motion);
+                gen_adiabatic_hllc_face_flux(&out_dir, ndim, dir, Recon::Ppm, motion);
+            }
             for cc in [Coords::Cartesian, Coords::Cylindrical, Coords::Spherical] {
                 for rc in [Recon::Plm, Recon::Ppm] {
                     gen_adiabatic_wb_face_flux(&out_dir, ndim, dir, rc, cc, "_hllc_plus");
@@ -3557,7 +3580,7 @@ fn main() {
     gen_godunov_stage(&out_dir, 2, "adiabatic", true, cyl.clone(), None);
     gen_snapshot(&out_dir, 2, "adiabatic", true, cyl.clone());
     for dir in 0..2 {
-        gen_adiabatic_face_flux(&out_dir, 2, dir, cyl.clone(), Recon::Plm);
+        gen_adiabatic_face_flux(&out_dir, 2, dir, cyl.clone(), Recon::Plm, FaceMotion::Moving);
     }
     // the cylindrical natural (DOF == NDIM) hydro family for all three regimes (iso /
     // adiabatic / rhd), at 1D (radial), 2D (r-phi disk plane), and 3D (r,phi,z) — the

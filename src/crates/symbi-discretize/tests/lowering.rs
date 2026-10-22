@@ -82,7 +82,7 @@ fn flux_kernels_lower() {
     KernelRun::new(iso_flux_gv::<1>(0))
         .grid([8])
         .assert_lowers();
-    KernelRun::new(adiabatic_flux_gv::<1>(0, Recon::Plm))
+    KernelRun::new(adiabatic_flux_gv::<1>(0, Recon::Plm, symbi_discretize::coords::FaceMotion::Moving))
         .grid([8])
         .assert_lowers();
     KernelRun::new(rhd_flux_gv::<1>(0, EosArm::IdealGamma))
@@ -92,7 +92,7 @@ fn flux_kernels_lower() {
     KernelRun::new(iso_flux_gv::<2>(1))
         .grid([8, 8])
         .assert_lowers();
-    KernelRun::new(adiabatic_flux_gv::<2>(1, Recon::Plm))
+    KernelRun::new(adiabatic_flux_gv::<2>(1, Recon::Plm, symbi_discretize::coords::FaceMotion::Moving))
         .grid([8, 8])
         .assert_lowers();
     KernelRun::new(rhd_flux_gv::<2>(1, EosArm::IdealGamma))

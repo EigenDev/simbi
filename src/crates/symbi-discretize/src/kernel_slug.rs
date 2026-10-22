@@ -198,6 +198,7 @@ pub struct FaceFluxName<'a> {
     pub chart: &'a str,
     pub eos: &'a str,
     pub geom: &'a str,
+    pub motion: &'a str,
     pub spacetime: Spacetime,
     pub ndim: usize,
     pub dir: usize,
@@ -213,6 +214,7 @@ impl Default for FaceFluxName<'_> {
             chart: "",
             eos: "",
             geom: "",
+            motion: "",
             spacetime: Spacetime::Minkowski,
             ndim: 1,
             dir: 0,
@@ -223,7 +225,7 @@ impl Default for FaceFluxName<'_> {
 impl FaceFluxName<'_> {
     pub fn build(&self) -> String {
         format!(
-            "{}_face_flux{}{}{}{}{}{}{}_{}d_{}",
+            "{}_face_flux{}{}{}{}{}{}{}{}_{}d_{}",
             self.prefix,
             self.solver,
             self.recon,
@@ -231,6 +233,7 @@ impl FaceFluxName<'_> {
             self.chart,
             self.eos,
             self.geom,
+            self.motion,
             spacetime_slug(self.spacetime),
             self.ndim,
             self.dir

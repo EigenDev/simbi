@@ -204,6 +204,20 @@ pub(crate) fn motion_scalar(
     }
 }
 
+/// whether the faces swept along `dir` stand still: the two moving-mesh scalars the general
+/// face flux binds for that axis, the expansion rate and the translation velocity, are both
+/// exactly zero, so its traced face velocity `mesh_adot * x_face + mesh_vtrans` is zero at
+/// every face of a finite grid
+pub(crate) fn faces_stationary(
+    motion: &symbi_geometry::MotionState<f64>,
+    coords: symbi_geometry::Geometry,
+    ndim: usize,
+    dir: usize,
+) -> bool {
+    let bound = |m| motion_scalar(motion, coords, ndim, ScalarRef::Mesh(m));
+    bound(symbi_ir::MeshScalar::Adot(dir as u8)) == Some(0.0) && bound(symbi_ir::MeshScalar::Vtrans(dir as u8)) == Some(0.0)
+}
+
 // ---- immersed-body forward source: gravity + accretion ----------
 
 /// resolve a body scalar ref `body_{idx}_{field}` to its value: `{mass,soft,racc,rmask,sink,delta}`

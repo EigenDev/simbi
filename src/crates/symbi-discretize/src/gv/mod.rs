@@ -967,7 +967,7 @@ mod tests {
         // carrier-generic riemann::hlle (-> Select branches). proves cx.field_shifted +
         // symbi-hydro's hlle build a dispatchable face-flux kernel — no rhd_side-style
         // hand-written per-component U/F. manifest + writes match the substrate hlle_flux.
-        let program = adiabatic_flux_gv::<1>(0, Recon::Plm);
+        let program = adiabatic_flux_gv::<1>(0, Recon::Plm, crate::coords::FaceMotion::Moving);
         let k = program.kernel();
         let writes = program.writes();
         assert_eq!(
