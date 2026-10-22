@@ -590,6 +590,7 @@ pub struct UnifiedMemory;
 impl MemoryStorage for UnifiedMemory {
     type HostAccess = UnifiedMemory;
     const IS_HOST_ACCESSIBLE: bool = true;
+    const IS_HOST_RESIDENT: bool = true;
     const IS_DEVICE_ACCESSIBLE: bool = true;
     const IS_UNIFIED: bool = true;
     const PREFERRED_ALIGNMENT: usize = 256;

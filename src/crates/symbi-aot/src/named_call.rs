@@ -159,10 +159,7 @@ impl<'a, S: Scalar + OrderedNumeric> NamedKernel<'a, S> {
                     panic!("kernel '{}': no buffer bound for manifest field '{field}'; expected {names:?}", self.name)
                 });
             let b = provided.swap_remove(pos);
-            let (len, is_mut) = match &b.handle {
-                BufHandle::Host(d) => (d.len() as u32, false),
-                BufHandle::HostMut(d) => (d.len() as u32, true),
-            };
+            let (len, is_mut) = (b.handle.len() as u32, b.handle.is_output());
             assert_eq!(
                 is_mut,
                 *is_out,
@@ -193,6 +190,7 @@ impl<'a, S: Scalar + OrderedNumeric> NamedKernel<'a, S> {
             match handle {
                 BufHandle::Host(d) => inputs.push(CpuField::from_layout(d, lo, ext)),
                 BufHandle::HostMut(d) => outputs.push(CpuFieldMut::from_layout(d, lo, ext)),
+                BufHandle::Device(_) | BufHandle::DeviceMut(_) => crate::refuse_device_binding(),
             }
         }
 

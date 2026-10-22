@@ -12,7 +12,9 @@
 // - a store outside the device-local scope is refused, naming the feature
 // - managed and device-local storage evolve the same bits
 // - a smooth entropy wave converges at second order on device-local storage
-// - a run restarted through a checkpoint continues bit for bit
+// - a run restarted through a checkpoint reproduces the straight run's recovered state (ghosts
+//   included) and conserved interior bit for bit; the conserved ghost band differs and is reported
+// - no kernel of the step reads the conserved ghost band, the correction and replay paths included
 // - a run that fails at its initial recovery releases its storage, and the next run proceeds
 //
 // usage:
@@ -97,23 +99,54 @@ fn mirror<Mem: MemoryStorage>(sim: &HostSim) -> SpaceSim<Mem> {
     mirror_sim::<_, 2, 2, _, _, _, HostMemory, Mem>(sim, 0).expect("the mirror")
 }
 
-/// every field of the evolved state of `store`, downloaded whole (ghosts included), in a fixed order
-fn evolved<Mem: MemoryStorage>(store: &FieldStore<2, 2, Mem, f64>) -> Vec<Vec<f64>> {
-    let (c, p) = (&store.fields.cons, &store.fields.prim);
-    let mut fields: Vec<&Field<f64, 2, Mem>> = vec![&c.den, &c.mom[0], &c.mom[1], &p.rho, &p.vel[0], &p.vel[1]];
+/// the conserved fields of `store` (density, momenta, energy), downloaded whole, ghosts included
+fn conserved<Mem: MemoryStorage>(store: &FieldStore<2, 2, Mem, f64>) -> Vec<Vec<f64>> {
+    let c = &store.fields.cons;
+    let mut fields: Vec<&Field<f64, 2, Mem>> = vec![&c.den, &c.mom[0], &c.mom[1]];
     fields.extend(c.nrg.iter());
+    fields.iter().map(|f| f.download().expect("download")).collect()
+}
+
+/// the recovered fields of `store` (density, velocities, pressure, recovery status), downloaded
+/// whole, ghosts included
+fn recovered<Mem: MemoryStorage>(store: &FieldStore<2, 2, Mem, f64>) -> Vec<Vec<f64>> {
+    let p = &store.fields.prim;
+    let mut fields: Vec<&Field<f64, 2, Mem>> = vec![&p.rho, &p.vel[0], &p.vel[1]];
     fields.extend(p.pre.iter());
     fields.push(&store.fields.c2p_error);
     fields.iter().map(|f| f.download().expect("download")).collect()
 }
 
-/// the interior cells of every field of [`evolved`]: the state a checkpoint carries. the conserved
-/// ghost band is dead storage the kernels never read, and a restart rebuilds it from the halo
-/// primitives, so two runs agree on it only where they share a history
-fn evolved_interior<Mem: MemoryStorage>(store: &FieldStore<2, 2, Mem, f64>) -> Vec<Vec<f64>> {
-    let allocated = &store.geom.allocated;
-    let interior: Vec<usize> = store.geom.interior.iter().map(|c| allocated.flat_index(c)).collect();
-    evolved(store).into_iter().map(|f| interior.iter().map(|&ii| f[ii]).collect()).collect()
+/// every field of the evolved state, whole
+fn evolved<Mem: MemoryStorage>(store: &FieldStore<2, 2, Mem, f64>) -> Vec<Vec<f64>> {
+    let mut fields = conserved(store);
+    fields.extend(recovered(store));
+    fields
+}
+
+/// the flat indices of the allocation's cells inside (`inside = true`) or outside the interior
+fn cells<Mem: MemoryStorage>(store: &FieldStore<2, 2, Mem, f64>, inside: bool) -> Vec<usize> {
+    let (allocated, interior) = (&store.geom.allocated, &store.geom.interior);
+    allocated.iter().filter(|&c| interior.contains(c) == inside).map(|c| allocated.flat_index(c)).collect()
+}
+
+fn select(fields: Vec<Vec<f64>>, at: &[usize]) -> Vec<Vec<f64>> {
+    fields.into_iter().map(|f| at.iter().map(|&ii| f[ii]).collect()).collect()
+}
+
+/// every conserved field's ghost band overwritten with NaN, through the synchronized transfers
+fn poison_conserved_ghosts<Mem: MemoryStorage>(store: &FieldStore<2, 2, Mem, f64>) {
+    let ghosts = cells(store, false);
+    let c = &store.fields.cons;
+    let mut fields = vec![&c.den, &c.mom[0], &c.mom[1]];
+    fields.extend(c.nrg.iter());
+    for f in fields {
+        let mut values = f.download().expect("download");
+        for &ii in &ghosts {
+            values[ii] = f64::NAN;
+        }
+        f.upload(&values).expect("upload");
+    }
 }
 
 fn assert_same_bits(a: &[Vec<f64>], b: &[Vec<f64>], what: &str) {
@@ -203,7 +236,7 @@ fn a_smooth_entropy_wave_converges_at_second_order_on_device_local_storage() {
 }
 
 #[test]
-fn a_restart_through_a_checkpoint_continues_bit_for_bit() {
+fn a_restart_reproduces_the_recovered_state_and_the_conserved_interior() {
     let dir = std::env::temp_dir().join(format!("symbi_device_local_{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
     let path = dir.join("half.h5");
@@ -231,7 +264,21 @@ fn a_restart_through_a_checkpoint_continues_bit_for_bit() {
     run(&mut second, t_end).expect("the second segment");
 
     assert_eq!((second.iteration, second.time), (straight.iteration, straight.time));
-    assert_same_bits(&evolved_interior(&straight.store), &evolved_interior(&second.store), "straight vs restarted");
+    // the recovered state agrees everywhere, ghosts included, and the conserved state on the
+    // interior. the conserved ghost band differs: the straight run holds whatever the band last
+    // received, the restart the conserved image of the checkpointed halo primitives. no kernel
+    // of the step reads the band (`no_kernel_of_the_step_reads_the_conserved_ghost_band`)
+    assert_same_bits(&recovered(&straight.store), &recovered(&second.store), "straight vs restarted, recovered");
+    let interior = cells(&straight.store, true);
+    assert_same_bits(
+        &select(conserved(&straight.store), &interior),
+        &select(conserved(&second.store), &interior),
+        "straight vs restarted, conserved interior",
+    );
+    let ghosts = cells(&straight.store, false);
+    let (a, b) = (select(conserved(&straight.store), &ghosts), select(conserved(&second.store), &ghosts));
+    let differing: usize = a.iter().zip(&b).map(|(x, y)| x.iter().zip(y).filter(|(p, q)| p.to_bits() != q.to_bits()).count()).sum();
+    eprintln!("restart: conserved ghost band differs in {differing} of {} values", ghosts.len() * a.len());
     let _ = std::fs::remove_dir_all(&dir);
 }
 
@@ -252,4 +299,41 @@ fn a_run_that_fails_releases_its_storage_and_the_next_run_proceeds() {
     let mut next = mirror::<Local>(&wave(16));
     run(&mut next, 4.0 * PINNED_DT).expect("the run after a failure");
     assert!(next.iteration > 0);
+}
+
+#[test]
+fn no_kernel_of_the_step_reads_the_conserved_ghost_band() {
+    // two device-local runs from one state, one with its conserved ghost band overwritten by NaN
+    // before the first step and after every step. a kernel reading the band would carry a NaN
+    // into the recovered state or the interior. an unrecoverable cell scheduled at step 3 drives
+    // the first-order correction, its freeze, and the whole-step replay from the step-entry
+    // snapshot through the same test
+    let mut source = wave(32);
+    source.store.max_dt = PINNED_DT;
+    let center = [16isize, 16];
+    *source.store.workspace.unrecoverable_once.lock().unwrap() = vec![(3, 0, center, false)];
+    let t_end = 12.0 * PINNED_DT;
+
+    let mut clean = mirror::<Local>(&source);
+    run(&mut clean, t_end).expect("the clean run");
+    let mut poisoned = mirror::<Local>(&source);
+    poison_conserved_ghosts(&poisoned.store);
+    let kernels = kernels(&poisoned);
+    symbi::sim::evolve::evolve_with_callback(&mut poisoned, &kernels, t_end, 1, |sim| poison_conserved_ghosts(&sim.store))
+        .expect("the poisoned run");
+
+    for sim in [&clean, &poisoned] {
+        let slots = sim.store.workspace.unrecoverable_once.lock().unwrap().clone();
+        assert_eq!(slots, vec![(3, 0, center, true)], "the scheduled cell never fired; the correction paths went untested");
+    }
+    assert_eq!((poisoned.iteration, poisoned.time), (clean.iteration, clean.time));
+    let band = select(conserved(&poisoned.store), &cells(&poisoned.store, false));
+    assert!(band.iter().flatten().all(|v| v.is_nan()), "the conserved ghost band holds values other than the poison");
+    assert_same_bits(&recovered(&clean.store), &recovered(&poisoned.store), "clean vs poisoned band, recovered");
+    let interior = cells(&clean.store, true);
+    assert_same_bits(
+        &select(conserved(&clean.store), &interior),
+        &select(conserved(&poisoned.store), &interior),
+        "clean vs poisoned band, conserved interior",
+    );
 }

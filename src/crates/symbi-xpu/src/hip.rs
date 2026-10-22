@@ -510,6 +510,7 @@ pub struct HipManaged;
 impl MemoryStorage for HipManaged {
     type HostAccess = HipManaged;
     const IS_HOST_ACCESSIBLE: bool = true;
+    const IS_HOST_RESIDENT: bool = true;
     const IS_DEVICE_ACCESSIBLE: bool = true;
     const IS_UNIFIED: bool = true;
     const PREFERRED_ALIGNMENT: usize = 256;
@@ -565,6 +566,7 @@ const HIP_MEMCPY_DEVICE_TO_HOST: c_int = 2;
 impl MemoryStorage for HipDeviceLocal {
     type HostAccess = crate::memory::NoHostAccess;
     const IS_HOST_ACCESSIBLE: bool = false;
+    const IS_HOST_RESIDENT: bool = false;
     const IS_DEVICE_ACCESSIBLE: bool = true;
     const IS_UNIFIED: bool = false;
     const PREFERRED_ALIGNMENT: usize = 256;
@@ -580,8 +582,11 @@ impl MemoryStorage for HipDeviceLocal {
         Ok(ptr as *mut u8)
     }
 
+    // a kernel launched before the last handle dropped may still read or write the allocation;
+    // the queue drains before the free, so the storage outlives every launch that bound it
     fn deallocate(ptr: *mut u8, _bytes: usize) {
         unsafe {
+            let _ = hipDeviceSynchronize();
             let _ = hipFree(ptr as *mut c_void);
         }
     }

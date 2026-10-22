@@ -197,7 +197,8 @@ impl<T: Copy + Default + 'static, const D: usize, M: MemorySpace, C: Centering> 
 
     /// immutable view over the entire domain.
     pub fn view(&self) -> View<T, D> {
-        View::from_domain(self.storage.get().as_ptr::<T>(), &self.domain)
+        // safety: a `MemorySpace` allocation is host-dereferenceable and spans the domain
+        unsafe { View::from_domain(self.storage.get().as_ptr::<T>(), &self.domain) }
     }
 
     /// mutable view over the entire domain.
@@ -206,7 +207,7 @@ impl<T: Copy + Default + 'static, const D: usize, M: MemorySpace, C: Centering> 
         // mutable views disjoint; writers run sequentially between
         // sync points.
         let ptr = self.storage.get().as_ptr::<T>() as *mut T;
-        ViewMut::from_domain(ptr, &self.domain)
+        unsafe { ViewMut::from_domain(ptr, &self.domain) }
     }
 
     // ---- coord-indexed access (used by #[symbi::kernel(coord)] macro) ----

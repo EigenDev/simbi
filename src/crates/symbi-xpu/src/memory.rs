@@ -39,6 +39,11 @@ pub trait MemoryStorage: 'static + Send + Sync + Sized {
     type HostAccess: MemorySpace + Sync;
     /// host code may dereference the storage directly (host and managed memory)
     const IS_HOST_ACCESSIBLE: bool;
+    /// the storage is mapped in host memory, so a host reference into it is valid: host and
+    /// managed memory, and the opaque cpu stand-in. kernel bindings of host-resident storage are
+    /// host slices; every other space binds as a device pointer and length, and the cpu executor
+    /// refuses it
+    const IS_HOST_RESIDENT: bool;
     /// kernels in this space run on a gpu
     const IS_DEVICE_ACCESSIBLE: bool;
     const IS_UNIFIED: bool;
@@ -83,6 +88,7 @@ pub struct NoHostAccess;
 impl MemoryStorage for NoHostAccess {
     type HostAccess = NoHostAccess;
     const IS_HOST_ACCESSIBLE: bool = false;
+    const IS_HOST_RESIDENT: bool = false;
     const IS_DEVICE_ACCESSIBLE: bool = false;
     const IS_UNIFIED: bool = false;
     const PREFERRED_ALIGNMENT: usize = 1;
@@ -224,6 +230,7 @@ fn host_dealloc(ptr: *mut u8, bytes: usize) {
 impl MemoryStorage for HostMemory {
     type HostAccess = HostMemory;
     const IS_HOST_ACCESSIBLE: bool = true;
+    const IS_HOST_RESIDENT: bool = true;
     const IS_DEVICE_ACCESSIBLE: bool = false;
     const IS_UNIFIED: bool = false;
     const PREFERRED_ALIGNMENT: usize = HOST_ALIGNMENT;
@@ -262,6 +269,7 @@ pub struct HostOpaque;
 impl MemoryStorage for HostOpaque {
     type HostAccess = NoHostAccess;
     const IS_HOST_ACCESSIBLE: bool = false;
+    const IS_HOST_RESIDENT: bool = true;
     const IS_DEVICE_ACCESSIBLE: bool = false;
     const IS_UNIFIED: bool = false;
     const PREFERRED_ALIGNMENT: usize = HOST_ALIGNMENT;

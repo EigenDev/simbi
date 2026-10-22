@@ -33,7 +33,7 @@ use symbi_exec::engine::field_sum_exact;
 use symbi_exec::exact_sum::ExactSum;
 use symbi_xpu::{MemorySpace, MemoryStorage};
 
-use symbi_aot::{Buf, BufHandle, CpuField, CpuFieldMut, KernelInvocation};
+use symbi_aot::{Buf, CpuField, CpuFieldMut, KernelInvocation};
 
 use crate::kernels::support::{GhostFillDriver, to_bc_array};
 use crate::regimes::substrate_kernels::{
@@ -110,7 +110,7 @@ where
     Mem: MemoryStorage,
 {
     // the CPU executor's copy: the storage is host-resident, host memory or its opaque stand-in
-    debug_assert!(!Mem::IS_DEVICE_ACCESSIBLE, "fused_save_buffers: device storage copies on the device");
+    assert!(Mem::IS_HOST_RESIDENT && !Mem::IS_DEVICE_ACCESSIBLE, "fused_save_buffers: device storage copies on the device");
     for (src, dst) in pairs {
         let n = src.domain().volume();
         debug_assert_eq!(n, dst.domain().volume(), "fused_save_buffers: length mismatch");
@@ -308,7 +308,7 @@ fn scalar_ghost_fill_over<const D: usize, const DOF: usize, Mem, Sc>(
     Sc: Scalar + OrderedNumeric,
 {
     let name = format!("scalar_ghost_fill_{D}d");
-    let (flo, fext, fvol) = field_layout(flag);
+    let (flo, fext, _) = field_layout(flag);
     GhostFillDriver::<D>::new(&sim.geom.allocated, interior, bc)
             .with_polar_turn(crate::kernels::support::polar_turn_for(sim.geom.coords, &sim.geom.interior))
             .drive_sweep(
@@ -317,9 +317,7 @@ fn scalar_ghost_fill_over<const D: usize, const DOF: usize, Mem, Sc>(
             let (ints, scalars) = scalar_ghost_params::<D, Sc>(&name, p, 1.0);
             let inv = KernelInvocation {
                 buffers: vec![Buf {
-                    handle: BufHandle::HostMut(unsafe {
-                        std::slice::from_raw_parts_mut(flag.as_mut_ptr(), fvol)
-                    }),
+                    handle: unsafe { symbi_exec::policy::bind_output(flag) },
                     lo: &flo,
                     extent: &fext,
                 }],
@@ -723,7 +721,7 @@ pub(crate) fn ghost_fill<const D: usize, const DOF: usize, Mem, Sc>(
     for dir in 0..D {
         let owned = sim.geom.interior.extend(dir, 0, 1);
         let face_alloc = mhd.bface[dir].domain().clone();
-        let (flo, fext, fvol) = field_layout(&mhd.bface[dir]);
+        let (flo, fext, _) = field_layout(&mhd.bface[dir]);
         GhostFillDriver::<D>::new(&face_alloc, &owned, bc)
             .with_polar_turn(crate::kernels::support::polar_turn_for(sim.geom.coords, &sim.geom.interior))
             .drive_sweep(|region, p| {
@@ -737,9 +735,7 @@ pub(crate) fn ghost_fill<const D: usize, const DOF: usize, Mem, Sc>(
             );
             let inv = KernelInvocation {
                 buffers: vec![Buf {
-                    handle: BufHandle::HostMut(unsafe {
-                        std::slice::from_raw_parts_mut(mhd.bface[dir].as_mut_ptr(), fvol)
-                    }),
+                    handle: unsafe { symbi_exec::policy::bind_output(&mhd.bface[dir]) },
                     lo: &flo,
                     extent: &fext,
                 }],
@@ -755,23 +751,23 @@ pub(crate) fn ghost_fill<const D: usize, const DOF: usize, Mem, Sc>(
 }
 
 /// snapshot the ssp step-entry state used by the scheme's convex combination.
-pub(crate) fn snapshot<const D: usize, const DOF: usize, Mem, Sc>(
-    sim: &FieldStore<D, DOF, Mem, Sc>,
+pub(crate) fn snapshot<'s, const D: usize, const DOF: usize, Mem, Sc>(
+    sim: &'s FieldStore<D, DOF, Mem, Sc>,
     has_energy: bool,
 ) where
     Mem: MemorySpace + Sync,
     Sc: Scalar + OrderedNumeric,
 {
-    let (alo, aext, vol) = alloc_layout(&sim.geom.allocated);
+    let (alo, aext, _) = alloc_layout(&sim.geom.allocated);
     let (grid, dlo) = exec_layout(&sim.geom.allocated);
 
-    let inb = |f: &Field<Sc, D, Mem>| Buf {
-        handle: BufHandle::Host(unsafe { std::slice::from_raw_parts(f.as_ptr(), vol) }),
+    let inb = |f: &'s Field<Sc, D, Mem>| Buf {
+        handle: unsafe { symbi_exec::policy::bind_input(f) },
         lo: &alo,
         extent: &aext,
     };
-    let outb = |f: &Field<Sc, D, Mem>| Buf {
-        handle: BufHandle::HostMut(unsafe { std::slice::from_raw_parts_mut(f.as_mut_ptr(), vol) }),
+    let outb = |f: &'s Field<Sc, D, Mem>| Buf {
+        handle: unsafe { symbi_exec::policy::bind_output(f) },
         lo: &alo,
         extent: &aext,
     };
@@ -904,22 +900,22 @@ pub(crate) fn restore_step<const D: usize, const DOF: usize, Mem, Sc>(
 /// pre-godunov state the additive `source_apply` evaluates `S` at, the same state the fused
 /// path evaluates it at. gas-only: B is not a source target, so bcell is not
 /// captured here. mirrors `snapshot` (which targets u_n) but writes u_stage.
-pub(crate) fn snapshot_stage<const D: usize, const DOF: usize, Mem, Sc>(
-    sim: &FieldStore<D, DOF, Mem, Sc>,
+pub(crate) fn snapshot_stage<'s, const D: usize, const DOF: usize, Mem, Sc>(
+    sim: &'s FieldStore<D, DOF, Mem, Sc>,
     has_energy: bool,
 ) where
     Mem: MemorySpace + Sync,
     Sc: Scalar + OrderedNumeric,
 {
-    let (alo, aext, vol) = alloc_layout(&sim.geom.allocated);
+    let (alo, aext, _) = alloc_layout(&sim.geom.allocated);
     let (grid, dlo) = exec_layout(&sim.geom.allocated);
-    let inb = |f: &Field<Sc, D, Mem>| Buf {
-        handle: BufHandle::Host(unsafe { std::slice::from_raw_parts(f.as_ptr(), vol) }),
+    let inb = |f: &'s Field<Sc, D, Mem>| Buf {
+        handle: unsafe { symbi_exec::policy::bind_input(f) },
         lo: &alo,
         extent: &aext,
     };
-    let outb = |f: &Field<Sc, D, Mem>| Buf {
-        handle: BufHandle::HostMut(unsafe { std::slice::from_raw_parts_mut(f.as_mut_ptr(), vol) }),
+    let outb = |f: &'s Field<Sc, D, Mem>| Buf {
+        handle: unsafe { symbi_exec::policy::bind_output(f) },
         lo: &alo,
         extent: &aext,
     };
@@ -979,20 +975,16 @@ where
         let sname = format!("rmhd_save_efield_{D}d");
         let (sf, sir) = expect_kernel::<Sc>(&sname);
         for (src, dst) in pairs {
-            let (l, ext, v) = field_layout(*src);
+            let (l, ext, _) = field_layout(*src);
             let inv = KernelInvocation {
                 buffers: vec![
                     Buf {
-                        handle: BufHandle::Host(unsafe {
-                            std::slice::from_raw_parts(src.as_ptr(), v)
-                        }),
+                        handle: unsafe { symbi_exec::policy::bind_input(*src) },
                         lo: &l,
                         extent: &ext,
                     },
                     Buf {
-                        handle: BufHandle::HostMut(unsafe {
-                            std::slice::from_raw_parts_mut(dst.as_mut_ptr(), v)
-                        }),
+                        handle: unsafe { symbi_exec::policy::bind_output(*dst) },
                         lo: &l,
                         extent: &ext,
                     },
@@ -1583,20 +1575,16 @@ pub(crate) fn save_predictor_emf<const D: usize, const DOF: usize, Mem, Sc>(
         let sname = format!("rmhd_save_efield_{D}d");
         let (sf, sir) = expect_kernel::<Sc>(&sname);
         for e in &edges {
-            let (l, ext, v) = field_layout(&mhd.efield[e.slot]);
+            let (l, ext, _) = field_layout(&mhd.efield[e.slot]);
             let inv = KernelInvocation {
                 buffers: vec![
                     Buf {
-                        handle: BufHandle::Host(unsafe {
-                            std::slice::from_raw_parts(mhd.efield[e.slot].as_ptr(), v)
-                        }),
+                        handle: unsafe { symbi_exec::policy::bind_input(&mhd.efield[e.slot]) },
                         lo: &l,
                         extent: &ext,
                     },
                     Buf {
-                        handle: BufHandle::HostMut(unsafe {
-                            std::slice::from_raw_parts_mut(mhd.efield_n[e.slot].as_mut_ptr(), v)
-                        }),
+                        handle: unsafe { symbi_exec::policy::bind_output(&mhd.efield_n[e.slot]) },
                         lo: &l,
                         extent: &ext,
                     },
@@ -1631,20 +1619,16 @@ pub(crate) fn average_with_predictor_emf<const D: usize, const DOF: usize, Mem, 
         let aname = format!("rmhd_average_efield_{D}d");
         let (af, air) = expect_kernel::<Sc>(&aname);
         for e in &edges {
-            let (l, ext, v) = field_layout(&mhd.efield[e.slot]);
+            let (l, ext, _) = field_layout(&mhd.efield[e.slot]);
             let inv = KernelInvocation {
                 buffers: vec![
                     Buf {
-                        handle: BufHandle::Host(unsafe {
-                            std::slice::from_raw_parts(mhd.efield_n[e.slot].as_ptr(), v)
-                        }),
+                        handle: unsafe { symbi_exec::policy::bind_input(&mhd.efield_n[e.slot]) },
                         lo: &l,
                         extent: &ext,
                     },
                     Buf {
-                        handle: BufHandle::HostMut(unsafe {
-                            std::slice::from_raw_parts_mut(mhd.efield[e.slot].as_mut_ptr(), v)
-                        }),
+                        handle: unsafe { symbi_exec::policy::bind_output(&mhd.efield[e.slot]) },
                         lo: &l,
                         extent: &ext,
                     },
@@ -2734,7 +2718,7 @@ fn extend_bface_periodic<const D: usize, const DOF: usize, Mem, Sc>(
     let name = format!("scalar_ghost_fill_{D}d");
     for d in 0..D {
         let field = &mhd.bface[d];
-        let (flo, fext, fvol) = field_layout(field);
+        let (flo, fext, _) = field_layout(field);
         // the face field's own domain is the allocated extent: the closing face and every halo
         // face lie outside the cell interior, and the wrap period is the interior cell count.
         GhostFillDriver::<D>::new(field.domain(), &sim.geom.interior, bc)
@@ -2744,9 +2728,7 @@ fn extend_bface_periodic<const D: usize, const DOF: usize, Mem, Sc>(
             let (ints, scalars) = scalar_ghost_params::<D, Sc>(&name, p, 1.0);
             let inv = KernelInvocation {
                 buffers: vec![Buf {
-                    handle: BufHandle::HostMut(unsafe {
-                        std::slice::from_raw_parts_mut(field.as_mut_ptr(), fvol)
-                    }),
+                    handle: unsafe { symbi_exec::policy::bind_output(field) },
                     lo: &flo,
                     extent: &fext,
                 }],

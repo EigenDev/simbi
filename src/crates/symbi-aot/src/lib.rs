@@ -136,12 +136,79 @@ impl<'a, T> CpuFieldMut<'a, T> {
 // call (`run_cpu`, below) or a GPU launch, by interpreting the handle. the
 // device-pointer handle variant for the runtime GPU render is future work.
 
-/// where a buffer's data lives. the variant encodes the kernel role: `Host` is a
-/// read-only input, `HostMut` an output (incl. in-place — the kernel reads + writes
-/// it). a `Device` variant for GPU launches is future work.
+/// where a buffer's data lives and the kernel's role for it. `Host`/`Device` are read-only
+/// inputs, `HostMut`/`DeviceMut` outputs (in-place ones included: the kernel reads and writes
+/// them). host-resident storage binds as slices; device-resident storage as a pointer and length,
+/// so no host reference to it is ever formed. the cpu executor runs host bindings alone.
 pub enum BufHandle<'a, T> {
     Host(&'a [T]),
     HostMut(&'a mut [T]),
+    Device(DeviceBuf<'a, T>),
+    DeviceMut(DeviceBufMut<'a, T>),
+}
+
+impl<T> BufHandle<'_, T> {
+    /// the base address the kernel binds
+    pub fn as_ptr(&self) -> *const T {
+        match self {
+            BufHandle::Host(d) => d.as_ptr(),
+            BufHandle::HostMut(d) => d.as_ptr(),
+            BufHandle::Device(d) => d.ptr,
+            BufHandle::DeviceMut(d) => d.ptr,
+        }
+    }
+
+    /// the element count of the bound allocation
+    pub fn len(&self) -> usize {
+        match self {
+            BufHandle::Host(d) => d.len(),
+            BufHandle::HostMut(d) => d.len(),
+            BufHandle::Device(d) => d.len,
+            BufHandle::DeviceMut(d) => d.len,
+        }
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+
+    /// the kernel writes this binding
+    pub fn is_output(&self) -> bool {
+        matches!(self, BufHandle::HostMut(_) | BufHandle::DeviceMut(_))
+    }
+}
+
+/// a read-only binding of device-resident storage: its base address and element count, valid
+/// for the borrow `'a`. kernels on the device dereference it; host code holds it as an address.
+pub struct DeviceBuf<'a, T> {
+    ptr: *const T,
+    len: usize,
+    _borrow: std::marker::PhantomData<&'a [T]>,
+}
+
+/// the written twin of [`DeviceBuf`], exclusive for the borrow `'a`
+pub struct DeviceBufMut<'a, T> {
+    ptr: *mut T,
+    len: usize,
+    _borrow: std::marker::PhantomData<&'a mut [T]>,
+}
+
+impl<'a, T> DeviceBuf<'a, T> {
+    /// # safety
+    /// `ptr` addresses `len` elements of one live device allocation that outlives `'a` and the
+    /// completion of every kernel launched with this binding.
+    pub unsafe fn from_raw(ptr: *const T, len: usize) -> Self {
+        DeviceBuf { ptr, len, _borrow: std::marker::PhantomData }
+    }
+}
+
+impl<'a, T> DeviceBufMut<'a, T> {
+    /// # safety
+    /// as [`DeviceBuf::from_raw`], and no other binding of the same launch addresses the
+    /// allocation.
+    pub unsafe fn from_raw(ptr: *mut T, len: usize) -> Self {
+        DeviceBufMut { ptr, len, _borrow: std::marker::PhantomData }
+    }
 }
 
 /// one buffer binding: its data handle + its per-axis layout (`lo`/`extent`) on the
@@ -183,6 +250,7 @@ impl<'a, T> KernelInvocation<'a, T> {
             match b.handle {
                 BufHandle::Host(d) => inputs.push(CpuField::from_layout(d, b.lo, b.extent)),
                 BufHandle::HostMut(d) => outputs.push(CpuFieldMut::from_layout(d, b.lo, b.extent)),
+                BufHandle::Device(_) | BufHandle::DeviceMut(_) => refuse_device_binding(),
             }
         }
         kernel(
@@ -194,6 +262,13 @@ impl<'a, T> KernelInvocation<'a, T> {
             self.scalars,
         );
     }
+}
+
+/// the cpu executor reads its buffers through host references, which device-resident storage
+/// cannot give
+#[cold]
+pub fn refuse_device_binding() -> ! {
+    panic!("a device-resident buffer reached the cpu executor; it runs kernels on host-resident storage alone")
 }
 
 // the kernel scalar type — the precision-generic parameter. the

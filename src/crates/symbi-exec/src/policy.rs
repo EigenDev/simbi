@@ -167,8 +167,8 @@ pub fn dispatch_fields_runtime_ir<Sc: Scalar + OrderedNumeric, Mem: MemoryStorag
 /// distinctness check above makes the no-aliasing precondition release-enforced.
 pub fn disjoint_host_buffers<'a, Sc, const D: usize, Mem>(
     name: &str,
-    inputs: &[&Field<Sc, D, Mem>],
-    outputs: &[&Field<Sc, D, Mem>],
+    inputs: &[&'a Field<Sc, D, Mem>],
+    outputs: &[&'a Field<Sc, D, Mem>],
     layouts: &'a [([i32; D], [u32; D], usize)],
 ) -> Vec<Buf<'a, Sc>>
 where
@@ -207,22 +207,59 @@ where
     );
     let mut buffers: Vec<Buf<'a, Sc>> = Vec::with_capacity(inputs.len() + outputs.len());
     for (f, (lo, ext, vol)) in inputs.iter().zip(layouts.iter()) {
-        buffers.push(Buf {
-            handle: BufHandle::Host(unsafe { std::slice::from_raw_parts(f.as_ptr(), *vol) }),
-            lo,
-            extent: ext,
-        });
+        debug_assert_eq!(*vol, f.domain().volume(), "disjoint_host_buffers('{name}'): a layout spans another allocation");
+        // safety: the two checks above leave no output aliasing this input
+        buffers.push(Buf { handle: unsafe { bind_input(*f) }, lo, extent: ext });
     }
     for (f, (lo, ext, vol)) in outputs.iter().zip(layouts.iter().skip(inputs.len())) {
-        buffers.push(Buf {
-            handle: BufHandle::HostMut(unsafe {
-                std::slice::from_raw_parts_mut(f.as_mut_ptr(), *vol)
-            }),
-            lo,
-            extent: ext,
-        });
+        debug_assert_eq!(*vol, f.domain().volume(), "disjoint_host_buffers('{name}'): a layout spans another allocation");
+        // safety: the two checks above leave every output distinct from every other binding
+        buffers.push(Buf { handle: unsafe { bind_output(*f) }, lo, extent: ext });
     }
     buffers
+}
+
+/// the read binding of `f`'s whole allocation: a host slice of host-resident storage, the device
+/// address and length of device-resident storage, so no host reference into device memory is
+/// ever formed. an empty allocation binds as an empty slice.
+///
+/// # safety
+/// no binding that writes `f`'s allocation is live during `'a`.
+pub unsafe fn bind_input<'a, Sc, const D: usize, Mem, C>(f: &'a Field<Sc, D, Mem, C>) -> BufHandle<'a, Sc>
+where
+    Sc: Scalar + OrderedNumeric,
+    Mem: MemoryStorage,
+    C: symbi_grid::Centering,
+{
+    let len = f.domain().volume();
+    if len == 0 {
+        BufHandle::Host(&[])
+    } else if Mem::IS_HOST_RESIDENT {
+        BufHandle::Host(unsafe { std::slice::from_raw_parts(f.as_ptr(), len) })
+    } else {
+        BufHandle::Device(unsafe { symbi_aot::DeviceBuf::from_raw(f.as_ptr(), len) })
+    }
+}
+
+/// the written binding of `f`'s whole allocation, host slice or device address as
+/// [`bind_input`] selects.
+///
+/// # safety
+/// no other binding or reference addresses `f`'s allocation during `'a`.
+pub unsafe fn bind_output<'a, Sc, const D: usize, Mem, C>(f: &'a Field<Sc, D, Mem, C>) -> BufHandle<'a, Sc>
+where
+    Sc: Scalar + OrderedNumeric,
+    Mem: MemoryStorage,
+    C: symbi_grid::Centering,
+{
+    let len = f.domain().volume();
+    if len == 0 {
+        BufHandle::HostMut(&mut [])
+    } else if Mem::IS_HOST_RESIDENT {
+        BufHandle::HostMut(unsafe { std::slice::from_raw_parts_mut(f.as_mut_ptr(), len) })
+    } else {
+        BufHandle::DeviceMut(unsafe { symbi_aot::DeviceBufMut::from_raw(f.as_mut_ptr(), len) })
+    }
 }
 
 /// the executor inversion (cpu). dispatch `name` over a disjoint cover of the exec
@@ -253,8 +290,8 @@ pub fn dispatch_fields_cover<Sc: Scalar + OrderedNumeric, Mem: MemoryStorage, co
 ) -> bool {
     use rayon::iter::{IntoParallelIterator, ParallelIterator};
 
-    if Mem::IS_DEVICE_ACCESSIBLE {
-        // host scheduler only; the gpu parallelizes a single launch over all cells
+    if Mem::IS_DEVICE_ACCESSIBLE || !Mem::IS_HOST_RESIDENT {
+        // host scheduler only, over host-resident storage; the gpu parallelizes a single launch over all cells
         // itself. defense-in-depth — the target-aware policy in `dispatch_named`
         // already passes `None` (whole window) on a device target, so this is
         // unreachable from there; it guards any other caller.

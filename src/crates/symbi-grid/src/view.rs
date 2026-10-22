@@ -51,8 +51,20 @@ impl<T, const D: usize> View<T, D> {
     }
 
     /// create a view from a domain and a pointer to the base of the allocation.
-    /// computes row-major strides from the domain's shape.
-    pub fn from_domain(ptr: *const T, domain: &Domain<D>) -> Self {
+    /// computes row-major strides from the domain's shape. a field hands out views of
+    /// host-dereferenceable storage through `Field::view`; a raw pointer becomes a view only
+    /// under this contract:
+    ///
+    /// ```compile_fail,E0133
+    /// let data = [0.0f64; 4];
+    /// let dom = symbi_algebra::Domain::new([symbi_algebra::Space { name: "x", lo: 0, hi: 4 }]);
+    /// let _ = symbi_grid::View::from_domain(data.as_ptr(), &dom);
+    /// ```
+    ///
+    /// # safety
+    /// `ptr` points to `domain.volume()` initialized elements in host memory, valid and unwritten
+    /// through any other path for as long as the view or a copy of it is read.
+    pub unsafe fn from_domain(ptr: *const T, domain: &Domain<D>) -> Self {
         let shape = domain.shape();
         let strides = Self::row_major_strides(&shape);
         let start = std::array::from_fn(|ax| domain.spaces[ax].lo);
@@ -69,12 +81,7 @@ impl<T, const D: usize> View<T, D> {
     #[inline]
     pub fn at(&self, coord: [isize; D]) -> &T {
         let idx = self.flat_index(coord);
-        debug_assert!(
-            idx < self.len,
-            "view: index {} out of bounds (len {})",
-            idx,
-            self.len
-        );
+        assert!(idx < self.len, "view: coordinate {coord:?} lies outside the view (index {idx}, len {})", self.len);
         unsafe { &*self.ptr.add(idx) }
     }
 
@@ -120,7 +127,19 @@ unsafe impl<T: Send, const D: usize> Send for ViewMut<T, D> {}
 unsafe impl<T: Sync, const D: usize> Sync for ViewMut<T, D> {}
 
 impl<T, const D: usize> ViewMut<T, D> {
-    pub fn from_domain(ptr: *mut T, domain: &Domain<D>) -> Self {
+    /// the mutable twin of [`View::from_domain`]:
+    ///
+    /// ```compile_fail,E0133
+    /// let mut data = [0.0f64; 4];
+    /// let dom = symbi_algebra::Domain::new([symbi_algebra::Space { name: "x", lo: 0, hi: 4 }]);
+    /// let _ = symbi_grid::ViewMut::from_domain(data.as_mut_ptr(), &dom);
+    /// ```
+    ///
+    /// # safety
+    /// `ptr` points to `domain.volume()` initialized elements in host memory, valid for reads and
+    /// writes for as long as the view or a copy of it is used, and no reference obtained through
+    /// another path to an element is live while the view writes it.
+    pub unsafe fn from_domain(ptr: *mut T, domain: &Domain<D>) -> Self {
         let shape = domain.shape();
         let strides = View::<T, D>::row_major_strides(&shape);
         let start = std::array::from_fn(|ax| domain.spaces[ax].lo);
@@ -136,21 +155,21 @@ impl<T, const D: usize> ViewMut<T, D> {
     #[inline]
     pub fn at(&self, coord: [isize; D]) -> &T {
         let idx = self.flat_index(coord);
-        debug_assert!(idx < self.len);
+        assert!(idx < self.len, "view: coordinate {coord:?} lies outside the view (index {idx}, len {})", self.len);
         unsafe { &*self.ptr.add(idx) }
     }
 
     #[inline]
     pub fn at_mut(&mut self, coord: [isize; D]) -> &mut T {
         let idx = self.flat_index(coord);
-        debug_assert!(idx < self.len);
+        assert!(idx < self.len, "view: coordinate {coord:?} lies outside the view (index {idx}, len {})", self.len);
         unsafe { &mut *self.ptr.add(idx) }
     }
 
     #[inline]
     pub fn set(&self, coord: [isize; D], val: T) {
         let idx = self.flat_index(coord);
-        debug_assert!(idx < self.len);
+        assert!(idx < self.len, "view: coordinate {coord:?} lies outside the view (index {idx}, len {})", self.len);
         unsafe {
             *self.ptr.add(idx) = val;
         }
@@ -188,7 +207,8 @@ mod tests {
             lo: 0,
             hi: 10,
         }]);
-        let view = View::from_domain(data.as_ptr(), &dom);
+        // safety: `data` holds the domain's elements and outlives the view
+        let view = unsafe { View::from_domain(data.as_ptr(), &dom) };
         assert_eq!(*view.at([0]), 0.0);
         assert_eq!(*view.at([5]), 5.0);
         assert_eq!(*view.at([9]), 9.0);
@@ -210,7 +230,8 @@ mod tests {
                 hi: 4,
             },
         ]);
-        let view = View::from_domain(data.as_ptr(), &dom);
+        // safety: `data` holds the domain's elements and outlives the view
+        let view = unsafe { View::from_domain(data.as_ptr(), &dom) };
         assert_eq!(*view.at([0, 0]), 0.0);
         assert_eq!(*view.at([1, 0]), 1.0); // step axis 0 -> stride 1
         assert_eq!(*view.at([0, 3]), 9.0); // step axis 1 -> 3*3 = 9
@@ -233,7 +254,8 @@ mod tests {
                 hi: 2,
             },
         ]);
-        let view = View::from_domain(data.as_ptr(), &dom);
+        // safety: `data` holds the domain's elements and outlives the view
+        let view = unsafe { View::from_domain(data.as_ptr(), &dom) };
         assert_eq!(*view.at([-2, -2]), 0.0);
         assert_eq!(*view.at([-2, 1]), 12.0); // (0) + (3)*4 = 12
         assert_eq!(*view.at([1, 1]), 15.0); // (3) + (3)*4 = 15
@@ -247,7 +269,8 @@ mod tests {
             lo: 0,
             hi: 10,
         }]);
-        let view = ViewMut::from_domain(data.as_mut_ptr(), &dom);
+        // safety: `data` holds the domain's elements and outlives the view
+        let view = unsafe { ViewMut::from_domain(data.as_mut_ptr(), &dom) };
         for ii in 0..10 {
             view.set([ii as isize], ii as f64 * ii as f64);
         }
@@ -276,7 +299,8 @@ mod tests {
                 hi: 4,
             },
         ]);
-        let view = View::from_domain(data.as_ptr(), &dom);
+        // safety: `data` holds the domain's elements and outlives the view
+        let view = unsafe { View::from_domain(data.as_ptr(), &dom) };
         assert_eq!(*view.at([0, 0, 0]), 0.0);
         assert_eq!(*view.at([1, 0, 0]), 1.0); // step axis 0
         assert_eq!(*view.at([0, 1, 0]), 2.0); // step axis 1
@@ -300,7 +324,8 @@ mod tests {
             Space { name: "j", lo, hi },
             Space { name: "k", lo, hi },
         ]);
-        let view = View::from_domain(data.as_ptr(), &dom);
+        // safety: `data` holds the domain's elements and outlives the view
+        let view = unsafe { View::from_domain(data.as_ptr(), &dom) };
 
         // corner: [-2, -2, -2] -> flat index 0
         assert_eq!(*view.at([-2, -2, -2]), 0.0);
@@ -331,7 +356,8 @@ mod tests {
             },
         ]);
         let data: Vec<f64> = (0..1000).map(|ii| ii as f64).collect();
-        let view = View::from_domain(data.as_ptr(), &dom);
+        // safety: `data` holds the domain's elements and outlives the view
+        let view = unsafe { View::from_domain(data.as_ptr(), &dom) };
 
         // the 6-point stencil about the center cell [5, 5, 5]
         let xm = *view.at([4, 5, 5]);

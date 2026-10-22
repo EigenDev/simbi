@@ -10,12 +10,10 @@
 //   buffers (reordered into kernel binding order) + params --> cuLaunchKernel
 //
 // `dispatch` picks the path on `Mem::IS_DEVICE_ACCESSIBLE` — the same invocation,
-// one branch. unified memory (the default device memory) is host- and
-// device-addressable, so the buffer's pointer is usable on-device as-is while the
-// host treats it as an opaque handle to forward. unified memory covers every
-// current path, so `BufHandle::Host`/`HostMut` are the variants defined; an
-// explicit-memory `BufHandle::Device` variant, needed for host-inaccessible
-// memory, would serve a path outside what unified memory currently covers.
+// one branch. a launch forwards each binding's address: a host slice of managed
+// (host- and device-addressable) memory, or the address and length of device-local
+// memory, which binds without any host reference into it. the cpu path takes host
+// slices alone and refuses a device binding.
 // =============================================================================
 
 use symbi_aot::{CpuField, CpuFieldMut, KernelInvocation, OrderedNumeric, Scalar};
@@ -268,10 +266,11 @@ fn resident_view<Sc: Scalar + OrderedNumeric, Mem: MemoryStorage, const D: usize
     field: &symbi_grid::Field<Sc, D, Mem>,
 ) -> symbi_grid::View<Sc, D> {
     assert!(
-        !Mem::IS_DEVICE_ACCESSIBLE,
+        Mem::IS_HOST_RESIDENT && !Mem::IS_DEVICE_ACCESSIBLE,
         "the CPU executor reads host-resident storage; device storage reduces on the device"
     );
-    symbi_grid::View::from_domain(field.as_ptr(), field.domain())
+    // safety: host-resident storage spans the field's domain, and the fold only reads it
+    unsafe { symbi_grid::View::from_domain(field.as_ptr(), field.domain()) }
 }
 
 /// the exact sum of `field` over `domain`: every cell's value added into one long accumulator,
@@ -1020,7 +1019,6 @@ fn run_gpu<B: GpuBackend, Sc: Scalar + OrderedNumeric>(
     kernel_name: &str,
 ) {
     GPU_LAUNCH_COUNT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-    use symbi_aot::BufHandle;
     use symbi_ir::emit::Precision;
     use symbi_ir::render_from_ir;
     // same-stream CUDA semantics serialize kernel-to-kernel ordering on their own, so
@@ -1094,23 +1092,20 @@ fn run_gpu<B: GpuBackend, Sc: Scalar + OrderedNumeric>(
     let mut host_n = 0usize;
     let mut hostmut_n = 0usize;
     for b in &buffers {
-        match &b.handle {
-            BufHandle::Host(s) => {
-                assert!(
-                    host_n < MAX_BUFS_PER_KIND,
-                    "run_gpu('{kernel_name}'): kernel has > {MAX_BUFS_PER_KIND} input buffers; raise MAX_BUFS_PER_KIND"
-                );
-                host_lookup[host_n] = (s.as_ptr() as *const u8, b.lo, b.extent);
-                host_n += 1;
-            }
-            BufHandle::HostMut(s) => {
-                assert!(
-                    hostmut_n < MAX_BUFS_PER_KIND,
-                    "run_gpu('{kernel_name}'): kernel has > {MAX_BUFS_PER_KIND} output buffers; raise MAX_BUFS_PER_KIND"
-                );
-                hostmut_lookup[hostmut_n] = (s.as_ptr() as *const u8, b.lo, b.extent);
-                hostmut_n += 1;
-            }
+        if b.handle.is_output() {
+            assert!(
+                hostmut_n < MAX_BUFS_PER_KIND,
+                "run_gpu('{kernel_name}'): kernel has > {MAX_BUFS_PER_KIND} output buffers; raise MAX_BUFS_PER_KIND"
+            );
+            hostmut_lookup[hostmut_n] = (b.handle.as_ptr() as *const u8, b.lo, b.extent);
+            hostmut_n += 1;
+        } else {
+            assert!(
+                host_n < MAX_BUFS_PER_KIND,
+                "run_gpu('{kernel_name}'): kernel has > {MAX_BUFS_PER_KIND} input buffers; raise MAX_BUFS_PER_KIND"
+            );
+            host_lookup[host_n] = (b.handle.as_ptr() as *const u8, b.lo, b.extent);
+            host_n += 1;
         }
     }
 
