@@ -81,5 +81,9 @@ harness = false
 name = "dye_overhead_bench"
 harness = false
 
+[[bench]]
+name = "device_local_bench"
+harness = false
+
 [lints]
 workspace = true
