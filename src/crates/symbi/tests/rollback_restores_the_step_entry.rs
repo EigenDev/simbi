@@ -15,8 +15,10 @@
 // bit for bit: the restored state is a fresh entry.
 //
 // the same kernel sets report whether their snapshot is complete: the gas
-// regimes on a plain store, and the flat magnetized set, which keeps no
-// step-entry snapshot, reports it incomplete.
+// regimes on a plain store, and the flat magnetized set, which keeps the
+// step-entry conserved state and both magnetic representations: complete on a
+// plain store, incomplete on a store carrying an immersed body, whose state
+// lives outside the snapshot.
 //
 // run: cargo test -p symbi --test rollback_restores_the_step_entry
 // =============================================================================
@@ -194,11 +196,10 @@ fn rhd_rk2_rejected_after_the_corrector() {
     assert_restores(&*s, &k, Timestepping::Rk2, 1, "rhd, rk2, corrector");
 }
 
-/// the flat magnetized set keeps no step-entry snapshot and says so
-#[test]
-fn the_flat_magnetized_set_reports_its_snapshot_incomplete() {
+/// a flat magnetized store on the periodic square
+fn magnetized() -> SimStateGeneric<NewtonianMhd, 2, 3, Cartesian, IdealGas<f64>, CpuSpace, HostMemory> {
     let h = 1.0 / N as f64;
-    let s = SimStateGeneric::<NewtonianMhd, 2, 3, Cartesian, IdealGas<f64>, CpuSpace, HostMemory>::build(
+    SimStateGeneric::<NewtonianMhd, 2, 3, Cartesian, IdealGas<f64>, CpuSpace, HostMemory>::build(
         NewtonianMhd,
         IdealGas { gamma: 5.0 / 3.0 },
         Cartesian,
@@ -218,7 +219,18 @@ fn the_flat_magnetized_set_reports_its_snapshot_incomplete() {
         0 => -(2.0 * PI * y).sin(),
         _ => (4.0 * PI * x).sin(),
     })
-    .build();
-    let k = s.substrate();
-    assert!(!k.rollback_snapshot_is_complete(&*s));
+    .build()
+}
+
+/// the flat magnetized set reports its snapshot complete on a plain store and incomplete on a store
+/// carrying an immersed body, whose position and receipts the snapshot does not hold
+#[test]
+fn the_flat_magnetized_set_reports_whether_its_snapshot_is_complete() {
+    let plain = magnetized();
+    let k = plain.substrate();
+    assert!(k.rollback_snapshot_is_complete(&*plain), "a plain magnetized store reports its snapshot incomplete");
+    let sink = symbi_ib::Body::gravitational(0, Tensor::new([0.5, 0.5]), Tensor::zeros(), 0.0, 0.1, 0.05);
+    let bodied = magnetized().with_bodies(symbi_ib::BodyCollection::new().add(sink));
+    let k = bodied.substrate();
+    assert!(!k.rollback_snapshot_is_complete(&*bodied), "a store carrying a body reports its snapshot complete");
 }

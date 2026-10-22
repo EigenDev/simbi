@@ -3,23 +3,23 @@
 //
 // the D-generic hydro analog of substrate_rmhd_gpu.rs: every iso / Newton / RHD
 // SubstrateKernelSet method runs on the GPU through the production dispatch path, at
-// 1D, 2D and 3D. build two identical sims — host (CpuSpace/HostMemory) and unified
-// (CudaSpace/UnifiedMemory) — and drive one `<Mem,f64,const D>` kernelset on
-// each. unified `Mem` routes every kernel to run_gpu (render neutral IR -> NVRTC ->
-// launch); host routes to the AOT CPU fn. the cfl exercises the device block-reduce
-// (field_reduce_device) — the only device->host crossing.
+// 1D, 2D and 3D. build two identical sims — host (CpuSpace/HostMemory) and device
+// (DeviceSpace/DeviceMemory, managed memory on either backend) — and drive one
+// `<Mem,f64,const D>` kernelset on each. device `Mem` routes every kernel to run_gpu
+// (render neutral IR -> NVRTC or hipRTC -> launch); host routes to the AOT CPU fn. the
+// cfl exercises the device block-reduce (field_reduce_device), a device->host crossing.
 //
 // a deterministic single-pass pipeline (snapshot, c2p, ghost_fill, cfl, flux per dir,
 // godunov_euler, godunov_rk2) — every kernel run + diffed on one shared input state, which
-// keeps the comparison free of cfl-clamped step-count sensitivity. GPU vs CPU agree modulo nvcc FMA
+// keeps the comparison free of cfl-clamped step-count sensitivity. GPU vs CPU agree modulo FMA
 // fusion: ULP-bounded, rel < 1e-9.
 //
-// runs on a CUDA GPU (NVRTC needs no nvcc). in the symbi-cuda distrobox:
-//   distrobox enter symbi-cuda -- cargo test -p symbi --features cuda \
-//       --test substrate_hydro_gpu
+// runs under either gpu backend (runtime compilation needs no nvcc or hipcc):
+//   cargo test -p symbi --features cuda --test substrate_hydro_gpu
+//   cargo test -p symbi --features hip --test substrate_hydro_gpu
 // =============================================================================
 
-#![cfg(feature = "cuda")]
+#![cfg(feature = "gpu")]
 
 use symbi::kernels::support::FaceDomain;
 use symbi::regimes::substrate::IsoSubstrateKernelSet;
@@ -37,7 +37,7 @@ use symbi_hydro::newtonian::Newtonian;
 use symbi_hydro::quantity::{Density, Pressure};
 use symbi_hydro::rhd::Rhd;
 use symbi_hydro::state::{Prim, PrimG};
-use symbi_xpu::cuda::{CudaSpace, UnifiedMemory};
+use symbi_xpu::{DeviceMemory, DeviceSpace};
 use symbi_xpu::{CpuSpace, ExecutionSpace, HostMemory, MemorySpace};
 
 const N: usize = 8;
@@ -46,7 +46,7 @@ const GAMMA: f64 = 1.4; // Newton
 const GAMMA_RHD: f64 = 5.0 / 3.0;
 const CS: f64 = 1.0; // isothermal sound speed
 
-// GPU vs CPU agree modulo nvcc FMA fusion: ULP-bounded drift, per single kernel.
+// GPU vs CPU agree modulo FMA fusion: ULP-bounded drift, per single kernel.
 // sync once before reading device fields back to host (the per-launch
 // `ctx_sync` removal means stream ordering alone doesn't make device writes
 // host-visible).
@@ -56,7 +56,7 @@ fn cmp<const D: usize, MH: MemorySpace, MD: MemorySpace>(
     dev: &Field<f64, D, MD>,
     what: &str,
 ) {
-    symbi_xpu::cuda::ctx_sync();
+    symbi_xpu::ctx_sync();
     for c in dom.iter() {
         let (h, g) = (*host.view().at(c), *dev.view().at(c));
         assert!(g.is_finite(), "{what} at {c:?} went non-finite on GPU: {g}");
@@ -121,11 +121,11 @@ where
     Cartesian: Metric<f64, D>,
 {
     let host = build_adiabatic::<CpuSpace, HostMemory, D>();
-    let dev = build_adiabatic::<CudaSpace, UnifiedMemory, D>();
+    let dev = build_adiabatic::<DeviceSpace, DeviceMemory, D>();
     let hset =
         AdiabaticSubstrateKernelSet::<HostMemory, f64, D>::new(GAMMA, CFL, &host.geom.allocated);
     let dset =
-        AdiabaticSubstrateKernelSet::<UnifiedMemory, f64, D>::new(GAMMA, CFL, &dev.geom.allocated);
+        AdiabaticSubstrateKernelSet::<DeviceMemory, f64, D>::new(GAMMA, CFL, &dev.geom.allocated);
     let alloc = &host.geom.allocated;
     let interior = &host.geom.interior;
     let (hnrg, dnrg) = (
@@ -260,9 +260,9 @@ where
     Cartesian: Metric<f64, D>,
 {
     let host = build_iso::<CpuSpace, HostMemory, D>();
-    let dev = build_iso::<CudaSpace, UnifiedMemory, D>();
+    let dev = build_iso::<DeviceSpace, DeviceMemory, D>();
     let hset = IsoSubstrateKernelSet::<HostMemory, f64, D>::new(CS, CFL, &host.geom.allocated);
-    let dset = IsoSubstrateKernelSet::<UnifiedMemory, f64, D>::new(CS, CFL, &dev.geom.allocated);
+    let dset = IsoSubstrateKernelSet::<DeviceMemory, f64, D>::new(CS, CFL, &dev.geom.allocated);
     let alloc = &host.geom.allocated;
     let interior = &host.geom.interior;
 
@@ -392,11 +392,11 @@ where
     Cartesian: Metric<f64, D>,
 {
     let host = build_rhd::<CpuSpace, HostMemory, D>();
-    let dev = build_rhd::<CudaSpace, UnifiedMemory, D>();
+    let dev = build_rhd::<DeviceSpace, DeviceMemory, D>();
     let hset =
         RhdSubstrateKernelSet::<HostMemory, f64, D>::new(GAMMA_RHD, CFL, &host.geom.allocated);
     let dset =
-        RhdSubstrateKernelSet::<UnifiedMemory, f64, D>::new(GAMMA_RHD, CFL, &dev.geom.allocated);
+        RhdSubstrateKernelSet::<DeviceMemory, f64, D>::new(GAMMA_RHD, CFL, &dev.geom.allocated);
     let alloc = &host.geom.allocated;
     let interior = &host.geom.interior;
     let (hnrg, dnrg) = (

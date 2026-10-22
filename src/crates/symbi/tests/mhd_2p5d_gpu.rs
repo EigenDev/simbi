@@ -4,13 +4,13 @@
 // GPU<->CPU parity for the genuine 2.5D MHD path (D=2, DOF=3) — the carrier gate
 // for the 2.5D substrate kernels (the 3D parity lives in
 // substrate_rmhd_gpu.rs). builds the same Orszag-Tang-with-Bz 2.5D sim on host
-// (CpuSpace/HostMemory) and device (CudaSpace/UnifiedMemory), evolves a handful of
+// (CpuSpace/HostMemory) and device (DeviceSpace/DeviceMemory, either backend), evolves a handful of
 // RK2 steps through the production loop, and asserts the conserved state + cell B
 // agree over the interior. the efield save/avg/snapshot copies must be dimensioned
 // `_{D}d`: a 3d copy kernel over a 2d field reads out of bounds and crashes.
 // =============================================================================
 
-#![cfg(feature = "cuda")]
+#![cfg(feature = "gpu")]
 
 use symbi::regimes::substrate_newtonian_mhd::NewtonianMhdSubstrateKernelSet;
 use symbi::sim::evolve::evolve;
@@ -22,7 +22,7 @@ use symbi_hydro::mhd_state::MhdPrim;
 use symbi_hydro::newtonian_mhd::NewtonianMhd;
 use symbi_hydro::quantity::{Density, Pressure};
 use symbi_hydro::state::Prim;
-use symbi_xpu::cuda::{CudaSpace, UnifiedMemory};
+use symbi_xpu::{DeviceMemory, DeviceSpace};
 use symbi_xpu::{CpuSpace, ExecutionSpace, HostMemory, MemorySpace};
 
 use std::f64::consts::PI;
@@ -70,14 +70,14 @@ fn build_sim<S: ExecutionSpace, Mem: MemorySpace>()
 #[test]
 fn nmhd_2p5d_evolve_gpu_matches_cpu() {
     let mut host = build_sim::<CpuSpace, HostMemory>();
-    let mut dev = build_sim::<CudaSpace, UnifiedMemory>();
+    let mut dev = build_sim::<DeviceSpace, DeviceMemory>();
     let hset = NewtonianMhdSubstrateKernelSet::<HostMemory, f64, 2>::new(
         GAMMA,
         CFL,
         1.0,
         &host.geom.allocated,
     );
-    let dset = NewtonianMhdSubstrateKernelSet::<UnifiedMemory, f64, 2>::new(
+    let dset = NewtonianMhdSubstrateKernelSet::<DeviceMemory, f64, 2>::new(
         GAMMA,
         CFL,
         1.0,
@@ -87,7 +87,7 @@ fn nmhd_2p5d_evolve_gpu_matches_cpu() {
     let t_final = 0.05_f64;
     evolve(&mut host, &hset, t_final).expect("cpu evolve");
     evolve(&mut dev, &dset, t_final).expect("gpu evolve");
-    symbi_xpu::cuda::ctx_sync(); // host-read barrier for the final async c2p/ghost.
+    symbi_xpu::ctx_sync(); // host-read barrier for the final async c2p/ghost.
 
     assert!(host.iteration >= 3, "too few steps ({})", host.iteration);
     assert_eq!(
