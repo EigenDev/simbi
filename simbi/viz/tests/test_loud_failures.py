@@ -83,6 +83,33 @@ def line_figure():
     return figure
 
 
+def polygon_figure():
+    from simbi.viz.components.polygons import PolygonPlotComponent, PolygonPlotProps
+    from simbi.viz.pipeline.transforms import _compose_polygons
+
+    figure = rendered_figure()
+    _, field = figure._components.pop()
+    component = PolygonPlotComponent(PolygonPlotProps())
+    component.initialize(figure.fig, figure.axes["main"])
+    figure.add_component(component, _compose_polygons([field]))
+    return figure
+
+
+@pytest.mark.parametrize(
+    "build,top_right_visible",
+    [(line_figure, False), (rendered_figure, True), (polygon_figure, True)],
+)
+def test_only_line_plots_hide_top_and_right_spines(build, top_right_visible):
+    # polygon values are a flat array, but they still describe a 2d field.
+    figure = build()
+    figure.render()
+    spines = figure.axes["main"].spines
+    for name in ("top", "right"):
+        assert spines[name].get_visible() == top_right_visible
+    for name in ("bottom", "left"):
+        assert spines[name].get_visible()
+
+
 def breaks(*_args, **_kwargs):
     raise RuntimeError("the step failed")
 

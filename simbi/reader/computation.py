@@ -15,6 +15,9 @@ from .io import Checkpoint
 
 ComputeFunc = Callable[[dict[str, Any]], Any]
 
+ISOTHERMAL_REGIMES = ("isothermal", "imhd")
+NEWTONIAN_REGIMES = ("newtonian", "nmhd", *ISOTHERMAL_REGIMES)
+
 
 class FieldComputationError(ValueError):
     """a derived field could not be computed from the checkpoint's stored
@@ -59,13 +62,13 @@ def lorentz_factor(
     velocity: Sequence[Array], regime: str, using_gamma_beta: bool = False
 ) -> Array | float:
     """compute lorentz factor from velocity."""
+    if regime in NEWTONIAN_REGIMES:
+        return 1.0
     vsquared = _dot_product(velocity, velocity)
-    if regime != "newtonian" and np.any(vsquared >= 1.0):
+    if np.any(vsquared >= 1.0):
         raise ValueError("velocity exceeds speed of light")
 
-    if regime == "newtonian":
-        return 1.0
-    elif not using_gamma_beta:
+    if not using_gamma_beta:
         return np.asarray(1.0 / np.sqrt(1.0 - vsquared))
     else:
         return np.asarray(np.sqrt(1.0 + vsquared))
@@ -126,14 +129,35 @@ class taub_mathews_t:
         return np.asarray(1.5 * theta + x_sq / (np.sqrt(x_sq + 1.0) + 1.0))
 
 
-closure_t = gamma_law_t | taub_mathews_t
+@dataclass(frozen=True)
+class isothermal_t:
+    """p = cs^2 rho, with no evolved energy equation."""
+
+    def sound_speed_sq(self, rho: Array, pre: Array) -> Array:
+        return np.asarray(pre / rho)
+
+    def specific_enthalpy(self, rho: Array, pre: Array) -> Array:
+        raise FieldComputationError(
+            "the isothermal closure does not specify thermal enthalpy"
+        )
+
+    def internal_energy(self, rho: Array, pre: Array) -> Array:
+        raise FieldComputationError(
+            "the isothermal closure has no energy equation"
+        )
+
+
+closure_t = gamma_law_t | taub_mathews_t | isothermal_t
 
 
 def closure_of(metadata: Any) -> closure_t:
     """the equation of state a checkpoint was integrated with. the synge closure is
     parameter-free, so the `gamma` attribute of a synge run carries a reporting value alone;
     reading it as an adiabatic index computes a different gas than the one that was evolved.
-    an empty slug marks a file predating the attribute, and such a file is gamma-law."""
+    isothermal regimes use p = cs^2 rho independently of the reporting gamma.
+    an empty eos slug on an energy regime defaults to gamma-law."""
+    if getattr(metadata, "regime", "") in ISOTHERMAL_REGIMES:
+        return isothermal_t()
     if getattr(metadata, "eos", "") == "synge":
         return taub_mathews_t()
     return gamma_law_t(metadata.gamma)
@@ -155,7 +179,9 @@ def spec_enthalpy(
     eos: closure_t, rho: Array, pressure: Array, regime: str
 ) -> Array | float:
     """compute specific enthalpy."""
-    if regime == "newtonian":
+    if regime in ISOTHERMAL_REGIMES:
+        return 1.0
+    if regime in NEWTONIAN_REGIMES:
         if _newtonian_gamma(eos) == 1.0:
             return 1.0 + pressure / rho
         return 1.0
@@ -166,17 +192,15 @@ def _enthalpy(
     rho: Array, pre: Array, eos: closure_t, regime: str
 ) -> Array | float:
     """compute enthalpy per particle."""
-    if regime == "newtonian":
+    if regime in NEWTONIAN_REGIMES:
         return 1.0
     return eos.specific_enthalpy(rho, pre)
 
 
 def sound_speed(rho: Array, pre: Array, eos: closure_t, regime: str) -> Array:
-    """the adiabatic sound speed. on a relativistic regime it is the RELATIVISTIC one,
-    a^2 / h — the newtonian form alone exceeds the speed of light once p / rho passes
-    1 / gamma, which is the ordinary state of a relativistic blast."""
+    """sound speed for the run's closure; relativistic regimes use a^2 / h."""
     a_sq = eos.sound_speed_sq(rho, pre)
-    if regime == "newtonian":
+    if regime in NEWTONIAN_REGIMES:
         return np.asarray(np.sqrt(a_sq))
     return np.asarray(np.sqrt(a_sq / eos.specific_enthalpy(rho, pre)))
 
@@ -197,13 +221,20 @@ def labframe_energy_density(
     regime: str = "newtonian",
 ) -> Array:
     """compute lab-frame energy density."""
+    if regime in ISOTHERMAL_REGIMES:
+        raise FieldComputationError(
+            f"'energy' is unavailable: the {regime} regime has no energy equation"
+        )
     vsq = sum(v**2 for v in vel)
 
-    if regime == "newtonian":
+    if regime in NEWTONIAN_REGIMES:
         gamma = _newtonian_gamma(eos)
         if gamma == 1.0:
             return pre / rho
-        return pre / (gamma - 1.0) + 0.5 * rho * vsq
+        energy = pre / (gamma - 1.0) + 0.5 * rho * vsq
+        if regime == "nmhd":
+            energy = energy + 0.5 * _dot_product(bfield, bfield)
+        return energy
 
     W = 1.0 / np.sqrt(1.0 - vsq)
     h = _enthalpy(rho, pre, eos, regime)
@@ -231,7 +262,7 @@ def labframe_momentum(
     mode: VectorMode | VectorComponent = VectorMode.All,
 ) -> Array:
     """compute lab-frame momentum."""
-    if regime == "newtonian":
+    if regime in NEWTONIAN_REGIMES:
         mom_vec = np.asarray(rho) * np.asarray(vel)
     elif regime in ("rhd", "rmhd"):
         h = _enthalpy(rho, pre, eos, regime)
@@ -295,7 +326,7 @@ def enthalpy_density(
     regime: str = "newtonian",
 ) -> Array:
     """compute enthalpy density."""
-    if regime == "newtonian":
+    if regime in NEWTONIAN_REGIMES:
         return rho
     elif regime == "rhd":
         return rho * _enthalpy(rho, pre, eos, regime)
@@ -431,13 +462,19 @@ def create_computation_pipeline(data: Checkpoint) -> dict[str, Any]:
                 for name, field in partition.hydro.magnetic.items():
                     mapping[name] = field.data
 
-            # the isothermal regime carries no pressure dataset; its eos
-            # closes with p = cs^2 rho at the constant metadata sound speed,
-            # so p-dependent derived fields stay computable.
-            if "p" not in mapping and regime == "isothermal":
-                cs = data.metadata.sound_speed
-                if cs is not None:
-                    mapping["p"] = cs * cs * mapping["rho"]
+            # the local closure field includes halos, just like the primitives.
+            # older checkpoints carry only a constant sound speed in metadata.
+            if "p" not in mapping and regime in ISOTHERMAL_REGIMES:
+                if level_data.iso_cs2 is not None:
+                    cs2 = level_data.iso_cs2.interior(halo).data
+                    if cs2.shape != mapping["rho"].shape:
+                        raise FieldComputationError(
+                            f"level {level}: iso_cs2 shape {cs2.shape} does not"
+                            f" match density shape {mapping['rho'].shape}"
+                        )
+                    mapping["p"] = cs2 * mapping["rho"]
+                elif data.metadata.sound_speed is not None:
+                    mapping["p"] = data.metadata.sound_speed**2 * mapping["rho"]
 
             # provide context to compute function
             ctx = level_context_t(mapping, mesh)
@@ -446,11 +483,11 @@ def create_computation_pipeline(data: Checkpoint) -> dict[str, Any]:
             except KeyError as exc:
                 missing = exc.args[0] if exc.args else "?"
                 hint = ""
-                if missing == "p" and regime == "isothermal":
+                if missing == "p" and regime in ISOTHERMAL_REGIMES:
                     hint = (
-                        " (this isothermal checkpoint predates the"
-                        " 'sound_speed' metadata attr, so p = cs^2 rho"
-                        " cannot be reconstructed)"
+                        " (this isothermal checkpoint has neither 'iso_cs2'"
+                        " nor 'sound_speed' metadata, so p = cs^2 rho cannot"
+                        " be reconstructed)"
                     )
                 raise FieldComputationError(
                     f"derived field '{self._name}' needs base field"
@@ -569,9 +606,7 @@ def create_computation_pipeline(data: Checkpoint) -> dict[str, Any]:
         return fields["rho"] * lorentz_factor(get_velocities(fields), regime)
 
     def compute_velocity_magnitude(fields: dict[str, Array]) -> Array:
-        if ndim == 1:
-            return fields["v1"]
-        return np.sqrt(sum(fields[f"v{ii}"] ** 2 for ii in range(1, ndim + 1)))
+        return np.sqrt(sum(v**2 for v in get_velocities(fields)))
 
     def compute_four_velocity_magnitude(fields: dict[str, Array]) -> Array:
         if ndim == 1:

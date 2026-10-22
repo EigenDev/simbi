@@ -176,9 +176,6 @@ class FigureFormatter:
         # title and time
         time = getattr(first_data, "time", None)
         set_title(main_ax, fig, self.style, time)
-        ndim = 0
-        if first_data:
-            ndim = first_data.values.ndim
 
         results = [entry for entry in rendered_artists if entry is not None]
 
@@ -288,8 +285,13 @@ class FigureFormatter:
         except Exception as exc:
             warn_once(f"legend:{type(exc).__name__}", f"legend failed: {exc}")
 
-        # remove top/right spines only for 1D plots
-        if main_ax.name != "polar" and ndim == 1:
+        # polygon values are flat too; use the artists to identify line plots.
+        # a field with a line overlay keeps its frame.
+        is_line_plot = any(
+            "line" in result.artists or "lines" in result.artists
+            for result in results
+        ) and not any(result.mappable is not None for result in results)
+        if main_ax.name != "polar" and is_line_plot:
             try:
                 remove_spines(main_ax)
             except Exception as exc:

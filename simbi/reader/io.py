@@ -152,6 +152,7 @@ class LevelData:
     level_id: int
     mesh: MeshGeometry
     partitions: list[PartitionData]
+    iso_cs2: Optional[FieldData] = None
 
     @property
     def num_partitions(self) -> int:
@@ -451,11 +452,19 @@ def read_level(
     if not partitions:
         return Err(f"no valid partitions in level_{level_id}")
 
+    iso_cs2 = None
+    if "iso_cs2" in level_group:
+        cs2_result = read_scalar_field(level_group, "iso_cs2")
+        if cs2_result.is_err():
+            return Err(f"failed to read iso_cs2 for level_{level_id}: {cs2_result.error}")
+        iso_cs2 = cs2_result.value
+
     return Ok(
         LevelData(
             level_id=level_id,
             mesh=mesh_result.value,
             partitions=partitions,
+            iso_cs2=iso_cs2,
         )
     )
 
