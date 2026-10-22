@@ -17,6 +17,8 @@ simbi/libs/
 data/
 workspace/
 simbi/tools/extras/*
+# the science tree is linked into the working copy from outside this repository
+/simbi_configs/science
 
 # output formats
 *.h5

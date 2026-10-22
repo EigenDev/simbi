@@ -1,5 +1,26 @@
 # git hooks
 
+## Pre-commit hook
+
+The hook rejects symlinks anywhere in the staged tree, including renamed links,
+regular files changed into links, and links already present in the index. Local,
+untracked symlinks are allowed. `simbi_configs/science` stays local and is ignored.
+
+Git ignore patterns match paths rather than file types, so the hook enforces the
+type-based policy. Hooks apply only where installed and can be bypassed explicitly.
+
+Enable all repository hooks with:
+
+```bash
+git config core.hooksPath .githooks
+```
+
+Run the isolated symlink-policy tests with:
+
+```bash
+python -m unittest discover -s .githooks/tests -v
+```
+
 ## Pre-push hook
 
 The hook runs two checks before a push: an authorship guard and a fast build

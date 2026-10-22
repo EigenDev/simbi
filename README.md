@@ -32,13 +32,12 @@
 SIMBI is a finite-volume code for astrophysical fluid simulations. If you want to put relativistic jets, shock tubes, stellar explosions, accretion flows, or magnetized turbulence on a grid and see what happens, this is the tool. Results from SIMBI have appeared in *The Astrophysical Journal* and *The Astrophysical Journal Letters*.
 
 SIMBI started life as a C++ code. I eventually rewrote the compute backend in Rust after getting interested in graph theory and the possibility of generating architecture-agnostic code from one description of the physics. [Sethi and Ullman (1970)](https://dl.acm.org/doi/10.1145/321607.321620), and the work that followed it, provided some of the inspiration. The physics stayed the same, but years of experience gave me a chance to make the code faster and much easier to reason about. You still drive the whole thing from Python; the Rust API is there when you want it.
-<!--that the russt workspace is called `symbi` instead of `simbi`. Well, that's because I really love the idea of turning symbolic expressions into machine code, but since both "simbi" and "symbi" sound the same, I thought that shift was a cool nod to the new direction of the codebase. The Python package is still called `simbi`, so you can keep your scripts and configs the same.-->
 
 **What you get:**
 - Six fluid regimes in one code: Newtonian hydro, relativistic hydro (RHD), Newtonian and relativistic MHD, plus isothermal variants of both
 - Spacetime as its own axis: hand the relativistic regimes a Minkowski or horizon-penetrating Kerr-Schild metric (nonspinning or Kerr) the same way you would pick a coordinate system
 - GPU acceleration on NVIDIA CUDA and AMD ROCm/HIP devices, with kernels compiled on the fly for the active accelerator
-- High-resolution shock capturing with HLLE, HLLC, HLLC+ (a low-Mach, shock-stable variant; see [Chen et al. 2020](https://doi.org/10.1137/18M119032X)), and HLLD Riemann solvers. First-order flux correction handles failed high-order updates and reports each affected cell. I am still working on making this safety mechanism stronger, possibly with a method in the spirit of [Zalesak et al.](https://apps.dtic.mil/sti/tr/pdf/ADA360122.pdf).
+- High-resolution shock capturing with HLLE, HLLC, HLLC+ (a low-Mach, shock-stable variant; see [Chen et al. 2020](https://doi.org/10.1137/18M119032X)), and HLLD Riemann solvers. First-order flux correction handles failed high-order updates and records troubled and frozen cell counts.
 - Constrained-transport MHD (contact [Gardiner & Stone](https://arxiv.org/abs/0712.2634) or UCT ([Mignone & DelZanna (2021)](https://arxiv.org/abs/2004.10542)) edge EMFs) that keeps div B at machine zero by construction
 - Physical transport when you want it: Navier-Stokes viscosity (constant or alpha-disk) and Ohmic resistivity, layered on top of the ideal solvers
 - Immersed bodies with point-mass gravity, masked accretors for problems such as Bondi-Hoyle flow, and rigid walls built from constructive solid geometry (CSG). The surface coupling uses volume penalization in the spirit of [Angot, Bruneau & Fabrie (1999)](https://doi.org/10.1007/s002110050401). Bodies support prescribed motion or two-way coupling, including translation, rotation, gas–body energy exchange, and force, torque, and accretion diagnostics. This part of SIMBI grew out of a class I took with [Chuck Peskin](https://en.wikipedia.org/wiki/Charles_S._Peskin) as a graduate student at NYU; I loved the subject and wanted to bring some of those ideas into the code.
@@ -51,10 +50,9 @@ SIMBI started life as a C++ code. I eventually rewrote the compute backend in Ru
 - A live terminal dashboard with pause, single-step, on-demand checkpoints, and field heatmaps; `simbi attach` provides a read-only view of a headless run from another shell
 - A type-safe Python configuration system that generates its own CLI
 
-> CUDA and HIP use kernels generated from the same definitions. SIMBI currently
-> supports multi-GPU decomposition within one node; multi-node decomposition is
-> not yet implemented. Most of my current science problems fit on one node, so it
-> remains further down the roadmap.
+> CUDA and HIP use kernels generated from the same definitions. GPU domain
+> decomposition runs within one node. `simbi launch` uses CPU worker processes;
+> distributed GPU launch is unsupported.
 ---
 
 ## Simulation Gallery
@@ -229,11 +227,11 @@ artifacts, not source data; `./dev.py clean` (or `cargo clean`) removes them.
 
 ## Usage
 
-### The four commands
+### Commands
 
 ```bash
 simbi run        # run simulations
-simbi launch     # run one simulation across worker processes (CPU, single host)
+simbi launch     # run one simulation across CPU worker processes
 simbi plot       # visualize checkpoint data
 simbi afterglow  # radiation transport and observables
 simbi attach     # watch a headless (cluster/batch) run from your own terminal
@@ -348,140 +346,7 @@ both use the same flux there: every tile marks its troubled cells, the marks
 cross the tile boundaries, and every tile then corrects knowing the trouble
 against its boundaries. Single-level runs on several tiles, runs that combine
 mesh refinement with `--ngpus` greater than one (on the root and the refined
-level), and `simbi launch` runs all share the decision this way. The refined
-multi-tile case is gated on CPU host tiles against the one-tile run, the total
-mass included.
-
-### Multi-process runs on one host
-
-`simbi launch` evolves one problem across worker processes that exchange
-boundary data over TCP on the local host, without MPI. Every tile carries
-the whole grid's origin, spacing, and maps and is placed by the index of its
-first cell, so a launched run equals the single-grid run bit for bit. The
-configurations below are gated locally on two to four processes against
-the single grid, bit for bit; "correction" means the first-order correction
-fired against a cut, "restart" a resume onto a changed, uneven partition,
-"rollback" a rejected step replayed on every worker:
-
-| regime | gated configurations |
-|---|---|
-| newtonian | 2D Cartesian: periodic (fresh, restart, correction, ppm, rollback), periodic with reflecting walls and a gravity source, Neumann and Robin walls, pointwise user sources, the constant-nu viscous transport (fresh, restart equal to the uninterrupted run, nu shown to act); reflect, outflow, Neumann, Robin walls at cut corners. 2D spherical with a log radial axis over both poles (fresh, correction at the pole, restart); 2D cylindrical with the R = 0 axis and reflecting ends. 3D Cartesian with a tabulated source (four workers, correction); 2D Cartesian with geometric spacing on both axes under a tabulated source (four workers, correction); 3D spherical over both poles with a cut azimuth (two, three uneven, four workers, correction at the pole). |
-| rhd | 2D Cartesian (fresh, restart, correction, rollback); 3D Cartesian shock tube (two and four workers, correction); 2D Cartesian blast under the Synge perfect gas (four workers, correction). |
-| isothermal | 2D Cartesian periodic shear layer (fresh, restart, correction); a locally isothermal closure refused. |
-| nmhd | 2D Cartesian vortex (fresh with the face audit, restart, correction under Contact and UCT in both stages, shared-face mismatch aborting every worker, the numerics its substrate has no door for refused, a forced rejection refused); 2D Cartesian rotor with outflow walls (four workers, correction); reflect and outflow walls at cut corners; 2D (r, phi) disk plane with a periodic azimuth (four workers, correction); ohmic resistivity (two workers, correction, eta shown to act); 3D Cartesian vortex with a z flow (four workers cut along x and z, correction against both cuts, under Contact and UCT); 3D spherical over both poles with a cut azimuth, in-process worker gates only. |
-| imhd | 2D Cartesian vortex (fresh with the face audit, correction under Contact and UCT). |
-
-The listed regime and operator combinations are locally validated; the
-launched path validates nothing beyond them. Combinations the tiles build
-as the single path does but that no distributed gate has validated are
-refused at startup by name: geometric spacing outside Newtonian hydro on
-the Cartesian chart, the gas equations of state beyond the ideal gas
-outside the Synge gas with relativistic hydro, the balanced reconstruction, reconstruction
-beyond plm outside Newtonian hydro, the isothermal regimes on the
-spherical and cylindrical charts and in 3D, walls beyond periodic for the
-isothermal regimes, resistivity with the isothermal MHD closure, and the viscous transport outside Newtonian hydro (the
-alpha prescription needs a central body, which is refused ahead of it).
-`SIMBI_LAUNCH_EXPERIMENTAL=1` runs such a combination anyway, as an
-experimental, unvalidated one, and the launch says so; successful
-construction is no evidence of validated support. A polar axis with a cut
-azimuth is filled by antipodal exchange on both charts; the cylindrical
-seam is ungated.
-
-Refused at startup with the property named: the rmhd regime, a curved
-spacetime, a locally isothermal closure, a gradient wall or a user source
-with a magnetized regime, nondefault magnetized numerics, a forced
-rejection of a magnetized step, mesh refinement, mesh motion, immersed
-bodies, tracers, a passive scalar, horizon excision, a driven boundary, an
-equilibrium prescription, a perturbation expression, and the logarithmic
-checkpoint cadence. The post-step operators (the viscous transport, horizon
-excision) are one recipe every driver folds: an operation that writes the
-conserved interior has the primitives recovered and the cut halos refreshed
-before the next reader and the checkpoint, and one that refreshes the halos
-more than once per step is refused on the launched path by that
-declaration.
-
-Across two nodes on Frontier the evidence covers 2D Cartesian Newtonian
-hydro alone (equality, rollback, and faults on the shear layer), and it
-stands for the build it was recorded on; that build predates the tile
-geometry, the walls, the charts, the third dimension, the polar seam, and
-the magnetized, isothermal, resistive, and viscous paths, so every row
-above rests on local evidence until the two-node gates run again on the
-current build. The cross-node timing measured then showed substantial
-arrival skew per stage; its cause and the network's share of it are not
-yet isolated. A magnetized run audits the two copies of every face two workers
-share after the initial exchange and before every checkpoint, and after
-every exchange under `SIMBI_FABRIC_AUDIT=all`; a disagreement ends the run
-with the face named and publishes no checkpoint. A layout file names the worker
-count and the partition, and each worker holds one tile:
-
-```toml
-[execution]
-workers = 2
-
-[partition]
-shape = [2, 1]        # or cuts = [[16], []]: interior cut indices per axis
-
-[checkpoint]
-staging_mb = 4        # checkpoint block size; directory = "..." overrides the output directory
-```
-
-```bash
-simbi launch simbi_configs/examples/newtonian/kh.py --layout two.toml --resolution 32,32
-simbi launch /path/to/problem.py --layout three.toml --checkpoint data/32x32.chkpt.final.h5
-```
-
-Across hosts, a scheduler starts one process per worker and each runs the same
-command; the worker takes its id from the scheduler's environment
-(`SLURM_PROCID`, `PMI_RANK`, `OMPI_COMM_WORLD_RANK`). Every worker listens on
-`bind` and is reached at `advertise` (its host name when `bind` is all
-interfaces), and the coordinator publishes its address and a fresh session
-credential in an owner-only rendezvous file under the checkpoint directory,
-which must be on a filesystem every node shares:
-
-```toml
-[execution]
-mode = "scheduler"
-workers = 2
-bind = "0.0.0.0"
-
-[partition]
-shape = [2, 1]
-
-[checkpoint]
-directory = "/shared/run-001"
-```
-
-```bash
-srun --nodes=2 --ntasks=2 simbi launch /path/to/problem.py --layout two-node.toml
-```
-
-`scripts/fabric_two_node_gate.sh <fresh-shared-dir>`, submitted with
-`sbatch --nodes=2 --ntasks-per-node=1`, runs this on two nodes and compares the
-result with `simbi run` of the same problem, recording each worker's host,
-backend hash, and exit code. The transport is unencrypted TCP for a trusted allocation.
-
-`scripts/fabric_campaign.py <fresh-dir> --tier smoke|full` runs the validation
-campaign over the capability table above: for every case a single-grid run,
-a one-worker launch, an uneven multi-worker launch, a launch resumed onto a
-different partition, a troubled cell against a cut on one worker and on
-many, and the failure arms (a forced rejection, an invalid timestep, a lost
-worker, a perturbed shared face), with the final checkpoints compared
-interior cell for interior cell, the conserved totals of a periodic case
-held to roundoff, and div B read from the staggered faces. Each case leaves
-`result.json`; the campaign leaves `provenance.txt` (commit, dirty state,
-host, reported backend hash, scheduler job) and `summary.md`. With
-`--mode scheduler` inside an allocation each arm is one `srun` with one
-task per worker, and each task records its host, cpus, streams, and exit,
-so the same table runs on one host and across nodes from one installation.
-
-Problem flags pass through as they do for `simbi run`. The launcher starts the
-workers, prints each worker's pid and exit code, and exits nonzero if any
-worker did; interrupting the launcher ends every worker. Checkpoints are
-written by the coordinator worker with the same names and layout as a
-single-grid run, so a run started on one partition resumes on another with
-`--checkpoint`. The workers agree on the build, the resolved configuration,
-the partition, and the placement before any data moves, and refuse the
-session otherwise.
+level), and `simbi launch` runs all share the decision this way.
 
 #### Choosing the cuts
 
@@ -529,15 +394,86 @@ the failing path and error message.
 #### Compatibility and performance
 
 SIMBI checks the requested physics and grid features at startup and reports
-unsupported combinations. Multi-node execution remains on the roadmap. Changing
-the partition can introduce small floating-point roundoff differences.
+unsupported combinations. Changing the partition can introduce small
+floating-point roundoff differences.
 
 Reported zone-cycles/s is the combined throughput of all tiles. To measure
 scaling, hold the global grid, solver, physics, end time,
 and output cadence fixed while changing only the device count and cuts. Speedup
 depends on the workload, tile sizes, and device interconnect. Record the startup
-backend/config identities and use `SYMBI_PROFILE=1`
-to investigate runtime costs before choosing a production layout.
+backend/config identities alongside the timings when comparing layouts.
+
+### Multi-process CPU runs
+
+`simbi launch` evolves one problem across CPU worker processes, with one tile
+per worker. Workers exchange boundary data over TCP without MPI. The launcher
+can start the workers on one host, or a scheduler can start them across hosts.
+
+GPU decomposition uses `simbi run --mode gpu --ngpus N` within one node;
+`simbi launch` does not accept GPU workers. The launch path checks the requested
+regime, grid, operators, and partition at startup and refuses unsupported
+combinations by name.
+
+A magnetized run checks agreement between the two copies of every shared face
+after the initial exchange and before every checkpoint. Set
+`SIMBI_FABRIC_AUDIT=all` to check after every exchange. A disagreement ends the
+run with the face named and publishes no checkpoint.
+
+A layout file sets the worker count and partition:
+
+```toml
+[execution]
+workers = 2
+
+[partition]
+shape = [2, 1]        # or cuts = [[16], []]: interior cut indices per axis
+
+[checkpoint]
+staging_mb = 4        # checkpoint block size; directory = "..." overrides the output directory
+```
+
+```bash
+simbi launch simbi_configs/examples/newtonian/kh.py --layout two.toml --resolution 32,32
+simbi launch /path/to/problem.py --layout three.toml --checkpoint data/32x32.chkpt.final.h5
+```
+
+#### Scheduler execution across hosts
+
+Across hosts, a scheduler starts one process per worker and each runs the same
+command; the worker takes its id from the scheduler's environment
+(`SLURM_PROCID`, `PMI_RANK`, `OMPI_COMM_WORLD_RANK`). Every worker listens on
+`bind` and is reached at `advertise` (its host name when `bind` is all
+interfaces), and the coordinator publishes its address and a fresh session
+credential in an owner-only rendezvous file under the checkpoint directory,
+which must be on a filesystem every node shares:
+
+```toml
+[execution]
+mode = "scheduler"
+workers = 2
+bind = "0.0.0.0"
+
+[partition]
+shape = [2, 1]
+
+[checkpoint]
+directory = "/shared/run-001"
+```
+
+```bash
+srun --nodes=2 --ntasks=2 simbi launch /path/to/problem.py --layout two-node.toml
+```
+
+The transport is unencrypted TCP, intended for a trusted allocation.
+
+Problem flags pass through as they do for `simbi run`. In local mode, the launcher
+starts the workers, prints each worker's pid and exit code, and exits nonzero if
+any worker did; interrupting the launcher ends every worker. Checkpoints are
+written by the coordinator worker with the same names and layout as a
+single-grid run, so a run started on one partition resumes on another with
+`--checkpoint`. The workers agree on the build, the resolved configuration,
+the partition, and the placement before any data moves, and refuse the
+session otherwise.
 
 ### Visualization
 
@@ -1113,7 +1049,7 @@ Two dissipative terms sit on top of the ideal solvers, both off by default (coef
 
 SIMBI uses the conservative level-transfer, subcycling, and flux-register construction of
 [Berger & Colella (1989)](https://doi.org/10.1016/0021-9991(89)90035-1). Refinement regions are
-currently specified in the problem configuration rather than selected dynamically.
+specified explicitly in the problem configuration.
 
 ```python
 # turn refinement on
@@ -1133,8 +1069,8 @@ refinement_subcycling_mode: Annotated[
 **Subcycling modes:**
 - `STANDARD` / `NONE`, the fixed-ratio schedule: level `l` takes `2^l` steps per root step, and the
   root step is picked so every level stays inside its own CFL. These two are the same thing.
-- `ADAPTIVE` / `MANUAL` are still on the roadmap. Today they raise `NotImplementedError` at
-  validation, so a config that asks for one says so up front.
+- `ADAPTIVE` / `MANUAL` are unsupported and raise `NotImplementedError` during
+  configuration validation.
 
 ---
 
@@ -1290,7 +1226,7 @@ archivePrefix = {ascl},
 
 | Version | Changes |
 |---------|---------|
-| **v0.9.0** (current) | Full rewrite of the compute backend from C++ to Rust (traced-IR kernels, LLVM + NVRTC + hipRTC + Cranelift); production NVIDIA CUDA and AMD HIP support; GR spacetimes + horizon excision; constrained-transport MHD; viscosity + resistivity; two-way rigid-body immersed walls (CSG shapes, spin, energy-conserving coupling); single-node multi-GPU domain decomposition; static mesh refinement; live TUI; the big performance campaign |
+| **v0.9.0** (current) | Full rewrite of the compute backend from C++ to Rust (traced-IR kernels, LLVM + NVRTC + hipRTC + Cranelift); production NVIDIA CUDA and AMD HIP support; GR spacetimes + horizon excision; constrained-transport MHD; viscosity + resistivity; two-way rigid-body immersed walls (CSG shapes, spin, energy-conserving coupling); single-node multi-GPU domain decomposition; static mesh refinement; live TUI |
 | **v0.8.0** | Minimized compiler warnings | 
 | **v0.7.0** | Added mypy type checking and the immersed boundary method |
 | **v0.6.0** | Fixed git tag ordering, general refactoring |
