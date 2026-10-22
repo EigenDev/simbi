@@ -17,13 +17,6 @@ simbi/libs/
 data/
 workspace/
 simbi/tools/extras/*
-# a symlink to a science-config tree outside the repo. committing it would commit the LINK
-# -- an absolute path into one machine's home directory -- which resolves nowhere else.
-simbi_configs/science
-# the synced mirror of Frontier scratch: ~23 GB of production checkpoints. it was only
-# ever invisible because every file in it happens to be `.h5`; name it so a stray script
-# dropped in there does not surface.
-frontier/
 
 # output formats
 *.h5
