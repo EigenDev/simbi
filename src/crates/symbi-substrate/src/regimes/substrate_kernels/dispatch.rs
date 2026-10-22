@@ -13,7 +13,7 @@ use symbi_algebra::{Domain, OrderedNumeric};
 use symbi_carrier::Scalar;
 use symbi_grid::Field;
 use symbi_ir::{FieldBind, FieldRef, ScalarRef};
-use symbi_xpu::MemorySpace;
+use symbi_xpu::{MemorySpace, MemoryStorage};
 
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -52,7 +52,7 @@ pub(crate) fn composite_max_reduce<const D: usize, const DOF: usize, Mem, Sc>(
     field: &Field<Sc, D, Mem>,
 ) -> f64
 where
-    Mem: MemorySpace,
+    Mem: MemoryStorage,
     Sc: Scalar + OrderedNumeric,
 {
     sim.composite_ownership
@@ -101,7 +101,7 @@ pub fn body_gravity_limited_dt<const D: usize, const DOF: usize, Mem, Sc>(
     min_physical_width: f64,
 ) -> f64
 where
-    Mem: MemorySpace,
+    Mem: MemoryStorage,
     Sc: Scalar + OrderedNumeric,
 {
     let peak_acceleration = sim
@@ -218,7 +218,7 @@ pub fn cfl_wave_speed<const D: usize, const DOF: usize, Mem, Sc>(
     excision_radius: f64,
 ) -> f64
 where
-    Mem: MemorySpace + Sync,
+    Mem: MemoryStorage + Sync,
     Sc: Scalar + OrderedNumeric,
 {
     let geom = &sim.geom;
@@ -338,7 +338,7 @@ pub fn fofc_project<const D: usize, const DOF: usize, Mem, Sc>(
     prim: &symbi_sim::state::PrimFieldsGeneric<D, DOF, Mem, Sc>,
     bcell: Option<[&Field<Sc, D, Mem>; 3]>,
 ) where
-    Mem: MemorySpace + Sync,
+    Mem: MemoryStorage + Sync,
     Sc: Scalar + OrderedNumeric,
 {
     let geom = &sim.geom;
@@ -418,7 +418,7 @@ pub(crate) fn fofc_project_named<const D: usize, const DOF: usize, Mem, Sc>(
     bcell: Option<[&Field<Sc, D, Mem>; 3]>,
     extra_slots: &[(&str, &Field<Sc, D, Mem>)],
 ) where
-    Mem: MemorySpace + Sync,
+    Mem: MemoryStorage + Sync,
     Sc: Scalar + OrderedNumeric,
 {
     let geom = &sim.geom;
@@ -508,7 +508,7 @@ fn conserved_component<'a, const D: usize, const DOF: usize, Mem, Sc>(
     context: &str,
 ) -> &'a Field<Sc, D, Mem>
 where
-    Mem: MemorySpace,
+    Mem: MemoryStorage,
     Sc: Scalar + OrderedNumeric,
 {
     if suffix == "den" {
@@ -534,7 +534,7 @@ pub fn fofc_source_theta<const D: usize, const DOF: usize, Mem, Sc>(
     bcell: [&Field<Sc, D, Mem>; 3],
     theta: &Field<Sc, D, Mem>,
 ) where
-    Mem: MemorySpace + Sync,
+    Mem: MemoryStorage + Sync,
     Sc: Scalar + OrderedNumeric,
 {
     let geom = &sim.geom;
@@ -620,7 +620,7 @@ pub fn constraint_projection<const D: usize, const DOF: usize, Mem, Sc>(
     binding: &Field<Sc, D, Mem>,
     floors: ConstraintParams,
 ) where
-    Mem: MemorySpace + Sync,
+    Mem: MemoryStorage + Sync,
     Sc: Scalar + OrderedNumeric,
 {
     let geom = &sim.geom;
@@ -726,7 +726,7 @@ pub fn fofc_exterior_mask<const D: usize, const DOF: usize, Mem, Sc>(
     bad: &Field<Sc, D, Mem>,
     exterior: &Field<Sc, D, Mem>,
 ) where
-    Mem: MemorySpace + Sync,
+    Mem: MemoryStorage + Sync,
     Sc: Scalar + OrderedNumeric,
 {
     let geom = &sim.geom;
@@ -791,7 +791,7 @@ pub fn shell_accretion_rates<const D: usize, const DOF: usize, Mem, Sc>(
     diagnostic_radius: f64,
 ) -> symbi_sim::driver::HorizonPartial
 where
-    Mem: MemorySpace + Sync,
+    Mem: MemoryStorage + Sync,
     Sc: Scalar + OrderedNumeric,
 {
     let geom = &sim.geom;
@@ -832,7 +832,10 @@ where
         );
         // the emit writes the outward contribution; the exact sum telescopes to the net outward
         // flux through the shell, the same for every partition of the interior
-        let sum = symbi_exec::engine::field_sum_exact(scratch, &geom.interior);
+        let sum = symbi_exec::engine::field_sum_exact(
+            scratch.host().expect("the horizon shell's exact sum runs on host-dereferenceable storage"),
+            &geom.interior,
+        );
         match quantity {
             "mass" => partial.mass = sum,
             _ => partial.nrg = sum,
@@ -852,7 +855,7 @@ pub fn state_finite_over_allocated<const D: usize, const DOF: usize, Mem, Sc>(
     scratch: &Field<Sc, D, Mem>,
 ) -> bool
 where
-    Mem: MemorySpace + Sync,
+    Mem: MemoryStorage + Sync,
     Sc: Scalar + OrderedNumeric,
 {
     let name = format!("state_finite_{D}d");
@@ -894,7 +897,7 @@ fn audit_stage_local_reads<'a, const D: usize, const DOF: usize, Mem, Sc>(
     mut resolve: impl FnMut(symbi_ir::FieldRef) -> &'a Field<Sc, D, Mem>,
 ) where
     Sc: Scalar + OrderedNumeric,
-    Mem: MemorySpace,
+    Mem: MemoryStorage,
 {
     // the buffer's own address is the identity: the several wire names for one field
     // (`prim.mag[k]` / `bcell[k]` / `cons.mag_k`) all resolve to that one reference, so aliases
@@ -932,7 +935,7 @@ fn audit_stage_local_reads<'a, const D: usize, const DOF: usize, Mem, Sc>(
     _resolve: impl FnMut(symbi_ir::FieldRef) -> &'a Field<Sc, D, Mem>,
 ) where
     Sc: Scalar + OrderedNumeric,
-    Mem: MemorySpace,
+    Mem: MemoryStorage,
 {
 }
 
@@ -952,7 +955,7 @@ pub fn dispatch_named<const D: usize, const DOF: usize, Mem, Sc>(
     scalars: &[Sc],
 ) where
     Sc: Scalar + OrderedNumeric,
-    Mem: MemorySpace,
+    Mem: MemoryStorage,
 {
     let bindings = kernel_bindings(name);
     let (inputs, outputs) = bind_manifest(&bindings, |fref| {
@@ -982,7 +985,7 @@ pub fn dispatch_body_source_wb<const D: usize, const DOF: usize, Mem, Sc>(
     gamma: f64,
     reach: i64,
 ) where
-    Mem: MemorySpace,
+    Mem: MemoryStorage,
     Sc: Scalar + OrderedNumeric,
 {
     assert!(
@@ -1006,7 +1009,7 @@ pub fn dispatch_body_source<const D: usize, const DOF: usize, Mem, Sc>(
     dt: f64,
     gamma: f64,
 ) where
-    Mem: MemorySpace + Sync,
+    Mem: MemoryStorage + Sync,
     Sc: Scalar + OrderedNumeric,
 {
     let sfx = geom_suffix(sim.geom.coords, DOF, D);
@@ -1050,7 +1053,7 @@ pub fn dispatch_excise<const D: usize, const DOF: usize, Mem, Sc>(
     rho_atmosphere: f64,
     pre_atmosphere: f64,
 ) where
-    Mem: MemorySpace + Sync,
+    Mem: MemoryStorage + Sync,
     Sc: Scalar + OrderedNumeric,
 {
     symbi_sim::driver::prof("excise", || {
@@ -1085,7 +1088,7 @@ pub fn dispatch_excise_sweep<const D: usize, const DOF: usize, Mem, Sc>(
     rho_atmosphere: f64,
     pre_atmosphere: f64,
 ) where
-    Mem: MemorySpace + Sync,
+    Mem: MemoryStorage + Sync,
     Sc: Scalar + OrderedNumeric,
 {
     symbi_sim::driver::prof("excise", || {
@@ -1108,7 +1111,7 @@ pub fn dispatch_excise_finalize<const D: usize, const DOF: usize, Mem, Sc>(
     rho_atmosphere: f64,
     pre_atmosphere: f64,
 ) where
-    Mem: MemorySpace + Sync,
+    Mem: MemoryStorage + Sync,
     Sc: Scalar + OrderedNumeric,
 {
     symbi_sim::driver::prof("excise", || {
@@ -1131,7 +1134,7 @@ pub fn excise_pass_count_for<const D: usize, const DOF: usize, Mem, Sc>(
     r_exc: f64,
 ) -> usize
 where
-    Mem: MemorySpace + Sync,
+    Mem: MemoryStorage + Sync,
     Sc: Scalar + OrderedNumeric,
 {
     if r_exc <= 0.0 {
@@ -1156,7 +1159,7 @@ pub fn dispatch_fofc_evidence_outside_sphere<const D: usize, const DOF: usize, M
     freeze: &Field<Sc, D, Mem>,
     evidence: &Field<Sc, D, Mem>,
 ) where
-    Mem: MemorySpace + Sync,
+    Mem: MemoryStorage + Sync,
     Sc: Scalar + OrderedNumeric,
 {
     let geom = &sim.geom;
@@ -1187,7 +1190,7 @@ pub fn dispatch_fofc_flag_unexcised<const D: usize, const DOF: usize, Mem, Sc>(
     r_exc: f64,
     flag: &Field<Sc, D, Mem>,
 ) where
-    Mem: MemorySpace + Sync,
+    Mem: MemoryStorage + Sync,
     Sc: Scalar + OrderedNumeric,
 {
     let geom = &sim.geom;
@@ -1231,7 +1234,7 @@ fn dispatch_excise_inner<const D: usize, const DOF: usize, Mem, Sc>(
     pre_atmosphere: f64,
     phase: ExcisePhase,
 ) where
-    Mem: MemorySpace + Sync,
+    Mem: MemoryStorage + Sync,
     Sc: Scalar + OrderedNumeric,
 {
     let geom = &sim.geom;
@@ -1459,7 +1462,7 @@ pub fn dispatch_viscous<const D: usize, const DOF: usize, Mem, Sc>(
     dt: f64,
     nu: f64,
 ) where
-    Mem: MemorySpace,
+    Mem: MemoryStorage,
     Sc: Scalar + OrderedNumeric,
 {
     // the viscous stencils are 3-point centered differences carrying a single width per axis, so
@@ -1625,7 +1628,7 @@ pub fn dispatch_viscous_alpha<const D: usize, const DOF: usize, Mem, Sc>(
     alpha: f64,
     cs: f64,
 ) where
-    Mem: MemorySpace,
+    Mem: MemoryStorage,
     Sc: Scalar + OrderedNumeric,
 {
     // the viscous stencils are 3-point centered differences carrying a single width per axis, so
@@ -1731,7 +1734,7 @@ pub fn dispatch_viscous_alpha<const D: usize, const DOF: usize, Mem, Sc>(
 /// partials of a split grid merge into the whole grid's sum; the device reduction's total otherwise
 fn feedback_sum<const D: usize, Mem, Sc>(field: &Field<Sc, D, Mem>, domain: &Domain<D>) -> symbi_algebra::ExactSum
 where
-    Mem: MemorySpace,
+    Mem: MemoryStorage,
     Sc: Scalar + OrderedNumeric,
 {
     if Mem::IS_DEVICE_ACCESSIBLE {
@@ -1739,7 +1742,10 @@ where
         sum.add(field_reduce(field, domain, ReductionOp::Add));
         sum
     } else {
-        symbi_exec::engine::field_sum_exact(field, domain)
+        symbi_exec::engine::field_sum_exact(
+            field.host().expect("the body feedback's exact sum runs on host-dereferenceable storage"),
+            domain,
+        )
     }
 }
 
@@ -1753,7 +1759,7 @@ pub fn dispatch_body_feedback<const D: usize, const DOF: usize, Mem, Sc>(
     dt: f64,
     gamma: f64,
 ) where
-    Mem: MemorySpace + Sync,
+    Mem: MemoryStorage + Sync,
     Sc: Scalar + OrderedNumeric,
 {
     if D < 2 {
@@ -1829,7 +1835,7 @@ fn feedback_scratch<'s, const D: usize, const DOF: usize, Mem, Sc>(
     n: usize,
 ) -> &'s [Field<Sc, D, Mem>]
 where
-    Mem: MemorySpace + Sync,
+    Mem: MemoryStorage + Sync,
     Sc: Scalar + OrderedNumeric,
 {
     // every body pass shares this OnceLock (feedback grav D, drain D+5,
@@ -1867,7 +1873,7 @@ fn dispatch_body_feedback_split<const D: usize, const DOF: usize, Mem, Sc>(
     dt: f64,
     gamma: f64,
 ) where
-    Mem: MemorySpace + Sync,
+    Mem: MemoryStorage + Sync,
     Sc: Scalar + OrderedNumeric,
 {
     let Some(im) = sim.immersed.as_ref() else {
@@ -2043,10 +2049,11 @@ pub fn dispatch_penalize<const D: usize, const DOF: usize, Mem, Sc>(
     gamma: f64,
     c_drain: f64,
 ) where
-    Mem: MemorySpace + Sync,
+    Mem: MemoryStorage + Sync,
     Sc: Scalar + OrderedNumeric,
 {
     // the hydrodynamic path: no magnetic field, so the Alfven stiffness is zero.
+    let sim = sim.host_only("the immersed-body drain");
     dispatch_penalize_with_stiffness(sim, dt, gamma, c_drain, symbi_sim::state::local_c_a2_max(sim));
 }
 
@@ -2060,11 +2067,11 @@ pub fn dispatch_penalize_with_stiffness<const D: usize, const DOF: usize, Mem, S
     c_drain: f64,
     c_a2: f64,
 ) where
-    Mem: MemorySpace + Sync,
+    Mem: MemoryStorage + Sync,
     Sc: Scalar + OrderedNumeric,
 {
     symbi_sim::driver::prof("penalize", || {
-        dispatch_penalize_inner(sim, dt, gamma, c_drain, c_a2);
+        dispatch_penalize_inner(sim.host_only("the immersed-body drain"), dt, gamma, c_drain, c_a2);
     });
 }
 
@@ -2778,7 +2785,7 @@ pub fn dispatch_body_source_iso<const D: usize, const DOF: usize, Mem, Sc>(
     pre: &Field<Sc, D, Mem>,
     dt: f64,
 ) where
-    Mem: MemorySpace + Sync,
+    Mem: MemoryStorage + Sync,
     Sc: Scalar + OrderedNumeric,
 {
     let sfx = geom_suffix(sim.geom.coords, DOF, D);
@@ -2797,7 +2804,7 @@ pub fn dispatch_body_source_iso_closure<const D: usize, const DOF: usize, Mem, S
     sim: &FieldStore<D, DOF, Mem, Sc>,
     dt: f64,
 ) where
-    Mem: MemorySpace + Sync,
+    Mem: MemoryStorage + Sync,
     Sc: Scalar + OrderedNumeric,
 {
     assert_eq!(
@@ -2818,7 +2825,7 @@ pub fn dispatch_body_feedback_iso<const D: usize, const DOF: usize, Mem, Sc>(
     pre: &Field<Sc, D, Mem>,
     dt: f64,
 ) where
-    Mem: MemorySpace + Sync,
+    Mem: MemoryStorage + Sync,
     Sc: Scalar + OrderedNumeric,
 {
     if D < 2 {
@@ -2882,7 +2889,7 @@ pub fn dispatch_godunov_with_body_source<const D: usize, const DOF: usize, Mem, 
     ac: f64,
     eos_param: f64,
 ) where
-    Mem: MemorySpace + Sync,
+    Mem: MemoryStorage + Sync,
     Sc: Scalar + OrderedNumeric,
 {
     let geom = &sim.geom;
@@ -2977,7 +2984,7 @@ pub fn dispatch_flux<const D: usize, const DOF: usize, Mem, Sc>(
     primary: f64,
     spec: FluxSpec,
 ) where
-    Mem: MemorySpace + Sync,
+    Mem: MemoryStorage + Sync,
     Sc: Scalar + OrderedNumeric,
 {
     let FluxSpec {
@@ -3189,7 +3196,7 @@ pub fn dispatch_godunov<const D: usize, const DOF: usize, Mem, Sc>(
     // source; the GR-hydro kernels are the ones declaring it, so this arm serves them.
     eos_param: f64,
 ) where
-    Mem: MemorySpace + Sync,
+    Mem: MemoryStorage + Sync,
     Sc: Scalar + OrderedNumeric,
 {
     let geom = &sim.geom;
@@ -3269,7 +3276,7 @@ pub fn dispatch_source_apply<const D: usize, const DOF: usize, Mem, Sc>(
     binding: &FusedSourceBinding,
     weight: f64,
 ) where
-    Mem: MemorySpace + Sync,
+    Mem: MemoryStorage + Sync,
     Sc: Scalar + OrderedNumeric,
 {
     let geom = &sim.geom;
@@ -3367,7 +3374,7 @@ pub fn dispatch_godunov_maybe_fused<const D: usize, const DOF: usize, Mem, Sc>(
     eos_param: f64,
     fused_source: Option<&FusedSourceBinding>,
 ) where
-    Mem: MemorySpace + Sync,
+    Mem: MemoryStorage + Sync,
     Sc: Scalar + OrderedNumeric,
 {
     match fused_source {
@@ -3410,7 +3417,7 @@ pub fn dispatch_godunov_with_sources<const D: usize, const DOF: usize, Mem, Sc>(
     source_id: &str,
     source_scalars: &HashMap<String, f64>,
 ) where
-    Mem: MemorySpace + Sync,
+    Mem: MemoryStorage + Sync,
     Sc: Scalar + OrderedNumeric,
 {
     let geom = &sim.geom;

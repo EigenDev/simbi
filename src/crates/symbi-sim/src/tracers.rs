@@ -54,7 +54,7 @@ pub struct TracerSet<const D: usize> {
 ///
 /// position and its ssp step snapshot are authoritative. ownership is derived
 /// after advancement for migration and material-reservoir accounting.
-pub struct ContinuousTracerSet<const D: usize, Mem: symbi_xpu::MemorySpace> {
+pub struct ContinuousTracerSet<const D: usize, Mem: symbi_xpu::MemoryStorage> {
     pub order: crate::mass_transport::ItoOrder,
     pub x: [symbi_xpu::MemoryBlock<Mem>; D],
     pub step_x: [symbi_xpu::MemoryBlock<Mem>; D],
@@ -95,14 +95,14 @@ pub struct ContinuousTracerSnapshot<const D: usize> {
 }
 
 /// cell-centered flux-derived coefficients interpolated by continuous tracers.
-pub struct ItoCoefficientFields<const D: usize, Mem: symbi_xpu::MemorySpace> {
+pub struct ItoCoefficientFields<const D: usize, Mem: symbi_xpu::MemoryStorage> {
     pub drift: [symbi_grid::Field<f64, D, Mem>; D],
     pub variance: [symbi_grid::Field<f64, D, Mem>; D],
     pub third: [symbi_grid::Field<f64, D, Mem>; D],
 }
 
 /// accepted full-step mass transfers from which continuous-tracer moments derive.
-pub struct ItoTransportReceipt<const D: usize, Mem: symbi_xpu::MemorySpace> {
+pub struct ItoTransportReceipt<const D: usize, Mem: symbi_xpu::MemoryStorage> {
     pub source_mass: symbi_grid::Field<f64, D, Mem>,
     pub face_mass: [symbi_grid::Field<f64, D, Mem>; D],
     pub step_scale: f64,
@@ -2860,7 +2860,7 @@ pub fn snapshot_transport_state<const D: usize, const DOF: usize, Mem: MemorySpa
 /// restore discrete tracer ownership after a rejected fluid step. injection is
 /// committed only after every stage accepts, so identities and spawn state are
 /// unchanged at this boundary.
-pub fn restore_transport_state<const D: usize, const DOF: usize, Mem: MemorySpace>(
+pub fn restore_transport_state<const D: usize, const DOF: usize, Mem: symbi_xpu::MemoryStorage>(
     sim: &mut FieldStore<D, DOF, Mem, f64>,
 ) {
     let Some(tracers) = sim.tracers.as_mut() else {

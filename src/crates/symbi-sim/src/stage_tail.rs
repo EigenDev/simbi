@@ -27,10 +27,10 @@ use crate::driver::StageSpec;
 use crate::mass_transport::ContainerId;
 use crate::state::FieldStore;
 use crate::tracers::TransportLayout;
-use symbi_xpu::MemorySpace;
+use symbi_xpu::{MemorySpace, MemoryStorage};
 
 /// the transport of a flat tiled march's stage tail on one participant's tiles
-pub trait FlatStageTail<const D: usize, const DOF: usize, M: MemorySpace> {
+pub trait FlatStageTail<const D: usize, const DOF: usize, M: MemoryStorage> {
     type Error;
     /// the stage-end excision through the driver's step context
     fn excise(&mut self) -> Result<(), Self::Error>;

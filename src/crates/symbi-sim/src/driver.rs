@@ -22,7 +22,7 @@
 use symbi_geometry::{Metric, MotionState};
 use symbi_hydro::eos::Eos;
 use symbi_hydro::regime::Regime;
-use symbi_xpu::{ExecutionSpace, MemorySpace};
+use symbi_xpu::{ExecutionSpace, MemoryStorage};
 
 use crate::state::{FieldStore, SimStateGeneric};
 
@@ -258,7 +258,7 @@ pub fn advance_state_clock<const D: usize, const DOF: usize, Mem>(
     state: &mut FieldStore<D, DOF, Mem, f64>,
     dt: f64,
 ) where
-    Mem: MemorySpace,
+    Mem: MemoryStorage,
 {
     (state.time, state.iteration) = advance_clock(state.time, state.iteration, dt);
     let law_value = state
@@ -273,7 +273,7 @@ pub fn horizon_request<const D: usize, const DOF: usize, Mem>(
     state: &FieldStore<D, DOF, Mem, f64>,
 ) -> Option<(usize, f64)>
 where
-    Mem: MemorySpace,
+    Mem: MemoryStorage,
 {
     state.immersed.as_ref().and_then(|immersed| {
         immersed
@@ -349,7 +349,7 @@ pub fn horizon_partial_of<const D: usize, const DOF: usize, Mem, K>(
     diagnostic_radius: f64,
 ) -> HorizonPartial
 where
-    Mem: MemorySpace,
+    Mem: MemoryStorage,
     K: crate::substrate_seam::KernelSet<D, DOF, Mem, f64>,
 {
     prof("horizon_accretion", || kernels.horizon_accretion(state, diagnostic_radius)).unwrap_or_else(|| {
@@ -369,7 +369,7 @@ pub fn book_horizon_receipt<const D: usize, const DOF: usize, Mem>(
     edot: f64,
     dt: f64,
 ) where
-    Mem: MemorySpace,
+    Mem: MemoryStorage,
 {
     let Some(immersed) = state.immersed.as_mut() else {
         return;
@@ -415,7 +415,7 @@ pub fn evolve_bodies<R: Regime<f64, D>, const D: usize, const DOF: usize, M, E, 
     M: Metric<f64, D> + Copy,
     E: Eos<f64>,
     S: ExecutionSpace,
-    Mem: MemorySpace,
+    Mem: MemoryStorage,
 {
     let (dt, time) = (sim.dt, sim.time);
 

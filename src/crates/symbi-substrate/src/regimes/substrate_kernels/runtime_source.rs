@@ -14,7 +14,7 @@ use symbi_geometry::Geometry;
 use symbi_grid::Field;
 use symbi_ir::{FieldBind, FieldRef, ScalarRef};
 use symbi_source_compile::{AdmittedSources, BoundaryPrescription, SourceEvaluator};
-use symbi_xpu::MemorySpace;
+use symbi_xpu::{MemorySpace, MemoryStorage};
 
 use std::sync::{Arc, OnceLock};
 
@@ -46,7 +46,7 @@ pub fn dispatch_runtime_ir<const D: usize, const DOF: usize, Mem, Sc>(
     resolve_scalar: impl Fn(&ScalarBind) -> Sc,
 ) where
     Sc: Scalar + OrderedNumeric,
-    Mem: MemorySpace,
+    Mem: MemoryStorage,
 {
     assert!(
         Mem::IS_DEVICE_ACCESSIBLE,
@@ -249,14 +249,14 @@ pub fn dispatch_runtime_source<const D: usize, const DOF: usize, Mem, Sc>(
     weight: f64,
 ) where
     Sc: Scalar + OrderedNumeric,
-    Mem: MemorySpace,
+    Mem: MemoryStorage,
 {
     if Mem::IS_DEVICE_ACCESSIBLE {
         apply_runtime_source_gpu(sim, rs, weight);
     } else if let Some(sk) = source_only_cpu_kernel(sim, rs) {
         dispatch_source_only_cpu(sim, sk, rs, weight);
     } else {
-        apply_runtime_source(sim, rs, weight);
+        apply_runtime_source(sim.host_only("the interpreted runtime source"), rs, weight);
     }
 }
 
@@ -499,7 +499,7 @@ pub(crate) fn source_only_cpu_kernel<'a, const D: usize, const DOF: usize, Mem, 
 ) -> Option<&'a FusedCpuKernel>
 where
     Sc: Scalar + OrderedNumeric,
-    Mem: MemorySpace,
+    Mem: MemoryStorage,
 {
     if Mem::IS_DEVICE_ACCESSIBLE {
         return None;
@@ -535,7 +535,7 @@ fn dispatch_source_only_cpu<const D: usize, const DOF: usize, Mem, Sc>(
     weight: f64,
 ) where
     Sc: Scalar + OrderedNumeric,
-    Mem: MemorySpace,
+    Mem: MemoryStorage,
 {
     debug_assert!(
         !Mem::IS_DEVICE_ACCESSIBLE,
@@ -607,7 +607,7 @@ pub(crate) fn fused_runtime_cpu_kernel<'a, const D: usize, const DOF: usize, Mem
 ) -> Option<&'a FusedCpuKernel>
 where
     Sc: Scalar + OrderedNumeric,
-    Mem: MemorySpace,
+    Mem: MemoryStorage,
 {
     if Mem::IS_DEVICE_ACCESSIBLE {
         return None;
@@ -660,7 +660,7 @@ pub(crate) fn body_fused_in<const D: usize, const DOF: usize, Mem, Sc>(
 ) -> bool
 where
     Sc: Scalar + OrderedNumeric,
-    Mem: MemorySpace,
+    Mem: MemoryStorage,
 {
     fold_body
         && sim.immersed.is_some()
@@ -699,7 +699,7 @@ pub(crate) fn resolve_body_only_fused<'a, const D: usize, const DOF: usize, Mem,
 ) -> Option<&'a FusedCpuKernel>
 where
     Sc: Scalar + OrderedNumeric,
-    Mem: MemorySpace,
+    Mem: MemoryStorage,
 {
     if Mem::IS_DEVICE_ACCESSIBLE {
         return None;
@@ -752,7 +752,7 @@ pub(crate) fn dispatch_fused_runtime_cpu<const D: usize, const DOF: usize, Mem, 
     gamma: f64,
 ) where
     Sc: Scalar + OrderedNumeric,
-    Mem: MemorySpace,
+    Mem: MemoryStorage,
 {
     debug_assert!(
         !Mem::IS_DEVICE_ACCESSIBLE,
@@ -890,7 +890,7 @@ fn apply_runtime_source_gpu<const D: usize, const DOF: usize, Mem, Sc>(
     weight: f64,
 ) where
     Sc: Scalar + OrderedNumeric,
-    Mem: MemorySpace,
+    Mem: MemoryStorage,
 {
     let (name, ir) = rs
         .gpu_ir
@@ -934,7 +934,7 @@ fn build_runtime_source_ir<const D: usize, const DOF: usize, Mem, Sc>(
 ) -> (String, String)
 where
     Sc: Scalar + OrderedNumeric,
-    Mem: MemorySpace,
+    Mem: MemoryStorage,
 {
     let (coords, spacing, axes) = sim_gv_geom(sim);
     let program =
@@ -953,7 +953,7 @@ pub(crate) fn sim_gv_geom<const D: usize, const DOF: usize, Mem, Sc>(
 )
 where
     Sc: Scalar + OrderedNumeric,
-    Mem: MemorySpace,
+    Mem: MemoryStorage,
 {
     use symbi_discretize::{Coords, Spacing};
     use symbi_geometry::AxisMap;

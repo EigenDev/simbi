@@ -18,7 +18,7 @@
 
 use crate::config::LaunchConfig;
 use crate::error::{self, XpuError};
-use crate::memory::MemorySpace;
+use crate::memory::{MemorySpace, MemoryStorage};
 use crate::space::ExecutionSpace;
 use std::cell::Cell;
 use std::ffi::{CString, c_char, c_int, c_uint, c_void};
@@ -86,6 +86,8 @@ unsafe extern "C" {
         extra: *mut *mut c_void,
     ) -> hipError_t;
     fn hipMallocManaged(dptr: *mut *mut c_void, size: usize, flags: c_uint) -> hipError_t;
+    fn hipMalloc(dptr: *mut *mut c_void, size: usize) -> hipError_t;
+    fn hipMemcpy(dst: *mut c_void, src: *const c_void, size: usize, kind: c_int) -> hipError_t;
     fn hipFree(ptr: *mut c_void) -> hipError_t;
     fn hipMemsetD8(dst: hipDeviceptr_t, value: u8, count: usize) -> hipError_t;
     fn hipDeviceGetName(name: *mut c_char, len: c_int, dev: hipDevice_t) -> hipError_t;
@@ -501,11 +503,12 @@ impl ExecutionSpace for HipSpace {
 // =============================================================================
 
 /// HIP managed (unified) memory. accessible from both host and device. the amd analog of
-/// `UnifiedMemory`; the same managed-thrash caveat applies -- a device-local space is
-/// future work.
+/// `UnifiedMemory`; the same managed-thrash caveat applies. `HipDeviceLocal` holds storage
+/// on the device alone.
 pub struct HipManaged;
 
-impl MemorySpace for HipManaged {
+impl MemoryStorage for HipManaged {
+    type HostAccess = HipManaged;
     const IS_HOST_ACCESSIBLE: bool = true;
     const IS_DEVICE_ACCESSIBLE: bool = true;
     const IS_UNIFIED: bool = true;
@@ -527,6 +530,82 @@ impl MemorySpace for HipManaged {
     fn deallocate(ptr: *mut u8, _bytes: usize) {
         unsafe {
             let _ = hipFree(ptr as *mut c_void);
+        }
+    }
+
+    // managed memory: drain the device, then the host reads or writes the pages directly
+    unsafe fn copy_to_host(dst: *mut u8, src: *const u8, bytes: usize) -> error::Result<()> {
+        ctx_sync();
+        unsafe { std::ptr::copy_nonoverlapping(src, dst, bytes) };
+        Ok(())
+    }
+
+    unsafe fn copy_from_host(dst: *mut u8, src: *const u8, bytes: usize) -> error::Result<()> {
+        ctx_sync();
+        unsafe { std::ptr::copy_nonoverlapping(src, dst, bytes) };
+        Ok(())
+    }
+}
+
+impl MemorySpace for HipManaged {}
+
+// =============================================================================
+// HipDeviceLocal: device-local storage
+// =============================================================================
+
+/// hip device-local memory (`hipMalloc`): resident on the current device, never migrated, and
+/// not dereferenceable by host code (it implements `MemoryStorage` alone). kernels read it in
+/// place; the host reaches it through the synchronized `hipMemcpy` transfers below.
+pub struct HipDeviceLocal;
+
+/// `hipMemcpyKind`: host to device, device to host
+const HIP_MEMCPY_HOST_TO_DEVICE: c_int = 1;
+const HIP_MEMCPY_DEVICE_TO_HOST: c_int = 2;
+
+impl MemoryStorage for HipDeviceLocal {
+    type HostAccess = crate::memory::NoHostAccess;
+    const IS_HOST_ACCESSIBLE: bool = false;
+    const IS_DEVICE_ACCESSIBLE: bool = true;
+    const IS_UNIFIED: bool = false;
+    const PREFERRED_ALIGNMENT: usize = 256;
+
+    fn allocate(bytes: usize) -> error::Result<*mut u8> {
+        ensure_init()?;
+        let mut ptr: *mut c_void = std::ptr::null_mut();
+        unsafe {
+            check(hipMalloc(&mut ptr, bytes), "hipMalloc")?;
+            check(hipMemsetD8(ptr, 0, bytes), "hipMemsetD8")?;
+            check(hipDeviceSynchronize(), "hipDeviceSynchronize")?;
+        }
+        Ok(ptr as *mut u8)
+    }
+
+    fn deallocate(ptr: *mut u8, _bytes: usize) {
+        unsafe {
+            let _ = hipFree(ptr as *mut c_void);
+        }
+    }
+
+    // the queue drains first, so the copy reads what every launched kernel wrote; hipMemcpy to
+    // pageable host memory returns once the bytes have landed
+    unsafe fn copy_to_host(dst: *mut u8, src: *const u8, bytes: usize) -> error::Result<()> {
+        unsafe {
+            check(hipDeviceSynchronize(), "hipDeviceSynchronize")?;
+            check(
+                hipMemcpy(dst as *mut c_void, src as *const c_void, bytes, HIP_MEMCPY_DEVICE_TO_HOST),
+                "hipMemcpy device to host",
+            )
+        }
+    }
+
+    unsafe fn copy_from_host(dst: *mut u8, src: *const u8, bytes: usize) -> error::Result<()> {
+        unsafe {
+            check(hipDeviceSynchronize(), "hipDeviceSynchronize")?;
+            check(
+                hipMemcpy(dst as *mut c_void, src as *const c_void, bytes, HIP_MEMCPY_HOST_TO_DEVICE),
+                "hipMemcpy host to device",
+            )?;
+            check(hipDeviceSynchronize(), "hipDeviceSynchronize")
         }
     }
 }

@@ -29,7 +29,7 @@ use symbi_grid::Field;
 use crate::substrate_seam::KernelSet;
 use symbi_algebra::OrderedNumeric;
 use symbi_carrier::Scalar;
-use symbi_xpu::MemorySpace;
+use symbi_xpu::MemoryStorage;
 
 /// arms `workspace.stage_writes` for one stage and disarms it on drop, so the audit is scoped to
 /// the stage pipeline rather than to the process. a caller that drives a substrate entry point
@@ -40,13 +40,13 @@ struct StageWriteAudit<'a, const D: usize, const DOF: usize, Mem, Sc>(
     &'a FieldStore<D, DOF, Mem, Sc>,
 )
 where
-    Mem: MemorySpace,
+    Mem: MemoryStorage,
     Sc: Scalar + OrderedNumeric;
 
 #[cfg(debug_assertions)]
 impl<'a, const D: usize, const DOF: usize, Mem, Sc> StageWriteAudit<'a, D, DOF, Mem, Sc>
 where
-    Mem: MemorySpace,
+    Mem: MemoryStorage,
     Sc: Scalar + OrderedNumeric,
 {
     fn arm(sim: &'a FieldStore<D, DOF, Mem, Sc>) -> Self {
@@ -64,7 +64,7 @@ where
 #[cfg(debug_assertions)]
 impl<const D: usize, const DOF: usize, Mem, Sc> Drop for StageWriteAudit<'_, D, DOF, Mem, Sc>
 where
-    Mem: MemorySpace,
+    Mem: MemoryStorage,
     Sc: Scalar + OrderedNumeric,
 {
     fn drop(&mut self) {
@@ -352,7 +352,7 @@ pub fn fold_stage<const D: usize, const DOF: usize, Mem, Sc, K>(
     hook: &mut impl FnMut(HookPoint),
 ) -> StageOutcome
 where
-    Mem: MemorySpace,
+    Mem: MemoryStorage,
     Sc: Scalar + OrderedNumeric,
     K: KernelSet<D, DOF, Mem, Sc> + ?Sized,
 {
@@ -369,7 +369,7 @@ pub fn fold_stage_through_mark<const D: usize, const DOF: usize, Mem, Sc, K>(
     hook: &mut impl FnMut(HookPoint),
 ) -> u64
 where
-    Mem: MemorySpace,
+    Mem: MemoryStorage,
     Sc: Scalar + OrderedNumeric,
     K: KernelSet<D, DOF, Mem, Sc> + ?Sized,
 {
@@ -385,7 +385,7 @@ pub fn fold_stage_through_emf<const D: usize, const DOF: usize, Mem, Sc, K>(
     args: StageArgs,
     hook: &mut impl FnMut(HookPoint),
 ) where
-    Mem: MemorySpace,
+    Mem: MemoryStorage,
     Sc: Scalar + OrderedNumeric,
     K: KernelSet<D, DOF, Mem, Sc> + ?Sized,
 {
@@ -402,7 +402,7 @@ pub fn fold_stage_curl_through_mark<const D: usize, const DOF: usize, Mem, Sc, K
     hook: &mut impl FnMut(HookPoint),
 ) -> u64
 where
-    Mem: MemorySpace,
+    Mem: MemoryStorage,
     Sc: Scalar + OrderedNumeric,
     K: KernelSet<D, DOF, Mem, Sc> + ?Sized,
 {
@@ -421,7 +421,7 @@ pub fn fold_stage_from_correction<const D: usize, const DOF: usize, Mem, Sc, K>(
     hook: &mut impl FnMut(HookPoint),
 ) -> StageOutcome
 where
-    Mem: MemorySpace,
+    Mem: MemoryStorage,
     Sc: Scalar + OrderedNumeric,
     K: KernelSet<D, DOF, Mem, Sc> + ?Sized,
 {
@@ -440,7 +440,7 @@ where
 /// the conservative first-order redo. the slot is marked fired; returns the cells it raised.
 fn raise_troubled<const D: usize, const DOF: usize, Mem, Sc>(sim: &FieldStore<D, DOF, Mem, Sc>, stage: usize) -> u64
 where
-    Mem: MemorySpace,
+    Mem: MemoryStorage,
     Sc: Scalar + OrderedNumeric,
 {
     let mut slot = sim.workspace.troubled_once.lock().expect("the troubled-cell slot");
@@ -460,13 +460,14 @@ where
 /// the flag was clear and 0 when the mark had already raised it.
 pub(crate) fn raise_troubled_cell<const D: usize, const DOF: usize, Mem, Sc>(sim: &FieldStore<D, DOF, Mem, Sc>, cell: [isize; D]) -> u64
 where
-    Mem: MemorySpace,
+    Mem: MemoryStorage,
     Sc: Scalar + OrderedNumeric,
 {
-    if *sim.workspace.fofc_flag.view().at(cell) > Sc::from_f64(0.0) {
+    let flag = &sim.workspace.fofc_flag;
+    if flag.read_one(cell).expect("the troubled flag transfer") > Sc::from_f64(0.0) {
         return 0;
     }
-    *sim.workspace.fofc_flag.view_mut().at_mut(cell) = Sc::from_f64(1.0);
+    flag.write_one(cell, Sc::from_f64(1.0)).expect("the troubled flag transfer");
     1
 }
 
@@ -477,7 +478,7 @@ where
 /// interior, where its entry is marked fired.
 fn apply_unrecoverable<const D: usize, const DOF: usize, Mem, Sc>(sim: &FieldStore<D, DOF, Mem, Sc>, stage: usize, point: HookPoint)
 where
-    Mem: MemorySpace,
+    Mem: MemoryStorage,
     Sc: Scalar + OrderedNumeric,
 {
     let mut slots = sim.workspace.unrecoverable_once.lock().expect("the unrecoverable-cell slots");
@@ -486,7 +487,7 @@ where
     };
     let (iteration, at_stage, cell, _) = *slot;
     // the poisoned conserved: the total energy, or the density of a regime without an energy field
-    fn poisoned<const D: usize, const DOF: usize, Mem: MemorySpace, Sc: Scalar + OrderedNumeric>(
+    fn poisoned<const D: usize, const DOF: usize, Mem: MemoryStorage, Sc: Scalar + OrderedNumeric>(
         u: &ConsFieldsGeneric<D, DOF, Mem, Sc>,
     ) -> &Field<Sc, D, Mem> {
         u.nrg_field().unwrap_or(&u.den)
@@ -503,7 +504,7 @@ where
         }
         HookPoint::BeforeGhostFill | HookPoint::AfterGhostFill => return,
     };
-    *field.view_mut().at_mut(cell) = Sc::from_f64(UNRECOVERABLE_POISON);
+    field.write_one(cell, Sc::from_f64(UNRECOVERABLE_POISON)).expect("the poisoned value transfer");
 }
 
 /// the poisoned value: a thousand times the O(1) density and energy of a test flow, negative. a
@@ -520,7 +521,7 @@ fn fold_span<const D: usize, const DOF: usize, Mem, Sc, K>(
     hook: &mut impl FnMut(HookPoint),
 ) -> (StageOutcome, u64)
 where
-    Mem: MemorySpace,
+    Mem: MemoryStorage,
     Sc: Scalar + OrderedNumeric,
     K: KernelSet<D, DOF, Mem, Sc> + ?Sized,
 {
@@ -716,7 +717,8 @@ where
             }
         }
         if crate::state::positivity_trace_enabled() {
-            sim.positivity_trace(&format!("stage={} phase={}", args.stage, ph.name));
+            sim.host_only("the positivity trace")
+                .positivity_trace(&format!("stage={} phase={}", args.stage, ph.name));
         }
         have = have.or(ph.writes);
     }
@@ -783,7 +785,7 @@ impl StepPhase {
         kernel: &K,
     ) -> bool
     where
-        Mem: MemorySpace,
+        Mem: MemoryStorage,
         K: KernelSet<D, DOF, Mem, f64> + ?Sized,
     {
         match self.op {
@@ -843,7 +845,7 @@ pub enum RefreshAt {
 /// what a driver supplies under the post-step recipe: where each tile's work runs, how a
 /// per-tile count is combined across every tile the step spans, and how the cut halos are
 /// made current after an operation wrote its interior.
-pub trait StepContext<const D: usize, const DOF: usize, Mem: MemorySpace> {
+pub trait StepContext<const D: usize, const DOF: usize, Mem: MemoryStorage> {
     /// run `f` where tile `k` lives
     fn on_tile(&self, k: usize, f: &mut dyn FnMut());
     /// the largest of a per-tile count over every tile the step spans
@@ -856,7 +858,7 @@ pub trait StepContext<const D: usize, const DOF: usize, Mem: MemorySpace> {
 /// and a halo refresh is the grid's own physical fill, which the next stage runs anyway
 pub struct SingleGridStep;
 
-impl<const D: usize, const DOF: usize, Mem: MemorySpace> StepContext<D, DOF, Mem> for SingleGridStep {
+impl<const D: usize, const DOF: usize, Mem: MemoryStorage> StepContext<D, DOF, Mem> for SingleGridStep {
     fn on_tile(&self, _k: usize, f: &mut dyn FnMut()) {
         f()
     }
@@ -876,7 +878,7 @@ pub fn fold_post_step<const D: usize, const DOF: usize, Mem, K>(
     select: impl Fn(StepOp) -> bool,
 ) -> Result<(), PostStepError>
 where
-    Mem: MemorySpace,
+    Mem: MemoryStorage,
     K: KernelSet<D, DOF, Mem, f64> + ?Sized,
 {
     fold_post_step_with(POST_STEP_PIPELINE, stores, kernels, dt, cx, select)
@@ -899,7 +901,7 @@ pub fn fold_stage_excision<const D: usize, const DOF: usize, Mem, K>(
     cx: &mut impl StepContext<D, DOF, Mem>,
 ) -> Result<(), PostStepError>
 where
-    Mem: MemorySpace,
+    Mem: MemoryStorage,
     K: KernelSet<D, DOF, Mem, f64> + ?Sized,
 {
     let local = (0..stores.len()).map(|k| kernels[k].excise_pass_count(stores[k])).max().unwrap_or(0);
@@ -927,7 +929,7 @@ pub fn fold_post_step_with<const D: usize, const DOF: usize, Mem, K>(
     select: impl Fn(StepOp) -> bool,
 ) -> Result<(), PostStepError>
 where
-    Mem: MemorySpace,
+    Mem: MemoryStorage,
     K: KernelSet<D, DOF, Mem, f64> + ?Sized,
 {
     let n = stores.len();
@@ -987,14 +989,15 @@ fn recover_primitives<const D: usize, const DOF: usize, Mem, K>(
     cx: &mut impl StepContext<D, DOF, Mem>,
 ) -> Result<(), PostStepError>
 where
-    Mem: MemorySpace,
+    Mem: MemoryStorage,
     K: KernelSet<D, DOF, Mem, f64> + ?Sized,
 {
     for k in 0..stores.len() {
         cx.on_tile(k, &mut || prof("c2p", || kernels[k].c2p(stores[k])));
-        let code = crate::hydro_ops::scan_c2p_errors(stores[k]);
+        let store = stores[k].host_only("the post-step recovery check");
+        let code = crate::hydro_ops::scan_c2p_errors(store);
         if !code.is_ok() {
-            let first = crate::hydro_ops::first_c2p_error(stores[k])
+            let first = crate::hydro_ops::first_c2p_error(store)
                 .map(|(coord, code)| format!("cell {coord:?} code {code}"))
                 .unwrap_or_else(|| "unavailable".to_string());
             return Err(PostStepError { phase: phase.name, detail: format!("tile {k}, {first}") });

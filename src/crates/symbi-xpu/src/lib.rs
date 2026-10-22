@@ -50,7 +50,7 @@ pub mod hiprtc;
 compile_error!("features `cuda` and `hip` are mutually exclusive: enable exactly one gpu backend");
 
 // traits
-pub use memory::{HostMemory, MemoryBlock, MemorySpace};
+pub use memory::{HostMemory, HostOpaque, MemoryBlock, MemorySpace, MemoryStorage, NoHostAccess, host_alias_is_identity};
 pub use space::ExecutionSpace;
 
 // types
@@ -84,7 +84,7 @@ pub use cuda::{CudaSpace, UnifiedMemory};
 #[cfg(feature = "cuda")]
 pub use cuda::{CudaSpace as DeviceSpace, UnifiedMemory as DeviceMemory};
 #[cfg(all(feature = "hip", not(feature = "cuda")))]
-pub use hip::{HipManaged, HipSpace};
+pub use hip::{HipDeviceLocal, HipManaged, HipSpace};
 #[cfg(all(feature = "hip", not(feature = "cuda")))]
 pub use hip::{HipManaged as DeviceMemory, HipSpace as DeviceSpace};
 

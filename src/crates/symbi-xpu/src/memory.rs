@@ -1,12 +1,17 @@
 // =============================================================================
 // memory.rs
 //
-// memory space trait and memory block. the memory space defines where data
-// lives (host, device, unified). the memory block provides raii ownership
-// of an allocation in a given space.
+// memory storage traits and memory block. a storage type defines where data
+// lives (host, managed, device-local) and how bytes cross to and from the host.
+// the memory block provides raii ownership of an allocation in a given space.
 //
 // design:
-//   - memory spaces are encoded as types, so the space is fixed at compile time (compile-time dispatch).
+//   - storage spaces are encoded as types, so the space is fixed at compile time.
+//   - `MemoryStorage` is every space: allocation, the space constants, and the
+//     synchronized host transfers. `MemorySpace` marks the spaces host code may
+//     dereference directly (host and managed memory); a device-local space
+//     implements `MemoryStorage` alone, so host code reaches its contents only
+//     through the explicit transfers.
 //   - memory blocks are move-only. drop frees the allocation.
 //   - no layout knowledge here — strides, shapes, multi-dim indexing
 //     belong in the grid/field layer.
@@ -24,22 +29,84 @@ use std::marker::PhantomData;
 // memory space trait
 // =============================================================================
 
-/// defines where data lives. implemented by HostMemory, DeviceMemory,
-/// UnifiedMemory. all methods are static — the space itself is stateless.
-pub trait MemorySpace: 'static + Send + Sync + Sized {
+/// where data lives and how its bytes reach the host. implemented by every space; all methods
+/// are static, the space itself is stateless.
+pub trait MemoryStorage: 'static + Send + Sync + Sized {
+    /// the space host code reaches this storage as: the space itself where host code may
+    /// dereference it (host and managed memory), `NoHostAccess` where it may not. a container in
+    /// this space is re-typed to its host alias only when the two are the same type, so the
+    /// re-typing is an identity and device-local storage never gains one.
+    type HostAccess: MemorySpace + Sync;
+    /// host code may dereference the storage directly (host and managed memory)
     const IS_HOST_ACCESSIBLE: bool;
+    /// kernels in this space run on a gpu
     const IS_DEVICE_ACCESSIBLE: bool;
     const IS_UNIFIED: bool;
     const PREFERRED_ALIGNMENT: usize;
 
-    /// allocate `bytes` of memory in this space. returns a raw pointer.
+    /// allocate `bytes` of zeroed memory in this space. returns a raw pointer.
     /// the pointer is valid for both host and device access if the space
     /// is unified.
     fn allocate(bytes: usize) -> error::Result<*mut u8>;
 
     /// free a previous allocation.
     fn deallocate(ptr: *mut u8, bytes: usize);
+
+    /// copy `bytes` from storage `src` in this space to host memory `dst`, after every queued
+    /// kernel that writes the source has finished; on return the host copy is complete.
+    ///
+    /// safety: `src` holds `bytes` of this space's storage and `dst` `bytes` of host memory.
+    unsafe fn copy_to_host(dst: *mut u8, src: *const u8, bytes: usize) -> error::Result<()>;
+
+    /// copy `bytes` from host memory `src` into storage `dst` in this space, ordered after every
+    /// queued kernel; on return the storage holds the bytes for any later kernel or transfer.
+    ///
+    /// safety: `dst` holds `bytes` of this space's storage and `src` `bytes` of host memory.
+    unsafe fn copy_from_host(dst: *mut u8, src: *const u8, bytes: usize) -> error::Result<()>;
 }
+
+/// a space host code may dereference directly: host memory and managed (unified) memory. the
+/// field layer's views and coordinate access require it, so storage outside it (device-local
+/// memory) cannot be read or written by host code at compile time.
+pub trait MemorySpace: MemoryStorage {}
+
+/// whether storage in space `M` is host-dereferenceable as itself: its host alias is the same
+/// type. the one test every host re-typing of a container passes before casting.
+pub fn host_alias_is_identity<M: MemoryStorage>() -> bool {
+    std::any::TypeId::of::<M>() == std::any::TypeId::of::<M::HostAccess>()
+}
+
+/// the host alias of storage host code cannot dereference. it allocates nothing; a container is
+/// never re-typed to it, because it differs from the storage it stands for.
+pub struct NoHostAccess;
+
+impl MemoryStorage for NoHostAccess {
+    type HostAccess = NoHostAccess;
+    const IS_HOST_ACCESSIBLE: bool = false;
+    const IS_DEVICE_ACCESSIBLE: bool = false;
+    const IS_UNIFIED: bool = false;
+    const PREFERRED_ALIGNMENT: usize = 1;
+
+    fn allocate(_bytes: usize) -> error::Result<*mut u8> {
+        Err(error::XpuError {
+            operation: "no_host_access_alloc",
+            code: -1,
+            detail: "NoHostAccess names the absence of host access and holds no storage".into(),
+        })
+    }
+
+    fn deallocate(_ptr: *mut u8, _bytes: usize) {}
+
+    unsafe fn copy_to_host(_dst: *mut u8, _src: *const u8, _bytes: usize) -> error::Result<()> {
+        unreachable!("NoHostAccess holds no storage")
+    }
+
+    unsafe fn copy_from_host(_dst: *mut u8, _src: *const u8, _bytes: usize) -> error::Result<()> {
+        unreachable!("NoHostAccess holds no storage")
+    }
+}
+
+impl MemorySpace for NoHostAccess {}
 
 // =============================================================================
 // memory block
@@ -47,16 +114,16 @@ pub trait MemorySpace: 'static + Send + Sync + Sized {
 
 /// raii memory ownership. move-only. drop frees the allocation.
 /// the block knows its size and memory space but not its layout.
-pub struct MemoryBlock<M: MemorySpace> {
+pub struct MemoryBlock<M: MemoryStorage> {
     ptr: *mut u8,
     bytes: usize,
     _space: PhantomData<M>,
 }
 
-unsafe impl<M: MemorySpace> Send for MemoryBlock<M> {}
-unsafe impl<M: MemorySpace> Sync for MemoryBlock<M> {}
+unsafe impl<M: MemoryStorage> Send for MemoryBlock<M> {}
+unsafe impl<M: MemoryStorage> Sync for MemoryBlock<M> {}
 
-impl<M: MemorySpace> MemoryBlock<M> {
+impl<M: MemoryStorage> MemoryBlock<M> {
     /// allocate a new block of `bytes` in the given memory space.
     pub fn new(bytes: usize) -> error::Result<Self> {
         if bytes == 0 {
@@ -110,7 +177,7 @@ impl<M: MemorySpace> MemoryBlock<M> {
     }
 }
 
-impl<M: MemorySpace> Drop for MemoryBlock<M> {
+impl<M: MemoryStorage> Drop for MemoryBlock<M> {
     fn drop(&mut self) {
         if !self.ptr.is_null() && self.bytes > 0 {
             M::deallocate(self.ptr, self.bytes);
@@ -128,36 +195,93 @@ impl<M: MemorySpace> Drop for MemoryBlock<M> {
 /// host memory. cache-line aligned. accessible from CPU only.
 pub struct HostMemory;
 
-impl MemorySpace for HostMemory {
+const HOST_ALIGNMENT: usize = 64; // cache line
+
+fn host_alloc_zeroed(bytes: usize) -> error::Result<*mut u8> {
+    let layout = std::alloc::Layout::from_size_align(bytes, HOST_ALIGNMENT).map_err(|_| error::XpuError {
+        operation: "host_alloc",
+        code: -1,
+        detail: "invalid layout".into(),
+    })?;
+    let ptr = unsafe { std::alloc::alloc_zeroed(layout) };
+    if ptr.is_null() {
+        return Err(error::XpuError {
+            operation: "host_alloc",
+            code: -2,
+            detail: format!("allocation failed for {} bytes", bytes),
+        });
+    }
+    Ok(ptr)
+}
+
+fn host_dealloc(ptr: *mut u8, bytes: usize) {
+    let layout = std::alloc::Layout::from_size_align(bytes, HOST_ALIGNMENT).expect("invalid layout");
+    unsafe {
+        std::alloc::dealloc(ptr, layout);
+    }
+}
+
+impl MemoryStorage for HostMemory {
+    type HostAccess = HostMemory;
     const IS_HOST_ACCESSIBLE: bool = true;
     const IS_DEVICE_ACCESSIBLE: bool = false;
     const IS_UNIFIED: bool = false;
-    const PREFERRED_ALIGNMENT: usize = 64; // cache line
+    const PREFERRED_ALIGNMENT: usize = HOST_ALIGNMENT;
 
     fn allocate(bytes: usize) -> error::Result<*mut u8> {
-        let layout = std::alloc::Layout::from_size_align(bytes, Self::PREFERRED_ALIGNMENT)
-            .map_err(|_| error::XpuError {
-                operation: "host_alloc",
-                code: -1,
-                detail: "invalid layout".into(),
-            })?;
-        let ptr = unsafe { std::alloc::alloc_zeroed(layout) };
-        if ptr.is_null() {
-            return Err(error::XpuError {
-                operation: "host_alloc",
-                code: -2,
-                detail: format!("allocation failed for {} bytes", bytes),
-            });
-        }
-        Ok(ptr)
+        host_alloc_zeroed(bytes)
     }
 
     fn deallocate(ptr: *mut u8, bytes: usize) {
-        let layout = std::alloc::Layout::from_size_align(bytes, Self::PREFERRED_ALIGNMENT)
-            .expect("invalid layout");
-        unsafe {
-            std::alloc::dealloc(ptr, layout);
-        }
+        host_dealloc(ptr, bytes)
+    }
+
+    unsafe fn copy_to_host(dst: *mut u8, src: *const u8, bytes: usize) -> error::Result<()> {
+        unsafe { std::ptr::copy_nonoverlapping(src, dst, bytes) };
+        Ok(())
+    }
+
+    unsafe fn copy_from_host(dst: *mut u8, src: *const u8, bytes: usize) -> error::Result<()> {
+        unsafe { std::ptr::copy_nonoverlapping(src, dst, bytes) };
+        Ok(())
+    }
+}
+
+impl MemorySpace for HostMemory {}
+
+// =============================================================================
+// opaque host storage
+// =============================================================================
+
+/// host-resident storage that host code cannot dereference: the cpu stand-in for device-local
+/// memory. kernels run on it through the cpu executor, and host code reaches its contents only
+/// through `copy_to_host`/`copy_from_host`, so a host build exercises the device-local discipline,
+/// and the compiler rejects any field view, coordinate read or write on it.
+pub struct HostOpaque;
+
+impl MemoryStorage for HostOpaque {
+    type HostAccess = NoHostAccess;
+    const IS_HOST_ACCESSIBLE: bool = false;
+    const IS_DEVICE_ACCESSIBLE: bool = false;
+    const IS_UNIFIED: bool = false;
+    const PREFERRED_ALIGNMENT: usize = HOST_ALIGNMENT;
+
+    fn allocate(bytes: usize) -> error::Result<*mut u8> {
+        host_alloc_zeroed(bytes)
+    }
+
+    fn deallocate(ptr: *mut u8, bytes: usize) {
+        host_dealloc(ptr, bytes)
+    }
+
+    unsafe fn copy_to_host(dst: *mut u8, src: *const u8, bytes: usize) -> error::Result<()> {
+        unsafe { std::ptr::copy_nonoverlapping(src, dst, bytes) };
+        Ok(())
+    }
+
+    unsafe fn copy_from_host(dst: *mut u8, src: *const u8, bytes: usize) -> error::Result<()> {
+        unsafe { std::ptr::copy_nonoverlapping(src, dst, bytes) };
+        Ok(())
     }
 }
 

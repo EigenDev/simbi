@@ -22,7 +22,7 @@ use symbi_aot::{CpuField, CpuFieldMut, KernelInvocation, OrderedNumeric, Scalar}
 #[cfg(feature = "gpu")]
 use symbi_aot::{compute_strides, copy_extent, copy_lo};
 use symbi_ir::emit::ReductionOp;
-use symbi_xpu::MemorySpace;
+use symbi_xpu::{MemorySpace, MemoryStorage};
 
 /// host-side pod that matches the CUDA `__symbi_View` struct emitted by
 /// `crate::backends::kernel::CRenderer::preamble` — 8-byte ptr + 16 bytes lo +
@@ -161,7 +161,7 @@ pub type DefaultGpuBackend = HipBackend;
 /// scratch field. thin wrapper over the general `field_reduce` — every regime
 /// computes its own `wave_speed_map` (the regime-specific physics) into `scratch`,
 /// then calls this; the reduce is shared (was copy-pasted in three substrate sets).
-pub fn field_max_reduce<Sc: Scalar + OrderedNumeric, Mem: MemorySpace, const D: usize>(
+pub fn field_max_reduce<Sc: Scalar + OrderedNumeric, Mem: MemoryStorage, const D: usize>(
     field: &symbi_grid::Field<Sc, D, Mem>,
     domain: &symbi_algebra::Domain<D>,
 ) -> f64 {
@@ -174,7 +174,7 @@ pub fn field_max_reduce<Sc: Scalar + OrderedNumeric, Mem: MemorySpace, const D: 
 /// leaving the full cell scan on the device where the data already lives.
 /// the two algebras agree (max/min are exact; add/mul differ from the host's
 /// sequential fold only by reassociated rounding).
-pub fn field_reduce<Sc: Scalar + OrderedNumeric, Mem: MemorySpace, const D: usize>(
+pub fn field_reduce<Sc: Scalar + OrderedNumeric, Mem: MemoryStorage, const D: usize>(
     field: &symbi_grid::Field<Sc, D, Mem>,
     domain: &symbi_algebra::Domain<D>,
     op: ReductionOp,
@@ -198,6 +198,7 @@ pub fn field_reduce<Sc: Scalar + OrderedNumeric, Mem: MemorySpace, const D: usiz
     // block-reduction this mirrors. small domains keep the sequential fold
     // (no rayon setup, bit-stable for the small exactness gates).
     let (identity, combine) = host_identity_combine(op);
+    let view = resident_view(field);
     const PAR_THRESHOLD: usize = 1 << 16;
     // slab the outermost axis, derived from the layout — `nest_order`'s first entry. splitting
     // `CONTIGUOUS_AXIS` instead hands each worker a slab of one x-index spanning every other axis,
@@ -227,7 +228,7 @@ pub fn field_reduce<Sc: Scalar + OrderedNumeric, Mem: MemorySpace, const D: usiz
                 let mut acc = identity;
                 let mut c = lo;
                 for _ in 0..total {
-                    acc = combine(acc, field.view().at(c).to_f64());
+                    acc = combine(acc, view.at(c).to_f64());
                     // carry with CONTIGUOUS_AXIS first: `nest_order` reversed is innermost-first.
                     for a in symbi_algebra::nest_order(D).rev() {
                         c[a] += 1;
@@ -255,9 +256,22 @@ pub fn field_reduce<Sc: Scalar + OrderedNumeric, Mem: MemorySpace, const D: usiz
     }
     let mut acc = identity;
     for c in domain.iter() {
-        acc = combine(acc, field.view().at(c).to_f64());
+        acc = combine(acc, view.at(c).to_f64());
     }
     acc
+}
+
+/// the CPU executor's view of a field it runs kernels on: host memory, or host-resident storage
+/// closed to host code (`HostOpaque`). the executor of a space is the one party that reads its
+/// storage directly; device-resident storage reduces on the device.
+fn resident_view<Sc: Scalar + OrderedNumeric, Mem: MemoryStorage, const D: usize>(
+    field: &symbi_grid::Field<Sc, D, Mem>,
+) -> symbi_grid::View<Sc, D> {
+    assert!(
+        !Mem::IS_DEVICE_ACCESSIBLE,
+        "the CPU executor reads host-resident storage; device storage reduces on the device"
+    );
+    symbi_grid::View::from_domain(field.as_ptr(), field.domain())
 }
 
 /// the exact sum of `field` over `domain`: every cell's value added into one long accumulator,
@@ -648,7 +662,7 @@ fn with_cached_segmented_result<Sc: Scalar + OrderedNumeric, R>(
 fn field_reduce_device<
     B: GpuBackend,
     Sc: Scalar + OrderedNumeric,
-    Mem: MemorySpace,
+    Mem: MemoryStorage,
     const D: usize,
 >(
     field: &symbi_grid::Field<Sc, D, Mem>,
@@ -875,7 +889,7 @@ fn field_segmented_reduce_device<
 pub fn dispatch<Sc, Mem, F>(inv: KernelInvocation<Sc>, ir: &str, kernel_name: &str, cpu: F)
 where
     Sc: Scalar + OrderedNumeric,
-    Mem: MemorySpace,
+    Mem: MemoryStorage,
     F: FnOnce(&[CpuField<'_, Sc>], &mut [CpuFieldMut<'_, Sc>], &[u32], &[i32], &[i32], &[Sc]),
 {
     if Mem::IS_DEVICE_ACCESSIBLE {
@@ -983,7 +997,7 @@ fn env_tile_block(ndim: usize) -> Option<[u32; 3]> {
 /// queue first. no-op on a host backend. call sites: the evolve callbacks,
 /// the amr hierarchy's api boundaries and host scans, and any test comparing
 /// device buffers right after a dispatch.
-pub fn device_sync<Mem: MemorySpace>() {
+pub fn device_sync<Mem: MemoryStorage>() {
     #[cfg(feature = "gpu")]
     if Mem::IS_DEVICE_ACCESSIBLE {
         symbi_xpu::ctx_sync();

@@ -60,7 +60,7 @@ pub struct AxisRing {
 /// grid carrying a staggered field whose interior reaches a pole or the R = 0 line
 pub fn axis_rings<const D: usize, const DOF: usize, Mem, Sc>(store: &FieldStore<D, DOF, Mem, Sc>) -> Vec<AxisRing>
 where
-    Mem: MemorySpace,
+    Mem: symbi_xpu::MemoryStorage,
     Sc: Scalar + OrderedNumeric,
 {
     let g = &store.geom;

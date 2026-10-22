@@ -24,7 +24,7 @@ use symbi_carrier::Scalar;
 use symbi_grid::Field;
 use symbi_sim::state::{ConsFieldsGeneric, FieldStore, PrimFieldsGeneric};
 use symbi_sim::substrate_seam::{FofcDecision, FofcReport, RetryExclusion, SourceReplayOutcome};
-use symbi_xpu::MemorySpace;
+use symbi_xpu::{MemorySpace, MemoryStorage};
 
 use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
 
@@ -171,7 +171,7 @@ fn horizon_split_count<const D: usize, const DOF: usize, Mem, Sc>(
     mask: &Field<Sc, D, Mem>,
 ) -> u64
 where
-    Mem: MemorySpace,
+    Mem: MemoryStorage,
     Sc: Scalar + OrderedNumeric,
 {
     let r_h = f64::from_bits(FOFC_HORIZON_RADIUS_BITS.load(Ordering::Relaxed));
@@ -181,7 +181,10 @@ where
     {
         return 0;
     }
-    horizon_flagged_count(mask, &sim.geom.interior, &sim.geom.x_lo, &sim.geom.dx, &sim.geom.index_offset, r_h)
+    match mask.host() {
+        Some(mask) => horizon_flagged_count(mask, &sim.geom.interior, &sim.geom.x_lo, &sim.geom.dx, &sim.geom.index_offset, r_h),
+        None => 0,
+    }
 }
 
 /// the freeze acts on the interior that count as evidence for rejecting the step or halting the
@@ -195,7 +198,7 @@ fn decision_freezes<const D: usize, const DOF: usize, Mem, Sc>(
     frozen: u64,
 ) -> u64
 where
-    Mem: MemorySpace + Sync,
+    Mem: MemoryStorage + Sync,
     Sc: Scalar + OrderedNumeric,
 {
     match sim.retry_exclusion {
@@ -218,7 +221,7 @@ fn decision_flag_count<const D: usize, const DOF: usize, Mem, Sc>(
     mask: &Field<Sc, D, Mem>,
 ) -> u64
 where
-    Mem: MemorySpace,
+    Mem: MemoryStorage,
     Sc: Scalar + OrderedNumeric,
 {
     sim.composite_ownership
@@ -238,7 +241,7 @@ fn record_rejection_evidence<const D: usize, const DOF: usize, Mem, Sc>(
     freeze: &Field<Sc, D, Mem>,
     stage: u8,
 ) where
-    Mem: MemorySpace,
+    Mem: MemoryStorage,
     Sc: Scalar + OrderedNumeric,
 {
     const NAMED: usize = 8;
@@ -249,11 +252,9 @@ fn record_rejection_evidence<const D: usize, const DOF: usize, Mem, Sc>(
         _ => freeze,
     };
     let mut lines = Vec::new();
-    if Mem::IS_DEVICE_ACCESSIBLE {
-        let count = decision_flag_count(sim, mask);
-        lines.push(format!("stage tag {stage}: {count} eligible freeze acts, held in device memory"));
-    } else {
-        let view = mask.view();
+    let host_mask = mask.host().filter(|_| !Mem::IS_DEVICE_ACCESSIBLE);
+    if let Some(host_mask) = host_mask {
+        let view = host_mask.view();
         let cells: Vec<[isize; D]> = sim
             .composite_ownership
             .decision_regions(&sim.geom.interior)
@@ -268,6 +269,9 @@ fn record_rejection_evidence<const D: usize, const DOF: usize, Mem, Sc>(
         if cells.len() > NAMED {
             lines.push(format!("stage tag {stage}: {} more frozen cells", cells.len() - NAMED));
         }
+    } else {
+        let count = decision_flag_count(sim, mask);
+        lines.push(format!("stage tag {stage}: {count} eligible freeze acts, held in device memory"));
     }
     sim.workspace.rejection_evidence.lock().expect("rejection evidence").extend(lines);
 }
@@ -316,7 +320,7 @@ pub(crate) fn fofc_comp<'a, const D: usize, const DOF: usize, Mem, Sc>(
     name: &str,
 ) -> &'a Field<Sc, D, Mem>
 where
-    Mem: MemorySpace,
+    Mem: MemoryStorage,
     Sc: Scalar + OrderedNumeric,
 {
     match name {
@@ -347,7 +351,7 @@ pub(crate) fn fofc_copy<const D: usize, const DOF: usize, Mem, Sc>(
         &PrimFieldsGeneric<D, DOF, Mem, Sc>,
     ),
 ) where
-    Mem: MemorySpace + Sync,
+    Mem: MemoryStorage + Sync,
     Sc: Scalar + OrderedNumeric,
 {
     let name = format!("{prefix}_fofc_{tag}{dof_sfx}_{D}d");
@@ -373,7 +377,7 @@ pub(crate) fn fofc_copy<const D: usize, const DOF: usize, Mem, Sc>(
 /// such cell.
 fn push_candidate_outside<const D: usize, const DOF: usize, Mem, Sc>(sim: &FieldStore<D, DOF, Mem, Sc>, stage: u8)
 where
-    Mem: MemorySpace,
+    Mem: MemoryStorage,
     Sc: Scalar + OrderedNumeric,
 {
     let mut slot = sim.workspace.inadmissible_once.lock().expect("the inadmissible-candidate slot");
@@ -388,8 +392,10 @@ where
     if !sim.geom.interior.contains(cell) {
         return;
     }
-    let anchor_energy = (*anchor.view().at(cell)).to_f64();
-    *candidate.view_mut().at_mut(cell) = Sc::from_f64(-anchor_energy.abs());
+    let anchor_energy = anchor.read_one(cell).expect("the anchor energy transfer").to_f64();
+    candidate
+        .write_one(cell, Sc::from_f64(-anchor_energy.abs()))
+        .expect("the candidate energy transfer");
 }
 
 /// dispatch the freeze-tier select kernel `{prefix}_fofc_select_{D}d` over the interior: keep the
@@ -407,7 +413,7 @@ pub fn fofc_select<const D: usize, const DOF: usize, Mem, Sc>(
     prim: &PrimFieldsGeneric<D, DOF, Mem, Sc>,
     freeze: &Field<Sc, D, Mem>,
 ) where
-    Mem: MemorySpace + Sync,
+    Mem: MemoryStorage + Sync,
     Sc: Scalar + OrderedNumeric,
 {
     let name = format!("{prefix}_fofc_select{dof_sfx}_{D}d");
@@ -449,7 +455,7 @@ pub fn fofc_select_with_body<const D: usize, const DOF: usize, Mem, Sc>(
     gamma: f64,
     freeze: &Field<Sc, D, Mem>,
 ) where
-    Mem: MemorySpace + Sync,
+    Mem: MemoryStorage + Sync,
     Sc: Scalar + OrderedNumeric,
 {
     let name = format!(
@@ -492,7 +498,7 @@ pub(crate) fn troubled_from_status<const D: usize, const DOF: usize, Mem, Sc>(
     sim: &FieldStore<D, DOF, Mem, Sc>,
     out: &Field<Sc, D, Mem>,
 ) where
-    Mem: MemorySpace + Sync,
+    Mem: MemoryStorage + Sync,
     Sc: Scalar + OrderedNumeric,
 {
     let name = format!("fofc_flag_from_status_{D}d");
@@ -512,7 +518,7 @@ pub(crate) fn fofc_flag_count<const D: usize, const DOF: usize, Mem, Sc>(
     flag: &Field<Sc, D, Mem>,
 ) -> u64
 where
-    Mem: MemorySpace,
+    Mem: MemoryStorage,
     Sc: Scalar + OrderedNumeric,
 {
     field_reduce(flag, &sim.geom.interior, ReductionOp::Add) as u64
@@ -531,7 +537,7 @@ pub(crate) fn fofc_splice<const D: usize, const DOF: usize, Mem, Sc>(
     flag: &Field<Sc, D, Mem>,
     flux_ho: &ConsFieldsGeneric<D, DOF, Mem, Sc>,
 ) where
-    Mem: MemorySpace + Sync,
+    Mem: MemoryStorage + Sync,
     Sc: Scalar + OrderedNumeric,
 {
     let name = format!("{prefix}_fofc_splice{dof_sfx}_{D}d_{dir}");
@@ -578,7 +584,7 @@ pub(crate) fn fofc_mark<const D: usize, const DOF: usize, Mem, Sc>(
     r_exc: f64,
 ) -> u64
 where
-    Mem: MemorySpace + Sync,
+    Mem: MemoryStorage + Sync,
     Sc: Scalar + OrderedNumeric,
 {
     let flag = &sim.workspace.fofc_flag;
@@ -597,7 +603,7 @@ fn gas_step_snapshot_pairs<'a, const D: usize, const DOF: usize, Mem, Sc>(
     sim: &'a FieldStore<D, DOF, Mem, Sc>,
 ) -> Vec<(&'a Field<Sc, D, Mem>, &'a Field<Sc, D, Mem>)>
 where
-    Mem: MemorySpace,
+    Mem: MemoryStorage,
     Sc: Scalar + OrderedNumeric,
 {
     let (cons, saved) = (&sim.fields.cons, &sim.workspace.u_n);
@@ -621,7 +627,7 @@ pub(crate) fn gas_rollback_snapshot_is_complete<const D: usize, const DOF: usize
     sim: &FieldStore<D, DOF, Mem, Sc>,
 ) -> bool
 where
-    Mem: MemorySpace,
+    Mem: MemoryStorage,
     Sc: Scalar + OrderedNumeric,
 {
     sim.tracers.is_none() && sim.continuous_tracers.is_none() && sim.immersed.is_none()
@@ -632,7 +638,7 @@ where
 pub(crate) fn gas_snapshot_retry<const D: usize, const DOF: usize, Mem, Sc>(
     sim: &FieldStore<D, DOF, Mem, Sc>,
 ) where
-    Mem: MemorySpace,
+    Mem: MemoryStorage,
     Sc: Scalar + OrderedNumeric,
 {
     crate::regimes::mhd_substrate::fofc_copy_fields(&gas_step_snapshot_pairs(sim));
@@ -644,7 +650,7 @@ pub(crate) fn gas_snapshot_retry<const D: usize, const DOF: usize, Mem, Sc>(
 pub(crate) fn gas_restore_step<const D: usize, const DOF: usize, Mem, Sc>(
     sim: &FieldStore<D, DOF, Mem, Sc>,
 ) where
-    Mem: MemorySpace,
+    Mem: MemoryStorage,
     Sc: Scalar + OrderedNumeric,
 {
     let pairs: Vec<_> = gas_step_snapshot_pairs(sim)
@@ -660,7 +666,7 @@ pub(crate) fn fofc_flags_in<const D: usize, const DOF: usize, Mem, Sc>(
     region: &symbi_algebra::Domain<D>,
 ) -> u64
 where
-    Mem: MemorySpace,
+    Mem: MemoryStorage,
     Sc: Scalar + OrderedNumeric,
 {
     field_reduce(&sim.workspace.fofc_flag, region, ReductionOp::Add) as u64
@@ -782,7 +788,7 @@ pub(crate) fn fofc_orchestrate<const D: usize, const DOF: usize, Mem, Sc>(
     retry_on_freeze: bool,
 ) -> FofcReport
 where
-    Mem: MemorySpace + Sync,
+    Mem: MemoryStorage + Sync,
     Sc: Scalar + OrderedNumeric,
 {
     let ws = &sim.workspace;
@@ -815,7 +821,9 @@ where
         );
     }
     if troubled > 0 {
-        post_first_fallback(sim, flag);
+        if let (Some(host), Some(flag)) = (sim.host(), flag.host()) {
+            post_first_fallback(host, flag);
+        }
     }
     // boundary-consistent ghosts for the flag: a face straddling the periodic wrap (or any boundary)
     // must take one first-order decision from both of its cells, else the splice re-creates the very
@@ -925,18 +933,27 @@ where
         static LOGGED: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
         let n = LOGGED.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         if n < 64 {
-            let first = symbi_sim::hydro_ops::first_c2p_error(sim)
+            let first = sim
+                .host()
+                .and_then(symbi_sim::hydro_ops::first_c2p_error)
                 .map(|(coord, code)| format!("{coord:?}:{code}"))
                 .unwrap_or_else(|| "unavailable".to_string());
             eprintln!("[fofc] {exterior_froze} exterior freeze(s), streak {streak}, first {first}");
         }
     }
     if streak >= FOFC_FREEZE_HALT_STREAK {
-        let c2p_errors = symbi_sim::hydro_ops::scan_c2p_errors(sim);
-        let first_error = symbi_sim::hydro_ops::first_c2p_error(sim)
+        // the host scans name the failure on host-dereferenceable storage; device-local storage
+        // reports the halt without them
+        let host = sim.host();
+        let c2p_errors = host
+            .map(|h| symbi_sim::hydro_ops::scan_c2p_errors(h).to_string())
+            .unwrap_or_else(|| "unavailable".to_string());
+        let first_error = host
+            .and_then(symbi_sim::hydro_ops::first_c2p_error)
             .map(|(coord, code)| format!("{coord:?}:{code}"))
             .unwrap_or_else(|| "unavailable".to_string());
-        let first_state = symbi_sim::hydro_ops::first_c2p_failure_state(sim)
+        let first_state = host
+            .and_then(symbi_sim::hydro_ops::first_c2p_failure_state)
             .unwrap_or_else(|| "unavailable".to_string());
         panic!(
             "FOFC last-resort freeze fired on {streak} consecutive substages outside any configured \

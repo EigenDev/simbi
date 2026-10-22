@@ -16,7 +16,7 @@ use crate::sim::state::*;
 use symbi_geometry::Metric;
 use symbi_hydro::eos::Eos;
 use symbi_hydro::regime::Regime;
-use symbi_xpu::{ExecutionSpace, MemorySpace};
+use symbi_xpu::{ExecutionSpace, MemorySpace, MemoryStorage};
 // the KernelSet trait lives at the sim<->substrate seam; the driver only consumes
 // the contract. re-exported so the `sim::evolve::KernelSet` path
 // resolves for downstream callers.
@@ -45,7 +45,7 @@ where
     M: Metric<f64, D> + Copy + Send + Sync,
     E: Eos<f64> + Send + Sync,
     S: ExecutionSpace,
-    Mem: MemorySpace + Sync,
+    Mem: MemoryStorage + Sync,
 {
     evolve_with_callback(sim, kernels, t_final, u64::MAX, |_| {})
 }
@@ -64,7 +64,7 @@ pub fn step_once<R, const D: usize, const DOF: usize, M, E, S, Mem>(
     M: Metric<f64, D> + Copy,
     E: Eos<f64>,
     S: ExecutionSpace,
-    Mem: MemorySpace,
+    Mem: MemoryStorage,
 {
     // the per-step driver opens no projection-ledger scope; its callers advance
     // the clock and own the step boundary, so a projection here books nothing.
@@ -84,7 +84,7 @@ where
     M: Metric<f64, D> + Copy,
     E: Eos<f64>,
     S: ExecutionSpace,
-    Mem: MemorySpace,
+    Mem: MemoryStorage,
     K: KernelSet<D, DOF, Mem, f64>,
 {
     sim: &'s mut SimStateGeneric<R, D, DOF, M, E, S, Mem>,
@@ -98,7 +98,7 @@ where
     M: Metric<f64, D> + Copy,
     E: Eos<f64>,
     S: ExecutionSpace,
-    Mem: MemorySpace,
+    Mem: MemoryStorage,
     K: KernelSet<D, DOF, Mem, f64>,
 {
     type Error = std::convert::Infallible;
@@ -159,7 +159,7 @@ where
     M: Metric<f64, D> + Copy + Send + Sync,
     E: Eos<f64> + Send + Sync,
     S: ExecutionSpace,
-    Mem: MemorySpace + Sync,
+    Mem: MemoryStorage + Sync,
 {
     // mesh motion is supported for single-grid hydro: homologous expansion on any geometry
     // (curvilinear scales the radial axis), and uniform translation on cartesian axis 0 (`a` is
@@ -224,7 +224,7 @@ where
     // cell failed inversion. on failure, panic with the decoded error code:
     // this check stops NaN cons at the source, before it can spread silently
     // through the run and land in a checkpoint as invalid state.
-    let initial_err = crate::sim::hydro_ops::scan_c2p_errors(sim);
+    let initial_err = c2p_status(sim);
     if initial_err.is_err() {
         return Err(symbi_xpu::XpuError {
             operation: "evolve",
@@ -255,7 +255,7 @@ where
     });
     if let Some(c) = trace_coord {
         eprintln!("SYMBI_TRACE: tracing cell {:?} +/- 1 neighborhood", c);
-        emit_trace_neighborhood(sim, c);
+        emit_trace_neighborhood(sim.host_only("the cell trace"), c);
     }
 
     // the projection ledger opens its scope on the backend's tile driver, not
@@ -281,7 +281,9 @@ where
                 // terminal NaN/inf cascade only: name the first bad cell before returning. one-time
                 // host scan confined to the failure boundary, off the happy path entirely (see report fn).
                 crate::regimes::substrate_gpu::device_sync::<Mem>();
-                let _ = report_first_nonfinite_cell(sim);
+                if let Some(host) = sim.host() {
+                    let _ = report_first_nonfinite_cell(host);
+                }
                 return Err(err);
             }
         };
@@ -310,6 +312,7 @@ where
         let dt = sim.dt;
         advance_state_clock(sim, dt);
         if sim.has_tracers() {
+            let sim = sim.host_mut_only("tracer transport");
             let geometry = sim.geom.block_geometry(sim.physics.metric);
             let layout = symbi_sim::tracers::TransportLayout::single(&sim.geom.interior);
             symbi_sim::tracers::refresh_derived_positions_store(&mut sim.store, &geometry, layout);
@@ -317,7 +320,7 @@ where
 
         if let Some(c) = trace_coord {
             crate::regimes::substrate_gpu::device_sync::<Mem>();
-            emit_trace_neighborhood(sim, c);
+            emit_trace_neighborhood(sim.host_only("the cell trace"), c);
         }
 
         // the post-step recipe once per step after the RK combination: the viscous
@@ -347,7 +350,7 @@ where
         if sim.has_bodies() {
             let accretion_density = if sim.has_tracers() {
                 crate::regimes::substrate_gpu::device_sync::<Mem>();
-                Some(symbi_sim::tracers::snapshot_accretion_density(sim))
+                Some(symbi_sim::tracers::snapshot_accretion_density(sim.host_only("tracer accretion transport")))
             } else {
                 None
             };
@@ -366,10 +369,11 @@ where
             }
             if symbi_sim::state::positivity_trace_enabled() {
                 crate::regimes::substrate_gpu::device_sync::<Mem>();
-                sim.positivity_trace("step phase=penalize");
+                sim.host_only("the positivity trace").positivity_trace("step phase=penalize");
             }
             if let Some(density_before) = accretion_density.as_deref() {
                 crate::regimes::substrate_gpu::device_sync::<Mem>();
+                let sim = sim.host_mut_only("tracer accretion transport");
                 symbi_sim::tracers::advance_accretion_transport(sim, density_before)
                     .unwrap_or_else(|detail| panic!("tracer accretion transport: {detail}"));
                 if sim.continuous_tracers.is_some() {
@@ -408,10 +412,12 @@ where
         // sequence has finished and the last stage ended in a conserved-to-primitive
         // recovery, so the primitives every census reads are the ones belonging to the
         // state at `sim.time`. sampling mid-stage would bin a partially advanced state.
-        symbi_substrate::census_sample::sample_censuses(
-            sim,
-            symbi_substrate::census_sample::NonphysicalCells { excision_radius: kernels.excision_radius() },
-        );
+        if !sim.censuses.is_empty() {
+            symbi_substrate::census_sample::sample_censuses(
+                sim.host_mut_only("census sampling"),
+                symbi_substrate::census_sample::NonphysicalCells { excision_radius: kernels.excision_radius() },
+            );
+        }
 
         if sim.iteration - last_cb >= interval {
             last_cb = sim.iteration;
@@ -424,6 +430,36 @@ where
     crate::regimes::substrate_gpu::device_sync::<Mem>();
     callback(sim);
     Ok(())
+}
+
+/// the combined c2p status of the decision regions. host-dereferenceable storage scans the status
+/// channel in place; device-local storage reduces it on the device to its largest code, and a
+/// failed recovery alone downloads the channel to combine the codes of every failed cell.
+fn c2p_status<const D: usize, const DOF: usize, Mem>(
+    store: &FieldStore<D, DOF, Mem, f64>,
+) -> symbi_hydro::c2p_result::ErrorCode
+where
+    Mem: MemoryStorage + Sync,
+{
+    if let Some(host) = store.host() {
+        return crate::sim::hydro_ops::scan_c2p_errors(host);
+    }
+    let regions = store.composite_ownership.decision_regions(&store.geom.interior);
+    let status = &store.fields.c2p_error;
+    let worst = regions
+        .iter()
+        .map(|region| crate::regimes::substrate_gpu::field_reduce(status, region, symbi_ir::emit::ReductionOp::Max))
+        .fold(0.0, f64::max);
+    if worst == 0.0 {
+        return symbi_hydro::c2p_result::ErrorCode(0);
+    }
+    let codes = status.download().expect("the c2p status transfer");
+    let allocated = status.domain();
+    let combined = regions
+        .iter()
+        .flat_map(|region| region.iter())
+        .fold(0u8, |acc, c| acc | codes[allocated.flat_index(c)] as u8);
+    symbi_hydro::c2p_result::ErrorCode(combined)
 }
 
 /// failure-only NaN locator. scan the interior for the first cell whose conserved state (density,
@@ -523,7 +559,7 @@ where
     M: Metric<f64, D> + Copy,
     E: Eos<f64>,
     S: ExecutionSpace,
-    Mem: MemorySpace,
+    Mem: MemoryStorage,
 {
     let stages = sim.timestepping.stages();
     let n = stages.len();
@@ -537,9 +573,10 @@ where
         prof("snapshot", || k.snapshot(sim));
     }
     if sim.has_tracers() {
-        symbi_sim::tracers::snapshot_transport_state(sim);
+        symbi_sim::tracers::snapshot_transport_state(sim.host_mut_only("tracer transport"));
     }
     if sim.continuous_tracers.is_some() {
+        let sim = sim.host_mut_only("continuous tracer transport");
         let geometry = sim.geom.block_geometry(sim.physics.metric);
         symbi_sim::tracers::begin_ito_transport_store(&mut sim.store, &geometry)
             .unwrap_or_else(|detail| panic!("ito transport initialization: {detail}"));
@@ -599,6 +636,7 @@ where
             .unwrap_or_else(|e| panic!("{e}"));
         if sim.has_tracers() {
             crate::regimes::substrate_gpu::device_sync::<Mem>();
+            let sim = sim.host_mut_only("tracer transport");
             if sim.continuous_tracers.is_some() {
                 let geometry = sim.geom.block_geometry(sim.physics.metric);
                 symbi_sim::tracers::accumulate_ito_transport_stage_store(
@@ -627,10 +665,11 @@ where
         }
     }
     if sim.tracers.is_some() {
-        symbi_sim::tracers::spawn_boundary_injection(sim, injection_ledger.clone())
+        symbi_sim::tracers::spawn_boundary_injection(sim.host_mut_only("tracer transport"), injection_ledger.clone())
             .unwrap_or_else(|detail| panic!("tracer boundary injection: {detail}"));
     }
     if sim.continuous_tracers.is_some() {
+        let sim = sim.host_mut_only("continuous tracer transport");
         let geometry = sim.geom.block_geometry(sim.physics.metric);
         let layout = symbi_sim::tracers::TransportLayout::single(&sim.geom.interior);
         symbi_sim::tracers::materialize_ito_coefficients_store(&mut sim.store, &geometry)

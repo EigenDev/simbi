@@ -29,7 +29,7 @@ use symbi_grid::Field;
 use symbi_ir::ScalarRef;
 use symbi_sim::census::CensusEvaluator;
 use symbi_sim::state::FieldStore;
-use symbi_xpu::MemorySpace;
+use symbi_xpu::MemoryStorage;
 
 use super::binding::resolve_path;
 use super::layout::{alloc_layout, exec_layout};
@@ -49,7 +49,7 @@ pub fn census_map_compiled<const D: usize, const DOF: usize, Mem>(
     write_segment: bool,
 ) -> bool
 where
-    Mem: MemorySpace,
+    Mem: MemoryStorage,
 {
     // the compiled kernel is cached across samples. tracing the graph and running the jit costs
     // orders of magnitude more than the sweep it produces — measured at 4.3 ms per sample over

@@ -14,7 +14,7 @@ use symbi_ir::{BodyScalar, ScalarRef};
 // `ScalarRef`/`FieldBind`, so the serialized IR scalar manifest is born typed. the dispatch
 // resolvers below match it unchanged.
 pub use symbi_ir::ScalarBind;
-use symbi_xpu::MemorySpace;
+use symbi_xpu::MemoryStorage;
 
 use symbi_sim::state::FieldStore;
 
@@ -284,7 +284,7 @@ pub fn penalize_owns_accretion<const D: usize, const DOF: usize, Mem, Sc>(
     sim: &FieldStore<D, DOF, Mem, Sc>,
 ) -> bool
 where
-    Mem: MemorySpace,
+    Mem: MemoryStorage,
     Sc: Scalar + OrderedNumeric,
 {
     // every immersed-boundary surface (drain / porous / torque-free) is baked for
@@ -354,7 +354,7 @@ pub(crate) fn mhd_scalar<const D: usize, const DOF: usize, Mem, Sc>(
     label: &str,
 ) -> Sc
 where
-    Mem: MemorySpace,
+    Mem: MemoryStorage,
     Sc: Scalar + OrderedNumeric,
 {
     let spacetime = |name: &str| -> f64 {
@@ -385,7 +385,7 @@ pub(crate) fn resolve_body_scalars<const D: usize, const DOF: usize, Mem, Sc>(
     name: &str,
 ) -> Vec<Sc>
 where
-    Mem: MemorySpace,
+    Mem: MemoryStorage,
     Sc: Scalar + OrderedNumeric,
 {
     let geom = &sim.geom;

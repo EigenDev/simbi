@@ -19,7 +19,7 @@
 
 use crate::config::LaunchConfig;
 use crate::error::{self, XpuError};
-use crate::memory::MemorySpace;
+use crate::memory::{MemorySpace, MemoryStorage};
 use crate::space::ExecutionSpace;
 use std::ffi::{CString, c_char, c_int, c_uint, c_void};
 use std::sync::OnceLock;
@@ -587,7 +587,8 @@ impl ExecutionSpace for CudaSpace {
 /// CUDA unified (managed) memory. accessible from both host and device.
 pub struct UnifiedMemory;
 
-impl MemorySpace for UnifiedMemory {
+impl MemoryStorage for UnifiedMemory {
+    type HostAccess = UnifiedMemory;
     const IS_HOST_ACCESSIBLE: bool = true;
     const IS_DEVICE_ACCESSIBLE: bool = true;
     const IS_UNIFIED: bool = true;
@@ -611,4 +612,19 @@ impl MemorySpace for UnifiedMemory {
             let _ = cuMemFree_v2(ptr as CUdeviceptr);
         }
     }
+
+    // managed memory: drain the context, then the host reads or writes the pages directly
+    unsafe fn copy_to_host(dst: *mut u8, src: *const u8, bytes: usize) -> error::Result<()> {
+        ctx_sync();
+        unsafe { std::ptr::copy_nonoverlapping(src, dst, bytes) };
+        Ok(())
+    }
+
+    unsafe fn copy_from_host(dst: *mut u8, src: *const u8, bytes: usize) -> error::Result<()> {
+        ctx_sync();
+        unsafe { std::ptr::copy_nonoverlapping(src, dst, bytes) };
+        Ok(())
+    }
 }
+
+impl MemorySpace for UnifiedMemory {}

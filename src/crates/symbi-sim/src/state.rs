@@ -29,7 +29,7 @@ use symbi_hydro::eos::Eos;
 use symbi_hydro::quantity::{Density, EnergyDensity, Pressure};
 use symbi_hydro::regime::Regime;
 use symbi_hydro::state::{Cons, ConsG, Prim, PrimFromSlots, PrimG, SeedableCons};
-use symbi_xpu::{DefaultMemory, DefaultSpace, ExecutionSpace, Executor, MemorySpace};
+use symbi_xpu::{DefaultMemory, DefaultSpace, ExecutionSpace, Executor, MemorySpace, MemoryStorage};
 
 // =============================================================================
 // energy/pressure field slot — the field-layer analog of
@@ -43,7 +43,7 @@ use symbi_xpu::{DefaultMemory, DefaultSpace, ExecutionSpace, Executor, MemorySpa
 /// the uniform surface of an energy/pressure field slot — a real `Field` (energy regimes) or the
 /// zero-sized [`FieldZero`] (isothermal). generic code resolves a slot through this without knowing
 /// which; regime-specific code names the concrete `Field` directly.
-pub trait EnergyFieldSlot<Sc: Scalar + OrderedNumeric, const D: usize, Mem: MemorySpace>:
+pub trait EnergyFieldSlot<Sc: Scalar + OrderedNumeric, const D: usize, Mem: MemoryStorage>:
     Sized
 {
     /// allocate the slot (a zeroed `Field`, or the free `FieldZero`).
@@ -54,7 +54,7 @@ pub trait EnergyFieldSlot<Sc: Scalar + OrderedNumeric, const D: usize, Mem: Memo
     fn ptr(&self) -> u64;
 }
 
-impl<Sc: Scalar + OrderedNumeric, const D: usize, Mem: MemorySpace> EnergyFieldSlot<Sc, D, Mem>
+impl<Sc: Scalar + OrderedNumeric, const D: usize, Mem: MemoryStorage> EnergyFieldSlot<Sc, D, Mem>
     for Field<Sc, D, Mem>
 {
     fn alloc(domain: &Domain<D>) -> symbi_xpu::Result<Self> {
@@ -72,7 +72,7 @@ impl<Sc: Scalar + OrderedNumeric, const D: usize, Mem: MemorySpace> EnergyFieldS
 #[derive(Clone, Copy, Debug, Default)]
 pub struct FieldZero;
 
-impl<Sc: Scalar + OrderedNumeric, const D: usize, Mem: MemorySpace> EnergyFieldSlot<Sc, D, Mem>
+impl<Sc: Scalar + OrderedNumeric, const D: usize, Mem: MemoryStorage> EnergyFieldSlot<Sc, D, Mem>
     for FieldZero
 {
     fn alloc(_domain: &Domain<D>) -> symbi_xpu::Result<Self> {
@@ -90,15 +90,15 @@ impl<Sc: Scalar + OrderedNumeric, const D: usize, Mem: MemorySpace> EnergyFieldS
 /// field slot. impl'd here (local trait + foreign type) so `SimStateGeneric<R, ..>` can pick the
 /// field storage from `R::Energy` at the type level.
 pub trait FieldEnergy {
-    type Slot<Sc: Scalar + OrderedNumeric, const D: usize, Mem: MemorySpace>: EnergyFieldSlot<Sc, D, Mem>;
+    type Slot<Sc: Scalar + OrderedNumeric, const D: usize, Mem: MemoryStorage>: EnergyFieldSlot<Sc, D, Mem>;
 }
 
 impl FieldEnergy for symbi_hydro::energy::Adiabatic {
-    type Slot<Sc: Scalar + OrderedNumeric, const D: usize, Mem: MemorySpace> = Field<Sc, D, Mem>;
+    type Slot<Sc: Scalar + OrderedNumeric, const D: usize, Mem: MemoryStorage> = Field<Sc, D, Mem>;
 }
 
 impl FieldEnergy for symbi_hydro::energy::IsoModel {
-    type Slot<Sc: Scalar + OrderedNumeric, const D: usize, Mem: MemorySpace> = FieldZero;
+    type Slot<Sc: Scalar + OrderedNumeric, const D: usize, Mem: MemoryStorage> = FieldZero;
 }
 
 // the energy/pressure field storage stays `Option<Field>`. the
@@ -122,7 +122,7 @@ impl FieldEnergy for symbi_hydro::energy::IsoModel {
 pub struct ConsFieldsGeneric<
     const NDIM: usize,
     const DOF: usize,
-    M: MemorySpace = DefaultMemory,
+    M: MemoryStorage = DefaultMemory,
     Sc: Scalar + OrderedNumeric = f64,
 > {
     pub den: Field<Sc, NDIM, M>,
@@ -137,7 +137,7 @@ pub struct ConsFieldsGeneric<
 /// the natural case: vector dimension == grid dimension.
 pub type ConsFields<const D: usize, M = DefaultMemory, Sc = f64> = ConsFieldsGeneric<D, D, M, Sc>;
 
-impl<const NDIM: usize, const DOF: usize, M: MemorySpace, Sc: Scalar + OrderedNumeric>
+impl<const NDIM: usize, const DOF: usize, M: MemoryStorage, Sc: Scalar + OrderedNumeric>
     ConsFieldsGeneric<NDIM, DOF, M, Sc>
 {
     /// fill a u64 pointer array with [den, mom[0], ..., mom[D-1], nrg].
@@ -234,7 +234,7 @@ impl<const NDIM: usize, const DOF: usize, M: MemorySpace, Sc: Scalar + OrderedNu
     /// gather AoS from SoA at a coordinate.
     /// returns nrg=0.0 when energy field is absent (isothermal).
     #[inline]
-    pub fn gather(&self, coord: [isize; NDIM]) -> Cons<Sc, DOF> {
+    pub fn gather(&self, coord: [isize; NDIM]) -> Cons<Sc, DOF> where M: MemorySpace {
         Cons::adiabatic(
             Density(*self.den.view().at(coord)),
             Tensor::new(std::array::from_fn(|dd| *self.mom[dd].view().at(coord))),
@@ -245,7 +245,7 @@ impl<const NDIM: usize, const DOF: usize, M: MemorySpace, Sc: Scalar + OrderedNu
     /// scatter AoS to SoA at a coordinate.
     /// skips nrg write when energy field is absent (isothermal).
     #[inline]
-    pub fn scatter(&self, coord: [isize; NDIM], val: Cons<Sc, DOF>) {
+    pub fn scatter(&self, coord: [isize; NDIM], val: Cons<Sc, DOF>) where M: MemorySpace {
         self.den.view_mut().set(coord, val.den());
         for dd in 0..DOF {
             self.mom[dd].view_mut().set(coord, val.mom()[dd]);
@@ -258,7 +258,7 @@ impl<const NDIM: usize, const DOF: usize, M: MemorySpace, Sc: Scalar + OrderedNu
     /// gather AoS from SoA with a specific energy model.
     /// isothermal: nrg slot becomes Zero<f64> (zst). adiabatic: nrg slot is f64.
     #[inline]
-    pub fn gather_as<E: EnergyModel>(&self, coord: [isize; NDIM]) -> ConsG<Sc, DOF, E> {
+    pub fn gather_as<E: EnergyModel>(&self, coord: [isize; NDIM]) -> ConsG<Sc, DOF, E> where M: MemorySpace {
         let mut slots = Vec::with_capacity(2 + DOF);
         slots.push(*self.den.view().at(coord));
         for dd in 0..DOF {
@@ -271,7 +271,7 @@ impl<const NDIM: usize, const DOF: usize, M: MemorySpace, Sc: Scalar + OrderedNu
     /// scatter AoS to SoA with a specific energy model.
     /// isothermal: writes 0.0 for nrg (via Zero::value()). adiabatic: writes real nrg.
     #[inline]
-    pub fn scatter_from<E: EnergyModel>(&self, coord: [isize; NDIM], val: ConsG<Sc, DOF, E>) {
+    pub fn scatter_from<E: EnergyModel>(&self, coord: [isize; NDIM], val: ConsG<Sc, DOF, E>) where M: MemorySpace {
         self.den.view_mut().set(coord, val.den());
         for dd in 0..DOF {
             self.mom[dd].view_mut().set(coord, val.mom()[dd]);
@@ -288,7 +288,7 @@ impl<const NDIM: usize, const DOF: usize, M: MemorySpace, Sc: Scalar + OrderedNu
 pub struct PrimFieldsGeneric<
     const NDIM: usize,
     const DOF: usize,
-    M: MemorySpace = DefaultMemory,
+    M: MemoryStorage = DefaultMemory,
     Sc: Scalar + OrderedNumeric = f64,
 > {
     pub rho: Field<Sc, NDIM, M>,
@@ -302,7 +302,7 @@ pub struct PrimFieldsGeneric<
 /// the natural case: velocity dimension == grid dimension.
 pub type PrimFields<const D: usize, M = DefaultMemory, Sc = f64> = PrimFieldsGeneric<D, D, M, Sc>;
 
-impl<const NDIM: usize, const DOF: usize, M: MemorySpace, Sc: Scalar + OrderedNumeric>
+impl<const NDIM: usize, const DOF: usize, M: MemoryStorage, Sc: Scalar + OrderedNumeric>
     PrimFieldsGeneric<NDIM, DOF, M, Sc>
 {
     /// fill a u64 pointer array with [rho, vel[0], ..., vel[DOF-1], pre].
@@ -385,7 +385,7 @@ impl<const NDIM: usize, const DOF: usize, M: MemorySpace, Sc: Scalar + OrderedNu
     }
 
     #[inline]
-    pub fn gather(&self, coord: [isize; NDIM]) -> Prim<Sc, DOF> {
+    pub fn gather(&self, coord: [isize; NDIM]) -> Prim<Sc, DOF> where M: MemorySpace {
         Prim::adiabatic(
             Density(*self.rho.view().at(coord)),
             Tensor::new(std::array::from_fn(|dd| *self.vel[dd].view().at(coord))),
@@ -394,7 +394,7 @@ impl<const NDIM: usize, const DOF: usize, M: MemorySpace, Sc: Scalar + OrderedNu
     }
 
     #[inline]
-    pub fn scatter(&self, coord: [isize; NDIM], val: Prim<Sc, DOF>) {
+    pub fn scatter(&self, coord: [isize; NDIM], val: Prim<Sc, DOF>) where M: MemorySpace {
         self.rho.view_mut().set(coord, val.rho());
         for dd in 0..DOF {
             self.vel[dd].view_mut().set(coord, val.vel()[dd]);
@@ -407,7 +407,7 @@ impl<const NDIM: usize, const DOF: usize, M: MemorySpace, Sc: Scalar + OrderedNu
     /// gather AoS from SoA with a specific energy model.
     /// isothermal: pre slot becomes Zero<f64> (zst). adiabatic: pre slot is f64.
     #[inline]
-    pub fn gather_as<E: EnergyModel>(&self, coord: [isize; NDIM]) -> PrimG<Sc, DOF, E> {
+    pub fn gather_as<E: EnergyModel>(&self, coord: [isize; NDIM]) -> PrimG<Sc, DOF, E> where M: MemorySpace {
         let mut slots = Vec::with_capacity(2 + DOF);
         slots.push(*self.rho.view().at(coord));
         for dd in 0..DOF {
@@ -420,7 +420,7 @@ impl<const NDIM: usize, const DOF: usize, M: MemorySpace, Sc: Scalar + OrderedNu
     /// scatter AoS to SoA with a specific energy model.
     /// isothermal: writes 0.0 for pre (via Zero::value()). adiabatic: writes real pre.
     #[inline]
-    pub fn scatter_from<E: EnergyModel>(&self, coord: [isize; NDIM], val: PrimG<Sc, DOF, E>) {
+    pub fn scatter_from<E: EnergyModel>(&self, coord: [isize; NDIM], val: PrimG<Sc, DOF, E>) where M: MemorySpace {
         self.rho.view_mut().set(coord, val.rho());
         for dd in 0..DOF {
             self.vel[dd].view_mut().set(coord, val.vel()[dd]);
@@ -441,7 +441,7 @@ impl<const NDIM: usize, const DOF: usize, M: MemorySpace, Sc: Scalar + OrderedNu
 pub struct PartitionFieldsGeneric<
     const NDIM: usize,
     const DOF: usize,
-    M: MemorySpace = DefaultMemory,
+    M: MemoryStorage = DefaultMemory,
     Sc: Scalar + OrderedNumeric = f64,
 > {
     pub cons: ConsFieldsGeneric<NDIM, DOF, M, Sc>,
@@ -496,13 +496,13 @@ pub type PartitionFields<const D: usize, M = DefaultMemory, Sc = f64> =
 pub struct BcellFields<
     const D: usize,
     const N: usize,
-    M: MemorySpace = DefaultMemory,
+    M: MemoryStorage = DefaultMemory,
     Sc: Scalar + OrderedNumeric = f64,
 > {
     pub b: [Field<Sc, D, M>; N],
 }
 
-impl<const D: usize, const N: usize, M: MemorySpace, Sc: Scalar + OrderedNumeric>
+impl<const D: usize, const N: usize, M: MemoryStorage, Sc: Scalar + OrderedNumeric>
     std::ops::Index<usize> for BcellFields<D, N, M, Sc>
 {
     type Output = Field<Sc, D, M>;
@@ -512,7 +512,7 @@ impl<const D: usize, const N: usize, M: MemorySpace, Sc: Scalar + OrderedNumeric
     }
 }
 
-impl<const D: usize, const N: usize, M: MemorySpace, Sc: Scalar + OrderedNumeric>
+impl<const D: usize, const N: usize, M: MemoryStorage, Sc: Scalar + OrderedNumeric>
     std::ops::IndexMut<usize> for BcellFields<D, N, M, Sc>
 {
     #[inline]
@@ -525,13 +525,13 @@ impl<const D: usize, const N: usize, M: MemorySpace, Sc: Scalar + OrderedNumeric
 /// face. CT-evolved "truth"; bcell is interpolated from this.
 pub struct BfaceFields<
     const D: usize,
-    M: MemorySpace = DefaultMemory,
+    M: MemoryStorage = DefaultMemory,
     Sc: Scalar + OrderedNumeric = f64,
 > {
     pub b: [Field<Sc, D, M>; D],
 }
 
-impl<const D: usize, M: MemorySpace, Sc: Scalar + OrderedNumeric> std::ops::Index<usize>
+impl<const D: usize, M: MemoryStorage, Sc: Scalar + OrderedNumeric> std::ops::Index<usize>
     for BfaceFields<D, M, Sc>
 {
     type Output = Field<Sc, D, M>;
@@ -541,7 +541,7 @@ impl<const D: usize, M: MemorySpace, Sc: Scalar + OrderedNumeric> std::ops::Inde
     }
 }
 
-impl<const D: usize, M: MemorySpace, Sc: Scalar + OrderedNumeric> std::ops::IndexMut<usize>
+impl<const D: usize, M: MemoryStorage, Sc: Scalar + OrderedNumeric> std::ops::IndexMut<usize>
     for BfaceFields<D, M, Sc>
 {
     #[inline]
@@ -554,13 +554,13 @@ impl<const D: usize, M: MemorySpace, Sc: Scalar + OrderedNumeric> std::ops::Inde
 /// to axis d. transient; recomputed each stage from fluxes.
 pub struct EfieldFields<
     const D: usize,
-    M: MemorySpace = DefaultMemory,
+    M: MemoryStorage = DefaultMemory,
     Sc: Scalar + OrderedNumeric = f64,
 > {
     pub e: [Field<Sc, D, M>; D],
 }
 
-impl<const D: usize, M: MemorySpace, Sc: Scalar + OrderedNumeric> std::ops::Index<usize>
+impl<const D: usize, M: MemoryStorage, Sc: Scalar + OrderedNumeric> std::ops::Index<usize>
     for EfieldFields<D, M, Sc>
 {
     type Output = Field<Sc, D, M>;
@@ -570,7 +570,7 @@ impl<const D: usize, M: MemorySpace, Sc: Scalar + OrderedNumeric> std::ops::Inde
     }
 }
 
-impl<const D: usize, M: MemorySpace, Sc: Scalar + OrderedNumeric> std::ops::IndexMut<usize>
+impl<const D: usize, M: MemoryStorage, Sc: Scalar + OrderedNumeric> std::ops::IndexMut<usize>
     for EfieldFields<D, M, Sc>
 {
     #[inline]
@@ -585,13 +585,13 @@ impl<const D: usize, M: MemorySpace, Sc: Scalar + OrderedNumeric> std::ops::Inde
 pub struct BfluxFields<
     const D: usize,
     const N: usize,
-    M: MemorySpace = DefaultMemory,
+    M: MemoryStorage = DefaultMemory,
     Sc: Scalar + OrderedNumeric = f64,
 > {
     pub f: [Field<Sc, D, M>; N],
 }
 
-impl<const D: usize, const N: usize, M: MemorySpace, Sc: Scalar + OrderedNumeric>
+impl<const D: usize, const N: usize, M: MemoryStorage, Sc: Scalar + OrderedNumeric>
     std::ops::Index<usize> for BfluxFields<D, N, M, Sc>
 {
     type Output = Field<Sc, D, M>;
@@ -601,7 +601,7 @@ impl<const D: usize, const N: usize, M: MemorySpace, Sc: Scalar + OrderedNumeric
     }
 }
 
-impl<const D: usize, const N: usize, M: MemorySpace, Sc: Scalar + OrderedNumeric>
+impl<const D: usize, const N: usize, M: MemoryStorage, Sc: Scalar + OrderedNumeric>
     std::ops::IndexMut<usize> for BfluxFields<D, N, M, Sc>
 {
     #[inline]
@@ -617,7 +617,7 @@ impl<const D: usize, const N: usize, M: MemorySpace, Sc: Scalar + OrderedNumeric
 pub struct MhdStepSnapshot<
     const D: usize,
     const DOF: usize,
-    M: MemorySpace = DefaultMemory,
+    M: MemoryStorage = DefaultMemory,
     Sc: Scalar + OrderedNumeric = f64,
 > {
     pub cons: ConsFieldsGeneric<D, DOF, M, Sc>,
@@ -631,7 +631,7 @@ pub struct MhdStepSnapshot<
 pub struct MhdStaggeredFields<
     const D: usize,
     const DOF: usize,
-    M: MemorySpace = DefaultMemory,
+    M: MemoryStorage = DefaultMemory,
     Sc: Scalar + OrderedNumeric = f64,
 > {
     /// the step-entry rollback state of every magnetized regime: its first-order correction
@@ -751,7 +751,7 @@ pub struct MhdStaggeredFields<
     pub bface_initialized: std::sync::atomic::AtomicBool,
 }
 
-impl<const D: usize, const DOF: usize, M: MemorySpace, Sc: Scalar + OrderedNumeric>
+impl<const D: usize, const DOF: usize, M: MemoryStorage, Sc: Scalar + OrderedNumeric>
     MhdStaggeredFields<D, DOF, M, Sc>
 {
     /// allocate MHD fields from the cell-centered domains.
@@ -1003,7 +1003,7 @@ impl<const D: usize, const DOF: usize, M: MemorySpace, Sc: Scalar + OrderedNumer
 pub struct MagneticSlipWorkspace<
     const D: usize,
     const DOF: usize,
-    M: MemorySpace = DefaultMemory,
+    M: MemoryStorage = DefaultMemory,
     Sc: Scalar + OrderedNumeric = f64,
 > {
     /// the immutable substep-input face field B^0.
@@ -1048,7 +1048,7 @@ pub struct MagneticSlipWorkspace<
 /// workspace, so a mixed vector is a face group paired with its member here.
 pub struct MagneticSlipCellComplex<
     const D: usize,
-    M: MemorySpace = DefaultMemory,
+    M: MemoryStorage = DefaultMemory,
     Sc: Scalar + OrderedNumeric = f64,
 > {
     pub input: Field<Sc, D, M>,
@@ -1066,7 +1066,7 @@ pub struct MagneticSlipCellComplex<
 pub struct RkWorkspaceGeneric<
     const NDIM: usize,
     const DOF: usize,
-    M: MemorySpace = DefaultMemory,
+    M: MemoryStorage = DefaultMemory,
     Sc: Scalar + OrderedNumeric = f64,
 > {
     pub u_n: ConsFieldsGeneric<NDIM, DOF, M, Sc>,
@@ -2384,7 +2384,7 @@ impl<const D: usize> CompositeOwnership<D> {
 pub struct FieldStore<
     const NDIM: usize,
     const DOF: usize,
-    Mem: MemorySpace = DefaultMemory,
+    Mem: MemoryStorage = DefaultMemory,
     Sc: Scalar + OrderedNumeric = f64,
 > {
     // ---- fields (allocated once, live forever) ----
@@ -2499,13 +2499,13 @@ pub struct Context<S: ExecutionSpace> {
 /// `DOF = NDIM = D` (the natural case); axisymmetric hydro uses `SimStateGeneric<R, 2, 3,
 /// Cylindrical, ..>` directly (2D grid, 3-vector momentum with the v_phi swirl).
 ///
-impl<const NDIM: usize, const DOF: usize, Mem: MemorySpace, Sc: Scalar + OrderedNumeric>
+impl<const NDIM: usize, const DOF: usize, Mem: MemoryStorage, Sc: Scalar + OrderedNumeric>
     FieldStore<NDIM, DOF, Mem, Sc>
 {
     /// the isothermal closure's `cs^2(x)` from a per-cell pressure field, `cs^2 = p / rho` over the
     /// interior, then continued into every ghost cell: the periodic image on a periodic axis, the
     /// nearest interior value otherwise. the field is read-only from here on.
-    pub fn set_isothermal_cs2_from_pressure(&self, pre: &Field<Sc, NDIM, Mem>) {
+    pub fn set_isothermal_cs2_from_pressure(&self, pre: &Field<Sc, NDIM, Mem>) where Mem: MemorySpace {
         let cs2 = self
             .fields
             .cs2
@@ -2520,7 +2520,7 @@ impl<const NDIM: usize, const DOF: usize, Mem: MemorySpace, Sc: Scalar + Ordered
     /// continue the isothermal closure field from `filled` (a region already holding its values)
     /// into every other allocated cell: the periodic image on a periodic axis, the nearest cell
     /// of `filled` otherwise.
-    pub fn extend_isothermal_cs2_into_ghosts(&self, filled: &Domain<NDIM>) {
+    pub fn extend_isothermal_cs2_into_ghosts(&self, filled: &Domain<NDIM>) where Mem: MemorySpace {
         if let Some(cs2) = self.fields.cs2.as_ref() {
             extend_closure_into_ghosts(cs2, &self.geom.allocated, filled, &self.boundaries);
         }
@@ -2689,7 +2689,7 @@ pub struct SimStateGeneric<
     M: Metric<Sc, NDIM>,
     E: Eos<Sc>,
     S: ExecutionSpace = DefaultSpace,
-    Mem: MemorySpace = DefaultMemory,
+    Mem: MemoryStorage = DefaultMemory,
     Sc: Scalar + OrderedNumeric = f64,
 > {
     // ---- mutable substance: the only thing kernels see ----
@@ -2700,6 +2700,51 @@ pub struct SimStateGeneric<
     pub ctx: Context<S>,
 }
 
+impl<R, const NDIM: usize, const DOF: usize, M, E, S, Mem, Sc> SimStateGeneric<R, NDIM, DOF, M, E, S, Mem, Sc>
+where
+    R: Regime<Sc, NDIM>,
+    M: Metric<Sc, NDIM>,
+    E: Eos<Sc>,
+    S: ExecutionSpace,
+    Mem: MemoryStorage,
+    Sc: Scalar + OrderedNumeric,
+{
+    /// this state re-typed as host-dereferenceable storage: `Some` on host and managed memory,
+    /// `None` on device-local storage
+    pub fn host(&self) -> Option<&SimStateGeneric<R, NDIM, DOF, M, E, S, Mem::HostAccess, Sc>> {
+        if symbi_xpu::host_alias_is_identity::<Mem>() {
+            // the host alias is this very type, so the cast is an identity
+            Some(unsafe { &*(self as *const Self as *const SimStateGeneric<R, NDIM, DOF, M, E, S, Mem::HostAccess, Sc>) })
+        } else {
+            None
+        }
+    }
+
+    /// the mutable twin of [`Self::host`]
+    pub fn host_mut(&mut self) -> Option<&mut SimStateGeneric<R, NDIM, DOF, M, E, S, Mem::HostAccess, Sc>> {
+        if symbi_xpu::host_alias_is_identity::<Mem>() {
+            Some(unsafe { &mut *(self as *mut Self as *mut SimStateGeneric<R, NDIM, DOF, M, E, S, Mem::HostAccess, Sc>) })
+        } else {
+            None
+        }
+    }
+
+    /// the host alias of this state for `operation`, an operation that runs on
+    /// host-dereferenceable storage alone; device-local storage refuses it by name
+    pub fn host_only(&self, operation: &str) -> &SimStateGeneric<R, NDIM, DOF, M, E, S, Mem::HostAccess, Sc> {
+        self.host().unwrap_or_else(|| {
+            panic!("{operation} runs on host-dereferenceable storage; device-local storage refuses it")
+        })
+    }
+
+    /// the mutable twin of [`Self::host_only`]
+    pub fn host_mut_only(&mut self, operation: &str) -> &mut SimStateGeneric<R, NDIM, DOF, M, E, S, Mem::HostAccess, Sc> {
+        self.host_mut().unwrap_or_else(|| {
+            panic!("{operation} runs on host-dereferenceable storage; device-local storage refuses it")
+        })
+    }
+}
+
 impl<R, const NDIM: usize, const DOF: usize, M, E, S, Mem, Sc> std::ops::Deref
     for SimStateGeneric<R, NDIM, DOF, M, E, S, Mem, Sc>
 where
@@ -2707,7 +2752,7 @@ where
     M: Metric<Sc, NDIM>,
     E: Eos<Sc>,
     S: ExecutionSpace,
-    Mem: MemorySpace,
+    Mem: MemoryStorage,
     Sc: Scalar + OrderedNumeric,
 {
     type Target = FieldStore<NDIM, DOF, Mem, Sc>;
@@ -2724,7 +2769,7 @@ where
     M: Metric<Sc, NDIM>,
     E: Eos<Sc>,
     S: ExecutionSpace,
-    Mem: MemorySpace,
+    Mem: MemoryStorage,
     Sc: Scalar + OrderedNumeric,
 {
     #[inline]
@@ -2751,7 +2796,7 @@ pub type SimState<R, const D: usize, M, E, S = DefaultSpace, Mem = DefaultMemory
 pub fn array_field_zeros<
     const D: usize,
     const N: usize,
-    M: MemorySpace,
+    M: MemoryStorage,
     C: symbi_grid::centering::Centering,
     Sc: Scalar + OrderedNumeric,
 >(
@@ -2768,7 +2813,7 @@ pub fn array_field_zeros<
 fn array_cons_zeros_with_energy<
     const D: usize,
     const DOF: usize,
-    M: MemorySpace,
+    M: MemoryStorage,
     Sc: Scalar + OrderedNumeric,
 >(
     domain: &Domain<D>,
@@ -2797,7 +2842,53 @@ pub fn axis_name(ax: usize) -> &'static str {
 // regime/EOS, so `Cons { den, mom, nrg }` is assembled here and the iso-vs-adiabatic split
 // is handled in one place.
 
-impl<const D: usize, const DOF: usize, Mem: MemorySpace> FieldStore<D, DOF, Mem, f64> {
+impl<const D: usize, const DOF: usize, Mem: MemoryStorage, Sc: Scalar + OrderedNumeric> FieldStore<D, DOF, Mem, Sc> {
+    /// this store re-typed as host-dereferenceable storage: `Some` on host and managed memory,
+    /// `None` on device-local storage. every host-only operation reaches a store through here, so
+    /// on device-local storage the caller takes a device path or refuses, and host code never
+    /// dereferences storage it cannot reach. a host scan of a device-local store fails to compile:
+    ///
+    /// ```compile_fail,E0277
+    /// fn scan(store: &symbi_sim::state::FieldStore<2, 2, symbi_xpu::HostOpaque, f64>) {
+    ///     let _ = symbi_sim::hydro_ops::scan_c2p_errors(store);
+    /// }
+    /// ```
+    ///
+    /// and reaches the scan only through this alias:
+    ///
+    /// ```
+    /// fn scan(store: &symbi_sim::state::FieldStore<2, 2, symbi_xpu::HostOpaque, f64>) {
+    ///     let _ = store.host().map(symbi_sim::hydro_ops::scan_c2p_errors);
+    /// }
+    /// ```
+    pub fn host(&self) -> Option<&FieldStore<D, DOF, Mem::HostAccess, Sc>> {
+        if symbi_xpu::host_alias_is_identity::<Mem>() {
+            // the host alias is this very type, so the cast is an identity
+            Some(unsafe { &*(self as *const Self as *const FieldStore<D, DOF, Mem::HostAccess, Sc>) })
+        } else {
+            None
+        }
+    }
+
+    /// the host alias of this store for `operation`, an operation that runs on
+    /// host-dereferenceable storage alone; device-local storage refuses it by name
+    pub fn host_only(&self, operation: &str) -> &FieldStore<D, DOF, Mem::HostAccess, Sc> {
+        self.host().unwrap_or_else(|| {
+            panic!("{operation} runs on host-dereferenceable storage; device-local storage refuses it")
+        })
+    }
+
+    /// the mutable twin of [`Self::host`]
+    pub fn host_mut(&mut self) -> Option<&mut FieldStore<D, DOF, Mem::HostAccess, Sc>> {
+        if symbi_xpu::host_alias_is_identity::<Mem>() {
+            Some(unsafe { &mut *(self as *mut Self as *mut FieldStore<D, DOF, Mem::HostAccess, Sc>) })
+        } else {
+            None
+        }
+    }
+}
+
+impl<const D: usize, const DOF: usize, Mem: MemoryStorage> FieldStore<D, DOF, Mem, f64> {
     /// the regime's primitive at a cell from the stored primitive fields: density, the velocity
     /// components, the pressure where the gas carries energy, and on a magnetized store the cell
     /// field
@@ -2805,6 +2896,7 @@ impl<const D: usize, const DOF: usize, Mem: MemorySpace> FieldStore<D, DOF, Mem,
     where
         R: Regime<f64, DOF>,
         <R as Regime<f64, DOF>>::Prim: symbi_hydro::state::PrimFromSlots<f64, DOF>,
+        Mem: MemorySpace,
     {
         use symbi_hydro::state::PrimFromSlots;
         let prim = &self.fields.prim;
@@ -2848,6 +2940,7 @@ impl<const D: usize, const DOF: usize, Mem: MemorySpace> FieldStore<D, DOF, Mem,
         E: symbi_hydro::eos::EosFor<f64, <R as Regime<f64, DOF>>::Energy>,
         <R as Regime<f64, DOF>>::Cons: symbi_hydro::state::SeedableCons<f64, DOF>,
         <R as Regime<f64, DOF>>::Prim: symbi_hydro::state::PrimFromSlots<f64, DOF>,
+        Mem: MemorySpace,
     {
         let interior = &self.geom.interior;
         let ghost = |c: &[isize; D]| !interior.contains(*c);
@@ -2871,7 +2964,7 @@ impl<const D: usize, const DOF: usize, Mem: MemorySpace> FieldStore<D, DOF, Mem,
     }
 
     /// write back the conserved halo `prepare_checkpoint_halo_with` replaced
-    pub fn restore_checkpoint_halo(&self, saved: &[Vec<f64>]) {
+    pub fn restore_checkpoint_halo(&self, saved: &[Vec<f64>]) where Mem: MemorySpace {
         let interior = &self.geom.interior;
         for (f, values) in self.halo_conserved_fields().into_iter().zip(saved) {
             let view = f.view_mut();
@@ -2882,13 +2975,13 @@ impl<const D: usize, const DOF: usize, Mem: MemorySpace> FieldStore<D, DOF, Mem,
     }
 }
 
-impl<const D: usize, const DOF: usize, Mem: MemorySpace, Sc: Scalar + OrderedNumeric> FieldStore<D, DOF, Mem, Sc> {
+impl<const D: usize, const DOF: usize, Mem: MemoryStorage, Sc: Scalar + OrderedNumeric> FieldStore<D, DOF, Mem, Sc> {
     /// the primitive fields of every excluded covered cell (`CompositeOwnership::decision_excluded`)
     /// whose conserved state has no admissible recovery, set to NaN for a checkpoint: such a cell
     /// holds the restriction of its children, no operator of the evolved cells reads it, and its
     /// recovered values carry no physical meaning. the conserved state is kept. returns the
     /// replaced values, which `restore_withheld_primitives` writes back
-    pub fn withhold_unrecovered_primitives(&self) -> Vec<([isize; D], Vec<Sc>)> {
+    pub fn withhold_unrecovered_primitives(&self) -> Vec<([isize; D], Vec<Sc>)> where Mem: MemorySpace {
         let Some(core) = self.composite_ownership.decision_excluded.as_ref() else {
             return Vec::new();
         };
@@ -2911,7 +3004,7 @@ impl<const D: usize, const DOF: usize, Mem: MemorySpace, Sc: Scalar + OrderedNum
 
     /// whether an excluded covered cell (`CompositeOwnership::decision_excluded`) holds a conserved
     /// state without an admissible recovery, the cells a checkpoint publishes with NaN primitives
-    pub fn has_unrecovered_excluded(&self) -> bool {
+    pub fn has_unrecovered_excluded(&self) -> bool where Mem: MemorySpace {
         let Some(core) = self.composite_ownership.decision_excluded.as_ref() else {
             return false;
         };
@@ -2920,7 +3013,7 @@ impl<const D: usize, const DOF: usize, Mem: MemorySpace, Sc: Scalar + OrderedNum
     }
 
     /// write back the primitives `withhold_unrecovered_primitives` replaced
-    pub fn restore_withheld_primitives(&self, saved: &[([isize; D], Vec<Sc>)]) {
+    pub fn restore_withheld_primitives(&self, saved: &[([isize; D], Vec<Sc>)]) where Mem: MemorySpace {
         let prim = &self.fields.prim;
         let fields: Vec<&Field<Sc, D, Mem>> =
             std::iter::once(&prim.rho).chain(prim.vel.iter()).chain(prim.pre.as_ref()).collect();
@@ -2939,6 +3032,7 @@ impl<const D: usize, const DOF: usize, Mem: MemorySpace, Sc: Scalar + OrderedNum
         M: Metric<Sc, D> + Metric<Sc, DOF>,
         E: symbi_hydro::eos::EosFor<Sc, <R as Regime<Sc, DOF>>::Energy>,
         <R as Regime<Sc, DOF>>::Cons: symbi_hydro::state::SeedableCons<Sc, DOF>,
+        Mem: MemorySpace,
     {
         use symbi_hydro::spatial_metric::{Gamma, GammaInv, SpatialMetric};
         use symbi_hydro::state::SeedableCons;
@@ -3064,7 +3158,7 @@ where
     M: Metric<Sc, D> + Metric<Sc, DOF>,
     E: symbi_hydro::eos::EosFor<Sc, <R as Regime<Sc, DOF>>::Energy>,
     S: ExecutionSpace,
-    Mem: MemorySpace,
+    Mem: MemoryStorage,
     Sc: Scalar + OrderedNumeric,
     <R as Regime<Sc, DOF>>::Cons: symbi_hydro::state::SeedableCons<Sc, DOF>,
 {
@@ -3078,7 +3172,7 @@ where
     /// state (via `to_conserved_covariant`) — the metric radius is the volume-weighted radial
     /// centroid, the point the metric-aware c2p inverts at, so the storage<->recovery round-trip
     /// is exact per cell. flat (Minkowski) keeps the orthonormal `to_conserved`.
-    pub fn seed_cell(&self, coord: [isize; D], prim: &<R as Regime<Sc, DOF>>::Prim) {
+    pub fn seed_cell(&self, coord: [isize; D], prim: &<R as Regime<Sc, DOF>>::Prim) where Mem: MemorySpace {
         self.store.seed_cell_with(&self.physics, coord, prim);
     }
 
@@ -3086,7 +3180,7 @@ where
     /// index->coordinate loop every IC otherwise hand-rolls. `sim.seed_cells(|x| prim_at(x))`
     /// replaces `for c in interior { let x = ...; sim.seed_cell(c, &prim_at(x)); }`. for MHD,
     /// pair with `seed_face` for the staggered face B (the CT ground truth).
-    pub fn seed_cells(&self, f: impl Fn([f64; D]) -> <R as Regime<Sc, DOF>>::Prim) {
+    pub fn seed_cells(&self, f: impl Fn([f64; D]) -> <R as Regime<Sc, DOF>>::Prim) where Mem: MemorySpace {
         for c in self.geom.interior.iter() {
             let x = self.geom.cell_coord(c);
             self.seed_cell(c, &f(x));
@@ -3101,7 +3195,7 @@ where
     pub fn perturb_cells(
         &self,
         f: impl Fn([f64; D], <R as Regime<Sc, DOF>>::Prim) -> <R as Regime<Sc, DOF>>::Prim,
-    ) {
+    ) where Mem: MemorySpace {
         for c in self.geom.interior.iter() {
             let x = self.geom.cell_coord(c);
             let p = self.expect_prim_at(c);
@@ -3112,7 +3206,7 @@ where
     /// gather the regime's conserved state at a cell — the inverse of `seed_cell`'s scatter, with
     /// the cell-centered B folded in for MHD, so a caller receives a ready
     /// `MhdCons { hydro: Cons { den: *..view().at(c), mom: Tensor::new([..]), nrg: .. }, mag: .. }`.
-    pub fn cons_at(&self, coord: [isize; D]) -> <R as Regime<Sc, DOF>>::Cons {
+    pub fn cons_at(&self, coord: [isize; D]) -> <R as Regime<Sc, DOF>>::Cons where Mem: MemorySpace {
         use symbi_hydro::state::SeedableCons;
         type Energy<R, const DOF: usize, Sc> =
             <<R as Regime<Sc, DOF>>::Cons as SeedableCons<Sc, DOF>>::Energy;
@@ -3129,7 +3223,7 @@ where
     pub fn recover_at(
         &self,
         coord: [isize; D],
-    ) -> symbi_hydro::Recovery<<R as Regime<Sc, DOF>>::Prim> {
+    ) -> symbi_hydro::Recovery<<R as Regime<Sc, DOF>>::Prim> where Mem: MemorySpace {
         <R as Regime<Sc, DOF>>::to_primitive(
             &self.physics.regime,
             &self.physics.eos,
@@ -3143,6 +3237,7 @@ where
     pub fn prim_at(&self, coord: [isize; D]) -> <R as Regime<Sc, DOF>>::Prim
     where
         <R as Regime<Sc, DOF>>::Prim: symbi_hydro::state::PrimFromSlots<Sc, DOF>,
+        Mem: MemorySpace,
     {
         use symbi_hydro::state::PrimFromSlots;
         let prim = &self.fields.prim;
@@ -3165,7 +3260,7 @@ where
     /// the panicking probe over `recover_at`, named for what it does: a cell whose recovery is
     /// rejected panics with its issue set. for tests and diagnostics that assert the cell is
     /// physical by reading it.
-    pub fn expect_prim_at(&self, coord: [isize; D]) -> <R as Regime<Sc, DOF>>::Prim {
+    pub fn expect_prim_at(&self, coord: [isize; D]) -> <R as Regime<Sc, DOF>>::Prim where Mem: MemorySpace {
         self.recover_at(coord)
             .unwrap_or_else(|failure| panic!("expect_prim_at({coord:?}): {failure}"))
             .into_inner()
@@ -3178,7 +3273,7 @@ where
     M: Metric<f64, D> + Metric<f64, DOF>,
     E: symbi_hydro::eos::EosFor<f64, <R as Regime<f64, DOF>>::Energy>,
     S: ExecutionSpace,
-    Mem: MemorySpace,
+    Mem: MemoryStorage,
     <R as Regime<f64, DOF>>::Cons: symbi_hydro::state::SeedableCons<f64, DOF>,
 {
     /// the conserved state of the ghost cells beside every physical face but a periodic one
@@ -3193,18 +3288,20 @@ where
     pub fn prepare_checkpoint_halo(&self) -> Vec<Vec<f64>>
     where
         <R as Regime<f64, DOF>>::Prim: symbi_hydro::state::PrimFromSlots<f64, DOF>,
+        Mem: MemorySpace,
     {
         self.store.prepare_checkpoint_halo_with(&self.physics)
     }
 
     /// write back the conserved halo `prepare_checkpoint_halo` replaced
-    pub fn restore_checkpoint_halo(&self, saved: &[Vec<f64>]) {
+    pub fn restore_checkpoint_halo(&self, saved: &[Vec<f64>]) where Mem: MemorySpace {
         self.store.restore_checkpoint_halo(saved);
     }
 
     pub fn fill_conserved_ghosts(&self)
     where
         <R as Regime<f64, DOF>>::Prim: symbi_hydro::state::PrimFromSlots<f64, DOF>,
+        Mem: MemorySpace,
     {
         let interior = &self.geom.interior;
         let allocated = &self.geom.allocated;
@@ -3242,7 +3339,7 @@ where
     M: Metric<Sc, D>,
     E: symbi_hydro::eos::EosFor<Sc, <R as Regime<Sc, D>>::Energy>,
     S: ExecutionSpace,
-    Mem: MemorySpace,
+    Mem: MemoryStorage,
     Sc: Scalar + OrderedNumeric,
 {
     /// construct a simulation. allocates all fields once. no further allocations.
@@ -3259,7 +3356,7 @@ where
         cfl: f64,
         timestepping: Timestepping,
         device_id: i64,
-    ) -> symbi_xpu::Result<Self> {
+    ) -> symbi_xpu::Result<Self> where Mem: MemorySpace {
         Self::new_at(
             regime,
             eos,
@@ -3297,7 +3394,7 @@ where
         cfl: f64,
         timestepping: Timestepping,
         device_id: i64,
-    ) -> symbi_xpu::Result<Self> {
+    ) -> symbi_xpu::Result<Self> where Mem: MemorySpace {
         let ng_i = ng as isize;
         let allocated = Domain::new(std::array::from_fn(|ax| Space {
             name: axis_name(ax),
@@ -3537,7 +3634,7 @@ where
     /// physical position, and mark the staggered field initialized. dissolves the per-IC loop
     /// `for c in bface[d].domain() { set(c, f(face_coord)); } + bface_initialized.store(...)`.
     /// the CT ground truth: seed the faces with `seed_face*`, the cells with `seed_cells`.
-    pub fn seed_face_with(&self, d: usize, f: impl Fn([f64; D]) -> Sc) {
+    pub fn seed_face_with(&self, d: usize, f: impl Fn([f64; D]) -> Sc) where Mem: MemorySpace {
         let mhd = self
             .fields
             .mhd
@@ -3554,7 +3651,7 @@ where
 
     /// seed a staggered face-normal B component to a uniform value (the common case — e.g., a
     /// uniform Bx / vertical B_z / toroidal B_phi threading the domain).
-    pub fn seed_face(&self, d: usize, value: Sc) {
+    pub fn seed_face(&self, d: usize, value: Sc) where Mem: MemorySpace {
         self.seed_face_with(d, |_| value);
     }
 
@@ -3562,7 +3659,7 @@ where
     /// order over the interior face domain (`interior` extended +1 on axis `d`) — the layout the
     /// python `staggered_bfields` generators yield. the index analog of [`seed_face_with`] for
     /// array-sourced ICs (the CT divergence-free ground truth).
-    pub fn seed_face_indexed(&self, d: usize, data: &[Sc]) {
+    pub fn seed_face_indexed(&self, d: usize, data: &[Sc]) where Mem: MemorySpace {
         let mhd = self
             .fields
             .mhd
@@ -3594,7 +3691,7 @@ where
     /// start a fluent [`SimBuilder`]: named setters + sane defaults (ng=2, cfl=0.4, RK2, outflow,
     /// device 0) in place of `new`'s 11 positional args. `Sim::build(regime, eos, metric)
     /// .cells([nx,ny]).bounds([0.,0.],[1.,1.]).boundaries(Periodic).finish()?`.
-    pub fn build(regime: R, eos: E, metric: M) -> SimBuilder<R, D, DOF, M, E, S, Mem, Sc> {
+    pub fn build(regime: R, eos: E, metric: M) -> SimBuilder<R, D, DOF, M, E, S, Mem, Sc> where Mem: MemorySpace {
         SimBuilder {
             regime,
             eos,
@@ -3748,14 +3845,14 @@ where
     M: Metric<f64, D> + Metric<f64, DOF> + Copy,
     E: Eos<f64>,
     S: ExecutionSpace,
-    Mem: MemorySpace,
+    Mem: MemoryStorage,
 {
     /// reduce total mass / energy and max|div B| over this level's interior. cell
     /// volumes come from the block geometry so the sums are correct on curvilinear
     /// grids (r^2 sin(theta) etc.) as well as cartesian. returns `None` on a
     /// device-resident gpu run, where the fields stay off the host, so the caller
     /// simply omits the diagnostics.
-    pub fn conservation_diag(&self) -> Option<ConservationDiag> {
+    pub fn conservation_diag(&self) -> Option<ConservationDiag> where Mem: MemorySpace {
         if !Mem::IS_HOST_ACCESSIBLE {
             return None;
         }
@@ -3893,7 +3990,7 @@ where
     M: Metric<f64, D> + Copy,
     E: Eos<f64>,
     S: ExecutionSpace,
-    Mem: MemorySpace,
+    Mem: MemoryStorage,
 {
 
 
@@ -3925,7 +4022,7 @@ where
     }
 
     /// the selected scalar field at a cell (host access assumed by the caller).
-    pub fn field_value(&self, c: [isize; D], kind: FieldKind) -> f64 {
+    pub fn field_value(&self, c: [isize; D], kind: FieldKind) -> f64 where Mem: MemorySpace {
         match kind {
             FieldKind::Density => *self.fields.prim.rho.view().at(c) as f64,
             FieldKind::Pressure => self
@@ -3965,7 +4062,7 @@ where
     /// the live heatmap: block-average the interior (mid-plane in axes >= 2 for the
     /// 3D z-slice) to <= `max_dim` per axis, so cost is bounded by the screen size.
     /// a 1D grid yields a 1-row line profile. `None` off host memory.
-    pub fn field_slice(&self, max_dim: usize, index: usize) -> Option<FieldDecimation> {
+    pub fn field_slice(&self, max_dim: usize, index: usize) -> Option<FieldDecimation> where Mem: MemorySpace {
         self.field_slice_oriented(max_dim, index, 0, 0)
     }
 
@@ -3981,7 +4078,7 @@ where
         index: usize,
         orient: usize,
         zoom: usize,
-    ) -> Option<FieldDecimation> {
+    ) -> Option<FieldDecimation> where Mem: MemorySpace {
         if !Mem::IS_HOST_ACCESSIBLE {
             return None;
         }
@@ -4141,7 +4238,7 @@ where
         max_dim: usize,
         kind: FieldKind,
         name: &str,
-    ) -> Option<FieldDecimation> {
+    ) -> Option<FieldDecimation> where Mem: MemorySpace {
         let interior = &self.geom.interior;
         let sp0 = &interior.spaces[0];
         let sp1 = interior.spaces.get(1)?;
@@ -4874,7 +4971,7 @@ pub fn positivity_trace_enabled() -> bool {
 
 impl<const NDIM: usize, const DOF: usize, Mem, Sc> FieldStore<NDIM, DOF, Mem, Sc>
 where
-    Mem: MemorySpace,
+    Mem: MemoryStorage,
     Sc: Scalar + OrderedNumeric,
 {
     /// print the interior's least density and least internal energy density
@@ -4883,7 +4980,7 @@ where
     /// primitive state one update behind the conserved one shows here), under `label`. reads
     /// the host view, so a device store must be drained first. a no-op unless
     /// `SYMBI_TRACE_POSITIVITY` is set.
-    pub fn positivity_trace(&self, label: &str) {
+    pub fn positivity_trace(&self, label: &str) where Mem: MemorySpace {
         if !positivity_trace_enabled() {
             return;
         }

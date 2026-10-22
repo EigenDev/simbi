@@ -11,7 +11,7 @@
 use symbi_algebra::{Domain, OrderedNumeric};
 use symbi_carrier::Scalar;
 use symbi_ir::ScalarRef;
-use symbi_xpu::MemorySpace;
+use symbi_xpu::{MemorySpace, MemoryStorage};
 
 use std::sync::Arc;
 
@@ -71,7 +71,7 @@ fn negate_over<const D: usize, Mem, Sc>(
     field: &symbi_grid::Field<Sc, D, Mem>,
     scratch: &symbi_grid::Field<Sc, D, Mem>,
 ) where
-    Mem: MemorySpace,
+    Mem: MemoryStorage,
     Sc: Scalar + OrderedNumeric,
 {
     if domain.volume() == 0 {
@@ -107,7 +107,7 @@ pub fn flip_polar_band<const D: usize, const DOF: usize, Mem, Sc>(
     side: symbi_algebra::Side,
     reach: usize,
 ) where
-    Mem: MemorySpace,
+    Mem: MemoryStorage,
     Sc: Scalar + OrderedNumeric,
 {
     let turn = crate::kernels::support::polar_turn_for(sim.geom.coords, &sim.geom.interior)
@@ -152,7 +152,7 @@ pub fn dispatch_driven_boundaries<const D: usize, const DOF: usize, Mem, Sc>(
     dags: &[Arc<RuntimeSource>],
 ) where
     Sc: Scalar + OrderedNumeric,
-    Mem: MemorySpace,
+    Mem: MemoryStorage,
 {
     for axis in 0..D {
         for side in 0..2 {
@@ -171,7 +171,7 @@ pub fn dispatch_driven_boundaries<const D: usize, const DOF: usize, Mem, Sc>(
             if Mem::IS_DEVICE_ACCESSIBLE {
                 apply_boundary_dag_gpu(sim, dag, &band);
             } else {
-                apply_boundary_dag_cpu(sim, dag, &band);
+                apply_boundary_dag_cpu(sim.host_only("a driven boundary's host evaluation"), dag, &band);
             }
         }
     }
@@ -274,7 +274,7 @@ fn apply_boundary_dag_gpu<const D: usize, const DOF: usize, Mem, Sc>(
     band: &Domain<D>,
 ) where
     Sc: Scalar + OrderedNumeric,
-    Mem: MemorySpace,
+    Mem: MemoryStorage,
 {
     let (name, ir) = dag.gpu_ir.get_or_init(|| {
         let (coords, spacing, axes) = sim_gv_geom(sim);
@@ -407,7 +407,7 @@ pub fn dispatch_gradient_boundaries<const D: usize, const DOF: usize, Mem, Sc>(
     iso_cs2: Option<f64>,
 ) where
     Sc: Scalar + OrderedNumeric,
-    Mem: MemorySpace,
+    Mem: MemoryStorage,
 {
     // `pre` is the regime's pressure field (energy: `sim.fields.prim.pre`; iso: the substrate-owned
     // `cs2*rho` field, off the global ABI) — the `dispatch_named` "prim.pre" override.

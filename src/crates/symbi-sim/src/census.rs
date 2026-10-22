@@ -1005,7 +1005,7 @@ impl std::fmt::Debug for RegisteredCensus {
 /// terms still being added to it and absorbs the whole tail — a total that is smooth, positive and
 /// wrong in its third digit. the artifacts are the census's own, so widening them here costs one
 /// buffer per accumulator and settles the question for every backend.
-pub struct CensusFields<const D: usize, Mem: symbi_xpu::MemorySpace> {
+pub struct CensusFields<const D: usize, Mem: symbi_xpu::MemoryStorage> {
     pub values: Vec<symbi_grid::Field<f64, D, Mem>>,
     pub segment: symbi_grid::Field<f64, D, Mem>,
     /// geometry/coverage stamp of a reusable, geometry-only segment field. `None` means the next

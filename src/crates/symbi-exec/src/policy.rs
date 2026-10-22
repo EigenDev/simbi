@@ -12,7 +12,7 @@
 use symbi_algebra::{BlockGrid, Domain, OrderedNumeric};
 use symbi_grid::Field;
 use symbi_carrier::Scalar;
-use symbi_xpu::MemorySpace;
+use symbi_xpu::MemoryStorage;
 
 use symbi_aot::{Buf, BufHandle, KernelInvocation};
 
@@ -34,7 +34,7 @@ use crate::layout::{alloc_layout, exec_layout, expect_kernel};
 /// safety: the caller guarantees every `outputs` field is a distinct allocation from
 /// the others and from `inputs` — the multiple `&mut` slices then alias nothing.
 #[allow(clippy::too_many_arguments)]
-pub fn dispatch_fields<Sc: Scalar + OrderedNumeric, Mem: MemorySpace, const D: usize>(
+pub fn dispatch_fields<Sc: Scalar + OrderedNumeric, Mem: MemoryStorage, const D: usize>(
     name: &str,
     allocated: &Domain<D>,
     exec: &Domain<D>,
@@ -75,7 +75,7 @@ fn assert_bindings_contained<Sc, const D: usize, Mem>(
     layouts: Option<&[([i32; D], [u32; D], usize)]>,
 ) where
     Sc: Scalar + OrderedNumeric,
-    Mem: MemorySpace,
+    Mem: MemoryStorage,
 {
     if let Some(layouts) = layouts {
         for (k, (f, layout)) in inputs.iter().chain(outputs.iter()).zip(layouts).enumerate() {
@@ -125,7 +125,7 @@ fn no_host_fallback<Sc: Scalar + OrderedNumeric>(
 /// safety: as `dispatch_fields` — every field outlives the dispatch scope and the kernel
 /// reads inputs immutably + writes only its own outputs.
 #[allow(clippy::too_many_arguments)]
-pub fn dispatch_fields_runtime_ir<Sc: Scalar + OrderedNumeric, Mem: MemorySpace, const D: usize>(
+pub fn dispatch_fields_runtime_ir<Sc: Scalar + OrderedNumeric, Mem: MemoryStorage, const D: usize>(
     name: &str,
     ir: &str,
     allocated: &Domain<D>,
@@ -173,7 +173,7 @@ pub fn disjoint_host_buffers<'a, Sc, const D: usize, Mem>(
 ) -> Vec<Buf<'a, Sc>>
 where
     Sc: Scalar + OrderedNumeric,
-    Mem: MemorySpace,
+    Mem: MemoryStorage,
 {
     // `layouts` carries one `(lo, extent, vol)` per field, in `inputs ++ outputs` order — a shared
     // cell layout (replicated) for `dispatch_fields`, or each field's own `Field::domain()` layout
@@ -242,7 +242,7 @@ where
 /// owns its own parallelism. otherwise the caller falls back to its own whole-window
 /// dispatch.
 #[must_use]
-pub fn dispatch_fields_cover<Sc: Scalar + OrderedNumeric, Mem: MemorySpace, const D: usize>(
+pub fn dispatch_fields_cover<Sc: Scalar + OrderedNumeric, Mem: MemoryStorage, const D: usize>(
     name: &str,
     exec: &Domain<D>,
     block: [usize; D],
@@ -399,7 +399,7 @@ pub fn report_dispatch_profile() -> (u64, u64, u64) {
 /// same coarse buffer as src_old and src_new when no time interpolation is
 /// wanted — shared `&[T]` reads alias soundly); outputs must stay distinct
 /// from everything.
-pub fn dispatch_fields_each<Sc: Scalar + OrderedNumeric, Mem: MemorySpace, const D: usize>(
+pub fn dispatch_fields_each<Sc: Scalar + OrderedNumeric, Mem: MemoryStorage, const D: usize>(
     name: &str,
     exec: &Domain<D>,
     inputs: &[&Field<Sc, D, Mem>],

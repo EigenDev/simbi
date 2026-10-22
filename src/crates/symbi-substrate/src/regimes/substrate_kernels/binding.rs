@@ -12,7 +12,7 @@ use symbi_algebra::OrderedNumeric;
 use symbi_carrier::Scalar;
 use symbi_grid::Field;
 use symbi_ir::{CtScratch, FieldBind, FieldRef, ScratchKey};
-use symbi_xpu::MemorySpace;
+use symbi_xpu::MemoryStorage;
 
 use std::collections::HashMap;
 use std::sync::{Arc, OnceLock, RwLock};
@@ -47,7 +47,7 @@ pub(crate) fn bind_manifest<'a, Sc, const D: usize, Mem>(
 ) -> (FieldVec<'a, Sc, D, Mem>, FieldVec<'a, Sc, D, Mem>)
 where
     Sc: Scalar + OrderedNumeric,
-    Mem: MemorySpace,
+    Mem: MemoryStorage,
 {
     let mut inputs: FieldVec<'a, Sc, D, Mem> = FieldVec::new();
     let mut outputs: FieldVec<'a, Sc, D, Mem> = FieldVec::new();
@@ -126,7 +126,7 @@ pub(crate) fn bind_by_manifest<'a, Sc, Mem, const D: usize>(
 ) -> (Vec<&'a Field<Sc, D, Mem>>, Vec<&'a Field<Sc, D, Mem>>)
 where
     Sc: Scalar + OrderedNumeric,
-    Mem: MemorySpace,
+    Mem: MemoryStorage,
 {
     bind_by_binds(name, &kernel_field_binds(name), resolve)
 }
@@ -140,7 +140,7 @@ pub(crate) fn bind_by_binds<'a, Sc, Mem, const D: usize>(
 ) -> (Vec<&'a Field<Sc, D, Mem>>, Vec<&'a Field<Sc, D, Mem>>)
 where
     Sc: Scalar + OrderedNumeric,
-    Mem: MemorySpace,
+    Mem: MemoryStorage,
 {
     let mut seen: std::collections::HashSet<&FieldBind> =
         std::collections::HashSet::with_capacity(binds.len());
@@ -174,7 +174,7 @@ pub(crate) fn resolve_snapshot_into<'a, const D: usize, const DOF: usize, Mem, S
 ) -> &'a Field<Sc, D, Mem>
 where
     Sc: Scalar + OrderedNumeric,
-    Mem: MemorySpace,
+    Mem: MemoryStorage,
 {
     use symbi_ir::{StateComp, StateSlot};
     let FieldBind::Ref(FieldRef::State { slot, comp }) = bind else {
@@ -237,7 +237,7 @@ pub(crate) fn resolve_feedback_slot<'a, Sc, Mem, const D: usize>(
 ) -> &'a Field<Sc, D, Mem>
 where
     Sc: Scalar + OrderedNumeric,
-    Mem: MemorySpace,
+    Mem: MemoryStorage,
 {
     let name = free_payload("body feedback", bind);
     let unknown = || panic!("body feedback: unknown manifest slot '{name}'");
@@ -273,7 +273,7 @@ pub(crate) fn resolve_penalize_slot<'a, Sc, Mem, const D: usize>(
 ) -> &'a Field<Sc, D, Mem>
 where
     Sc: Scalar + OrderedNumeric,
-    Mem: MemorySpace,
+    Mem: MemoryStorage,
 {
     let name = free_payload("penalize", bind);
     let unknown = || panic!("penalize: unknown manifest slot '{name}'");
@@ -410,7 +410,7 @@ pub(crate) fn resolve_path<'a, const D: usize, const DOF: usize, Mem, Sc>(
 ) -> &'a Field<Sc, D, Mem>
 where
     Sc: Scalar + OrderedNumeric,
-    Mem: MemorySpace,
+    Mem: MemoryStorage,
 {
     use symbi_ir::{StateComp, StateSlot};
 

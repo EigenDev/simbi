@@ -26,7 +26,7 @@
 use symbi_algebra::OrderedNumeric;
 use symbi_carrier::Scalar;
 use symbi_hydro::regime::Regime;
-use symbi_xpu::MemorySpace;
+use symbi_xpu::{MemorySpace, MemoryStorage};
 
 use crate::state::FieldStore;
 
@@ -323,7 +323,7 @@ impl<const NDIM: usize, const DOF: usize, Mem: MemorySpace> SlipCuts<NDIM, DOF, 
 
 pub trait KernelSet<const NDIM: usize, const DOF: usize, Mem, Sc>
 where
-    Mem: MemorySpace,
+    Mem: MemoryStorage,
     Sc: Scalar + OrderedNumeric,
 {
     fn flux(&self, store: &FieldStore<NDIM, DOF, Mem, Sc>, dir: usize);
@@ -502,7 +502,14 @@ where
     /// the edges on a coordinate axis reconciled to one EMF per ring, on a store holding every
     /// copy of its rings; a no-op on a grid with no axis edge.
     fn axis_emf(&self, store: &FieldStore<NDIM, DOF, Mem, Sc>) {
-        crate::axis_ring::reconcile_whole_rings(store);
+        match store.host() {
+            Some(host) => crate::axis_ring::reconcile_whole_rings(host),
+            None => assert!(
+                crate::axis_ring::axis_rings(store).is_empty(),
+                "axis-edge reconciliation runs on host-dereferenceable storage; a grid with an axis \
+                 ring is refused on device-local storage"
+            ),
+        }
     }
 
     /// the whole post-godunov update of one store holding every copy of its axis rings: the

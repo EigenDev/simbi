@@ -181,7 +181,7 @@ pub fn take_evidence<const D: usize, const DOF: usize, Mem, Sc>(
     attempt: u32,
 ) -> Vec<String>
 where
-    Mem: symbi_xpu::MemorySpace,
+    Mem: symbi_xpu::MemoryStorage,
     Sc: symbi_carrier::Scalar + symbi_algebra::OrderedNumeric,
 {
     let lines = std::mem::take(&mut *store.workspace.rejection_evidence.lock().expect("rejection evidence"));

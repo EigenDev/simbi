@@ -31,7 +31,7 @@ use symbi_ir::emit::ReductionOp;
 use crate::regimes::substrate_gpu::field_reduce;
 use symbi_exec::engine::field_sum_exact;
 use symbi_exec::exact_sum::ExactSum;
-use symbi_xpu::MemorySpace;
+use symbi_xpu::{MemorySpace, MemoryStorage};
 
 use symbi_aot::{Buf, BufHandle, CpuField, CpuFieldMut, KernelInvocation};
 
@@ -71,7 +71,7 @@ pub(crate) fn exec_layout<const D: usize>(dom: &Domain<D>) -> ([u32; D], [i32; D
 // per-field layout (lo / extent / volume) from the field's own domain — bface
 // and efield live on staggered domains (face / edge), off the cell-centered
 // allocated domain, so their descriptor lo/extent must come from the field itself.
-pub(crate) fn field_layout<const D: usize, Mem: MemorySpace, Sc: Scalar + OrderedNumeric>(
+pub(crate) fn field_layout<const D: usize, Mem: MemoryStorage, Sc: Scalar + OrderedNumeric>(
     f: &Field<Sc, D, Mem>,
 ) -> ([i32; D], [u32; D], usize) {
     let d = f.domain();
@@ -90,7 +90,7 @@ pub(crate) fn field_layout<const D: usize, Mem: MemorySpace, Sc: Scalar + Ordere
 fn invoke<Sc, Mem, F>(inv: KernelInvocation<Sc>, ir: &str, name: &str, cpu: F)
 where
     Sc: Scalar + OrderedNumeric,
-    Mem: MemorySpace,
+    Mem: MemoryStorage,
     F: FnOnce(&[CpuField<'_, Sc>], &mut [CpuFieldMut<'_, Sc>], &[u32], &[i32], &[i32], &[Sc]),
 {
     crate::regimes::substrate_gpu::dispatch::<Sc, Mem, F>(inv, ir, name, cpu);
@@ -107,11 +107,13 @@ where
 fn fused_save_buffers<const D: usize, Sc, Mem>(pairs: &[(&Field<Sc, D, Mem>, &Field<Sc, D, Mem>)])
 where
     Sc: Scalar + OrderedNumeric,
-    Mem: MemorySpace,
+    Mem: MemoryStorage,
 {
+    // the CPU executor's copy: the storage is host-resident, host memory or its opaque stand-in
+    debug_assert!(!Mem::IS_DEVICE_ACCESSIBLE, "fused_save_buffers: device storage copies on the device");
     for (src, dst) in pairs {
-        let n = src.view().len();
-        debug_assert_eq!(n, dst.view().len(), "fused_save_buffers: length mismatch");
+        let n = src.domain().volume();
+        debug_assert_eq!(n, dst.domain().volume(), "fused_save_buffers: length mismatch");
         unsafe {
             let s = std::slice::from_raw_parts(src.as_ptr(), n);
             let d = std::slice::from_raw_parts_mut(dst.as_mut_ptr(), n);
@@ -288,7 +290,7 @@ pub(crate) fn flag_ghost_fill<const D: usize, const DOF: usize, Mem, Sc>(
     flag: &Field<Sc, D, Mem>,
     bc: [[BcType; 2]; D],
 ) where
-    Mem: MemorySpace + Sync,
+    Mem: MemoryStorage + Sync,
     Sc: Scalar + OrderedNumeric,
 {
     scalar_ghost_fill_over(sim, flag, bc, &sim.geom.interior);
@@ -302,7 +304,7 @@ fn scalar_ghost_fill_over<const D: usize, const DOF: usize, Mem, Sc>(
     bc: [[BcType; 2]; D],
     interior: &symbi_algebra::Domain<D>,
 ) where
-    Mem: MemorySpace + Sync,
+    Mem: MemoryStorage + Sync,
     Sc: Scalar + OrderedNumeric,
 {
     let name = format!("scalar_ghost_fill_{D}d");
@@ -971,7 +973,7 @@ pub(crate) fn snapshot_stage<const D: usize, const DOF: usize, Mem, Sc>(
 pub(crate) fn fofc_copy_fields<const D: usize, Sc, Mem>(pairs: &[(&Field<Sc, D, Mem>, &Field<Sc, D, Mem>)])
 where
     Sc: Scalar + OrderedNumeric,
-    Mem: MemorySpace,
+    Mem: MemoryStorage,
 {
     if Mem::IS_DEVICE_ACCESSIBLE {
         let sname = format!("rmhd_save_efield_{D}d");

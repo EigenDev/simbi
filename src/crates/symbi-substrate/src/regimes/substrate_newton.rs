@@ -26,7 +26,7 @@ use symbi_carrier::Scalar;
 use symbi_grid::Field;
 use symbi_ir::ScalarRef;
 use symbi_source_compile::{AdmittedSources, BoundaryPrescription};
-use symbi_xpu::MemorySpace;
+use symbi_xpu::MemoryStorage;
 
 use std::sync::{Arc, OnceLock};
 
@@ -47,7 +47,7 @@ use symbi_sim::substrate_seam::{KernelSet, WithViscosity};
 /// a D-generic adiabatic (ideal-gas Euler) `KernelSet`, every method substrate-generated.
 // the adiabatic viscous operator books both the Navier-Stokes shear force and the viscous heating
 // (div(tau.v) onto the total energy); constant-nu, cartesian 2D.
-impl<Mem: MemorySpace, Sc: Scalar + OrderedNumeric, const D: usize> WithViscosity
+impl<Mem: MemoryStorage, Sc: Scalar + OrderedNumeric, const D: usize> WithViscosity
     for AdiabaticSubstrateKernelSet<Mem, Sc, D>
 {
     fn with_viscosity(mut self, nu: f64) -> Self {
@@ -63,19 +63,19 @@ impl<Mem: MemorySpace, Sc: Scalar + OrderedNumeric, const D: usize> WithViscosit
 }
 
 // horizon excision is a GR-chart operation; the adiabatic (flat) set ignores it.
-impl<Mem: MemorySpace, Sc: Scalar + OrderedNumeric, const D: usize>
+impl<Mem: MemoryStorage, Sc: Scalar + OrderedNumeric, const D: usize>
     symbi_sim::substrate_seam::WithExcision for AdiabaticSubstrateKernelSet<Mem, Sc, D>
 {
 }
 
 // resistivity is an MHD operation; the pure-hydro adiabatic set has no magnetic field, ignores it.
-impl<Mem: MemorySpace, Sc: Scalar + OrderedNumeric, const D: usize>
+impl<Mem: MemoryStorage, Sc: Scalar + OrderedNumeric, const D: usize>
     symbi_sim::substrate_seam::WithResistivity for AdiabaticSubstrateKernelSet<Mem, Sc, D>
 {
 }
 
 pub struct AdiabaticSubstrateKernelSet<
-    Mem: MemorySpace,
+    Mem: MemoryStorage,
     Sc: Scalar + OrderedNumeric,
     const D: usize,
 > {
@@ -144,7 +144,7 @@ pub struct AdiabaticSubstrateKernelSet<
     pub alpha: f64,
 }
 
-impl<Mem: MemorySpace, Sc: Scalar + OrderedNumeric, const D: usize>
+impl<Mem: MemoryStorage, Sc: Scalar + OrderedNumeric, const D: usize>
     AdiabaticSubstrateKernelSet<Mem, Sc, D>
 {
     pub fn new(gamma: f64, cfl_number: f64, alloc_domain: &Domain<D>) -> Self {
@@ -350,7 +350,7 @@ impl<Mem: MemorySpace, Sc: Scalar + OrderedNumeric, const D: usize>
     }
 }
 
-impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize>
+impl<Mem: MemoryStorage + Sync, Sc: Scalar + OrderedNumeric, const D: usize>
     AdiabaticSubstrateKernelSet<Mem, Sc, D>
 {
     /// the evolution face-flux scheme assembled from this set's dials.
@@ -367,7 +367,7 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize>
     }
 }
 
-impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize, const DOF: usize>
+impl<Mem: MemoryStorage + Sync, Sc: Scalar + OrderedNumeric, const D: usize, const DOF: usize>
     KernelSet<D, DOF, Mem, Sc> for AdiabaticSubstrateKernelSet<Mem, Sc, D>
 {
     fn census_partials(
@@ -379,6 +379,7 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize, const
         covered: Option<&symbi_algebra::Domain<D>>,
         now: f64,
     ) -> Option<Vec<symbi_sim::census::CensusPartial>> {
+        let store = store.host_only("census sampling");
         Some(crate::census_sample::tile_partials_exact(store, censuses, level, cadence, covered, <Self as KernelSet<D, DOF, Mem, Sc>>::excision_radius(self), now))
     }
 
@@ -514,7 +515,11 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize, const
         // alpha: nu grows with radius and with the local cs^2, so the cap bounds it
         // by the largest sound speed at the slowest orbit (adiabatic_alpha_nu_max).
         let nu_max = if self.alpha > 0.0 {
-            crate::regimes::substrate_kernels::adiabatic_alpha_nu_max(sim, self.alpha, self.gamma)
+            crate::regimes::substrate_kernels::adiabatic_alpha_nu_max(
+                sim.host_only("the alpha-viscosity timestep cap"),
+                self.alpha,
+                self.gamma,
+            )
         } else {
             self.viscosity
         };
