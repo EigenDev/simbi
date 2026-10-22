@@ -2832,6 +2832,9 @@ where
     let io_secs = std::cell::Cell::new(0.0f64);
     let mut last_inst = start;
     let mut last_iter = hier.levels[0].state.iteration;
+    // the iteration this segment starts from: zero for a fresh run, the checkpoint's iteration on a
+    // restart. the segment's rate and profile count the steps taken since.
+    let start_iteration = last_iter;
     // FOFC observability: zero the deliberate-fallback counters at run start, track the last-seen
     // totals so the benchmark cadence can post the per-window delta (a limiter that fired always
     // shows). cumulative totals also close out the run summary.
@@ -3357,17 +3360,14 @@ where
     // delivers between writes, and the number comparable across run lengths
     // (wall-based rates dilute with checkpoint cadence on short runs).
     let compute = (wall - io_secs.get()).max(1e-9);
-    let avg = if wall > 1e-9 {
-        n_zones as f64 * root.iteration as f64 / compute
-    } else {
-        0.0
-    };
+    let steps = segment_steps(start_iteration, root.iteration);
+    let avg = if wall > 1e-9 { n_zones as f64 * steps as f64 / compute } else { 0.0 };
     // leave the alternate screen, then render the green success exit frame so the
     // run's summary persists on the primary buffer.
     screen.leave();
     table.set_dynamic(false);
     let summary = format!(
-        "complete — {} steps, t = {:.4}, {:.2}s ({:.2}s io), {}/s sustained · final {final_path}",
+        "complete — {steps} steps to iteration {}, t = {:.4}, {:.2}s ({:.2}s io), {}/s sustained · final {final_path}",
         root.iteration,
         root.time,
         wall,
@@ -3395,7 +3395,7 @@ where
         }
     }
     table.exit_frame(ExitKind::Success, &summary);
-    dump_profile_if_enabled(root.iteration, n_zones);
+    dump_profile_if_enabled(segment_steps(start_iteration, root.iteration), n_zones);
     dump_dispatch_profile_if_enabled();
     Ok(diagnostics)
 }
@@ -3440,6 +3440,12 @@ fn dump_dispatch_profile_if_enabled() {
         total / 1e6,
         total / calls as f64
     );
+}
+
+/// the root steps one run segment took: its end iteration less the iteration it started from (the
+/// checkpoint's iteration on a restart), which the segment's rate and profile divide by
+fn segment_steps(start_iteration: u64, end_iteration: u64) -> u64 {
+    end_iteration.saturating_sub(start_iteration)
 }
 
 /// dump the accumulated per-phase wall-time profile to stderr when `SYMBI_PROFILE` is set (the
