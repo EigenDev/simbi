@@ -53,3 +53,21 @@ def test_gradient_and_robin_faces_take_the_configured_coefficients() -> None:
 def test_a_recorded_kind_the_configuration_contradicts_is_refused() -> None:
     with pytest.raises(ConfigError, match="face 1: the checkpoint records a 'neumann' boundary"):
         boundaries_on_restart(("outflow", "neumann"), [BoundaryCondition.OUTFLOW, BoundaryCondition.OUTFLOW])
+
+
+@pytest.mark.simulation
+def test_a_grid_spelled_at_its_own_dimension_keeps_that_spelling_on_restart(tmp_path) -> None:
+    # the checkpoint records a 2d grid in the three-axis form (n, n, 1). a problem that spells it
+    # (n, n), and reads its rank from that length, keeps (n, n): both name the same grid, and the
+    # three-axis form would make the problem generate a 3d state for a 2d run
+    from simbi.simulation import runner
+    from simbi.simulation.checkpoint import merge_with_checkpoint
+    from simbi_configs.examples.newtonian.linear_wave import LinearWave
+
+    first = tmp_path / "first"
+    runner.run(LinearWave(resolution=(32, 32), data_directory=first, end_time=1e9), compute_mode="cpu", max_steps=2)
+    final = next(first.glob("*final*.h5"))
+    resumed = LinearWave(resolution=(32, 32), data_directory=tmp_path / "resumed", checkpoint_file=final, end_time=1e9)
+    assert merge_with_checkpoint(resumed, final).resolution == (32, 32)
+    runner.run(resumed, compute_mode="cpu", max_steps=4)
+    assert next((tmp_path / "resumed").glob("*final*.h5"))

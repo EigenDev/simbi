@@ -502,7 +502,11 @@ def merge_with_checkpoint(
                         f"{user_value!r}. drop the flag to continue the run as "
                         f"recorded, or start a fresh run (no --checkpoint) to change it."
                     )
-                merged_data[field_name] = coerced
+                # a sequence the user spells at its own length that names the checkpoint's value (a
+                # grid shape without the trailing unit axes of the three-axis form) keeps the user's
+                # spelling: the problem reads its rank from that length
+                same_value_own_spelling = isinstance(user_value, (list, tuple)) and _values_agree(user_value, coerced)
+                merged_data[field_name] = user_value if same_value_own_spelling else coerced
             else:
                 # user can override
                 merged_data[field_name] = user_value
