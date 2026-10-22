@@ -721,7 +721,7 @@ fn max_messages() -> usize {
 }
 
 /// format current local time as "hh:mm:SS".
-fn timestamp() -> String {
+pub fn timestamp() -> String {
     #[cfg(unix)]
     {
         #[repr(C)]

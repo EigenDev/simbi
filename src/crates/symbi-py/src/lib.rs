@@ -2751,7 +2751,7 @@ where
             .into());
         }
     }
-    announce_retry_guard(&hier.levels[0].state);
+    announce_retry_guard(cfg, &hier.levels[0].state);
     // the checkpoint cadence is in natural units: `checkpoint_interval * time_unit`
     // is the code-unit spacing, so `checkpoint_interval = 0.1` with a binary's
     // orbital `time_unit` means "every 0.1 orbits". default time_unit = 1.0 keeps
@@ -3976,13 +3976,45 @@ fn retry_guard_of(cfg: &Config) -> symbi_sim::retry_guard::RetryGuard {
     }
 }
 
-/// the retry guard's opening report for a run whose root store is `store`, on stderr
-fn announce_retry_guard<const D: usize, const DOF: usize, Mem: symbi::symbi_xpu::MemorySpace>(store: &symbi_sim::state::FieldStore<D, DOF, Mem, f64>) {
-    eprintln!(
-        "SIMBI {}",
-        symbi_sim::retry_guard::opening_report(&store.retry_guard, store.retry_guard_recorded.as_ref(), store.severe_streak)
+/// the retry guard's opening report for a run whose root store is `store`. both lines go to the
+/// run log; each reaches stderr when it departs from the default run: thresholds other than the
+/// defaults, a severe streak carried over, thresholds changed on restart, a retry exclusion
+fn announce_retry_guard<const D: usize, const DOF: usize, Mem: symbi::symbi_xpu::MemorySpace>(
+    cfg: &Config,
+    store: &symbi_sim::state::FieldStore<D, DOF, Mem, f64>,
+) {
+    let guard = store.retry_guard;
+    let changed = store.retry_guard_recorded.is_some_and(|recorded| recorded != guard);
+    let notable = guard != symbi_sim::retry_guard::RetryGuard::default() || store.severe_streak > 0 || changed;
+    let report = symbi_sim::retry_guard::opening_report(&guard, store.retry_guard_recorded.as_ref(), store.severe_streak);
+    opening_record(cfg, &report, notable);
+    let exclusion = store.retry_exclusion;
+    opening_record(
+        cfg,
+        &format!("retry exclusion: {exclusion}"),
+        exclusion != symbi_sim::substrate_seam::RetryExclusion::None,
     );
-    eprintln!("SIMBI retry exclusion: {}", store.retry_exclusion);
+}
+
+/// one line of the run's opening record, appended to the run log (`<data_dir>simbi.log`) in the
+/// format of the posted messages; a `notable` line is printed on stderr as well
+fn opening_record(cfg: &Config, line: &str, notable: bool) {
+    use std::io::Write;
+    if notable {
+        for part in line.lines() {
+            eprintln!("SIMBI {part}");
+        }
+    }
+    let Some(path) = log_path(cfg) else { return };
+    if !cfg.data_dir.is_empty() {
+        let _ = std::fs::create_dir_all(&cfg.data_dir);
+    }
+    if let Ok(mut log) = std::fs::OpenOptions::new().create(true).append(true).open(path) {
+        let ts = symbi_display::table::timestamp();
+        for part in line.lines() {
+            let _ = writeln!(log, "{ts} [{:<7}] {part}", "INFO");
+        }
+    }
 }
 
 fn host_eos(cfg: &Config) -> EosSelect<f64> {
@@ -6350,7 +6382,7 @@ where
             store.retry_guard = guard;
             store.retry_exclusion = exclusion;
         }
-        announce_retry_guard(&*stores[0]);
+        announce_retry_guard(cfg, &*stores[0]);
         // a declared stationary target's residual, added back before the recovery of every stage
         // (the admissibility redo's included): the target becomes an exact fixed point of the
         // tiled scheme as of the single grid's
@@ -6794,7 +6826,7 @@ where
             level.state.retry_exclusion = exclusion;
         }
     }
-    announce_retry_guard(&tiles[0].levels[0].state);
+    announce_retry_guard(cfg, &tiles[0].levels[0].state);
     reporter.milestone("priming the hierarchy levels, their halos and the first exchange");
     // the root iteration this segment starts from, after any restore: the checkpoint's on a restart
     let start_iteration = tiles[0].levels[0].state.iteration;
@@ -10785,11 +10817,15 @@ fn run_simulation(
 ) -> PyResult<NativeRunDiagnostics> {
     let mut cfg = parse_config(sim_info)?;
     validate_config_preflight(&cfg).map_err(PyValueError::new_err)?;
-    eprintln!(
-        "SIMBI provenance: backend={} config={} config_sha256={}",
-        build_source_id(),
-        cfg.config_source,
-        cfg.config_sha256
+    opening_record(
+        &cfg,
+        &format!(
+            "provenance: backend={} config={} config_sha256={}",
+            build_source_id(),
+            cfg.config_source,
+            cfg.config_sha256
+        ),
+        false,
     );
     // drain the passive-scalar generator (None = undyed). one flat cell-centered
     // buffer; the per-arm seeding checks the count against the interior.
@@ -12958,7 +12994,7 @@ where
         }
     }
     if me == WorkerId(0) {
-        announce_retry_guard(&tiles[0].levels[0].state);
+        announce_retry_guard(cfg, &tiles[0].levels[0].state);
     }
     let outcome = evolve_refined_worker(&mut tiles, &held, &plans, &LocalCopy, &mut fabric, &refined_cfg, seed_target, on_seeded, |accepted, time, tiles, fabric| {
         if accepted == 0 {
@@ -14179,7 +14215,7 @@ where
             store.retry_exclusion = exclusion;
         }
         if launch.worker == 0 {
-            announce_retry_guard(&*stores[0]);
+            announce_retry_guard(cfg, &*stores[0]);
         }
         let report = evolve_worker_traced(
             &tile_ids,
