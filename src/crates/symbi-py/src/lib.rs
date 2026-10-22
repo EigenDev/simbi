@@ -6236,6 +6236,8 @@ where
         })
         .collect();
     let mut reporter = DecomposedReporter::new(cfg, n_zones, &counts, &slabs);
+    // the root iteration this segment starts from: the checkpoint's on a restart
+    let start_iteration = tiles[0].0.iteration;
     // open peer links once (no-op for pairs that can't peer; those stage).
     enable_peer_mesh(&devices);
     reporter.milestone("peer links opened");
@@ -6444,7 +6446,7 @@ where
     match write_tiles(&sh, &final_path, cadence.index) {
         Ok(io) => {
             reporter.checkpoint_written(cfg, &final_path, time, io);
-            reporter.finish(iter, time, &final_path);
+            reporter.finish(segment_steps(start_iteration, iter), iter, time, &final_path);
         }
         Err(msg) => {
             reporter.fail(&msg);
@@ -6794,8 +6796,10 @@ where
     }
     announce_retry_guard(&tiles[0].levels[0].state);
     reporter.milestone("priming the hierarchy levels, their halos and the first exchange");
+    // the root iteration this segment starts from, after any restore: the checkpoint's on a restart
+    let start_iteration = tiles[0].levels[0].state.iteration;
     // a run resumed at its step cap takes no step and ends through the same epilogue
-    let diagnostics = if step_cap_reached(cfg, tiles[0].levels[0].state.iteration) {
+    let diagnostics = if step_cap_reached(cfg, start_iteration) {
         symbi_sim::run_diagnostics::RunDiagnostics::default()
     } else {
         evolve_hierarchy_decomposed(
@@ -6875,7 +6879,7 @@ where
             let root = &tiles[0].levels[0].state;
             let (iter, time) = (root.iteration, root.time);
             reporter.checkpoint_written(cfg, &final_path, time, io);
-            reporter.finish(iter, time, &final_path);
+            reporter.finish(segment_steps(start_iteration, iter), iter, time, &final_path);
         }
         Err(msg) => {
             reporter.fail(&msg);
@@ -9197,14 +9201,16 @@ impl DecomposedReporter {
         self.refresh();
     }
 
-    fn finish(mut self, iter: u64, time: f64, final_path: &str) {
+    /// the completion line: the root steps this segment took, the root iteration it ended at (the
+    /// two differ on a restart), and the segment's zone-cycle rate over its compute time
+    fn finish(mut self, steps: u64, end_iteration: u64, time: f64, final_path: &str) {
         let wall = self.start.elapsed().as_secs_f64();
         let compute = (wall - self.io_secs).max(1e-9);
-        let avg = self.n_zones as f64 * iter as f64 / compute;
+        let avg = self.n_zones as f64 * steps as f64 / compute;
         self.screen.leave();
         self.table.set_dynamic(false);
         let summary = format!(
-            "complete — {iter} steps, t = {time:.4}, {wall:.2}s ({:.2}s io), {}/s sustained · final {final_path}",
+            "complete — {steps} steps to iteration {end_iteration}, t = {time:.4}, {wall:.2}s ({:.2}s io), {}/s sustained · final {final_path}",
             self.io_secs,
             humanize_rate(avg),
         );
@@ -12896,6 +12902,9 @@ where
     };
     let slabs: Vec<Vec<usize>> = (0..D).map(|ax| (0..counts[ax]).map(|i| partition.tile_range(ax, i).1).collect()).collect();
     let mut reporter = (me == WorkerId(0)).then(|| DecomposedReporter::new(cfg, total as u64, &counts, &slabs));
+    // the root iteration this segment starts from: the checkpoint's on a restart. the worker counts
+    // its accepted root steps from zero, and each advances the root iteration by one
+    let start_iteration = tiles[0].levels[0].state.iteration;
     // the checkpoint schedule the single grid walks
     let mut cadence = CheckpointCadence::of(cfg);
     let cp_width = checkpoint_time_width(cfg);
@@ -13020,7 +13029,7 @@ where
         Ok((iter, time, None)) => {
             if let Some(r) = reporter {
                 let final_path = checkpoint_name(cfg, checkpoint_status_tag(CheckpointOutcome::Completed));
-                r.finish(iter, time, &final_path);
+                r.finish(iter, start_iteration + iter, time, &final_path);
             }
             Ok(())
         }
@@ -14015,6 +14024,9 @@ where
     let slabs: Vec<Vec<usize>> = (0..D)
         .map(|ax| (0..counts[ax]).map(|i| partition.tile_range(ax, i).1).collect())
         .collect();
+    // the root iteration this segment starts from: the checkpoint's on a restart. the worker counts
+    // its accepted root steps from zero, and each advances the root iteration by one
+    let start_iteration = tiles[0].0.iteration;
     let mut reporter = if me == WorkerId(0) {
         let mut r = DecomposedReporter::new(cfg, total as u64, &counts, &slabs);
         r.milestone(&format!(
@@ -14317,7 +14329,7 @@ where
         Ok((iter, time, None)) => {
             if let Some(r) = reporter {
                 let final_path = checkpoint_name(cfg, checkpoint_status_tag(CheckpointOutcome::Completed));
-                r.finish(iter, time, &final_path);
+                r.finish(iter, start_iteration + iter, time, &final_path);
             }
             Ok(())
         }
