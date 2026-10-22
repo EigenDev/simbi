@@ -73,7 +73,7 @@ fn timestep(courant: f64) -> f64 {
 }
 
 /// the test's own admissibility predicate on the conserved state at `c`
-fn admissible(store: &FieldStore<2, 2>, c: [isize; 2]) -> bool {
+fn admissible(store: &FieldStore<2, 2, HostMemory>, c: [isize; 2]) -> bool {
     let cons = &store.fields.cons;
     let rho = *cons.den.view().at(c);
     let m2: f64 = (0..2).map(|k| cons.mom[k].view().at(c).powi(2)).sum();
@@ -81,7 +81,7 @@ fn admissible(store: &FieldStore<2, 2>, c: [isize; 2]) -> bool {
     rho.is_finite() && m2.is_finite() && e.is_finite() && rho > 0.0 && e - 0.5 * m2 / rho > 0.0
 }
 
-fn first_stage(store: &FieldStore<2, 2>, kernels: &impl KernelSet<2, 2, HostMemory, f64>, dt: f64) -> StageOutcome {
+fn first_stage(store: &FieldStore<2, 2, HostMemory>, kernels: &impl KernelSet<2, 2, HostMemory, f64>, dt: f64) -> StageOutcome {
     let stages = Timestepping::Rk2.stages();
     kernels.snapshot(store);
     fold_stage(
@@ -101,11 +101,11 @@ fn first_stage(store: &FieldStore<2, 2>, kernels: &impl KernelSet<2, 2, HostMemo
     )
 }
 
-fn frozen(store: &FieldStore<2, 2>) -> Vec<[isize; 2]> {
+fn frozen(store: &FieldStore<2, 2, HostMemory>) -> Vec<[isize; 2]> {
     store.geom.interior.iter().filter(|&c| *store.workspace.freeze_applied.view().at(c) > 0.0).collect()
 }
 
-fn bits(store: &FieldStore<2, 2>) -> Vec<u64> {
+fn bits(store: &FieldStore<2, 2, HostMemory>) -> Vec<u64> {
     let cons = &store.fields.cons;
     let fields = [&cons.den, &cons.mom[0], &cons.mom[1], cons.nrg_field().unwrap()];
     fields.iter().flat_map(|f| store.geom.interior.iter().map(|c| f.view().at(c).to_bits())).collect()

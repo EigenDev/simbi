@@ -77,7 +77,7 @@ fn build() -> Sim {
 }
 
 /// E - |m|^2 / 2 rho - |B_cell|^2 / 2 at `c`
-fn internal_energy(store: &FieldStore<2, 3>, c: [isize; 2]) -> f64 {
+fn internal_energy(store: &FieldStore<2, 3, HostMemory>, c: [isize; 2]) -> f64 {
     let cons = &store.fields.cons;
     let mhd = store.fields.mhd.as_ref().expect("mhd fields");
     let rho = *cons.den.view().at(c);
@@ -92,7 +92,7 @@ fn bits(field: &symbi_grid::Field<f64, 2, HostMemory>, domain: &symbi_algebra::D
 }
 
 /// every conserved component, cell field and face field of the interior, bit patterns
-fn state_bits(store: &FieldStore<2, 3>) -> Vec<Vec<u64>> {
+fn state_bits(store: &FieldStore<2, 3, HostMemory>) -> Vec<Vec<u64>> {
     let interior = &store.geom.interior;
     let cons = &store.fields.cons;
     let mhd = store.fields.mhd.as_ref().expect("mhd fields");

@@ -84,7 +84,7 @@ fn build(armed: bool) -> Hierarchy<NewtonianMhd, 2, 3, Cartesian, IdealGas<f64>,
 }
 
 /// every interior value of the conserved, primitive and cell fields and every face value, bits
-fn state_bits(store: &FieldStore<2, 3>) -> Vec<Vec<u64>> {
+fn state_bits(store: &FieldStore<2, 3, HostMemory>) -> Vec<Vec<u64>> {
     let bits = |f: &symbi_grid::Field<f64, 2, HostMemory>, d: &symbi_algebra::Domain<2>| -> Vec<u64> {
         let v = f.view();
         d.iter().map(|c| v.at(c).to_bits()).collect()
@@ -102,7 +102,7 @@ fn state_bits(store: &FieldStore<2, 3>) -> Vec<Vec<u64>> {
 }
 
 /// the sink's accreted mass and rate, bits
-fn sink_book(store: &FieldStore<2, 3>) -> Vec<u64> {
+fn sink_book(store: &FieldStore<2, 3, HostMemory>) -> Vec<u64> {
     let mut book = Vec::new();
     store.immersed.as_ref().expect("the sink").bodies.visit_accretion(|b| {
         if let symbi_ib::BodyKind::BlackHole { total_accreted_mass, accretion_rate, .. } = &b.kind {

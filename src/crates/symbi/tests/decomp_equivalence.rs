@@ -195,11 +195,15 @@ macro_rules! decomp_harness {
             // cut-centered dye gate vacuous. the chi runs therefore add a uniform diagonal drift
             // so every cut is flux-bearing, and paint the dye as a diagonal ramp so every cut
             // carries a gradient; then dropping the exchange on any axis breaks the match.
+            // the passive-scalar helpers below serve the host instances; the device instances
+            // run the density gates alone
+            #[allow(dead_code)]
             const CHI_DRIFT: f64 = 0.4; // subsonic (cs ~ 1.18 here), same on every axis
 
             // the dye concentration at a global point: a ramp along the space diagonal, so it has
             // a gradient across every axis's cut. evaluated at the cell center so mono and every
             // tile seed the identical value.
+            #[allow(dead_code)]
             fn chi_ic(x: [f64; $d]) -> f64 {
                 0.25 + 0.1 * x.iter().sum::<f64>()
             }
@@ -208,6 +212,7 @@ macro_rules! decomp_harness {
             // slot allocated + seeded from `chi_ic`. the kernel set is unchanged -- chi advection
             // is a runtime-gated phase in the substrate step (has_passive_scalar), dispatching
             // kernels baked unconditionally.
+            #[allow(dead_code)]
             fn make_chi(tile: &PlacedTile<$d>, ts: Timestepping) -> (Sim, Kern) {
                 let (mut sim, k) = make(tile, ts);
                 let offset = tile.offset;
@@ -234,6 +239,7 @@ macro_rules! decomp_harness {
                 (sim, k)
             }
 
+            #[allow(dead_code)]
             fn grid_tiles_chi(counts: [usize; $d], ts: Timestepping) -> Vec<(Sim, Kern)> {
                 let partition = Partition::uniform([N; $d], counts).expect("N splits evenly into the counts");
                 let total: usize = counts.iter().product();
@@ -246,6 +252,7 @@ macro_rules! decomp_harness {
             }
 
             // scatter every tile's interior primitive dye into one global N^D grid.
+            #[allow(dead_code)]
             fn global_chi(tiles: &[(Sim, Kern)], counts: [usize; $d]) -> Vec<f64> {
                 sync_devices();
                 let m: [usize; $d] = std::array::from_fn(|a| N / counts[a]);
@@ -316,6 +323,7 @@ macro_rules! decomp_harness {
             // the monolithic dye field bit for bit -- which it can only do if prim.chi is
             // exchanged across every cut. the dye is derived into the transport set from the
             // store, so this is what proves the derivation actually carries it.
+            #[allow(dead_code)]
             pub fn assert_chi_matches(counts: [usize; $d], ts: Timestepping) {
                 let mut mono = grid_tiles_chi([1; $d], ts);
                 run(&mut mono, [1; $d], ts);
