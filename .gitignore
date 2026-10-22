@@ -33,9 +33,12 @@ frontier/
 *.html
 *.csv
 
-# repo artwork is checked in: the readme renders it, so it is not run output
-!docs/assets/*.png
-!docs/assets/*.svg
+# local research notes stay private; the readme's two logo assets are public
+/docs/*
+!/docs/assets/
+/docs/assets/*
+!/docs/assets/simbi-dither-dark.png
+!/docs/assets/simbi-dither-light.png
 *.xml
 *.mp4
 *.log
