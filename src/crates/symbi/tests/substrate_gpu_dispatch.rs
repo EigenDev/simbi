@@ -28,18 +28,20 @@ use symbi_xpu::MemoryBlock;
 // CPU kernel to `tol` (relative). generic over the scalar — f64 and f32 both render
 // from the one IR blob, at their own precision.
 fn iso_c2p_gpu_matches_cpu<S: Scalar + OrderedNumeric>(tol: f64) {
-    let n = 6usize;
-    let den: Vec<S> = [1.0, 2.0, 0.5, 1.5, 0.8, 1.2]
+    // the last cell's negative density has no admissible recovery: its status is nonzero on
+    // both backends, and its recovered values carry no meaning
+    let n = 7usize;
+    let den: Vec<S> = [1.0, 2.0, 0.5, 1.5, 0.8, 1.2, -1.0]
         .iter()
         .map(|&x| S::from_f64(x))
         .collect();
-    let mom: Vec<S> = [0.3, -0.4, 0.1, 0.6, -0.2, 0.05]
+    let mom: Vec<S> = [0.3, -0.4, 0.1, 0.6, -0.2, 0.05, 0.1]
         .iter()
         .map(|&x| S::from_f64(x))
         .collect();
     // cs2 is a per-cell field (the prescribed sound-speed-squared). a varying cs2 here
     // exercises the locally isothermal path: p = cs2(x)*rho with a distinct sound speed per cell.
-    let cs2: Vec<S> = [0.49, 0.6, 0.4, 0.55, 0.5, 0.45]
+    let cs2: Vec<S> = [0.49, 0.6, 0.4, 0.55, 0.5, 0.45, 0.5]
         .iter()
         .map(|&x| S::from_f64(x))
         .collect();
@@ -47,7 +49,7 @@ fn iso_c2p_gpu_matches_cpu<S: Scalar + OrderedNumeric>(tol: f64) {
     // CPU reference (the AOT-compiled kernel via the descriptor ABI), at S
     // precision. 6 buffers (den, mom, cs2 in; rho, vel, pre out), no scalar.
     let z = S::from_f64(0.0);
-    let (mut rc, mut vc, mut pc) = (vec![z; n], vec![z; n], vec![z; n]);
+    let (mut rc, mut vc, mut pc, mut sc) = (vec![z; n], vec![z; n], vec![z; n], vec![z; n]);
     {
         let blo = [0i32];
         let bext = [n as u32];
@@ -60,13 +62,14 @@ fn iso_c2p_gpu_matches_cpu<S: Scalar + OrderedNumeric>(tol: f64) {
             CpuFieldMut::from_layout(rc.as_mut_slice(), &blo, &bext),
             CpuFieldMut::from_layout(vc.as_mut_slice(), &blo, &bext),
             CpuFieldMut::from_layout(pc.as_mut_slice(), &blo, &bext),
+            CpuFieldMut::from_layout(sc.as_mut_slice(), &blo, &bext),
         ];
         iso_c2p_1d::<S>(&inputs, &mut outputs, &[n as u32], &[0], &[], &[]);
     }
 
     // 6 unified buffers (den, mom, cs2 inputs; rho, vel, pre outputs) — host- and
     // device-addressable, so they go straight into the invocation handles.
-    let mut blocks: Vec<MemoryBlock<DeviceMemory>> = (0..6)
+    let mut blocks: Vec<MemoryBlock<DeviceMemory>> = (0..7)
         .map(|_| MemoryBlock::<DeviceMemory>::for_elements::<S>(n).unwrap())
         .collect();
     let ptrs: Vec<*mut S> = blocks.iter_mut().map(|b| b.as_mut_ptr::<S>()).collect();
@@ -115,6 +118,11 @@ fn iso_c2p_gpu_matches_cpu<S: Scalar + OrderedNumeric>(tol: f64) {
                 lo: &lo,
                 extent: &ext,
             },
+            Buf {
+                handle: BufHandle::HostMut(unsafe { std::slice::from_raw_parts_mut(ptrs[6], n) }),
+                lo: &lo,
+                extent: &ext,
+            },
         ],
         grid: &grid,
         dom_lo: &dom_lo,
@@ -134,7 +142,7 @@ fn iso_c2p_gpu_matches_cpu<S: Scalar + OrderedNumeric>(tol: f64) {
             .map(|j| unsafe { (*p.add(j)).to_f64() })
             .collect::<Vec<f64>>()
     };
-    let (rg, vg, pg) = (read(ptrs[3]), read(ptrs[4]), read(ptrs[5]));
+    let (rg, vg, pg, sg) = (read(ptrs[3]), read(ptrs[4]), read(ptrs[5]), read(ptrs[6]));
     let close = |g: f64, c: f64, what: &str, i: usize| {
         let rel = (g - c).abs() / c.abs().max(1.0);
         assert!(
@@ -143,10 +151,16 @@ fn iso_c2p_gpu_matches_cpu<S: Scalar + OrderedNumeric>(tol: f64) {
         );
     };
     for i in 0..n {
+        assert_eq!(sg[i], sc[i].to_f64(), "status[{i}]: gpu {} != cpu {}", sg[i], sc[i].to_f64());
+        if sc[i].to_f64() != 0.0 {
+            continue;
+        }
         close(rg[i], rc[i].to_f64(), "rho", i);
         close(vg[i], vc[i].to_f64(), "vel", i);
         close(pg[i], pc[i].to_f64(), "pre", i);
     }
+    assert!(sc[n - 1].to_f64() != 0.0, "the negative-density cell recovered; the status comparison is vacuous");
+    assert!(sc[..n - 1].iter().all(|s| s.to_f64() == 0.0), "an admissible cell failed its recovery on the cpu");
 }
 
 #[test]
