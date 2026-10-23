@@ -33,7 +33,7 @@ import time
 import tomllib
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Sequence
+from typing import Mapping, Sequence
 
 
 def even_cuts(n_cells: Sequence[int], shape: Sequence[int]) -> list[list[int]]:
@@ -228,7 +228,24 @@ def retire_rendezvous(rendezvous: Path, keep: bool) -> None:
         rendezvous.unlink()
 
 
-def spawn_workers(layout: Layout, argv: Sequence[str], data_directory: str, grace: float = 5.0) -> int:
+GPU_MASKS = ("ROCR_VISIBLE_DEVICES", "HIP_VISIBLE_DEVICES", "CUDA_VISIBLE_DEVICES")
+
+
+def worker_device_env(environ: Mapping[str, str], worker: int, workers: int) -> dict[str, str]:
+    """the visible-device mask of local gpu worker `worker`: one device each. under a mask the
+    parent already set, the worker takes that mask's `worker`-th entry; with none, device
+    `worker` of the host. more workers than masked devices is refused, since the extra workers
+    would share a device."""
+    for name in GPU_MASKS:
+        if environ.get(name):
+            entries = [e.strip() for e in environ[name].split(",") if e.strip()]
+            if workers > len(entries):
+                raise ValueError(f"{workers} gpu workers but {name}={environ[name]} makes {len(entries)} devices visible")
+            return {name: entries[worker]}
+    return {"HIP_VISIBLE_DEVICES": str(worker), "CUDA_VISIBLE_DEVICES": str(worker)}
+
+
+def spawn_workers(layout: Layout, argv: Sequence[str], data_directory: str, grace: float = 5.0, gpu: bool = False) -> int:
     """spawn one process per worker running `argv` plus the worker flags; the exit code is
     zero when every worker exited zero. the first nonzero exit ends the rest after `grace`
     seconds. the layout's checkpoint directory, when named, is the output directory of
@@ -258,7 +275,8 @@ def spawn_workers(layout: Layout, argv: Sequence[str], data_directory: str, grac
     try:
         for worker in range(layout.workers):
             cmd = [sys.executable, "-m", "simbi.cli", *argv, *worker_flags(layout, worker, rendezvous, credential, output)]
-            proc = subprocess.Popen(cmd, env=dict(os.environ, **{LAUNCHED_MARK: "1"}))
+            device = worker_device_env(os.environ, worker, layout.workers) if gpu else {}
+            proc = subprocess.Popen(cmd, env=dict(os.environ, **device, **{LAUNCHED_MARK: "1"}))
             session.procs.append(proc)
             print(f"launch: worker {worker} pid {proc.pid}", flush=True)
         code = 0

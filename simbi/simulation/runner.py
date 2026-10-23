@@ -951,6 +951,8 @@ def launch_worker(
     if max_steps < 0:
         raise ValueError(f"max_steps must be >= 0, got {max_steps}")
     exec_dict["max_steps"] = max_steps
+    if compute_mode == "gpu":
+        exec_dict["gpu_block_dims"] = tuple(_configure_gpu_blocks(problem.dimensionality))
     backend = _load_backend(compute_mode)
     if backend is None:
         raise RuntimeError("no backend is available for launch")
@@ -962,7 +964,7 @@ def launch_worker(
     # `entered` is the epoch time this call began: against the process start it measures
     # the imports and the problem construction, which come before it
     print(
-        f"SIMBI launch startup: worker={worker}/{workers} entered={entered:.3f} "
+        f"SIMBI launch startup: worker={worker}/{workers} host={__import__('socket').gethostname()} entered={entered:.3f} "
         f"python={time.monotonic() - clock:.3f}s cpus_visible={os.cpu_count()}",
         file=sys.stderr,
         flush=True,

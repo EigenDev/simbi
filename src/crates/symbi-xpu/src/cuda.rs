@@ -88,6 +88,7 @@ unsafe extern "C" {
     fn cuCtxSynchronize() -> CUresult;
     fn cuDeviceGetAttribute(pi: *mut c_int, attrib: c_int, dev: CUdevice) -> CUresult;
     fn cuDeviceGetName(name: *mut c_char, len: c_int, dev: CUdevice) -> CUresult;
+    fn cuDeviceGetPCIBusId(pci_bus_id: *mut c_char, len: c_int, dev: CUdevice) -> CUresult;
     fn cuDeviceTotalMem_v2(bytes: *mut usize, dev: CUdevice) -> CUresult;
     fn cuDeviceGetCount(count: *mut c_int) -> CUresult;
     // peer access + cross-device copy. cuMemcpyPeer takes the source and
@@ -238,6 +239,26 @@ thread_local! {
 /// the device ordinal whose context is current on this thread.
 pub fn current_device() -> i32 {
     CURRENT_DEVICE.with(|c| c.get())
+}
+
+/// the pci address (domain:bus:device.function) of the gpu current on this thread: the physical
+/// identity of a device, which a per-process visibility mask renumbers to logical 0
+pub fn pci_bus_id() -> error::Result<String> {
+    ensure_init()?;
+    let count = device_count()?;
+    let mut dev: CUdevice = 0;
+    let mut buf = [0 as c_char; 64];
+    unsafe {
+        check(cuDeviceGet(&mut dev, current_device() % count.max(1)), "cuDeviceGet")?;
+        check(cuDeviceGetPCIBusId(buf.as_mut_ptr(), buf.len() as c_int, dev), "cuDeviceGetPCIBusId")?;
+    }
+    Ok(c_text(&buf))
+}
+
+/// the nul-terminated text a device query wrote into `buf`
+fn c_text(buf: &[c_char]) -> String {
+    let bytes: Vec<u8> = buf.iter().take_while(|&&c| c != 0).map(|&c| c as u8).collect();
+    String::from_utf8_lossy(&bytes).into_owned()
 }
 
 /// number of cuda devices visible to the process.

@@ -67,6 +67,7 @@ class Launched:
     final: Path
     backend: set[str]
     exits: dict[int, int]
+    stderr: str = ""
 
 
 def _backend_of(text: str) -> set[str]:
@@ -81,7 +82,8 @@ from simbi.simulation.runner import _load_backend, to_execution_dict
 from simbi_configs.examples.newtonian.kh import KelvinHelmholtz
 out, steps = sys.argv[1], int(sys.argv[2])
 extra = dict(arg.split("=", 1) for arg in sys.argv[3:])
-runner.run(KelvinHelmholtz(resolution=({rx}, {ry}), data_directory=out, checkpoint_interval=1e9, **extra), compute_mode="cpu", max_steps=steps)
+mode = extra.pop("compute_mode", "cpu")
+runner.run(KelvinHelmholtz(resolution=({rx}, {ry}), data_directory=out, checkpoint_interval=1e9, **extra), compute_mode=mode, max_steps=steps)
 """
 
 
@@ -152,7 +154,7 @@ def _launch(out: Path, layout: Path, steps: int, workers: int, checkpoint: Path 
     where = output or out
     files = sorted(where.glob("*final*.h5"))
     assert len(files) == 1, f"expected one final checkpoint in {where}, found {files}"
-    return Launched(final=files[0], backend=backend, exits=exits)
+    return Launched(final=files[0], backend=backend, exits=exits, stderr=done.stderr)
 
 
 def _interior(f: h5py.File) -> dict[str, np.ndarray]:
@@ -865,3 +867,39 @@ def test_a_final_checkpoint_after_a_cadence_checkpoint_of_the_same_step_is_publi
     reference = sorted((tmp_path / "single").glob("*final*.h5"))
     assert len(reference) == 1, f"expected one final checkpoint, found {reference}"
     _assert_same_state(finals[0], reference[0], "two workers, a checkpoint every step")
+
+
+GPU_BACKEND = runner._load_backend("gpu") if "SIMBI_LAUNCH_GPU_TESTS" in os.environ else None
+needs_gpu = pytest.mark.skipif(GPU_BACKEND is None, reason="set SIMBI_LAUNCH_GPU_TESTS on a gpu node with the gpu backend built")
+DEVICE_LINE = re.compile(r"SIMBI launch: worker=(\d+) host=(\S*) pci=(\S+) device=")
+
+
+def _bound_devices(stderr: str) -> dict[int, tuple[str, str]]:
+    """each worker's physical device: its host and the gpu's pci address"""
+    return {int(w): (host, pci) for w, host, pci in DEVICE_LINE.findall(stderr)}
+
+
+@needs_gpu
+def test_a_two_gpu_launch_matches_the_single_gpu_run(tmp_path: Path) -> None:
+    """two workers, one gpu each, against the one-gpu single grid: the whole checkpoint bit for bit"""
+    reference, backend = _reference(tmp_path / "single", STEPS, compute_mode="gpu")
+    layout = _layout(tmp_path / "two.toml", workers=2, shape=(2, 1))
+    launched = _launch(tmp_path / "two", layout, STEPS, workers=2, flags=["--gpu"])
+    assert launched.backend == backend, f"launched {launched.backend} against reference {backend}"
+    bound = _bound_devices(launched.stderr)
+    assert sorted(bound) == [0, 1], f"the workers reported device bindings {bound}"
+    assert bound[0][0] == bound[1][0], f"a local launch spanned hosts: {bound}"
+    assert bound[0][1] != bound[1][1], f"both workers bound the gpu at one pci address: {bound}"
+    _assert_same_state(launched.final, reference, "two gpu workers")
+
+
+@needs_gpu
+def test_a_two_gpu_launch_resumed_from_its_checkpoint_matches(tmp_path: Path) -> None:
+    """half the steps on two gpus, a checkpoint, and the other half resumed on two gpus, against
+    the uninterrupted single-gpu run"""
+    reference, backend = _reference(tmp_path / "single", STEPS, compute_mode="gpu")
+    layout = _layout(tmp_path / "two.toml", workers=2, shape=(2, 1))
+    partial = _launch(tmp_path / "first", layout, STEPS // 2, workers=2, flags=["--gpu"])
+    resumed = _launch(tmp_path / "second", layout, STEPS, workers=2, checkpoint=partial.final, flags=["--gpu"])
+    assert resumed.backend == backend
+    _assert_same_state(resumed.final, reference, "two gpu workers, resumed")

@@ -475,10 +475,12 @@ pub fn refuse<const D: usize, const DOF: usize, M: MemorySpace, K: KernelSet<D, 
     if !matches!(D, 1..=3) {
         return Err(refused(&format!("a {D}-dimensional grid")));
     }
-    if M::IS_DEVICE_ACCESSIBLE {
-        return Err(refused("device memory"));
-    }
     for store in stores {
+        if M::IS_DEVICE_ACCESSIBLE
+            && let Some(reason) = device_scope_refusal(store)
+        {
+            return Err(refused(reason));
+        }
         let flat = store.geom.spacetime == symbi_geometry::Spacetime::Minkowski;
         let reason = if !flat && !curved {
             Some(format!("the {:?} spacetime", store.geom.spacetime))
@@ -500,6 +502,24 @@ pub fn refuse<const D: usize, const DOF: usize, M: MemorySpace, K: KernelSet<D, 
         }
     }
     Ok(())
+}
+
+/// the feature of `store` a launched worker on device memory refuses, if any. on device memory the
+/// worker drains before every host read of its fields at the exchange, audit, body, checkpoint
+/// and restart sites; tracers, a horizon body's shell ledger and the magnetic-slip solve read or
+/// write fields on the host outside those sites
+pub fn device_scope_refusal<const D: usize, const DOF: usize, M: symbi_xpu::MemoryStorage>(
+    store: &FieldStore<D, DOF, M, f64>,
+) -> Option<&'static str> {
+    if store.tracers.is_some() || store.continuous_tracers.is_some() {
+        Some("a tracer population on device memory")
+    } else if crate::driver::horizon_request(store).is_some() {
+        Some("a horizon body on device memory")
+    } else if store.fields.mhd.as_ref().is_some_and(|mhd| mhd.magnetic_slip.is_some() || mhd.slip_quadrature.is_some()) {
+        Some("a magnetic-slip body on device memory")
+    } else {
+        None
+    }
 }
 
 /// `fields[tile][field]` for every held tile, in schema order; unheld tiles are empty.
@@ -701,6 +721,9 @@ where
     let clock = Instant::now();
     let mut run = || -> Result<(), FabricError> {
         for axis in 0..D {
+            // the strips are gathered and scattered by host code, after every kernel that wrote
+            // them; a scatter is complete before the next kernel launches
+            crate::decomp::drain_devices::<M>(devices);
             let epoch = exchange.epoch(point, step, attempt, axis);
             exchange.open_axis(&fields, devices, transport, fabric, epoch)?;
             fabric.wait(deadline)?;
@@ -838,6 +861,7 @@ pub fn audit_point<const D: usize, const DOF: usize, M, L>(
     tiles: &[TileId],
     stores: &[&FieldStore<D, DOF, M, f64>],
     n_tiles: usize,
+    devices: &[i32],
     fabric: &mut Fabric<L>,
     at: AuditAt,
     step: u64,
@@ -852,6 +876,8 @@ where
     if !exchange.has_audits() {
         return Ok(());
     }
+    // the audit reads the interface faces on the host, after every kernel that wrote them
+    crate::decomp::drain_devices::<M>(devices);
     let fields = field_lists(tiles, stores, n_tiles);
     let cost = exchange
         .audit(&fields, fabric, at, step, attempt, deadline)
@@ -1131,7 +1157,7 @@ where
             with_device(devices[tiles[k].0 as usize], || kernels[k].ghost_fill(sh[k]));
         }
         if self.audit {
-            audit_point(self.exchange, tiles, &sh, devices.len(), self.fabric, AuditAt::Stage(self.stage), self.iter, self.attempt, self.deadline, self.report)
+            audit_point(self.exchange, tiles, &sh, devices.len(), devices, self.fabric, AuditAt::Stage(self.stage), self.iter, self.attempt, self.deadline, self.report)
                 .map_err(|e| fail(self.fabric, e))?;
         }
         Ok(())
@@ -1206,6 +1232,10 @@ where
 
     fn held(&mut self) -> crate::accepted_tail::HeldTiles<'_, 's, D, DOF, M, K> {
         crate::accepted_tail::HeldTiles { stores: &mut *self.stores, kernels: self.kernels, devices: self.tile_devices }
+    }
+
+    fn drain(&mut self) {
+        crate::decomp::drain_devices::<M>(self.devices);
     }
 
     // every tile's value at its tile id, so the maximum is over every tile of every worker
@@ -1763,7 +1793,7 @@ where
             with_device(dev(k), || kernels[k].ghost_fill(sh[k]));
         }
         if self.cfg.audit_every_point {
-            audit_point(self.exchange, tiles, &sh, devices.len(), self.fabric, AuditAt::Rollback, self.iter, self.attempt, deadline, self.report)
+            audit_point(self.exchange, tiles, &sh, devices.len(), devices, self.fabric, AuditAt::Rollback, self.iter, self.attempt, deadline, self.report)
                 .map_err(|e| fail(self.fabric, e))?;
         }
         self.attempt += 1;
@@ -2139,9 +2169,10 @@ where
             with_device(dev(k), || kernels[k].ghost_fill(sh[k]));
         }
         audit_point(
-            exchange, tiles, &sh, n_tiles, fabric, AuditAt::Prime, 0, 0, deadline, &mut report,
+            exchange, tiles, &sh, n_tiles, devices, fabric, AuditAt::Prime, 0, 0, deadline, &mut report,
         )
         .map_err(|e| fail(fabric, e))?;
+        crate::decomp::drain_devices::<M>(devices);
         for (k, store) in sh.iter().enumerate() {
             let err = crate::hydro_ops::scan_c2p_errors(store);
             if err.is_err() {

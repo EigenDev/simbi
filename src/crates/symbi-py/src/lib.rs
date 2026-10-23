@@ -13781,6 +13781,37 @@ fn run_worker_process(
 /// checkpoints at the linear cadence, and the final checkpoint before the session ends.
 /// worker 0 reports through the decomposed table.
 #[allow(clippy::too_many_arguments)]
+/// bind a launched worker to its gpu: exactly one device visible to the process, reported with
+/// the worker id. more than one visible device would leave every worker of the node on device 0,
+/// so it is refused. a host build has nothing to bind
+fn bind_worker_device(worker: usize) -> Result<(), String> {
+    #[cfg(feature = "gpu")]
+    {
+        let visible = symbi::symbi_xpu::device_count().map_err(|e| format!("worker {worker}: the gpu runtime: {e}"))?;
+        if visible != 1 {
+            return Err(format!(
+                "worker {worker} sees {visible} gpus; a launched gpu worker computes on exactly one. the local \
+                 launcher masks one per worker; under a scheduler bind one gpu per task (on Frontier: \
+                 srun --gpus-per-task=1 --gpu-bind=closest)"
+            ));
+        }
+        let info = symbi::symbi_xpu::device_info().map_err(|e| format!("worker {worker}: the gpu runtime: {e}"))?;
+        // the physical identity: the host and the gpu's pci address. a masked worker sees its gpu
+        // as logical 0, so two workers on two gpus of one node both report device 0 by ordinal
+        let pci = symbi::symbi_xpu::pci_bus_id().map_err(|e| format!("worker {worker}: the gpu runtime: {e}"))?;
+        let host = std::process::Command::new("hostname").output().ok().map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string()).unwrap_or_default();
+        let mask = ["ROCR_VISIBLE_DEVICES", "HIP_VISIBLE_DEVICES", "CUDA_VISIBLE_DEVICES"]
+            .iter()
+            .filter_map(|k| std::env::var(k).ok().map(|v| format!("{k}={v}")))
+            .collect::<Vec<_>>()
+            .join(" ");
+        eprintln!("SIMBI launch: worker={worker} host={host} pci={pci} device={} ({mask})", info.name);
+    }
+    #[cfg(not(feature = "gpu"))]
+    let _ = worker;
+    Ok(())
+}
+
 fn worker_session<R, G, E, K, const D: usize, const DOF: usize>(
     cfg: &Config,
     launch: &WorkerLaunch,
@@ -13945,6 +13976,9 @@ where
             }))
         },
     });
+    // a worker computes on the one gpu its process sees: the launcher (or the scheduler's
+    // per-task binding) masks the others, so logical device 0 is this worker's own
+    bind_worker_device(launch.worker)?;
     let devices = vec![0i32; partition.n_tiles()];
     let ng_session = tiles[0].0.geom.ng;
     let restart_grid = decomposed_grid::<D>(cfg, ng_session);
@@ -14052,6 +14086,8 @@ where
             symbi_sim::checkpoint::check_census_state(path, &mut sim.store.censuses, 1, 0.0)
                 .map_err(|e| format!("census restart of tile {flat} from '{path}': {e}"))?;
         }
+        // the loads write the fields on the host, after every kernel of the target's probe
+        symbi::sim::decomp::drain_devices::<DefaultMemory>(&devices);
         for (k, (&flat, (sim, _))) in mine.iter().zip(tiles.iter_mut()).enumerate() {
             symbi_sim::checkpoint::load_partitioned_level(sim, path, 0, offsets[flat], &restart_grid)
                 .map_err(|e| format!("restart of tile {flat} from '{path}': {e}"))?;
@@ -14153,6 +14189,8 @@ where
                  cp_index: u64,
                  basis: AuditBasis|
      -> Result<f64, String> {
+        // the checkpoint reads the fields on the host, after every kernel that wrote them
+        symbi::sim::decomp::drain_devices::<DefaultMemory>(&devices);
         let halos: Vec<_> = sh.iter().map(|s| s.prepare_checkpoint_halo_with(&physics)).collect();
         let written = write_level(sh, fabric, path, cp_index, basis);
         for (s, halo) in sh.iter().zip(&halos) {

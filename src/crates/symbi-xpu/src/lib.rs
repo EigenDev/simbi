@@ -73,7 +73,7 @@ use hip as gpu_backend;
 #[cfg(feature = "gpu")]
 pub use gpu_backend::{
     DeviceInfo, MAX_GPUS, can_access_peer, ctx_sync, current_device, device_count, device_info,
-    enable_peer_access, memcpy_peer,
+    enable_peer_access, memcpy_peer, pci_bus_id,
 };
 
 // neutral device space/memory aliases. the concrete `CudaSpace`/`UnifiedMemory` (and the hip

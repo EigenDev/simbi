@@ -13,6 +13,7 @@ from argparse import Namespace
 from typing import Optional
 
 from ...utils.formatter import HelpFormatter
+from ...actions import ComputeModeAction
 from ..run.parser import _validate_config_script
 
 
@@ -32,6 +33,11 @@ def setup_parser(subparsers) -> None:
         help="config file or registered config name",
         type=_validate_config_script,
     )
+    # every worker computes in this mode; the launcher forwards it on the workers' command lines
+    mode = parser.add_argument_group("compute mode")
+    mode.add_argument("--mode", help="execution mode", default="cpu", choices=["cpu", "gpu"], dest="compute_mode")
+    mode.add_argument("--cpu", action=ComputeModeAction, const="cpu")
+    mode.add_argument("--gpu", action=ComputeModeAction, const="gpu")
     layout = parser.add_argument_group("layout")
     layout.add_argument(
         "--layout",

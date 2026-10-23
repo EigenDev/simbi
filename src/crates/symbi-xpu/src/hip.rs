@@ -91,6 +91,7 @@ unsafe extern "C" {
     fn hipFree(ptr: *mut c_void) -> hipError_t;
     fn hipMemsetD8(dst: hipDeviceptr_t, value: u8, count: usize) -> hipError_t;
     fn hipDeviceGetName(name: *mut c_char, len: c_int, dev: hipDevice_t) -> hipError_t;
+    fn hipDeviceGetPCIBusId(pci_bus_id: *mut c_char, len: c_int, device: c_int) -> hipError_t;
     fn hipDeviceTotalMem(bytes: *mut usize, dev: hipDevice_t) -> hipError_t;
     // peer access + cross-device copy. hipMemcpyPeer takes device
     // ordinals, simpler than the cuda context-based form.
@@ -158,6 +159,26 @@ fn cached_device_count() -> i32 {
 fn physical(ord: i32) -> i32 {
     let count = cached_device_count();
     if count > 0 { ord % count } else { 0 }
+}
+
+/// the pci address (domain:bus:device.function) of the gpu current on this thread: the physical
+/// identity of a device, which a per-process visibility mask renumbers to logical 0
+pub fn pci_bus_id() -> error::Result<String> {
+    ensure_init()?;
+    let mut buf = [0 as c_char; 64];
+    unsafe {
+        check(
+            hipDeviceGetPCIBusId(buf.as_mut_ptr(), buf.len() as c_int, physical(current_device())),
+            "hipDeviceGetPCIBusId",
+        )?;
+    }
+    Ok(c_text(&buf))
+}
+
+/// the nul-terminated text a device query wrote into `buf`
+fn c_text(buf: &[c_char]) -> String {
+    let bytes: Vec<u8> = buf.iter().take_while(|&&c| c != 0).map(|&c| c as u8).collect();
+    String::from_utf8_lossy(&bytes).into_owned()
 }
 
 /// number of hip devices visible to the process.

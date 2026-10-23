@@ -72,6 +72,7 @@ def _run_worker_role(args: Namespace, problem, worker: int, workers: int, owner,
         advertise=advertise,
         staging_cells=staging_cells,
         max_steps=args.max_steps,
+        compute_mode=args.compute_mode,
     )
 
 
@@ -116,6 +117,6 @@ def launch_config(args: Namespace, argv: Optional[Sequence[str]] = None) -> None
             if worker == 0:
                 retire_rendezvous(Path(rendezvous), layout.keep_rendezvous)
         return
-    code = spawn_workers(layout, sys.argv[1:], problem.data_directory)
+    code = spawn_workers(layout, sys.argv[1:], problem.data_directory, gpu=args.compute_mode == "gpu")
     if code != 0:
         sys.exit(code)
