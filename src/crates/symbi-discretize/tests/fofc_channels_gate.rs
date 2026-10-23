@@ -24,6 +24,15 @@
 //     FreezeApplied (`.freeze_applied`) — the orchestrator, which hands it to
 //                                     the correcting selects;
 // - the three channels are three distinct field allocations.
+// two narrow access categories, each a list of (file, function) pairs and a law the gate checks
+// on every line of the pair's body:
+//   checkpoint inspection — the checkpoint writer's read of the recovery status to decide which
+//                           covered cells it publishes without primitives; reads only (`.view()`);
+//   byte-preserving transfer — the device-local mirror and state transfers, which copy whole
+//                           channel buffers between memory spaces; no element access at all.
+// one pending finding stays reported by name until its contract is decided: the dual-energy
+// synchronization clears the recovery status of a cell it recovers from the entropy, a second
+// producer of `C2pStatus`.
 // =============================================================================
 
 use std::path::{Path, PathBuf};
@@ -115,6 +124,59 @@ const CHANNELS: &[ChannelRule] = &[
     },
 ];
 
+/// a channel access granted to one function of one file, under a law its lines must obey
+struct ScopedAccess {
+    category: &'static str,
+    file: &'static str,
+    function: &'static str,
+    law: fn(&str) -> bool,
+}
+
+/// every channel spelling on the line is followed by a read-only view
+fn reads_only(code: &str) -> bool {
+    CHANNELS.iter().all(|rule| {
+        code.match_indices(rule.spelling)
+            .all(|(at, _)| code[at + rule.spelling.len()..].starts_with(".view()"))
+    })
+}
+
+/// the line moves or measures whole buffers: no element read or write on any field
+fn whole_buffers_only(code: &str) -> bool {
+    [".set(", ".view(", ".view_mut(", ".at(", ".add_assign_checked("].iter().all(|op| !code.contains(op))
+}
+
+/// the scoped grants, by function within one file
+const SCOPED: &[ScopedAccess] = &[
+    ScopedAccess { category: "checkpoint inspection", file: "symbi-sim/src/state.rs", function: "withhold_unrecovered_primitives", law: reads_only },
+    ScopedAccess { category: "checkpoint inspection", file: "symbi-sim/src/state.rs", function: "has_unrecovered_excluded", law: reads_only },
+    ScopedAccess { category: "byte-preserving transfer", file: "symbi-sim/src/device_local.rs", function: "mirror_store", law: whole_buffers_only },
+    ScopedAccess { category: "byte-preserving transfer", file: "symbi-sim/src/device_local.rs", function: "state_pairs", law: whole_buffers_only },
+    ScopedAccess { category: "byte-preserving transfer", file: "symbi-sim/src/device_local.rs", function: "resident_bytes", law: whole_buffers_only },
+];
+
+/// an access outside the channel contract whose decision is pending: one statement of one
+/// function, matched by its code, reported by name. any other access in the same function is
+/// a violation
+struct Pending {
+    file: &'static str,
+    function: &'static str,
+    code: &'static str,
+    finding: &'static str,
+}
+
+const PENDING: &[Pending] = &[Pending {
+    file: "symbi-substrate/src/regimes/dual_energy.rs",
+    function: "synchronize",
+    code: "sim.fields.c2p_error.set(c, Sc::from_f64(0.0));",
+    finding: "the entropy recovery clears the c2p status, a second producer of C2pStatus; pending the \
+              recovery-contract decision for the opt-in dual-energy prototype",
+}];
+
+/// whether the access `code` in `function` of `file` is the pending one
+fn is_pending(file: &str, function: &str, code: &str) -> bool {
+    PENDING.iter().any(|p| file.ends_with(p.file) && p.function == function && p.code == code)
+}
+
 /// true when `code` spells `spelling` as a whole identifier: the character after it
 /// continues no identifier.
 fn spells(code: &str, spelling: &str) -> bool {
@@ -130,7 +192,7 @@ fn spells(code: &str, spelling: &str) -> bool {
 /// function extents are brace-tracked (a `fn` line opens a body, brace balance
 /// closes it), and a line spelling a channel's field access outside that
 /// channel's sanctioned functions is flagged.
-fn channel_violations(text: &str) -> Vec<String> {
+fn channel_violations(text: &str) -> Vec<(usize, String, String)> {
     let mut fn_name = String::new();
     let mut in_fn = false;
     let mut entered = false;
@@ -159,7 +221,8 @@ fn channel_violations(text: &str) -> Vec<String> {
             if spells(code, rule.spelling)
                 && !(in_fn && rule.allowed_fns.contains(&fn_name.as_str()))
             {
-                hits.push(format!("{number}: {}", raw.trim()));
+                hits.push((number, if in_fn { fn_name.clone() } else { String::new() }, code.trim().to_string()));
+                break;
             }
         }
         if in_fn && entered && depth <= 0 {
@@ -223,8 +286,16 @@ fn each_channel_stays_inside_its_boundary() {
                 seen += 1;
             }
         }
-        for hit in channel_violations(&text) {
-            hits.push(format!("{}:{hit}", path.display()));
+        let file = path.display().to_string();
+        for (number, function, code) in channel_violations(&text) {
+            let scoped = SCOPED.iter().find(|grant| file.ends_with(grant.file) && grant.function == function);
+            let pending = is_pending(&file, &function, &code);
+            match scoped {
+                Some(grant) if (grant.law)(&code) => {}
+                Some(grant) => hits.push(format!("{file}:{number}: {code}  (breaks the {} law of {})", grant.category, grant.function)),
+                None if pending => {}
+                None => hits.push(format!("{file}:{number}: {code}")),
+            }
         }
     }
     assert!(
@@ -236,6 +307,57 @@ fn each_channel_stays_inside_its_boundary() {
         "a channel buffer crossed outside its sanctioned functions:\n{}",
         hits.join("\n")
     );
+}
+
+/// every out-of-contract access the scan finds, as (file, function, code)
+fn out_of_contract() -> Vec<(String, String, String)> {
+    let mut found = Vec::new();
+    for path in scanned_files() {
+        let text = std::fs::read_to_string(&path).expect("source file must be readable");
+        for (_, function, code) in channel_violations(&text) {
+            found.push((path.display().to_string(), function, code));
+        }
+    }
+    found
+}
+
+#[test]
+fn every_scoped_grant_names_a_live_access() {
+    let found = out_of_contract();
+    for grant in SCOPED {
+        assert!(
+            found.iter().any(|(file, function, _)| file.ends_with(grant.file) && *function == grant.function),
+            "the {} grant to {}::{} matches no channel access; remove it",
+            grant.category,
+            grant.file,
+            grant.function
+        );
+    }
+}
+
+#[test]
+fn the_pending_channel_findings_remain_reported() {
+    let found = out_of_contract();
+    for p in PENDING {
+        let matching = found.iter().filter(|(f, func, code)| is_pending(f, func, code)).count();
+        assert_eq!(
+            matching, 1,
+            "{}::{} holds {matching} copies of its pending access `{}`; resolve or restate the entry ({})",
+            p.file, p.function, p.code, p.finding
+        );
+        eprintln!("pending channel finding: {}::{}: `{}`: {}", p.file, p.function, p.code, p.finding);
+    }
+}
+
+#[test]
+fn the_pending_exception_admits_its_one_statement_alone() {
+    let file = "crates/symbi-substrate/src/regimes/dual_energy.rs";
+    assert!(is_pending(file, "synchronize", "sim.fields.c2p_error.set(c, Sc::from_f64(0.0));"));
+    // a second access in the same function is a violation, as is the same statement elsewhere
+    assert!(!is_pending(file, "synchronize", "sim.fields.c2p_error.set(c, Sc::from_f64(64.0));"));
+    assert!(!is_pending(file, "synchronize", "let flag = &sim.workspace.fofc_flag;"));
+    assert!(!is_pending(file, "drain_entropy", "sim.fields.c2p_error.set(c, Sc::from_f64(0.0));"));
+    assert!(!is_pending("crates/symbi-substrate/src/regimes/fofc.rs", "synchronize", "sim.fields.c2p_error.set(c, Sc::from_f64(0.0));"));
 }
 
 #[test]
@@ -290,4 +412,32 @@ fn channel_gate_flags_cross_channel_borrowing() {
     // the field spelled at the end of a line, or before punctuation, is still caught.
     let field_at_end = "fn stray_view() {\n    let f = &ws.fofc_flag;\n    let g = ws.fofc_flag\n}\n";
     assert_eq!(channel_violations(field_at_end).len(), 2);
+}
+
+#[test]
+fn the_inspection_law_admits_reads_alone() {
+    assert!(reads_only("let status = self.fields.c2p_error.view();"));
+    assert!(!reads_only("let status = self.fields.c2p_error.view_mut();"), "a mutable view passed as a read");
+    assert!(!reads_only("self.fields.c2p_error.set(c, Sc::from_f64(0.0));"), "a write passed as a read");
+    assert!(!reads_only("let flag = &self.workspace.fofc_flag;"), "a bare borrow passed as a read");
+}
+
+#[test]
+fn the_transfer_law_admits_whole_buffers_alone() {
+    assert!(whole_buffers_only("c2p_error: mirror_field(&f.c2p_error)?,"));
+    assert!(whole_buffers_only("+ f.c2p_error.domain().volume()"));
+    assert!(!whole_buffers_only("w.fofc_flag.set(c, Sc::from_f64(1.0));"), "an element write passed as a transfer");
+    assert!(!whole_buffers_only("let v = f.c2p_error.view();"), "an element read passed as a transfer");
+    assert!(!whole_buffers_only("*w.freeze_applied.view_mut().at_mut(c) = x;"), "an element write passed as a transfer");
+}
+
+#[test]
+fn a_granted_function_that_breaks_its_law_is_flagged() {
+    // the scanner reports the granted function's access; the law decides it
+    let text = "fn mirror_store() {\n    w.fofc_flag.set(c, 1.0);\n}\n";
+    let hits = channel_violations(text);
+    assert_eq!(hits.len(), 1, "the scanner missed the access");
+    let (_, function, code) = &hits[0];
+    assert_eq!(function, "mirror_store");
+    assert!(!whole_buffers_only(code), "an element write inside a transfer grant passed its law");
 }

@@ -149,6 +149,15 @@ fn poison_conserved_ghosts<Mem: MemoryStorage>(store: &FieldStore<2, 2, Mem, f64
     }
 }
 
+/// the recovery status and every correction channel of `store`, downloaded whole
+fn channels<Mem: MemoryStorage>(store: &FieldStore<2, 2, Mem, f64>) -> Vec<Vec<f64>> {
+    let w = &store.workspace;
+    [&store.fields.c2p_error, &w.fofc_flag, &w.freeze_applied, &w.fofc_evidence, &w.fofc_inadmissible]
+        .into_iter()
+        .map(|f| f.download().expect("download"))
+        .collect()
+}
+
 fn assert_same_bits(a: &[Vec<f64>], b: &[Vec<f64>], what: &str) {
     assert_eq!(a.len(), b.len(), "{what}: field count");
     for (kk, (fa, fb)) in a.iter().zip(b).enumerate() {
@@ -160,8 +169,21 @@ fn assert_same_bits(a: &[Vec<f64>], b: &[Vec<f64>], what: &str) {
 #[test]
 fn the_mirror_and_the_state_transfers_move_every_value_bit_for_bit() {
     let source = wave(16);
+    // the recovery status and the correction channels carry distinct values, so a mirror that
+    // dropped, reordered or zeroed one of them would show
+    {
+        let w = &source.store.workspace;
+        for (kk, f) in [&source.store.fields.c2p_error, &w.fofc_flag, &w.freeze_applied, &w.fofc_evidence, &w.fofc_inadmissible]
+            .into_iter()
+            .enumerate()
+        {
+            let values: Vec<f64> = (0..f.domain().volume()).map(|ii| (kk * 1000 + ii) as f64 * 0.5).collect();
+            f.upload(&values).expect("upload");
+        }
+    }
     let device = mirror::<Local>(&source);
     assert!(device.store.host().is_none(), "the device-local store reached a host alias");
+    assert_same_bits(&channels(&source.store), &channels(&device.store), "mirrored channels");
     assert_same_bits(&evolved(&source.store), &evolved(&device.store), "mirror");
     let workspace_flag = device.store.workspace.fofc_flag.download().expect("download");
     assert_eq!(workspace_flag.len(), source.geom.allocated.volume(), "the workspace mirrors the allocation");
