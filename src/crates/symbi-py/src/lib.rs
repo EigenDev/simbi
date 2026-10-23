@@ -2826,6 +2826,9 @@ where
     });
     let mut next_diag = diag_plan.as_ref().map_or(diag_interval, |p| p.next);
     let start = std::time::Instant::now();
+    // the per-phase profile and the run's wall clock share one window: setup and priming before
+    // this instant stay out of both
+    symbi::sim::evolve::reset_profile();
     // checkpoint-write seconds, accumulated on every run regardless of SYMBI_PROFILE: the
     // exit summary reports the sustained integration rate with i/o excluded — on a
     // short run the h5 writes are a large slice of wall and dilute the displayed rate.
@@ -3395,7 +3398,7 @@ where
         }
     }
     table.exit_frame(ExitKind::Success, &summary);
-    dump_profile_if_enabled(segment_steps(start_iteration, root.iteration), n_zones);
+    dump_profile_if_enabled(segment_steps(start_iteration, root.iteration), n_zones, wall);
     dump_dispatch_profile_if_enabled();
     Ok(diagnostics)
 }
@@ -3452,7 +3455,7 @@ fn segment_steps(start_iteration: u64, end_iteration: u64) -> u64 {
 /// `prof()` accumulator is otherwise a no-op). mirrors the zone-cycle bench: per phase the wall ms,
 /// its share of the instrumented total, and ns/zone-cycle (normalized by steps * interior zones),
 /// slowest first. empty (no-op) when profiling is off.
-fn dump_profile_if_enabled(steps: u64, n_zones: u64) {
+fn dump_profile_if_enabled(steps: u64, n_zones: u64, window_s: f64) {
     let mut rows = symbi::sim::evolve::report_profile();
     if rows.is_empty() {
         return;
@@ -3469,8 +3472,15 @@ fn dump_profile_if_enabled(steps: u64, n_zones: u64) {
         );
     }
     eprintln!(
-        "  {:<18} {total:>8.1} ms  (sum of instrumented phases)\n",
+        "  {:<18} {total:>8.1} ms  (sum of instrumented phases)",
         "TOTAL"
+    );
+    let window = window_s * 1e3;
+    eprintln!(
+        "  {:<18} {window:>8.1} ms  (run window: the loop, checkpoints included)\n  {:<18} {:>8.1} ms  (window less the instrumented phases)\n",
+        "WINDOW",
+        "UNATTRIBUTED",
+        window - total
     );
 }
 

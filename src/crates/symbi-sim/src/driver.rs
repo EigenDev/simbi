@@ -163,9 +163,41 @@ pub fn prof<T>(name: &'static str, f: impl FnOnce() -> T) -> T {
     if !profiling() {
         return f();
     }
+    timed_once(name, f)
+}
+
+thread_local! {
+    // the phases open on this thread: a phase timed inside an open phase of the same name is
+    // already inside that phase's interval
+    static OPEN_PHASES: std::cell::RefCell<Vec<&'static str>> = const { std::cell::RefCell::new(Vec::new()) };
+}
+
+/// run `f` and book its wall time under `name`, once: a call nested inside an open phase of the
+/// same name on this thread books nothing, so every instant of the run counts toward a phase at
+/// most once per name
+fn timed_once<T>(name: &'static str, f: impl FnOnce() -> T) -> T {
+    if OPEN_PHASES.with(|open| open.borrow().contains(&name)) {
+        return f();
+    }
+    // closes the phase when `f` returns or unwinds
+    struct Open(&'static str);
+    impl Drop for Open {
+        fn drop(&mut self) {
+            OPEN_PHASES.with(|open| {
+                let mut open = open.borrow_mut();
+                if let Some(at) = open.iter().rposition(|phase| *phase == self.0) {
+                    open.remove(at);
+                }
+            });
+        }
+    }
+    OPEN_PHASES.with(|open| open.borrow_mut().push(name));
+    let open = Open(name);
     let t0 = std::time::Instant::now();
     let r = f();
-    *PHASE_MS.lock().unwrap().entry(name).or_insert(0.0) += t0.elapsed().as_secs_f64() * 1e3;
+    let ms = t0.elapsed().as_secs_f64() * 1e3;
+    drop(open);
+    *PHASE_MS.lock().unwrap().entry(name).or_insert(0.0) += ms;
     r
 }
 /// clear the per-phase profile accumulator (call after warmup).
@@ -635,5 +667,50 @@ mod horizon_partial_tests {
         assert_eq!(b.rates().1.to_bits(), a.rates().1.to_bits());
         assert!(a.to_words().iter().all(|&w| w != u64::MAX), "a word takes the absent bits");
         assert!(HorizonPartial::from_words(&a.to_words()[1..]).is_err());
+    }
+}
+
+#[cfg(test)]
+mod phase_timing_tests {
+    use super::{PHASE_MS, timed_once};
+
+    fn booked(name: &str) -> f64 {
+        PHASE_MS.lock().unwrap().get(name).copied().unwrap_or(0.0)
+    }
+
+    fn spin(ms: u64) {
+        let t0 = std::time::Instant::now();
+        while t0.elapsed() < std::time::Duration::from_millis(ms) {}
+    }
+
+    #[test]
+    fn a_phase_nested_in_itself_is_booked_once() {
+        let outer = std::time::Instant::now();
+        timed_once("nested_once", || {
+            spin(20);
+            timed_once("nested_once", || spin(20));
+        });
+        let wall = outer.elapsed().as_secs_f64() * 1e3;
+        let total = booked("nested_once");
+        assert!(total >= 40.0, "the outer interval was not booked: {total} ms");
+        assert!(total <= wall, "the phase booked {total} ms inside a {wall} ms interval; the nested call counted twice");
+    }
+
+    #[test]
+    fn distinct_phases_nest_and_both_book() {
+        timed_once("outer_distinct", || {
+            spin(10);
+            timed_once("inner_distinct", || spin(10));
+        });
+        assert!(booked("outer_distinct") >= 20.0);
+        assert!(booked("inner_distinct") >= 10.0);
+    }
+
+    #[test]
+    fn a_phase_that_unwinds_closes() {
+        let unwound = std::panic::catch_unwind(|| timed_once("unwinds", || panic!("inside the phase")));
+        assert!(unwound.is_err());
+        timed_once("unwinds", || spin(5));
+        assert!(booked("unwinds") >= 5.0, "the phase stayed open after unwinding and booked nothing");
     }
 }

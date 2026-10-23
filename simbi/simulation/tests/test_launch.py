@@ -93,10 +93,13 @@ def _reference(out: Path, steps: int, **extra: str) -> tuple[Path, set[str]]:
     args = [f"{k}={v}" for k, v in extra.items()]
     done = subprocess.run([sys.executable, "-c", snippet, str(out), str(steps), *args], capture_output=True, text=True, timeout=600)
     assert done.returncode == 0, f"reference failed:\n{done.stderr}"
-    backend = _backend_of(done.stderr)
-    assert len(backend) == 1, f"the reference reports backends {backend}"
     files = sorted(out.glob("*final*.h5"))
     assert len(files) == 1, f"expected one final checkpoint in {out}, found {files}"
+    # a single-grid run records its backend build in the checkpoint metadata and the run log; the
+    # launched workers announce theirs on stderr
+    with h5py.File(files[0], "r") as f:
+        backend = {str(f["metadata"].attrs["build_source_id"])}
+    assert all(PROVENANCE.fullmatch(f"backend={b} config=") for b in backend), f"the reference records backend {backend}"
     return files[0], backend
 
 

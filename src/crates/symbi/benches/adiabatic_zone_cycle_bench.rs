@@ -193,5 +193,8 @@ fn main() {
             "  {:<16} {total:>8.1} ms  (sum of instrumented phases)",
             "TOTAL"
         );
+        let window = elapsed * 1e3;
+        println!("  {:<16} {window:>8.1} ms  (timed window: the evolve span)", "WINDOW");
+        println!("  {:<16} {:>8.1} ms  (window less the instrumented phases)", "UNATTRIBUTED", window - total);
     }
 }
