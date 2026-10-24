@@ -2001,6 +2001,48 @@ pub fn evolve_worker_traced<const D: usize, const DOF: usize, M, K, T, L, F>(
     continuous: Option<&ContinuousTracerContext<'_, D>>,
     slip: Option<&SlipPlans<'_, D>>,
     stage_hook: &mut crate::decomp::TileStageHook<'_, D, DOF, M>,
+    on_step: F,
+) -> Result<WorkerReport, WorkerError>
+where
+    M: MemorySpace,
+    K: KernelSet<D, DOF, M, f64>,
+    T: HaloTransport,
+    L: Link,
+    symbi_geometry::Cartesian: symbi_geometry::Metric<f64, D>,
+    F: FnMut(
+        u64,
+        f64,
+        &[&FieldStore<D, DOF, M, f64>],
+        &mut Fabric<L>,
+    ) -> Result<ControlFlow<()>, WorkerError>,
+{
+    evolve_worker_published(
+        tiles, stores, kernels, devices, exchange, transport, fabric, cfg, continuous, slip, stage_hook, &mut |_, _| Ok(()), on_step,
+    )
+}
+
+/// the primed state a worker hands its caller once, after the prime exchange and audit and the
+/// initial-condition check and before the first step: every held tile's primitives and halos
+/// as the march starts from them
+pub type PrimedHook<'h, const D: usize, const DOF: usize, M, L> =
+    dyn FnMut(&[&FieldStore<D, DOF, M, f64>], &mut Fabric<L>) -> Result<(), WorkerError> + 'h;
+
+/// `evolve_worker_traced` that hands the primed state to `on_primed` before the first step, where
+/// a run publishes its initial checkpoint with every halo filled as the march reads it
+#[allow(clippy::too_many_arguments)]
+pub fn evolve_worker_published<const D: usize, const DOF: usize, M, K, T, L, F>(
+    tiles: &[TileId],
+    stores: &mut [&mut FieldStore<D, DOF, M, f64>],
+    kernels: &[&K],
+    devices: &[i32],
+    exchange: &PlanExchange<'_, D>,
+    transport: &T,
+    fabric: &mut Fabric<L>,
+    cfg: &WorkerConfig,
+    continuous: Option<&ContinuousTracerContext<'_, D>>,
+    slip: Option<&SlipPlans<'_, D>>,
+    stage_hook: &mut crate::decomp::TileStageHook<'_, D, DOF, M>,
+    on_primed: &mut PrimedHook<'_, D, DOF, M, L>,
     mut on_step: F,
 ) -> Result<WorkerReport, WorkerError>
 where
@@ -2185,6 +2227,10 @@ where
                 ));
             }
         }
+    }
+    {
+        let sh = shared!();
+        on_primed(&sh, fabric).map_err(|e| fail(fabric, e))?;
     }
 
     let guard_scope = crate::guard_ledger::open_scope();

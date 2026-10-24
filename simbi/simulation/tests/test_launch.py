@@ -35,6 +35,7 @@ from simbi_configs.examples.srhd.ram44 import Ram44
 
 from simbi.simulation.tests.checkpoint_compare import assert_same_checkpoint
 from simbi.simulation.tests.process_guard import ProcessGuard, descendants
+from simbi.simulation.tests.staggered_div_b import DIV_B_TOLERANCE, normalized_div_b
 
 pytestmark = pytest.mark.simulation
 
@@ -984,3 +985,54 @@ def test_two_gpu_workers_masked_onto_one_gpu_are_refused_together(tmp_path: Path
     flat = " ".join(done.stderr.split())
     assert flat.count("workers 0 and 1 bound one physical gpu") == 2, f"a worker did not refuse at the agreement:\n{done.stderr}"
     assert not list(out.glob("*.h5")), "a checkpoint was published"
+
+
+# -----------------------------------------------------------------------------
+# magnetized parity to a requested end time, every checkpoint of the run compared
+# -----------------------------------------------------------------------------
+
+MHD_END_TIME = 0.05
+MHD_INTERVAL = 0.0125
+AUDIT_LINE = re.compile(r"SIMBI launch: worker=(\d+)/\d+ .*?checkpoint_audits=(\d+) audit_faces=(\d+)")
+MHD_RUN_SNIPPET = """
+import sys
+from simbi.simulation import runner
+from simbi_configs.examples.newtonian.nmhd_orszag_tang import NewtonianOrszagTang
+out, mode, end, interval = sys.argv[1], sys.argv[2], float(sys.argv[3]), float(sys.argv[4])
+runner.run(NewtonianOrszagTang(resolution=({rx}, {ry}, 1), data_directory=out, end_time=end, checkpoint_interval=interval), compute_mode=mode)
+"""
+
+
+@pytest.mark.parametrize("mode", MODES)
+def test_a_magnetized_launch_equals_one_device_at_every_checkpoint_to_its_end_time(tmp_path: Path, mode: str) -> None:
+    """orszag-tang to t = 0.05 with a checkpoint every 0.0125: two workers against one device,
+    every checkpoint of the run bit for bit with its staggered faces, the shared faces audited
+    after every exchange, and the divergence of the stored faces at every checkpoint of both runs
+    within DIV_B_TOLERANCE of the largest field per cell width"""
+    snippet = MHD_RUN_SNIPPET.format(rx=MHD_RESOLUTION[0], ry=MHD_RESOLUTION[1])
+    single = tmp_path / "single"
+    done = subprocess.run([sys.executable, "-c", snippet, str(single), mode, repr(MHD_END_TIME), repr(MHD_INTERVAL)], capture_output=True, text=True, timeout=600)
+    assert done.returncode == 0, f"reference failed:\n{done.stderr}"
+    layout = _layout(tmp_path / "two.toml", workers=2, shape=(2, 1))
+    out = tmp_path / "two"
+    cmd = _mhd_launch_command(out, layout, 0) + ["--end-time", repr(MHD_END_TIME)] + _mode_flags(mode)
+    cmd[cmd.index("--checkpoint-interval") + 1] = repr(MHD_INTERVAL)
+    done = subprocess.run(cmd, capture_output=True, text=True, timeout=600, env=dict(os.environ, SIMBI_FABRIC_AUDIT="all"))
+    assert done.returncode == 0, f"launch failed:\nstdout:\n{done.stdout}\nstderr:\n{done.stderr}"
+    exits = {int(w): int(c) for w, c in EXIT.findall(done.stdout)}
+    assert sorted(exits) == [0, 1] and all(c == 0 for c in exits.values()), f"worker exit codes {exits}"
+    launched, references = sorted(out.glob("*.h5")), sorted(single.glob("*.h5"))
+    assert [p.name for p in launched] == [p.name for p in references], f"checkpoints {launched} against {references}"
+    assert len(launched) >= 4, f"the run published {len(launched)} checkpoints; the cadence is not exercised"
+    for got, want in zip(launched, references):
+        _assert_same_state(got, want, f"two workers against one device, {got.name}")
+    for path in (launched[-1], references[-1]):
+        with h5py.File(path, "r") as f:
+            assert "final" in path.name and float(f["level_0"].attrs["time"]) == MHD_END_TIME, f"{path} ends at t = {f['level_0'].attrs['time']!r}"
+    divergence = {p.name: normalized_div_b(p) for p in launched + references}
+    assert all(d <= DIV_B_TOLERANCE for d in divergence.values()), f"normalized div B {divergence}"
+    audits = {int(w): (int(n), int(faces)) for w, n, faces in AUDIT_LINE.findall(done.stderr)}
+    assert sorted(audits) == [0, 1] and all(n > 0 and faces > 0 for n, faces in audits.values()), f"shared-face audits {audits}"
+    if mode == "gpu":
+        bound = _bound_devices(done.stderr)
+        assert sorted(bound) == [0, 1] and bound[0] != bound[1], f"device bindings {bound}"

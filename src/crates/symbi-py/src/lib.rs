@@ -13901,7 +13901,7 @@ where
     use symbi_sim::plan_exchange::PlanExchange;
     use symbi_sim::phase_table::PhaseTable;
     use symbi_sim::substrate_seam::RegimeKind;
-    use symbi_sim::worker::{WorkerConfig, WorkerError, evolve_worker_traced};
+    use symbi_sim::worker::{WorkerConfig, WorkerError};
 
     let n: [usize; D] = std::array::from_fn(|ax| cfg.n_cells[ax]);
     let total: usize = n.iter().product();
@@ -14168,7 +14168,7 @@ where
     // the root iteration this segment starts from: the checkpoint's on a restart. the worker counts
     // its accepted root steps from zero, and each advances the root iteration by one
     let start_iteration = tiles[0].0.iteration;
-    let mut reporter = if me == WorkerId(0) {
+    let reporter = std::cell::RefCell::new(if me == WorkerId(0) {
         let mut r = DecomposedReporter::new(cfg, total as u64, &counts, &slabs);
         r.milestone(&format!(
             "fabric session over {} workers; plan {:016x}, placement {:016x}",
@@ -14177,7 +14177,7 @@ where
         Some(r)
     } else {
         None
-    };
+    });
     // the checkpoint schedule the single grid walks
     let mut cadence = CheckpointCadence::of(cfg);
     let cp_width = checkpoint_time_width(cfg);
@@ -14278,23 +14278,24 @@ where
     });
     let mut next_diag = diag_plan.as_ref().map_or(diag_interval, |p| p.next);
     let outcome: Result<(u64, f64, Option<String>), String> = (|| {
-        if cfg.checkpoint_index == 0 || cfg.start_time == 0.0 {
-            let sh: Vec<&symbi_sim::state::FieldStore<D, DOF, DefaultMemory, f64>> = stores.iter().map(|s| &**s).collect();
-            // the builders seed the conserved state; the initial checkpoint publishes the
-            // primitives the march starts from, recovered on every held tile as the single
-            // grid's priming does (a recovery touches no face)
-            for (s, k) in sh.iter().zip(&kernels) {
-                k.c2p(s);
+        // a fresh start publishes the state the march starts from once the worker has primed it:
+        // the primitives recovered and every halo filled, as the single grid's initial checkpoint
+        // carries them. the prime audit certified the shared faces and nothing has touched a face
+        // since
+        let opening = (cfg.checkpoint_index == 0 || cfg.start_time == 0.0)
+            .then(|| checkpoint_name(cfg, &cadence.tag(cfg, cp_width, cfg.start_time, cfg.checkpoint_index)));
+        let mut on_primed = |sh: &[&symbi_sim::state::FieldStore<D, DOF, DefaultMemory, f64>],
+                             fabric: &mut Fabric<_>|
+         -> Result<(), WorkerError> {
+            let Some(path) = opening.as_ref() else {
+                return Ok(());
+            };
+            let io = write(sh, fabric, path, cfg.checkpoint_index, AuditBasis::Primed).map_err(WorkerError::Checkpoint)?;
+            if let Some(r) = reporter.borrow_mut().as_mut() {
+                r.checkpoint_written(cfg, path, cfg.start_time, io);
             }
-            let tag = cadence.tag(cfg, cp_width, cfg.start_time, cfg.checkpoint_index);
-            let path = checkpoint_name(cfg, &tag);
-            // before the march: the prime audit certified this state and nothing has touched
-            // a face since
-            let io = write(&sh, &mut fabric, &path, cfg.checkpoint_index, AuditBasis::Primed)?;
-            if let Some(r) = reporter.as_mut() {
-                r.checkpoint_written(cfg, &path, cfg.start_time, io);
-            }
-        }
+            Ok(())
+        };
         // the start-time body diagnostics row on a fresh file (or a tail behind the resume clock)
         if let Some(dp) = &diag_path {
             if diag_plan.as_ref().is_some_and(|p| p.write_initial) {
@@ -14324,7 +14325,7 @@ where
         if launch.worker == 0 {
             announce_retry_guard(cfg, &*stores[0]);
         }
-        let report = evolve_worker_traced(
+        let report = symbi_sim::worker::evolve_worker_published(
             &tile_ids,
             &mut stores,
             &kernels,
@@ -14349,6 +14350,7 @@ where
                     );
                 }
             },
+            &mut on_primed,
             |iter, time, sh, fabric| {
                 if fault.exit_after == Some(iter) {
                     // the process ends here as a lost node would: no relay, no unwinding, the
@@ -14365,7 +14367,7 @@ where
                         *field.view_mut().at_mut(at) = f64::from_bits(old.to_bits() + 1);
                     }
                 }
-                if let Some(r) = reporter.as_mut() {
+                if let Some(r) = reporter.borrow_mut().as_mut() {
                     r.progress(iter, time);
                 }
                 // the step that reaches the `max_steps` root iteration publishes through the
@@ -14378,7 +14380,7 @@ where
                     let path = checkpoint_name(cfg, &tag);
                     // the state completed step `iter`, whose exchanges ran under step index iter - 1
                     let io = write(sh, fabric, &path, cadence.index, AuditBasis::AfterStep(iter - 1)).map_err(WorkerError::Checkpoint)?;
-                    if let Some(r) = reporter.as_mut() {
+                    if let Some(r) = reporter.borrow_mut().as_mut() {
                         r.checkpoint_written(cfg, &path, time, io);
                     }
                     cadence.advance(time);
@@ -14409,7 +14411,7 @@ where
             cadence.index,
             report.steps.checked_sub(1).map_or(AuditBasis::Primed, AuditBasis::AfterStep),
         )?;
-        if let Some(r) = reporter.as_mut() {
+        if let Some(r) = reporter.borrow_mut().as_mut() {
             r.checkpoint_written(cfg, &final_path, report.time, io);
         }
         fabric.finish(deadline).map_err(|e| e.to_string())?;
@@ -14467,6 +14469,7 @@ where
         }
         Ok((report.steps, report.time, report.halt))
     })();
+    let reporter = reporter.into_inner();
     match outcome {
         Ok((iter, time, Some(cause))) => halted_launch(cfg, reporter, iter, time, &cause),
         Ok((iter, time, None)) => {
