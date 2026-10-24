@@ -1104,3 +1104,80 @@ def test_a_killed_worker_ends_the_session_and_keeps_the_last_complete_checkpoint
     resumed = _launch(tmp_path / "resumed", layout, published[last] + 2, workers=2, checkpoint=last, flags=_mode_flags(mode))
     with h5py.File(resumed.final, "r") as f:
         assert int(f["level_0"].attrs["iteration"]) == published[last] + 2
+
+
+# -----------------------------------------------------------------------------
+# scheduler sessions over one output directory: each session rendezvous through a record of its
+# own, so a resumed session never reads a record an earlier (killed) session left behind
+# -----------------------------------------------------------------------------
+
+
+def _scheduler_session(out: Path, layout: Path, steps: int, step_id: int, checkpoint: Path | None = None, coordinator_delay: float = 0.0) -> None:
+    """two workers started as one slurm step would start them, worker 1 first; worker 0 starts
+    `coordinator_delay` seconds later"""
+    cmd = [
+        sys.executable, "-m", "simbi.cli", "launch", SCRIPT, "--layout", str(layout),
+        "--max-steps", str(steps), "--resolution", ",".join(str(r) for r in RESOLUTION),
+        "--data-directory", str(out / "ignored"), "--checkpoint-interval", "1e9",
+    ]
+    if checkpoint is not None:
+        cmd += ["--checkpoint", str(checkpoint)]
+    procs = {}
+    for rank in (1, 0):
+        if rank == 0:
+            time.sleep(coordinator_delay)
+        env = dict(os.environ, SLURM_PROCID=str(rank), SLURM_NTASKS="2", SLURM_JOB_ID="4242", SLURM_STEP_ID=str(step_id))
+        procs[rank] = subprocess.Popen(cmd, env=env, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, text=True)
+    errs = {rank: p.communicate(timeout=300)[1] for rank, p in procs.items()}
+    for rank, p in procs.items():
+        assert p.returncode == 0, f"scheduler-started worker {rank} failed:\n{errs[rank][-3000:]}"
+
+
+def _scheduler_layout(path: Path, directory: Path) -> Path:
+    path.write_text(
+        "[execution]\nmode = \"scheduler\"\nworkers = 2\n\n[partition]\nshape = [2, 1]\n\n"
+        f'[checkpoint]\nstaging_mb = 1\ndirectory = "{directory}"\nkeep_rendezvous = true\n'
+    )
+    return path
+
+
+def test_a_scheduler_session_ignores_the_record_a_killed_session_left(tmp_path: Path) -> None:
+    """records a killed coordinator left behind, under the unscoped name and under an earlier
+    step's name, each naming a dead address and another credential; worker 1 starts 3 s before
+    the coordinator, so it reads the directory before the session's own record exists. the
+    session rendezvous through its own record and equals the reference."""
+    reference, _ = _reference(tmp_path / "single", STEPS)
+    out = tmp_path / "sched"
+    out.mkdir()
+    for stale in (out / ".rendezvous", out / ".rendezvous-4242.6"):
+        stale.write_text("127.0.0.1:9\n12345\n")
+        stale.chmod(0o600)
+    layout = _scheduler_layout(tmp_path / "sched.toml", out)
+    _scheduler_session(out, layout, STEPS, step_id=7, coordinator_delay=3.0)
+    finals = sorted(out.glob("*final*.h5"))
+    assert len(finals) == 1, f"expected one final checkpoint in {out}, found {finals}"
+    kept = out / ".rendezvous-4242.7.kept"
+    assert kept.exists(), f"the session's record was not kept: {sorted(p.name for p in out.iterdir())}"
+    assert int(kept.read_text().splitlines()[1]) != 12345, "the session took the stale credential"
+    _assert_same_state(finals[0], reference, "scheduler session beside stale records")
+
+
+def test_a_scheduler_session_resumed_in_its_directory_matches_the_uninterrupted_run(tmp_path: Path) -> None:
+    """half the steps in one scheduler step, the rest resumed from its final checkpoint in a later
+    step over the same directory: each session rendezvous under a fresh record and credential, and
+    the resumed run equals the uninterrupted single-grid run"""
+    reference, _ = _reference(tmp_path / "single", STEPS)
+    out = tmp_path / "sched"
+    layout = _scheduler_layout(tmp_path / "sched.toml", out)
+    _scheduler_session(out, layout, STEPS // 2, step_id=1)
+    first = sorted(out.glob("*final*.h5"))
+    assert len(first) == 1, f"the first session published {first}"
+    partial = first[0].rename(out / "first-session.h5")
+    with h5py.File(partial, "r") as f:
+        assert int(f["level_0"].attrs["iteration"]) == STEPS // 2
+    _scheduler_session(out, layout, STEPS, step_id=2, checkpoint=partial)
+    finals = sorted(out.glob("*final*.h5"))
+    assert len(finals) == 1, f"expected one final checkpoint in {out}, found {finals}"
+    credentials = [int((out / f".rendezvous-4242.{step}.kept").read_text().splitlines()[1]) for step in (1, 2)]
+    assert credentials[0] != credentials[1], "the resumed session reused the first session's credential"
+    _assert_same_state(finals[0], reference, "scheduler session resumed in its directory")

@@ -13,7 +13,7 @@
 # its worker id from the scheduler's environment and runs the worker role
 # directly, with the coordinator writing its advertised address and the
 # session credential into a restricted rendezvous file on the shared output
-# directory that the others poll.
+# directory that the others poll, named for the scheduler's job step.
 #
 # usage:
 #   layout = Layout.from_file("cluster.toml", resolution)
@@ -321,9 +321,14 @@ def scheduler_identity(layout: Layout) -> tuple[int, int]:
     return worker, workers
 
 
-def scheduler_rendezvous(layout: Layout, data_directory: str) -> Path:
-    """the rendezvous file every scheduler-started worker of a session shares: a fixed name
-    under the output directory, which the workers see through the shared filesystem."""
+def scheduler_rendezvous(layout: Layout, data_directory: str, environ: Mapping[str, str] = os.environ) -> Path:
+    """the rendezvous file every scheduler-started worker of a session shares, under the output
+    directory the workers see through the shared filesystem. under slurm the name carries the
+    job and step ids, which every task of one step shares and each step holds alone, so a record
+    a killed session left behind is never read by a later session in the same directory."""
     output = Path(layout.checkpoint_directory or data_directory)
     output.mkdir(parents=True, exist_ok=True)
+    job, step = environ.get("SLURM_JOB_ID"), environ.get("SLURM_STEP_ID")
+    if job is not None and step is not None:
+        return output / f".rendezvous-{job}.{step}"
     return output / ".rendezvous"
