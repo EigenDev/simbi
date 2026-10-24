@@ -869,7 +869,7 @@ def test_a_final_checkpoint_after_a_cadence_checkpoint_of_the_same_step_is_publi
     _assert_same_state(finals[0], reference[0], "two workers, a checkpoint every step")
 
 
-GPU_BACKEND = runner._load_backend("gpu") if "SIMBI_LAUNCH_GPU_TESTS" in os.environ else None
+GPU_BACKEND = _load_backend("gpu") if "SIMBI_LAUNCH_GPU_TESTS" in os.environ else None
 needs_gpu = pytest.mark.skipif(GPU_BACKEND is None, reason="set SIMBI_LAUNCH_GPU_TESTS on a gpu node with the gpu backend built")
 DEVICE_LINE = re.compile(r"SIMBI launch: worker=(\d+) host=(\S*) pci=(\S+) device=")
 
