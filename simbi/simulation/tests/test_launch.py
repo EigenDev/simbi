@@ -1036,3 +1036,71 @@ def test_a_magnetized_launch_equals_one_device_at_every_checkpoint_to_its_end_ti
     if mode == "gpu":
         bound = _bound_devices(done.stderr)
         assert sorted(bound) == [0, 1] and bound[0] != bound[1], f"device bindings {bound}"
+
+
+# -----------------------------------------------------------------------------
+# a worker lost during evolution
+# -----------------------------------------------------------------------------
+
+PID_LINE = re.compile(r"launch: worker (\d+) pid (\d+)")
+
+
+def _wait_for(condition, seconds: float, what: str):
+    deadline = time.monotonic() + seconds
+    while time.monotonic() < deadline:
+        value = condition()
+        if value:
+            return value
+        time.sleep(0.1)
+    raise AssertionError(f"{what} within {seconds} s")
+
+
+def _published_iterations(out: Path) -> dict[Path, int]:
+    """every published checkpoint by its iteration; a file the writer renamed into place is whole"""
+    found = {}
+    for path in out.glob("*.h5"):
+        with h5py.File(path, "r") as f:
+            found[path] = int(f["level_0"].attrs["iteration"])
+    return found
+
+
+@pytest.mark.parametrize("victim", [0, 1], ids=["coordinator", "peer"])
+@pytest.mark.parametrize("mode", MODES)
+def test_a_killed_worker_ends_the_session_and_keeps_the_last_complete_checkpoint(tmp_path: Path, mode: str, victim: int) -> None:
+    """a worker killed by SIGKILL once a checkpoint past the second step is published: the
+    survivor detects the loss itself and exits nonzero within the launcher's 5 s grace, the
+    launcher exits nonzero and records both exits, no final checkpoint is published, and the last
+    published checkpoint resumes"""
+    layout = _layout(tmp_path / "two.toml", workers=2, shape=(2, 1))
+    out = tmp_path / "two"
+    cmd = _launch_command(out, layout, 1_000_000, interval=0.02, flags=["--end-time", "1e9", *_mode_flags(mode)])
+    stdout, stderr = tmp_path / "launcher.out", tmp_path / "launcher.err"
+    with open(stdout, "w") as so, open(stderr, "w") as se:
+        proc = subprocess.Popen(cmd, stdout=so, stderr=se, text=True)
+        try:
+            pids = _wait_for(lambda: (lambda p: p if len(p) == 2 else None)({int(w): int(pid) for w, pid in PID_LINE.findall(stdout.read_text())}), 120, "two worker pids")
+            _wait_for(lambda: any(it >= 2 for it in _published_iterations(out).values()), 300, "a checkpoint past the second step")
+            os.kill(pids[victim], signal.SIGKILL)
+            killed = time.monotonic()
+            proc.wait(timeout=120)
+            ended = time.monotonic() - killed
+        finally:
+            if proc.poll() is None:
+                proc.kill()
+                proc.wait()
+    assert proc.returncode != 0, "the launcher reported success"
+    exits = {int(w): int(c) for w, c in EXIT.findall(stdout.read_text())}
+    survivor = 1 - victim
+    assert exits.get(victim) == -signal.SIGKILL, f"worker exit codes {exits}"
+    # a positive code is the survivor's own exit; the launcher's termination would be a signal
+    assert exits.get(survivor, 0) > 0, f"the survivor did not end on its own: worker exit codes {exits}"
+    assert ended < 5.0 + 2.0 + 5.0, f"the session took {ended:.1f} s to end after the kill"
+    record = " ".join(stderr.read_text().split())
+    assert f"worker {victim}" in record or "disconnected" in record.lower(), f"the survivor's record names no lost peer:\n{stderr.read_text()[-3000:]}"
+    published = _published_iterations(out)
+    assert published and not [p for p in published if "final" in p.name], f"published {sorted(p.name for p in published)}"
+    assert not list(out.glob(".rendezvous-*")), "the rendezvous file was left behind"
+    last = max(published, key=published.get)
+    resumed = _launch(tmp_path / "resumed", layout, published[last] + 2, workers=2, checkpoint=last, flags=_mode_flags(mode))
+    with h5py.File(resumed.final, "r") as f:
+        assert int(f["level_0"].attrs["iteration"]) == published[last] + 2
