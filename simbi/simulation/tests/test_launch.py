@@ -60,6 +60,8 @@ SCRIPT = str(Path(KelvinHelmholtz.__module__.replace(".", "/") + ".py"))
 
 PROVENANCE = re.compile(r"backend=([0-9a-f]{40}(?:-dirty)?) config=")
 EXIT = re.compile(r"launch: worker (\d+) exit (-?\d+)")
+GPU_BACKEND = _load_backend("gpu") if "SIMBI_LAUNCH_GPU_TESTS" in os.environ else None
+needs_gpu = pytest.mark.skipif(GPU_BACKEND is None, reason="set SIMBI_LAUNCH_GPU_TESTS on a gpu node with the gpu backend built")
 
 
 @dataclass
@@ -142,9 +144,9 @@ def _launch_command(out: Path, layout: Path, steps: int, checkpoint: Path | None
     return cmd
 
 
-def _launch(out: Path, layout: Path, steps: int, workers: int, checkpoint: Path | None = None, interval: float = 1e9, flags: list[str] | None = None, output: Path | None = None) -> Launched:
+def _launch(out: Path, layout: Path, steps: int, workers: int, checkpoint: Path | None = None, interval: float = 1e9, flags: list[str] | None = None, output: Path | None = None, env: dict[str, str] | None = None) -> Launched:
     cmd = _launch_command(out, layout, steps, checkpoint, interval, flags)
-    done = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
+    done = subprocess.run(cmd, capture_output=True, text=True, timeout=600, env=env)
     assert done.returncode == 0, f"launch failed:\nstdout:\n{done.stdout}\nstderr:\n{done.stderr}"
     exits = {int(w): int(c) for w, c in EXIT.findall(done.stdout)}
     assert sorted(exits) == list(range(workers)), f"exit codes reported for {sorted(exits)}, expected {workers} workers"
@@ -869,8 +871,6 @@ def test_a_final_checkpoint_after_a_cadence_checkpoint_of_the_same_step_is_publi
     _assert_same_state(finals[0], reference[0], "two workers, a checkpoint every step")
 
 
-GPU_BACKEND = _load_backend("gpu") if "SIMBI_LAUNCH_GPU_TESTS" in os.environ else None
-needs_gpu = pytest.mark.skipif(GPU_BACKEND is None, reason="set SIMBI_LAUNCH_GPU_TESTS on a gpu node with the gpu backend built")
 DEVICE_LINE = re.compile(r"SIMBI launch: worker=(\d+) host=(\S*) pci=(\S+) device=")
 
 
@@ -903,3 +903,64 @@ def test_a_two_gpu_launch_resumed_from_its_checkpoint_matches(tmp_path: Path) ->
     resumed = _launch(tmp_path / "second", layout, STEPS, workers=2, checkpoint=partial.final, flags=["--gpu"])
     assert resumed.backend == backend
     _assert_same_state(resumed.final, reference, "two gpu workers, resumed")
+
+
+# -----------------------------------------------------------------------------
+# the session's physical device bindings. a fault reports one pci address for every worker,
+# on this host or on a host of each worker's own, so the agreement runs on a host build.
+# -----------------------------------------------------------------------------
+
+
+def test_workers_bound_to_one_gpu_of_one_host_are_refused_together(tmp_path: Path) -> None:
+    """two workers reporting one pci address on one host: every worker refuses at the binding
+    agreement, before any state moves, within the session's startup, and nothing is published"""
+    layout = _layout(tmp_path / "two.toml", workers=2, shape=(2, 1))
+    out = tmp_path / "two"
+    env = dict(os.environ, SIMBI_FABRIC_INJECT="device:shared:0000:c1:00.0")
+    start = time.monotonic()
+    done = subprocess.run(_launch_command(out, layout, STEPS), capture_output=True, text=True, timeout=600, env=env)
+    elapsed = time.monotonic() - start
+    assert done.returncode != 0, f"the launch succeeded:\n{done.stdout}"
+    bound = _bound_devices(done.stderr)
+    assert sorted(bound) == [0, 1] and bound[0] == bound[1], f"the fault did not bind one gpu twice: {bound}"
+    exits = {int(w): int(c) for w, c in EXIT.findall(done.stdout)}
+    assert sorted(exits) == [0, 1] and all(c > 0 for c in exits.values()), f"worker exit codes {exits}"
+    flat = " ".join(done.stderr.split())
+    assert flat.count("workers 0 and 1 bound one physical gpu") == 2, f"a worker did not refuse at the agreement:\n{done.stderr}"
+    # well inside the 120 s rendezvous budget and the 600 s collective deadline: the refusal is
+    # the agreement's, not a stalled peer's
+    assert elapsed < 120, f"the refusal took {elapsed:.1f} s"
+    assert not list(out.glob("*.h5")), "a checkpoint was published"
+
+
+def test_one_pci_address_on_two_hosts_is_two_gpus(tmp_path: Path) -> None:
+    """the same pci address on two hosts names two gpus: the session runs and equals the
+    single-grid run"""
+    reference, _ = _reference(tmp_path / "single", STEPS)
+    layout = _layout(tmp_path / "two.toml", workers=2, shape=(2, 1))
+    env = dict(os.environ, SIMBI_FABRIC_INJECT="device:hosts:0000:c1:00.0")
+    launched = _launch(tmp_path / "two", layout, STEPS, workers=2, env=env)
+    bound = _bound_devices(launched.stderr)
+    assert sorted(bound) == [0, 1], f"device bindings {bound}"
+    assert bound[0][1] == bound[1][1] and bound[0][0] != bound[1][0], f"the fault did not share a pci address across hosts: {bound}"
+    _assert_same_state(launched.final, reference, "one pci address on two hosts")
+
+
+@needs_gpu
+def test_two_gpu_workers_masked_onto_one_gpu_are_refused_together(tmp_path: Path) -> None:
+    """a parent mask naming one device twice hands both workers the same physical gpu, each as
+    its logical device 0: the binding agreement refuses on every worker and nothing is published"""
+    present = [m for m in launcher.GPU_MASKS if m in os.environ]
+    first = os.environ[present[0]].split(",")[0].strip() if present else "0"
+    env = dict(os.environ, **{m: f"{first},{first}" for m in (present or ["HIP_VISIBLE_DEVICES", "CUDA_VISIBLE_DEVICES"])})
+    layout = _layout(tmp_path / "two.toml", workers=2, shape=(2, 1))
+    out = tmp_path / "two"
+    done = subprocess.run(_launch_command(out, layout, STEPS, flags=["--gpu"]), capture_output=True, text=True, timeout=600, env=env)
+    assert done.returncode != 0, f"the launch succeeded:\n{done.stdout}"
+    bound = _bound_devices(done.stderr)
+    assert sorted(bound) == [0, 1] and bound[0] == bound[1], f"the mask did not put both workers on one gpu: {bound}"
+    exits = {int(w): int(c) for w, c in EXIT.findall(done.stdout)}
+    assert sorted(exits) == [0, 1] and all(c > 0 for c in exits.values()), f"worker exit codes {exits}"
+    flat = " ".join(done.stderr.split())
+    assert flat.count("workers 0 and 1 bound one physical gpu") == 2, f"a worker did not refuse at the agreement:\n{done.stderr}"
+    assert not list(out.glob("*.h5")), "a checkpoint was published"

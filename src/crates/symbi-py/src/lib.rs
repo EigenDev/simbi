@@ -11263,6 +11263,9 @@ struct LaunchFault {
     level_rejection: Option<(u64, usize, u64, usize)>,
     /// a staging fault in this worker's nested flux contributions: (step, level, path, stage, fault)
     nested_contribution: Option<(u64, u8, u32, usize, symbi_sim::plan_exchange::StagingFault)>,
+    /// the device binding this worker reports in place of its own: a gpu at this pci address on
+    /// this host, or on a host named for the worker when the flag is set
+    device_binding: Option<(bool, String)>,
 }
 
 impl LaunchFault {
@@ -11286,6 +11289,21 @@ impl LaunchFault {
         if parts[0] == "cap" {
             // cap:STEP:BITS, on every worker alike
             fault.injection.cap_dt_at = Some((number(1)?, number(2)?));
+            return Ok(fault);
+        }
+        if parts[0] == "device" {
+            // device:shared:PCI or device:hosts:PCI, on every worker alike: one pci address on
+            // this host for every worker, or on a host of each worker's own
+            let distinct = match parts.get(1).copied() {
+                Some("shared") => false,
+                Some("hosts") => true,
+                _ => return Err(format!("SIMBI_FABRIC_INJECT='{spec}': field 1 is neither shared nor hosts")),
+            };
+            let pci = parts.get(2..).map(|p| p.join(":")).unwrap_or_default();
+            if pci.is_empty() {
+                return Err(format!("SIMBI_FABRIC_INJECT='{spec}': no pci address"));
+            }
+            fault.device_binding = Some((distinct, pci));
             return Ok(fault);
         }
         if parts[0] == "trouble" {
@@ -13776,15 +13794,25 @@ fn run_worker_process(
     }
 }
 
-/// the fabric session of one worker over its built tiles, whatever the regime: the
-/// rendezvous under the session credential, the worker loop with the coordinator-written
-/// checkpoints at the linear cadence, and the final checkpoint before the session ends.
-/// worker 0 reports through the decomposed table.
-#[allow(clippy::too_many_arguments)]
+/// the name of the host this process runs on
+fn host_name() -> String {
+    std::process::Command::new("hostname")
+        .output()
+        .ok()
+        .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+        .unwrap_or_default()
+}
+
+/// one record line to stderr in a single write, so the lines of workers sharing a stream stay whole
+fn record_line(line: &str) {
+    use std::io::Write;
+    let _ = std::io::stderr().write_all(format!("{line}\n").as_bytes());
+}
+
 /// bind a launched worker to its gpu: exactly one device visible to the process, reported with
-/// the worker id. more than one visible device would leave every worker of the node on device 0,
-/// so it is refused. a host build has nothing to bind
-fn bind_worker_device(worker: usize) -> Result<(), String> {
+/// the worker id, its host and the gpu's pci address. more than one visible device would leave
+/// every worker of the node on device 0, so it is refused. a host build binds no device
+fn bind_worker_device(worker: usize) -> Result<symbi_sim::device_identity::DeviceBinding, String> {
     #[cfg(feature = "gpu")]
     {
         let visible = symbi::symbi_xpu::device_count().map_err(|e| format!("worker {worker}: the gpu runtime: {e}"))?;
@@ -13792,26 +13820,53 @@ fn bind_worker_device(worker: usize) -> Result<(), String> {
             return Err(format!(
                 "worker {worker} sees {visible} gpus; a launched gpu worker computes on exactly one. the local \
                  launcher masks one per worker; under a scheduler bind one gpu per task (on Frontier: \
-                 srun --gpus-per-task=1 --gpu-bind=closest)"
+                 srun -c7 --gpus-per-task=1 --gpu-bind=closest)"
             ));
         }
         let info = symbi::symbi_xpu::device_info().map_err(|e| format!("worker {worker}: the gpu runtime: {e}"))?;
         // the physical identity: the host and the gpu's pci address. a masked worker sees its gpu
         // as logical 0, so two workers on two gpus of one node both report device 0 by ordinal
         let pci = symbi::symbi_xpu::pci_bus_id().map_err(|e| format!("worker {worker}: the gpu runtime: {e}"))?;
-        let host = std::process::Command::new("hostname").output().ok().map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string()).unwrap_or_default();
+        let host = host_name();
         let mask = ["ROCR_VISIBLE_DEVICES", "HIP_VISIBLE_DEVICES", "CUDA_VISIBLE_DEVICES"]
             .iter()
             .filter_map(|k| std::env::var(k).ok().map(|v| format!("{k}={v}")))
             .collect::<Vec<_>>()
             .join(" ");
-        eprintln!("SIMBI launch: worker={worker} host={host} pci={pci} device={} ({mask})", info.name);
+        record_line(&format!("SIMBI launch: worker={worker} host={host} pci={pci} device={} ({mask})", info.name));
+        return Ok(symbi_sim::device_identity::DeviceBinding::Gpu { host, pci });
     }
     #[cfg(not(feature = "gpu"))]
-    let _ = worker;
-    Ok(())
+    {
+        let _ = worker;
+        Ok(symbi_sim::device_identity::DeviceBinding::Host)
+    }
 }
 
+/// the binding a worker contributes to the session: its own, or the one a fault names, reported
+/// on the same record line as a real binding
+fn session_device_binding(worker: usize, fault: &LaunchFault) -> symbi_sim::device_identity::DeviceBinding {
+    use symbi_sim::device_identity::DeviceBinding;
+    let own = bind_worker_device(worker);
+    match (&fault.device_binding, own) {
+        (Some((distinct, pci)), _) => {
+            let host = if *distinct { format!("{}-worker{worker}", host_name()) } else { host_name() };
+            record_line(&format!("SIMBI launch: worker={worker} host={host} pci={pci} device=injected"));
+            DeviceBinding::Gpu { host, pci: pci.clone() }
+        }
+        (None, Ok(binding)) => binding,
+        (None, Err(reason)) => {
+            record_line(&format!("SIMBI launch: worker={worker} gpu binding refused: {reason}"));
+            DeviceBinding::Refused
+        }
+    }
+}
+
+/// the fabric session of one worker over its built tiles, whatever the regime: the
+/// rendezvous under the session credential, the worker loop with the coordinator-written
+/// checkpoints at the linear cadence, and the final checkpoint before the session ends.
+/// worker 0 reports through the decomposed table.
+#[allow(clippy::too_many_arguments)]
 fn worker_session<R, G, E, K, const D: usize, const DOF: usize>(
     cfg: &Config,
     launch: &WorkerLaunch,
@@ -13977,8 +14032,12 @@ where
         },
     });
     // a worker computes on the one gpu its process sees: the launcher (or the scheduler's
-    // per-task binding) masks the others, so logical device 0 is this worker's own
-    bind_worker_device(launch.worker)?;
+    // per-task binding) masks the others, so logical device 0 is this worker's own. the session
+    // compares the physical bindings before any state moves and ends on every worker together
+    // when two share a gpu or one could not bind
+    let binding = session_device_binding(launch.worker, &fault);
+    symbi_sim::device_identity::agree_device_bindings(&mut fabric, launch.worker, launch.workers, &binding, deadline)
+        .map_err(|e| e.to_string())?;
     let devices = vec![0i32; partition.n_tiles()];
     let ng_session = tiles[0].0.geom.ng;
     let restart_grid = decomposed_grid::<D>(cfg, ng_session);

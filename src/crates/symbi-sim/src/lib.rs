@@ -30,6 +30,7 @@ pub mod census;
 pub mod collective_stage;
 pub mod checkpoint;
 pub mod decomp;
+pub mod device_identity;
 pub mod device_local;
 pub mod distributed_checkpoint;
 pub mod driver;
