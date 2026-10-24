@@ -661,45 +661,65 @@ def test_a_rejection_on_one_worker_rolls_every_worker_back(tmp_path: Path) -> No
     _assert_same_state(launched, reference, "two workers, rejection on worker 1")
 
 
-def test_a_rejection_on_a_magnetized_launch_replays_every_worker_from_the_step_entry(tmp_path: Path) -> None:
-    """a magnetized store carries the step-entry snapshot of its conserved state, cell field and
-    face field, so a rejection forced on worker 1 at step 5 in the corrector replays the step on
-    every worker. the launch stops after that step: two workers equal the clean two-worker launch
-    whose step 5 is capped at the timestep the replay accepted (no rejection there, the same
-    accepted timestep sequence entered from a state no rollback touched), bit for bit with the
-    staggered faces, the clock and the metadata, and equal one worker under the same rejection."""
+REPORT_LINE = re.compile(r"SIMBI launch: worker=(\d+)/\d+ steps=(\d+) rejections=(\d+)")
+MODES = ["cpu", pytest.param("gpu", marks=needs_gpu)]
+
+
+def _mode_flags(mode: str) -> list[str]:
+    return ["--gpu"] if mode == "gpu" else []
+
+
+@pytest.mark.parametrize("mode", MODES)
+@pytest.mark.parametrize("magnetized", [False, True], ids=["hydro", "mhd"])
+def test_a_rejection_on_one_worker_replays_every_worker_against_the_capped_clean_launch(tmp_path: Path, magnetized: bool, mode: str) -> None:
+    """a rejection forced on worker 1 at step 5 in the corrector replays the step on every
+    worker from its entry: the conserved state, and on a magnetized store the cell field and the
+    staggered faces. the launch stops after that step. every worker counts the one rejection, and
+    the state equals the clean two-worker launch whose step 5 is capped at the timestep the
+    replay accepted (no rejection there, the same accepted timestep sequence entered from a state
+    no rollback touched), bit for bit with the faces, the clock and the metadata; it also equals
+    one worker under the same rejection."""
     rejected_step = 5
     steps = rejected_step + 1
     one = _layout(tmp_path / "one.toml", workers=1, shape=(1, 1))
     two = _layout(tmp_path / "two.toml", workers=2, shape=(2, 1))
-    rejections = re.compile(r"SIMBI launch: worker=\d+/\d+ steps=\d+ rejections=(\d+)")
 
-    def launch(out: Path, layout: Path, workers: int, inject: str | None) -> tuple[Path, set[int]]:
+    def launch(out: Path, layout: Path, workers: int, inject: str | None) -> tuple[Path, dict[int, int]]:
         env = dict(os.environ)
         env.pop("SIMBI_FABRIC_INJECT", None)
         if inject is not None:
             env["SIMBI_FABRIC_INJECT"] = inject
-        done = subprocess.run(_mhd_launch_command(out, layout, steps), capture_output=True, text=True, timeout=600, env=env)
+        command = _mhd_launch_command(out, layout, steps) if magnetized else _launch_command(out, layout, steps)
+        done = subprocess.run(command + _mode_flags(mode), capture_output=True, text=True, timeout=600, env=env)
         assert done.returncode == 0, f"launch failed:\nstdout:\n{done.stdout}\nstderr:\n{done.stderr}"
         exits = {int(w): int(c) for w, c in EXIT.findall(done.stdout)}
         assert sorted(exits) == list(range(workers)) and all(c == 0 for c in exits.values()), f"worker exit codes {exits}"
+        reports = {int(w): (int(n), int(r)) for w, n, r in REPORT_LINE.findall(done.stderr)}
+        assert sorted(reports) == list(range(workers)), f"the workers reported {reports}"
+        assert all(n == steps for n, _ in reports.values()), f"the workers accepted {reports} steps, expected {steps}"
         files = sorted(out.glob("*final*.h5"))
         assert len(files) == 1, f"expected one final checkpoint in {out}, found {files}"
-        return files[0], {int(r) for r in rejections.findall(done.stderr)}
+        with h5py.File(files[0], "r") as f:
+            assert int(f["level_0"].attrs["iteration"]) == steps, "the launch did not stop after the replayed step"
+            if magnetized:
+                assert "level_0/partition_0/hydro/magnetic/B1/data" in f, "the checkpoint carries no staggered faces"
+        return files[0], {w: r for w, (_, r) in reports.items()}
 
     launched, launched_rejections = launch(tmp_path / "two", two, 2, f"reject:1:{rejected_step}:1")
-    assert launched_rejections == {1}, "a worker did not count the rejection"
+    assert launched_rejections == {0: 1, 1: 1}, f"rejections per worker {launched_rejections}: a worker kept out of the rollback"
     clean, clean_rejections = launch(tmp_path / "clean", two, 2, None)
-    assert clean_rejections == {0}
+    assert clean_rejections == {0: 0, 1: 0}
     with h5py.File(launched, "r") as fr, h5py.File(clean, "r") as fc:
         accepted = float(fr["level_0"].attrs["dt"])
         assert accepted < float(fc["level_0"].attrs["dt"]), "the rejection left the timestep unreduced; the replay is never exercised"
     capped, capped_rejections = launch(tmp_path / "capped", two, 2, f"cap:{rejected_step}:{int(np.float64(accepted).view(np.uint64))}")
-    assert capped_rejections == {0}, "the capped control rejected a step"
-    _assert_same_state(launched, capped, "two magnetized workers, rejection on worker 1, against the capped clean launch")
+    assert capped_rejections == {0: 0, 1: 0}, "the capped control rejected a step"
+    with h5py.File(capped, "r") as f:
+        assert float(f["level_0"].attrs["dt"]) == accepted, "the capped control's last step took another timestep"
+    _assert_same_state(launched, capped, "two workers, rejection on worker 1, against the capped clean launch")
     reference, reference_rejections = launch(tmp_path / "one", one, 1, f"reject:0:{rejected_step}:1")
-    assert reference_rejections == {1}, "the one-worker run did not count its rejection"
-    _assert_same_state(launched, reference, "two magnetized workers, rejection on worker 1, against one worker")
+    assert reference_rejections == {0: 1}, "the one-worker run did not count its rejection"
+    _assert_same_state(launched, reference, "two workers, rejection on worker 1, against one worker")
 
 # -----------------------------------------------------------------------------
 # relativistic hydro through the public path, on the two-dimensional riemann problem of
