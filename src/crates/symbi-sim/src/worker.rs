@@ -130,8 +130,15 @@ pub struct WorkerTiming {
     pub compute: Duration,
     /// the timestep minimum and the rejection votes
     pub collectives: Duration,
-    /// halo exchange: pack, grants, transfer, scatter
+    /// halo exchange: pack, grants, transfer, scatter, from the point every kernel before it has
+    /// completed on the device
     pub exchange: Duration,
+    /// the caller's hooks: the primed-state hook and the step callback, where checkpoints and
+    /// progress reports run
+    pub callback: Duration,
+    /// the whole march, from the prime to the last step's callback; compute, collectives,
+    /// exchange and callback divide it
+    pub march: Duration,
 }
 
 #[derive(Debug)]
@@ -718,6 +725,8 @@ where
     T: HaloTransport,
     L: Link,
 {
+    // the kernels before the exchange complete on the clock of the compute that launched them
+    crate::decomp::drain_devices::<M>(devices);
     let clock = Instant::now();
     let mut run = || -> Result<(), FabricError> {
         for axis in 0..D {
@@ -2230,7 +2239,10 @@ where
     }
     {
         let sh = shared!();
-        on_primed(&sh, fabric).map_err(|e| fail(fabric, e))?;
+        let clock = Instant::now();
+        let primed = on_primed(&sh, fabric);
+        in_callback += clock.elapsed();
+        primed.map_err(|e| fail(fabric, e))?;
     }
 
     let guard_scope = crate::guard_ledger::open_scope();
@@ -2520,9 +2532,9 @@ where
     }
     // compute is the remainder: every kernel call on owned tiles, outside the fabric and the
     // step callback
-    timing.compute = march_start
-        .elapsed()
-        .saturating_sub(timing.collectives + timing.exchange + in_callback);
+    timing.march = march_start.elapsed();
+    timing.callback = in_callback;
+    timing.compute = timing.march.saturating_sub(timing.collectives + timing.exchange + in_callback);
     report.timing = timing;
     report.grant_high_water = (0..exchange.placement().workers)
         .map(|p| fabric.grants().high_water(WorkerId(p)))

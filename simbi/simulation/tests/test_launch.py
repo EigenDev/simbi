@@ -1181,3 +1181,24 @@ def test_a_scheduler_session_resumed_in_its_directory_matches_the_uninterrupted_
     credentials = [int((out / f".rendezvous-4242.{step}.kept").read_text().splitlines()[1]) for step in (1, 2)]
     assert credentials[0] != credentials[1], "the resumed session reused the first session's credential"
     _assert_same_state(finals[0], reference, "scheduler session resumed in its directory")
+
+
+TIMING_LINE = re.compile(
+    r"SIMBI launch: worker=(\d+)/\d+ steps=\d+ rejections=\d+ compute=([0-9.]+)s collectives=([0-9.]+)s "
+    r"exchange=([0-9.]+)s callback=([0-9.]+)s march=([0-9.]+)s"
+)
+
+
+def test_a_launch_divides_its_march_into_disjoint_timing_buckets(tmp_path: Path) -> None:
+    """every worker reports its march and the four buckets that divide it: compute, collectives,
+    exchange, and the callback where the cadence checkpoints run. the buckets sum to the march
+    within the six-decimal print rounding (five values, 5e-7 each)."""
+    layout = _layout(tmp_path / "two.toml", workers=2, shape=(2, 1))
+    launched = _launch(tmp_path / "two", layout, STEPS, workers=2, interval=1e-3)
+    cadence = [p for p in (tmp_path / "two").glob("*.h5") if "final" not in p.name]
+    assert len(cadence) >= 3, f"{len(cadence)} cadence checkpoints; the callback bucket is not exercised"
+    timing = {int(w): [float(v) for v in vals] for w, *vals in TIMING_LINE.findall(launched.stderr)}
+    assert sorted(timing) == [0, 1], f"timing lines {timing}"
+    for worker, (compute, collectives, exchange, callback, march) in timing.items():
+        assert march > 0 and callback > 0, f"worker {worker}: march {march}, callback {callback}"
+        assert abs(compute + collectives + exchange + callback - march) <= 2.5e-6, f"worker {worker}: buckets {timing[worker]}"

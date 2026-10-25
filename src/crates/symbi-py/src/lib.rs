@@ -14425,8 +14425,8 @@ where
             let (audits, audit) = audit_total.get();
             let line = format!(
                 "SIMBI launch: worker={}/{} steps={} rejections={} compute={:.6}s collectives={:.6}s \
-                 exchange={:.6}s final_checkpoint={:.6}s checkpoint_audits={} audit_faces={} \
-                 audit_bytes={} checkpoint_audit={:.6}s\n",
+                 exchange={:.6}s callback={:.6}s march={:.6}s final_checkpoint={:.6}s checkpoint_audits={} \
+                 audit_faces={} audit_bytes={} checkpoint_audit={:.6}s\n",
                 launch.worker,
                 launch.workers,
                 report.steps,
@@ -14434,6 +14434,8 @@ where
                 t.compute.as_secs_f64(),
                 t.collectives.as_secs_f64(),
                 t.exchange.as_secs_f64(),
+                t.callback.as_secs_f64(),
+                t.march.as_secs_f64(),
                 io,
                 audits,
                 audit.faces,

@@ -1923,9 +1923,9 @@ where
             Err(e) => return Err(fail(fabric, e)),
         }
     }
-    timing.compute = march_start
-        .elapsed()
-        .saturating_sub(timing.collectives + timing.exchange + in_callback);
+    timing.march = march_start.elapsed();
+    timing.callback = in_callback;
+    timing.compute = timing.march.saturating_sub(timing.collectives + timing.exchange + in_callback);
     report.timing = timing;
     report.grant_high_water = (0..plans.root.placement().workers)
         .map(|p| fabric.grants().high_water(WorkerId(p)))
