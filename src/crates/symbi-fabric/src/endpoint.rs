@@ -1253,6 +1253,11 @@ impl<L: Link> Fabric<L> {
                     _ => self.link.send(self.me, peer, header, &payload)?,
                 }
             }
+            // one nonblocking write attempt per peer, so the results leave before this collective
+            // returns: the coordinator's next fabric call may lie a whole compute phase away.
+            // bytes a full socket refuses stay queued in frame order and leave at the next drive
+            // or flush; a peer that already sent Done is detached as on a drive
+            self.tolerating_done(|link| link.flush_writes())?;
             if let Some((pending, _)) = self.collective.pending {
                 if pending == op {
                     self.collective.result = Some(result);
