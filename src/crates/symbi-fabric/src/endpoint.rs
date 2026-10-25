@@ -392,6 +392,8 @@ pub struct Fabric<L: Link> {
     /// the frame bound every worker of the session honors, agreed at the first windowed
     /// assembly
     agreed_payload: Option<usize>,
+    /// the diagnostic wait record SIMBI_FABRIC_TRACE enables
+    trace: Option<Box<crate::trace::Trace>>,
 }
 
 /// the checkpoint block path. a worker sends blocks to the coordinator under a byte
@@ -565,6 +567,7 @@ impl<L: Link> Fabric<L> {
                 held: Vec::new(),
             },
             agreed_payload: None,
+            trace: crate::trace::Trace::from_env(me.0),
             blocks: Blocks {
                 credit: 0,
                 outstanding: 0,
@@ -881,7 +884,14 @@ impl<L: Link> Fabric<L> {
     fn pause_if_idle(&mut self, mark: u64) {
         if self.advance_mark() == mark {
             self.stats.idle_pauses += 1;
-            std::thread::sleep(POLL_PAUSE);
+            match self.trace.as_mut() {
+                Some(trace) => {
+                    let clock = Instant::now();
+                    std::thread::sleep(POLL_PAUSE);
+                    trace.slept(clock.elapsed());
+                }
+                None => std::thread::sleep(POLL_PAUSE),
+            }
         } else {
             self.stats.advancing_passes += 1;
         }
@@ -1045,6 +1055,9 @@ impl<L: Link> Fabric<L> {
                 }) else {
                     return Err(FabricError::protocol(from, "malformed Result payload"));
                 };
+                if let Some(trace) = self.trace.as_mut() {
+                    trace.event("recv", u64::from(header.id), 0, 0);
+                }
                 match self.collective.pending {
                     Some((op, k)) if op == header.id && k == kind => {
                         self.collective.result = Some(words);
@@ -1145,6 +1158,9 @@ impl<L: Link> Fabric<L> {
         kind: OpKind,
         words: Vec<u64>,
     ) -> Result<(), FabricError> {
+        if let Some(trace) = self.trace.as_mut() {
+            trace.event("arrive", u64::from(op), u64::from(from.0), 0);
+        }
         let workers = self.workers;
         let current = self.collective.gathers[0].op;
         let slot = if op == current {
@@ -1231,6 +1247,9 @@ impl<L: Link> Fabric<L> {
                     dense
                 }
             };
+            if let Some(trace) = self.trace.as_mut() {
+                trace.event("result", u64::from(op), 0, 0);
+            }
             let payload = encode_op(kind, &result);
             let header = Header {
                 kind: Kind::Result,
@@ -1327,6 +1346,9 @@ impl<L: Link> Fabric<L> {
         self.collective.next_op += 1;
         self.collective.pending = Some((op, kind));
         self.collective.result = None;
+        if let Some(trace) = self.trace.as_mut() {
+            trace.begin_collective(op, kind as u8);
+        }
         if self.is_coordinator() {
             self.table_contribution(self.me, op, kind, words)?;
         } else {
@@ -1355,6 +1377,9 @@ impl<L: Link> Fabric<L> {
         }
         self.service()?;
         if let Some(result) = self.collective.result.take() {
+            if let (Some(trace), Some((op, _))) = (self.trace.as_mut(), self.collective.pending) {
+                trace.end_collective(op);
+            }
             self.collective.pending = None;
             return Ok(Some(result));
         }
@@ -1630,9 +1655,15 @@ impl<L: Link> Fabric<L> {
     /// progress until the open phase is done or `deadline` passes.
     pub fn wait(&mut self, deadline: Duration) -> Result<(), FabricError> {
         let start = Instant::now();
+        if let Some(trace) = self.trace.as_mut() {
+            trace.event("xbegin", 0, 0, 0);
+        }
         loop {
             let mark = self.advance_mark();
             if self.progress()? == Progress::Done {
+                if let Some(trace) = self.trace.as_mut() {
+                    trace.event("xend", 0, 0, 0);
+                }
                 return Ok(());
             }
             if start.elapsed() > deadline {

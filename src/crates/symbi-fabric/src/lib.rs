@@ -24,6 +24,7 @@ pub mod grant;
 pub mod ident;
 pub mod rendezvous;
 pub mod tcp;
+pub mod trace;
 
 pub use endpoint::{
     ABSENT, PASS_KINDS,
