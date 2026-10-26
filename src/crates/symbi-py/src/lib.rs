@@ -12925,8 +12925,9 @@ where
     let binding = session_device_binding(launch.worker, &fault);
     symbi_sim::device_identity::agree_device_bindings(&mut fabric, launch.worker, launch.workers, &binding, deadline)
         .map_err(|e| e.to_string())?;
-    // the transfers this worker's plans send to other workers over one pass of the phase table,
-    // by plan role: the coarse-fine traffic that crosses a worker boundary
+    // by plan role, the transfers this worker's compiled plans schedule to other workers, summed
+    // over every point of the phase table, the initialization points included: a property of the
+    // plans, read before any exchange runs
     {
         let mut remote: std::collections::BTreeMap<String, u64> = std::collections::BTreeMap::new();
         for plan in &all {

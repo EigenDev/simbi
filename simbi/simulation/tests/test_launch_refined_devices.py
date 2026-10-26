@@ -6,9 +6,11 @@
 # two cuts make the coarse-fine traffic cross the workers: a cut on the fine
 # box's low x face (the flux-register contributions travel to the coarse cells'
 # owner, the parent prim stencil to the fine tile's), and a cut through the box
-# (the fine level's halos travel between the workers). each launch reports the
-# transfers its plans send to the other worker by role, and the gate asserts the
-# role it is built to exercise.
+# (the fine level's halos travel between the workers). each launch reports, by
+# plan role, the transfers its compiled plans schedule to the other worker
+# (summed over the phase table's points, a property of the plans); the gate
+# asserts that the role its cut is built to exercise schedules remote transfers,
+# and the bitwise equality with the single device is the runtime evidence.
 # - evolution, priming and checkpoints: every published checkpoint, the opening
 #   one included, equals the single device's, whole file, both levels
 # - restart: half the steps cut through the box, the rest resumed on the cut on
@@ -128,7 +130,7 @@ def test_a_refined_launch_equals_one_device_at_every_checkpoint(tmp_path: Path, 
     launched, stderr = _launch(tmp_path / "two", layout, mode)
     remote = _remote_sends(stderr)
     for role in roles:
-        assert any(remote[w].get(role, 0) > 0 for w in remote), f"{geometry}: no {role} transfer crosses the workers ({remote}); the gate is vacuous"
+        assert any(remote[w].get(role, 0) > 0 for w in remote), f"{geometry}: the plans schedule no remote {role} transfer ({remote}); the gate is vacuous"
     assert all(n == STEPS for n, _ in _reports(stderr).values()), f"steps per worker {_reports(stderr)}"
     assert sorted(launched) == sorted(reference), f"checkpoints {sorted(launched)} against {sorted(reference)}"
     assert len(launched) >= 4, f"{len(launched)} checkpoints; the cadence is not exercised"
