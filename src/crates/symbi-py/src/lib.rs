@@ -11593,6 +11593,10 @@ mod launch_authorization_tests {
         assert_eq!(ungated_on_device(None, true), None);
         let mut nested = gated();
         nested.regions = 2;
+        assert_eq!(ungated_on_device(Some(&nested), true), None, "two nested regions are the gated depth");
+        nested.body = super::untested_device_body(&[sink()]);
+        assert_eq!(ungated_on_device(Some(&nested), true), None, "the gated sink under two nested regions");
+        nested.regions = 3;
         assert_eq!(ungated_on_device(Some(&nested), false), None, "a refined launch on host memory has its own gates");
     }
 
@@ -11604,7 +11608,7 @@ mod launch_authorization_tests {
             ("a 2-dimensional grid", Box::new(|f| f.dims = 2)),
             ("the spherical chart", Box::new(|f| f.coord_system = "spherical".into())),
             ("a non-uniform spacing", Box::new(|f| f.uniform_spacing = false)),
-            ("2 refined regions", Box::new(|f| f.regions = 2)),
+            ("3 refined regions", Box::new(|f| f.regions = 3)),
             ("ppm reconstruction", Box::new(|f| f.reconstruction = "ppm".into())),
             ("the van leer limiter", Box::new(|f| f.van_leer = true)),
             ("the hllc solver", Box::new(|f| f.solver = "hllc".into())),
@@ -11852,7 +11856,8 @@ fn untested_device_body(bodies: &[BodyParams]) -> Option<String> {
 }
 
 /// the first structural property of a refined run outside the scope the gpu hardware gates
-/// verified: newtonian hydro on a 3D uniform cartesian grid, one refined region, plm with a limiter of
+/// verified: newtonian hydro on a 3D uniform cartesian grid, one refined region or two nested ones
+/// (every level of ratio two, as the refined launch requires), plm with a limiter of
 /// the minmod-MC family (any validated theta), hlle, rk2,
 /// the ideal gas, outflow on every face, on two workers, at most the gated sink, no tracer, passive scalar,
 /// source, census, viscosity, mesh motion, perturbation, driven or gradient wall, declared target,
@@ -11863,7 +11868,7 @@ fn untested_refined_device_property(f: &RefinedDeviceFacts) -> Option<String> {
         (f.dims != 3, format!("a {}-dimensional grid", f.dims)),
         (f.coord_system != "cartesian", format!("the {} chart", f.coord_system)),
         (!f.uniform_spacing, "a non-uniform spacing".into()),
-        (f.regions != 1, format!("{} refined regions", f.regions)),
+        (!(1..=2).contains(&f.regions), format!("{} refined regions", f.regions)),
         (f.reconstruction != "plm", format!("{} reconstruction", f.reconstruction)),
         (f.van_leer, "the van leer limiter".into()),
         (f.solver != "hlle", format!("the {} solver", f.solver)),

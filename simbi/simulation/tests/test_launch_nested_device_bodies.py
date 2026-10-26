@@ -22,7 +22,8 @@
 #   step, with the sink cut by the workers, against the clean launch capped at
 #   the accepted timestep: no accretion, force, torque or heat of the rejected
 #   attempt survives
-# nested refinement on gpu device memory runs under SIMBI_LAUNCH_EXPERIMENTAL.
+# the sink under two nested regions runs on either device without
+# SIMBI_LAUNCH_EXPERIMENTAL.
 #
 # run: pytest -m simulation simbi/simulation/tests/test_launch_nested_device_bodies.py
 # =============================================================================
@@ -37,7 +38,7 @@ import pytest
 
 from simbi.simulation.tests.test_launch import MODES, _bound_devices, _layout, bounded_processes  # noqa: F401  the autouse process guard
 from simbi.simulation.tests.test_launch_bodies import _assert_same, _assert_same_diagnostics, _final, _iteration
-from simbi.simulation.tests.test_launch_nested_devices import EXPERIMENTAL, REPORT, _remote_sends
+from simbi.simulation.tests.test_launch_nested_devices import REPORT, _remote_sends
 
 pytestmark = pytest.mark.simulation
 
@@ -84,13 +85,11 @@ def sink(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     return tmp_path / "launched_nested_sink.py"
 
 
-def _env(mode: str, inject: str | None = None) -> dict[str, str]:
-    """nested refinement on gpu device memory runs under the experimental opt-in"""
+def _env(inject: str | None = None) -> dict[str, str]:
+    """no experimental opt-in: the sink under two nested regions runs on either device without it"""
     env = dict(os.environ)
     env.pop("SIMBI_FABRIC_INJECT", None)
     env.pop("SIMBI_LAUNCH_EXPERIMENTAL", None)
-    if mode == "gpu":
-        env["SIMBI_LAUNCH_EXPERIMENTAL"] = "1"
     if inject is not None:
         env["SIMBI_FABRIC_INJECT"] = inject
     return env
@@ -123,10 +122,10 @@ def _launch(script: Path, out: Path, layout: Path, mode: str, steps: int, checkp
         cmd += ["--checkpoint", str(checkpoint)]
     if mode == "gpu":
         cmd.append("--gpu")
-    done = subprocess.run(cmd, capture_output=True, text=True, timeout=900, env=_env(mode, inject))
+    done = subprocess.run(cmd, capture_output=True, text=True, timeout=900, env=_env(inject))
     assert done.returncode == 0, f"launch failed:\nstdout:\n{done.stdout[-2000:]}\nstderr:\n{done.stderr[-3000:]}"
+    assert "experimental combination" not in done.stderr, "the gated nested sink ran as experimental"
     if mode == "gpu":
-        assert EXPERIMENTAL in " ".join(done.stderr.split()), "the nested gpu launch ran outside the experimental opt-in"
         bound = _bound_devices(done.stderr)
         assert sorted(bound) == [0, 1] and bound[0] != bound[1], f"device bindings {bound}"
     return _final(out), done.stderr

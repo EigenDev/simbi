@@ -23,8 +23,9 @@
 # - rollback: a rejection in the last stage of the last level-2 substep of one
 #   step, on the worker holding level 2, rolls both workers back; it equals the
 #   clean launch capped at the accepted timestep
-# - admission: on the gpu the nested launch runs under SIMBI_LAUNCH_EXPERIMENTAL
-#   and is refused naming the two refined regions without it
+# - admission: two nested regions run on the gpu without SIMBI_LAUNCH_EXPERIMENTAL;
+#   a third nested region is refused by name on the gpu without it and runs on
+#   the cpu launch
 #
 # run: pytest -m simulation simbi/simulation/tests/test_launch_nested_devices.py
 # =============================================================================
@@ -63,6 +64,27 @@ class NestedBlast3D(RefinedBlast3D):
     ]
     refinement_ratios: Annotated[list[int], ProblemParam([2, 2], description="ratios")]
 '''
+THREE_LEVELS = '''
+from typing import Annotated
+
+from simbi import ProblemParam
+from nested_blast import NestedBlast3D
+
+
+class ThreeLevels(NestedBlast3D):
+    """a third fine box inside the second, over root cells 10.5..13.5"""
+
+    refinement_max_levels: Annotated[int, ProblemParam(4, description="levels")]
+    refinement_regions: Annotated[
+        list[list[float]],
+        ProblemParam(
+            [[-0.25, 0.25, -0.25, 0.25, -0.25, 0.25], [-0.125, 0.125, -0.125, 0.125, -0.125, 0.125],
+             [-0.0625, 0.0625, -0.0625, 0.0625, -0.0625, 0.0625]],
+            description="boxes",
+        ),
+    ]
+    refinement_ratios: Annotated[list[int], ProblemParam([2, 2, 2], description="ratios")]
+'''
 # root cells of the level-2 box's low x face and of its middle
 FACE_CELL = 9
 GEOMETRIES = {
@@ -71,7 +93,7 @@ GEOMETRIES = {
 }
 REMOTE = re.compile(r"SIMBI launch refined plans: worker=(\d+)/\d+ remote_sends=(\S+)")
 REPORT = re.compile(r"SIMBI launch: worker=(\d+)/\d+ steps=(\d+) rejections=(\d+) refined=1")
-EXPERIMENTAL = "mesh refinement on gpu device memory with 2 refined regions"
+UNTESTED_DEPTH = "mesh refinement on gpu device memory with 3 refined regions"
 REJECTED_STEP = 2
 # worker 1 holds the level-2 box under the cut on its face; level 2 takes four substeps per root
 # step under rk2, so substep 3 stage 1 is the last stage of the last level-2 substep of the step
@@ -81,17 +103,16 @@ LEVEL_REJECTION = f"reject_level:1:{REJECTED_STEP}:2:3:1"
 @pytest.fixture
 def nested(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     (tmp_path / "nested_blast.py").write_text(NESTED)
+    (tmp_path / "three_levels.py").write_text(THREE_LEVELS)
     monkeypatch.setenv("PYTHONPATH", os.pathsep.join([str(tmp_path), os.getcwd(), os.environ.get("PYTHONPATH", "")]))
     return tmp_path / "nested_blast.py"
 
 
-def _env(mode: str, inject: str | None = None, opt_in: bool = True) -> dict[str, str]:
-    """nested refinement on gpu device memory runs under the experimental opt-in"""
+def _env(inject: str | None = None) -> dict[str, str]:
+    """no experimental opt-in: two nested regions run on either device without it"""
     env = dict(os.environ)
     env.pop("SIMBI_FABRIC_INJECT", None)
     env.pop("SIMBI_LAUNCH_EXPERIMENTAL", None)
-    if mode == "gpu" and opt_in:
-        env["SIMBI_LAUNCH_EXPERIMENTAL"] = "1"
     if inject is not None:
         env["SIMBI_FABRIC_INJECT"] = inject
     return env
@@ -122,12 +143,12 @@ def _launch(script: Path, out: Path, layout: Path, mode: str, steps: int = STEPS
         cmd += ["--checkpoint", str(checkpoint)]
     if mode == "gpu":
         cmd.append("--gpu")
-    done = subprocess.run(cmd, capture_output=True, text=True, timeout=900, env=_env(mode, inject))
+    done = subprocess.run(cmd, capture_output=True, text=True, timeout=900, env=_env(inject))
     assert done.returncode == 0, f"launch failed:\nstdout:\n{done.stdout[-2000:]}\nstderr:\n{done.stderr[-3000:]}"
     exits = {int(w): int(c) for w, c in EXIT.findall(done.stdout)}
     assert sorted(exits) == [0, 1] and all(c == 0 for c in exits.values()), f"worker exit codes {exits}"
+    assert "experimental combination" not in done.stderr, "the gated nested launch ran as experimental"
     if mode == "gpu":
-        assert EXPERIMENTAL in " ".join(done.stderr.split()), "the nested gpu launch ran outside the experimental opt-in"
         bound = _bound_devices(done.stderr)
         assert sorted(bound) == [0, 1] and bound[0] != bound[1], f"device bindings {bound}"
     files = {p.name: p for p in out.glob("*.h5")}
@@ -222,12 +243,29 @@ def test_a_deepest_substep_rejection_rolls_both_workers_back_as_the_capped_clean
     assert_same_checkpoint(_final(rejected), _final(capped), f"{mode}: level-2 substep rejection against the capped clean launch", expect=("level_2",))
 
 
-@needs_gpu
-def test_a_nested_gpu_launch_is_refused_by_name_without_the_opt_in(tmp_path: Path, nested: Path) -> None:
+def _three_levels(nested: Path, tmp_path: Path, mode: str) -> subprocess.CompletedProcess:
+    """one step of the three-region variant on two workers cut through the boxes"""
+    script = nested.parent / "three_levels.py"
     layout = _layout(tmp_path / "two.toml", workers=2, cuts=GEOMETRIES["cut-through-level-2"][0])
-    cmd = [sys.executable, "-m", "simbi.cli", "launch", str(nested), "--layout", str(layout), "--max-steps", "1", "--gpu",
+    cmd = [sys.executable, "-m", "simbi.cli", "launch", str(script), "--layout", str(layout), "--max-steps", "1",
            "--resolution", ",".join(str(r) for r in RESOLUTION), "--data-directory", str(tmp_path / "out"), "--checkpoint-interval", "1e9"]
-    done = subprocess.run(cmd, capture_output=True, text=True, timeout=600, env=_env("gpu", opt_in=False))
+    if mode == "gpu":
+        cmd.append("--gpu")
+    return subprocess.run(cmd, capture_output=True, text=True, timeout=600, env=_env())
+
+
+@needs_gpu
+def test_a_third_nested_region_on_gpus_is_refused_by_name_without_the_opt_in(tmp_path: Path, nested: Path) -> None:
+    done = _three_levels(nested, tmp_path, "gpu")
     assert done.returncode != 0, f"the launch ran:\n{done.stdout}"
-    assert f"{EXPERIMENTAL} is installed on the launched path without a distributed gate" in " ".join(done.stderr.split()), done.stderr[-3000:]
+    assert f"{UNTESTED_DEPTH} is installed on the launched path without a distributed gate" in " ".join(done.stderr.split()), done.stderr[-3000:]
     assert not list((tmp_path / "out").glob("*.h5")), "a checkpoint was published"
+
+
+def test_a_third_nested_region_runs_on_the_cpu_launch(tmp_path: Path, nested: Path) -> None:
+    """the gpu refusal is the device scope's: three nested regions are a valid refined cpu launch"""
+    done = _three_levels(nested, tmp_path, "cpu")
+    assert done.returncode == 0, f"three nested regions are no valid refined cpu launch:\n{done.stderr[-3000:]}"
+    assert _reports(done.stderr) == {0: (1, 0), 1: (1, 0)}, f"(steps, rejections) per worker {_reports(done.stderr)}"
+    with h5py.File(_final({p.name: p for p in (tmp_path / "out").glob("*.h5")}), "r") as f:
+        assert "level_3" in f, "the cpu launch published no third refined level"
