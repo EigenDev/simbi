@@ -97,6 +97,36 @@ pub struct FluxRegister<const D: usize, const DOF: usize, Mem: MemorySpace> {
 /// the conserved components of `c` as a flat field list: den, mom[0..DOF],
 /// then nrg when present. pairs of lists zip positionally — both sides of
 /// every register operation carry the same component order.
+/// the axis whose low register face SIMBI_REFLUX_PROBE names: every register operation on the
+/// first cell of that face prints its x-momentum operands and result, as bit patterns, once the
+/// devices have completed. unset, nothing is read or printed
+fn probe_axis() -> Option<usize> {
+    static AXIS: std::sync::OnceLock<Option<usize>> = std::sync::OnceLock::new();
+    *AXIS.get_or_init(|| std::env::var("SIMBI_REFLUX_PROBE").ok().and_then(|v| v.trim().parse().ok()))
+}
+
+/// the x-momentum's position in a face's component list
+const PROBE_COMPONENT: usize = 1;
+
+fn probe_cell<const D: usize>(dom: &Domain<D>) -> [isize; D] {
+    std::array::from_fn(|ax| dom.spaces[ax].lo)
+}
+
+fn probe_sync<Mem: MemorySpace>() {
+    symbi_sim::decomp::drain_devices::<Mem>(&[0]);
+}
+
+fn probe_line(op: &str, role: FaceRole, cell: &[isize], values: &[(&str, f64)]) {
+    use std::io::Write;
+    let fields: Vec<String> = values.iter().map(|(k, v)| format!("{k}={:016x}", v.to_bits())).collect();
+    let line = format!(
+        "SIMBI reflux probe: pid={} op={op} role={role:?} cell={cell:?} {}\n",
+        std::process::id(),
+        fields.join(" ")
+    );
+    let _ = std::io::stderr().write_all(line.as_bytes());
+}
+
 fn comps<const D: usize, const DOF: usize, Mem: MemorySpace>(
     c: &ConsFieldsGeneric<D, DOF, Mem>,
 ) -> Vec<&Field<f64, D, Mem>> {
@@ -387,8 +417,19 @@ impl<const D: usize, const DOF: usize, Mem: MemorySpace> FluxRegister<D, DOF, Me
         let ints = [0i32; 3];
         for (idx, inbox, dom) in self.inboxes() {
             let face = self.all_comps(idx);
-            for (rf, uf) in face.into_iter().zip(inbox) {
+            let probed = probe_axis() == Some(idx / 2) && idx % 2 == 0;
+            for (comp, (rf, uf)) in face.into_iter().zip(inbox).enumerate() {
+                let probe = probed && comp == PROBE_COMPONENT;
+                let c = probe_cell(dom);
+                if probe {
+                    probe_sync::<Mem>();
+                }
+                let (before, unit) = if probe { (*rf.at(c), *uf.at(c)) } else { (0.0, 0.0) };
                 dispatch_fields_each::<f64, Mem, D>(axpy, dom, &[uf], &[rf], &ints[..D], &[1.0]);
+                if probe {
+                    probe_sync::<Mem>();
+                    probe_line("fold", self.roles[idx], &c, &[("register", before), ("unit", unit), ("scale", 1.0), ("after", *rf.at(c))]);
+                }
                 dispatch_fields_each::<f64, Mem, D>(fill, dom, &[], &[uf], &[], &[0.0]);
             }
         }
@@ -606,7 +647,13 @@ impl<const D: usize, const DOF: usize, Mem: MemorySpace> FluxRegister<D, DOF, Me
                 continue;
             }
             if let (Some(reg), Some(dom)) = (&self.faces[idx], &self.domains[idx]) {
-                for (rf, ff) in comps(reg).into_iter().zip(comps(&flux[dir])) {
+                for (comp, (rf, ff)) in comps(reg).into_iter().zip(comps(&flux[dir])).enumerate() {
+                    let probe = probe_axis() == Some(dir) && side == 0 && comp == PROBE_COMPONENT;
+                    let c = probe_cell(dom);
+                    if probe {
+                        probe_sync::<Mem>();
+                    }
+                    let (before, operand) = if probe { (*rf.at(c), *ff.at(c)) } else { (0.0, 0.0) };
                     dispatch_fields_each::<f64, Mem, D>(
                         name,
                         dom,
@@ -615,6 +662,10 @@ impl<const D: usize, const DOF: usize, Mem: MemorySpace> FluxRegister<D, DOF, Me
                         &ints[..D],
                         &scalars,
                     );
+                    if probe {
+                        probe_sync::<Mem>();
+                        probe_line("coarse", self.roles[idx], &c, &[("register", before), ("flux", operand), ("scale", scalars[0]), ("after", *rf.at(c))]);
+                    }
                 }
             }
         }
@@ -642,8 +693,38 @@ impl<const D: usize, const DOF: usize, Mem: MemorySpace> FluxRegister<D, DOF, Me
                 continue;
             }
             if let (Some(reg), Some(dom)) = (&self.faces[idx], &self.domains[idx]) {
-                for (rf, ff) in comps(reg).into_iter().zip(comps(&fine_flux[dir])) {
+                for (comp, (rf, ff)) in comps(reg).into_iter().zip(comps(&fine_flux[dir])).enumerate() {
+                    let probe = probe_axis() == Some(dir) && side == 0 && comp == PROBE_COMPONENT;
+                    let c = probe_cell(dom);
+                    if probe {
+                        probe_sync::<Mem>();
+                    }
+                    let before = if probe { *rf.at(c) } else { 0.0 };
+                    // the fine faces in the kernel's summation order: the transverse offsets
+                    // counted with the lowest transverse axis fastest
+                    let transverse: Vec<usize> = (0..D).filter(|&t| t != dir).collect();
+                    let fine: Vec<f64> = if probe {
+                        (0..1usize << transverse.len())
+                            .map(|bits| {
+                                let at: [isize; D] = std::array::from_fn(|ax| {
+                                    let off = transverse.iter().position(|&t| t == ax).map_or(0, |k| ((bits >> k) & 1) as isize);
+                                    2 * c[ax] + off
+                                });
+                                *ff.at(at)
+                            })
+                            .collect()
+                    } else {
+                        Vec::new()
+                    };
                     dispatch_fields_each::<f64, Mem, D>(name, dom, &[ff], &[rf], &[], &scalars);
+                    if probe {
+                        probe_sync::<Mem>();
+                        let mut values: Vec<(&str, f64)> = vec![("register", before), ("scale", scalars[0])];
+                        let names = ["fine0", "fine1", "fine2", "fine3"];
+                        values.extend(names.iter().copied().zip(fine.iter().copied()));
+                        values.push(("after", *rf.at(c)));
+                        probe_line("fine", self.roles[idx], &c, &values);
+                    }
                 }
             }
         }
@@ -681,7 +762,14 @@ impl<const D: usize, const DOF: usize, Mem: MemorySpace> FluxRegister<D, DOF, Me
                         (dom.clone(), [0i32; 3], 1.0)
                     };
                     let scalars = [sign * inv_vol];
-                    for (rf, uf) in comps(reg).into_iter().zip(comps(cons)) {
+                    for (comp, (rf, uf)) in comps(reg).into_iter().zip(comps(cons)).enumerate() {
+                        let probe = probe_axis() == Some(ax) && side == 0 && comp == PROBE_COMPONENT;
+                        let c = probe_cell(dom);
+                        let cell: [isize; D] = std::array::from_fn(|aa| c[aa] - isize::from(aa == ax));
+                        if probe {
+                            probe_sync::<Mem>();
+                        }
+                        let (before, register) = if probe { (*uf.at(cell), *rf.at(c)) } else { (0.0, 0.0) };
                         dispatch_fields_each::<f64, Mem, D>(
                             name,
                             &cell_dom,
@@ -690,6 +778,10 @@ impl<const D: usize, const DOF: usize, Mem: MemorySpace> FluxRegister<D, DOF, Me
                             &arg[..D],
                             &scalars,
                         );
+                        if probe {
+                            probe_sync::<Mem>();
+                            probe_line("apply", self.roles[idx], &cell, &[("cell", before), ("register", register), ("scale", scalars[0]), ("after", *uf.at(cell))]);
+                        }
                     }
                 }
             }

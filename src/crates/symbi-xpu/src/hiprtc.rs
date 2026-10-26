@@ -118,7 +118,24 @@ pub fn compile_code(source: &str, kernel_name: &str) -> error::Result<Vec<u8>> {
     unsafe {
         let _ = hiprtcDestroyProgram(&mut prog);
     }
+    dump_kernel(kernel_name, source, &code);
     Ok(code)
+}
+
+/// with SIMBI_DUMP_KERNELS=<dir>, the source and the compiled code object of every kernel this
+/// process compiles, as <dir>/<kernel>.hip and <dir>/<kernel>.co (an amdgpu ELF, readable with
+/// llvm-objdump -d); unset, nothing is written
+fn dump_kernel(kernel_name: &str, source: &str, code: &[u8]) {
+    let Ok(dir) = std::env::var("SIMBI_DUMP_KERNELS") else {
+        return;
+    };
+    let dir = std::path::Path::new(&dir);
+    let written = std::fs::create_dir_all(dir)
+        .and_then(|()| std::fs::write(dir.join(format!("{kernel_name}.hip")), source))
+        .and_then(|()| std::fs::write(dir.join(format!("{kernel_name}.co")), code));
+    if let Err(e) = written {
+        eprintln!("SIMBI kernel dump: {kernel_name} into {dir:?}: {e}");
+    }
 }
 
 /// read the hipRTC program log (compiler diagnostics) for a failed compile.
