@@ -11566,7 +11566,7 @@ mod launch_authorization_tests {
             outflow_everywhere: true,
             spacetime: "minkowski".into(),
             workers: 2,
-            bodies: false,
+            body: None,
             binary: false,
             bonded_assembly: false,
             tracers: false,
@@ -11613,7 +11613,7 @@ mod launch_authorization_tests {
             ("a boundary other than outflow", Box::new(|f| f.outflow_everywhere = false)),
             ("the schwarzschild_ks spacetime", Box::new(|f| f.spacetime = "schwarzschild_ks".into())),
             ("3 workers", Box::new(|f| f.workers = 3)),
-            ("immersed bodies", Box::new(|f| f.bodies = true)),
+            ("a moving body", Box::new(|f| f.body = Some("a moving body".into()))),
             ("a binary", Box::new(|f| f.binary = true)),
             ("a bonded assembly", Box::new(|f| f.bonded_assembly = true)),
             ("tracers", Box::new(|f| f.tracers = true)),
@@ -11638,6 +11638,68 @@ mod launch_authorization_tests {
             let err = authorize_launch(Some(named.clone()), false).expect_err("refused without the opt-in");
             assert!(err.contains("SIMBI_LAUNCH_EXPERIMENTAL=1"), "{err}");
             assert_eq!(authorize_launch(Some(named), true), Ok(Some(format!("mesh refinement on gpu device memory with {property}"))), "the opt-in runs it as experimental");
+        }
+    }
+
+    /// the gated body: the bondi point mass with its drain at rest
+    fn sink() -> super::BodyParams {
+        super::BodyParams {
+            capability: 3,
+            mass: 1.0,
+            radius: 0.0,
+            position: vec![0.0, 0.0, 0.0],
+            velocity: vec![0.0, 0.0, 0.0],
+            softening: 0.01,
+            softening_kind: 0.0,
+            accretion_radius: 1.04,
+            sink_rate: 0.0,
+            porosity: None,
+            k_eta_n: 0.0,
+            k_eta_t: 0.0,
+            torque_free_xi: None,
+            inertia: 0.0,
+            no_slip: false,
+            shape_json: None,
+            omega: 0.0,
+            spin_axis: [0.0, 0.0, 1.0],
+            inertia_principal: [0.0; 3],
+            two_way_coupling: false,
+            magnetic_resistivity: None,
+            magnetic_slip: None,
+        }
+    }
+
+    #[test]
+    fn the_gated_sink_at_any_mass_radius_softening_and_position_runs_on_device_memory() {
+        use super::{ungated_on_device, untested_device_body};
+        assert_eq!(untested_device_body(&[]), None);
+        assert_eq!(untested_device_body(&[sink()]), None);
+        let varied = || super::BodyParams { mass: 2.5, accretion_radius: 0.4, softening: 0.1, position: vec![0.3, -0.2, 0.1], ..sink() };
+        assert_eq!(untested_device_body(&[varied()]), None, "scalar parameters vary freely");
+        let mut facts = gated();
+        facts.body = untested_device_body(&[varied()]);
+        assert_eq!(ungated_on_device(Some(&facts), true), None);
+    }
+
+    #[test]
+    fn every_untested_body_property_is_refused_by_name_on_device_memory() {
+        use super::{BodyParams, ungated_on_device, untested_device_body};
+        let cases: Vec<(&str, Vec<BodyParams>)> = vec![
+            ("2 immersed bodies", vec![sink(), BodyParams { position: vec![0.5, 0.0, 0.0], ..sink() }]),
+            ("a body other than a gravitating sink", vec![BodyParams { capability: 1, ..sink() }]),
+            ("a body other than a gravitating sink", vec![BodyParams { capability: 2, ..sink() }]),
+            ("a body other than a gravitating sink", vec![BodyParams { capability: 1 << 4, ..sink() }]),
+            ("a moving body", vec![BodyParams { velocity: vec![0.0, 0.1, 0.0], ..sink() }]),
+            ("a porous sink surface", vec![BodyParams { porosity: Some(0.5), ..sink() }]),
+            ("a torque-free sink surface", vec![BodyParams { torque_free_xi: Some(0.5), ..sink() }]),
+            ("compact softening", vec![BodyParams { softening_kind: 1.0, ..sink() }]),
+            ("a magnetic body coupling", vec![BodyParams { magnetic_resistivity: Some(0.1), ..sink() }]),
+        ];
+        for (property, bodies) in cases {
+            assert_eq!(untested_device_body(&bodies).as_deref(), Some(property));
+            let mut facts = gated();
+            facts.body = untested_device_body(&bodies);
+            assert_eq!(ungated_on_device(Some(&facts), true), Some(format!("mesh refinement on gpu device memory with {property}")));
         }
     }
 
@@ -11716,7 +11778,8 @@ struct RefinedDeviceFacts {
     outflow_everywhere: bool,
     spacetime: String,
     workers: usize,
-    bodies: bool,
+    /// the first property of the immersed bodies outside the gated body, or None
+    body: Option<String>,
     binary: bool,
     bonded_assembly: bool,
     tracers: bool,
@@ -11749,7 +11812,7 @@ impl RefinedDeviceFacts {
             outflow_everywhere: cfg.boundaries.iter().all(|b| *b == BoundaryType::Outflow),
             spacetime: cfg.spacetime.clone(),
             workers,
-            bodies: !cfg.bodies.is_empty(),
+            body: untested_device_body(&cfg.bodies),
             binary: cfg.binary.is_some(),
             bonded_assembly: cfg.bonded_assembly.is_some(),
             tracers: cfg.n_tracers > 0 || !cfg.cohort_ic.is_empty(),
@@ -11768,10 +11831,30 @@ impl RefinedDeviceFacts {
     }
 }
 
+/// the first property of a run's immersed bodies outside the body the gpu hardware gates verified on
+/// the refined launch: one point mass that gravitates and drains, at rest, with the pure drain
+/// surface and plummer softening. its mass, radius, softening length and position are scalars the
+/// body validation checks and enter no fact here
+fn untested_device_body(bodies: &[BodyParams]) -> Option<String> {
+    const SINK: u64 = 0b11; // gravitational | accretion
+    let [body] = bodies else {
+        return (!bodies.is_empty()).then(|| format!("{} immersed bodies", bodies.len()));
+    };
+    let checks: [(bool, &str); 6] = [
+        (body.capability != SINK, "a body other than a gravitating sink"),
+        (body.velocity.iter().any(|v| *v != 0.0), "a moving body"),
+        (body.porosity.is_some(), "a porous sink surface"),
+        (body.torque_free_xi.is_some(), "a torque-free sink surface"),
+        (body.softening_kind != 0.0, "compact softening"),
+        (body.magnetic_resistivity.is_some() || body.magnetic_slip.is_some(), "a magnetic body coupling"),
+    ];
+    checks.into_iter().find(|(untested, _)| *untested).map(|(_, property)| property.to_string())
+}
+
 /// the first structural property of a refined run outside the scope the gpu hardware gates
 /// verified: newtonian hydro on a 3D uniform cartesian grid, one refined region, plm with a limiter of
 /// the minmod-MC family (any validated theta), hlle, rk2,
-/// the ideal gas, outflow on every face, on two workers, with no body, tracer, passive scalar,
+/// the ideal gas, outflow on every face, on two workers, at most the gated sink, no tracer, passive scalar,
 /// source, census, viscosity, mesh motion, perturbation, driven or gradient wall, declared target,
 /// excision, well-balanced reconstruction or locally isothermal closure
 fn untested_refined_device_property(f: &RefinedDeviceFacts) -> Option<String> {
@@ -11789,7 +11872,7 @@ fn untested_refined_device_property(f: &RefinedDeviceFacts) -> Option<String> {
         (!f.outflow_everywhere, "a boundary other than outflow".into()),
         (f.spacetime != "minkowski", format!("the {} spacetime", f.spacetime)),
         (f.workers != 2, format!("{} workers", f.workers)),
-        (f.bodies, "immersed bodies".into()),
+        (f.body.is_some(), f.body.clone().unwrap_or_default()),
         (f.binary, "a binary".into()),
         (f.bonded_assembly, "a bonded assembly".into()),
         (f.tracers, "tracers".into()),

@@ -19,8 +19,11 @@
 #   step, on one worker, with the sink cut by the workers; stopped after the
 #   run it equals the clean launch capped at the accepted timestep, so no
 #   accretion, force, torque or heat of the rejected attempt survives
-# - admission: on the gpu the sink runs under SIMBI_LAUNCH_EXPERIMENTAL alone;
-#   without it the launch is refused naming the immersed bodies
+# - admission: on the gpu the sink runs without SIMBI_LAUNCH_EXPERIMENTAL at
+#   any mass, radius, softening length and position; each untested body
+#   property (two bodies, a gravity-only mass, a moving sink, a porous surface,
+#   compact softening) is refused by name on the gpu without it and runs on the
+#   cpu launch
 #
 # run: pytest -m simulation simbi/simulation/tests/test_launch_refined_device_bodies.py
 # =============================================================================
@@ -41,9 +44,13 @@ pytestmark = pytest.mark.simulation
 
 STEPS = 6
 SINK = '''
+from dataclasses import replace
 from typing import Annotated
 
+from pydantic import computed_field
+
 from simbi import ProblemParam
+from simbi.types.bodies import BodyCapability, GravitationalProperties
 from simbi_configs.examples.newtonian.bondi import SphericalBondiTest
 
 
@@ -57,8 +64,67 @@ class RefinedSink(SphericalBondiTest):
     refinement_max_levels: Annotated[int, ProblemParam(2, description="levels")]
     refinement_regions: Annotated[list[list[float]] | None, ProblemParam([[-2.5, 2.5, -2.5, 2.5, -2.5, 2.5]], description="box")]
     refinement_ratios: Annotated[list[int] | None, ProblemParam([2], description="ratios")]
+
+
+class ScaledSink(RefinedSink):
+    """the gated sink at another mass, drain radius, softening length and position"""
+
+    @computed_field
+    @property
+    def immersed_bodies(self) -> list:
+        (body,) = super().immersed_bodies
+        return [replace(body, mass=0.7, position=(0.3, -0.2, 0.1), gravitational=GravitationalProperties(softening_length=0.05),
+                        accretion=replace(body.accretion, accretion_radius=0.8))]
+
+
+class TwoSinks(RefinedSink):
+    @computed_field
+    @property
+    def immersed_bodies(self) -> list:
+        (body,) = super().immersed_bodies
+        return [replace(body, mass=0.5, position=(-1.2, 0.0, 0.0)), replace(body, mass=0.5, position=(1.2, 0.0, 0.0))]
+
+
+class GravityOnly(RefinedSink):
+    @computed_field
+    @property
+    def immersed_bodies(self) -> list:
+        (body,) = super().immersed_bodies
+        return [replace(body, capability=BodyCapability.GRAVITATIONAL, accretion=None)]
+
+
+class MovingSink(RefinedSink):
+    @computed_field
+    @property
+    def immersed_bodies(self) -> list:
+        (body,) = super().immersed_bodies
+        return [replace(body, velocity=(0.05, 0.0, 0.0))]
+
+
+class PorousSink(RefinedSink):
+    @computed_field
+    @property
+    def immersed_bodies(self) -> list:
+        (body,) = super().immersed_bodies
+        return [replace(body, accretion=replace(body.accretion, porosity=0.5))]
+
+
+class CompactSoftening(RefinedSink):
+    @computed_field
+    @property
+    def immersed_bodies(self) -> list:
+        (body,) = super().immersed_bodies
+        return [replace(body, gravitational=replace(body.gravitational, softening_kind="compact"))]
 '''
 LAUNCHED = "from refined_sink import RefinedSink as Base\n\n\nclass LaunchedRefinedSink(Base):\n    pass\n"
+# the untested body variants of the sink and the property each is refused by on the gpu
+UNTESTED_BODIES = {
+    "TwoSinks": "2 immersed bodies",
+    "GravityOnly": "a body other than a gravitating sink",
+    "MovingSink": "a moving body",
+    "PorousSink": "a porous sink surface",
+    "CompactSoftening": "compact softening",
+}
 # root cells of the 24-cell grid on [-5, 5]: the box spans 6..18, the sink of radius ~1.04 sits at
 # the face of cell 12 (x = 0)
 ROOT_CELL = 10.0 / 24
@@ -80,14 +146,11 @@ def sink(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     return tmp_path / "launched_refined_sink.py"
 
 
-def _env(mode: str, inject: str | None = None) -> dict[str, str]:
-    """a gpu launch carries the experimental opt-in, under which bodies run on refined device
-    memory; the cpu launch runs them in its gated scope"""
+def _env(inject: str | None = None) -> dict[str, str]:
+    """no experimental opt-in: the gated sink runs on either device without it"""
     env = dict(os.environ)
     env.pop("SIMBI_FABRIC_INJECT", None)
     env.pop("SIMBI_LAUNCH_EXPERIMENTAL", None)
-    if mode == "gpu":
-        env["SIMBI_LAUNCH_EXPERIMENTAL"] = "1"
     if inject is not None:
         env["SIMBI_FABRIC_INJECT"] = inject
     return env
@@ -120,8 +183,9 @@ def _launch(script: Path, out: Path, layout: Path, mode: str, steps: int, checkp
         cmd += ["--checkpoint", str(checkpoint)]
     if mode == "gpu":
         cmd.append("--gpu")
-    done = subprocess.run(cmd, capture_output=True, text=True, timeout=900, env=_env(mode, inject))
+    done = subprocess.run(cmd, capture_output=True, text=True, timeout=900, env=_env(inject))
     assert done.returncode == 0, f"launch failed:\nstdout:\n{done.stdout[-2000:]}\nstderr:\n{done.stderr[-3000:]}"
+    assert "experimental combination" not in done.stderr, "the gated sink ran as experimental"
     if mode == "gpu":
         bound = _bound_devices(done.stderr)
         assert sorted(bound) == [0, 1] and bound[0] != bound[1], f"device bindings {bound}"
@@ -207,14 +271,39 @@ def test_a_fine_substep_rejection_with_a_cut_sink_replays_as_the_capped_launch(t
     _assert_same_diagnostics(tmp_path / "rejected", tmp_path / "capped", f"{mode}: fine-substep rejection")
 
 
-@needs_gpu
-def test_a_refined_sink_on_gpus_is_refused_by_name_without_the_opt_in(tmp_path: Path, sink: Path) -> None:
+def _variant_launch(sink: Path, problem: str, tmp_path: Path, mode: str) -> subprocess.CompletedProcess:
+    """one step of a sink variant on two workers cut through the sink"""
+    script = sink.parent / f"launched_{problem.lower()}.py"
+    script.write_text(f"from refined_sink import {problem} as Base\n\n\nclass Launched{problem}(Base):\n    pass\n")
     two = _layout(tmp_path / "two.toml", workers=2, cuts=GEOMETRIES["cut-through-sink"][0])
-    cmd = [sys.executable, "-m", "simbi.cli", "launch", str(sink), "--layout", str(two), "--max-steps", "1", "--gpu",
+    cmd = [sys.executable, "-m", "simbi.cli", "launch", str(script), "--layout", str(two), "--max-steps", "1",
            "--data-directory", str(tmp_path / "out"), "--checkpoint-interval", "1e9"]
-    env = _env("cpu")
-    done = subprocess.run(cmd, capture_output=True, text=True, timeout=600, env=env)
+    if mode == "gpu":
+        cmd.append("--gpu")
+    return subprocess.run(cmd, capture_output=True, text=True, timeout=600, env=_env())
+
+
+@needs_gpu
+def test_the_gated_sink_at_other_scalars_launches_on_gpus_without_the_opt_in(tmp_path: Path, sink: Path) -> None:
+    done = _variant_launch(sink, "ScaledSink", tmp_path, "gpu")
+    assert done.returncode == 0, f"the gated sink was refused:\n{done.stderr[-3000:]}"
+    assert "experimental combination" not in done.stderr, "the gated sink ran as experimental"
+    assert _reports(done.stderr) == {0: (1, 0), 1: (1, 0)}, f"(steps, rejections) per worker {_reports(done.stderr)}"
+
+
+@needs_gpu
+@pytest.mark.parametrize("problem", list(UNTESTED_BODIES))
+def test_an_untested_body_is_refused_by_name_on_gpus(tmp_path: Path, sink: Path, problem: str) -> None:
+    done = _variant_launch(sink, problem, tmp_path, "gpu")
     assert done.returncode != 0, f"the launch ran:\n{done.stdout}"
-    want = "mesh refinement on gpu device memory with immersed bodies is installed on the launched path without a distributed gate"
+    want = f"mesh refinement on gpu device memory with {UNTESTED_BODIES[problem]} is installed on the launched path without a distributed gate"
     assert want in " ".join(done.stderr.split()), done.stderr[-3000:]
     assert not list((tmp_path / "out").glob("*.h5")), "a checkpoint was published"
+
+
+@pytest.mark.parametrize("problem", ["ScaledSink", *UNTESTED_BODIES])
+def test_each_sink_variant_runs_on_the_cpu_launch(tmp_path: Path, sink: Path, problem: str) -> None:
+    """the gpu refusals are the device scope's: each variant is a valid refined cpu launch"""
+    done = _variant_launch(sink, problem, tmp_path, "cpu")
+    assert done.returncode == 0, f"{problem} is no valid refined cpu launch:\n{done.stderr[-3000:]}"
+    assert _reports(done.stderr) == {0: (1, 0), 1: (1, 0)}, f"(steps, rejections) per worker {_reports(done.stderr)}"
