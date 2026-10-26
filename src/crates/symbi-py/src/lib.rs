@@ -11551,6 +11551,16 @@ mod launch_authorization_tests {
     use super::authorize_launch;
 
     #[test]
+    fn a_refined_launch_on_device_memory_is_ungated() {
+        use super::ungated_on_device;
+        assert_eq!(ungated_on_device(true, true).as_deref(), Some("mesh refinement on gpu device memory"));
+        assert_eq!(ungated_on_device(true, false), None, "a refined launch on host memory is gated");
+        assert_eq!(ungated_on_device(false, true), None, "a flat launch on device memory is gated");
+        let err = authorize_launch(ungated_on_device(true, true), false).expect_err("a refined device launch ran without the opt-in");
+        assert!(err.starts_with("mesh refinement on gpu device memory is installed on the launched path"), "{err}");
+    }
+
+    #[test]
     fn a_gated_combination_runs_with_or_without_the_opt_in() {
         assert_eq!(authorize_launch(None, false), Ok(None));
         assert_eq!(authorize_launch(None, true), Ok(None));
@@ -11602,7 +11612,13 @@ fn ungated_launch_combination(cfg: &Config) -> Option<String> {
     if !gated_grid(cfg) {
         return Some(format!("the {} regime on the {}", cfg.regime, grid_name(cfg)));
     }
-    None
+    ungated_on_device(cfg.refinement_enabled, cfg!(feature = "gpu"))
+}
+
+/// a refined launch on device memory: its workers build their hierarchies on the gpu build's
+/// device memory with no distributed gate on that device
+fn ungated_on_device(refined: bool, device_memory: bool) -> Option<String> {
+    (refined && device_memory).then(|| "mesh refinement on gpu device memory".to_string())
 }
 
 /// whether the run spaces any axis non-uniformly
@@ -12389,6 +12405,17 @@ where
     use symbi_sim::substrate_seam::RegimeKind;
     use symbi_sim::worker::{WorkerConfig, WorkerError};
 
+    // the hierarchies compute on device memory under the gpu build; a tracer population, a horizon
+    // body and a magnetic-slip body have no device path there, so each is refused before any
+    // session is built, alike on every worker
+    if <DefaultMemory as symbi::symbi_xpu::MemoryStorage>::IS_DEVICE_ACCESSIBLE {
+        let refusal = (cfg.n_tracers > 0).then_some("a tracer population on device memory").or_else(|| {
+            tiles.iter().flat_map(|h| h.levels.iter()).find_map(|l| symbi_sim::worker::device_scope_refusal(&l.state))
+        });
+        if let Some(what) = refusal {
+            return Err(format!("{what} with mesh refinement is outside the distributed first release"));
+        }
+    }
     let RefinedLayout { n, partition, owner, placement, me, mine, patch } = layout;
     let (n, patch, me) = (*n, *patch, *me);
     if let Some((step, level, substep, stage)) = fault.level_rejection {
@@ -12891,6 +12918,30 @@ where
         let _ = std::io::stderr().write_all(line.as_bytes());
     }
     let mut fabric = fabric_for(&all, link, session).with_block_credit(credit);
+    // a worker computes on the one gpu its process sees: the launcher (or the scheduler's per-task
+    // binding) masks the others, so logical device 0 is this worker's own. the session compares
+    // the physical bindings before any state moves and ends on every worker together when two
+    // share a gpu or one could not bind
+    let binding = session_device_binding(launch.worker, &fault);
+    symbi_sim::device_identity::agree_device_bindings(&mut fabric, launch.worker, launch.workers, &binding, deadline)
+        .map_err(|e| e.to_string())?;
+    // the transfers this worker's plans send to other workers over one pass of the phase table,
+    // by plan role: the coarse-fine traffic that crosses a worker boundary
+    {
+        let mut remote: std::collections::BTreeMap<String, u64> = std::collections::BTreeMap::new();
+        for plan in &all {
+            let sends: u64 = plan
+                .phase_counts()
+                .iter()
+                .flat_map(|by_peer| by_peer.iter().enumerate())
+                .filter(|(peer, _)| *peer != me.0 as usize)
+                .map(|(_, by_axis)| by_axis.iter().map(|&c| u64::from(c)).sum::<u64>())
+                .sum();
+            *remote.entry(format!("{:?}", plan.role()).replace(' ', "")).or_default() += sends;
+        }
+        let roles: Vec<String> = remote.iter().map(|(role, n)| format!("{role}:{n}")).collect();
+        record_line(&format!("SIMBI launch refined plans: worker={}/{} remote_sends={}", launch.worker, launch.workers, roles.join(",")));
+    }
     let plans = RefinedPlans { root, seed, fine, flux, emf, faces, corrected, stencil, prim_stencil, nested: nested_plans, coefficients, bands, band_seams, slip_shared, slip_cells };
     let root_devices = vec![0i32; n_root];
     let fine_devices = vec![0i32; n_fine];
