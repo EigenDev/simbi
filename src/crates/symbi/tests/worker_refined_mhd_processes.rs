@@ -73,9 +73,9 @@ const STEPS: u64 = 8;
 const T_FINAL: f64 = 10.0;
 /// the uniform field the bump stirs: its cell and face components
 const B0: [f64; 3] = [0.5, 0.25, 0.2];
-/// the flux register components of a 2.5D magnetized run: den, three momenta, energy, and
-/// the out-of-plane cell field
-const N_COMP: usize = 6;
+/// the flux register slots of a 2.5D magnetized run: den, three momenta, energy, the
+/// out-of-plane cell field, and the coefficient a transported unit carries
+const N_SLOT: usize = 7;
 /// the bound on |div B| per tile and assembled, from each tile's own faces
 const DIV_TOL: f64 = 1.0e-10;
 const TRANSFER_DEADLINE: Duration = Duration::from_secs(10);
@@ -463,7 +463,7 @@ fn run_worker(arm: &Arm, me: WorkerId, out: PathBuf) -> Result<(), WorkerError> 
         std::array::from_fn(|a| (RATIO * arm.patch[a].0.saturating_sub(root_ext[a].0)) as isize)
     };
     let fine_plan = ExchangePlan::compile_shifted(&fine_partition.partition, &open, &schema, ng + 1, &fine_lo).expect("fine plan");
-    let flux_plan = ExchangePlan::flux_contributions(&partition, &open, arm.patch, ng, N_COMP).expect("flux plan");
+    let flux_plan = ExchangePlan::flux_contributions(&partition, &open, arm.patch, ng, N_SLOT).expect("flux plan");
     let emf_plan = ExchangePlan::emf_contributions(&partition, &open, arm.patch, ng).expect("emf plan");
     let faces_plan = ExchangePlan::interface_faces(&partition, &open, arm.patch, ng).expect("faces plan");
     let corrected_plan = ExchangePlan::corrected_faces(&partition, &open, arm.patch, ng).expect("corrected plan");
@@ -1113,7 +1113,7 @@ fn a_magnetized_patch_face_on_a_cut_refluxes_through_the_neighbor() {
     let reports: Vec<&Report> = outcomes.iter().map(|o| o.report.as_ref().unwrap()).collect();
     assert!(reports.iter().any(|r| r.off_tile > 0), "no stencil face came from past a tile's lattice; the gather is untested");
     for (w, r) in reports.iter().enumerate() {
-        assert_eq!(r.contrib, 2 * N_COMP as u64, "worker {w}: the flux plan holds {} contributions", r.contrib);
+        assert_eq!(r.contrib, 2 * N_SLOT as u64, "worker {w}: the flux plan holds {} contributions", r.contrib);
         assert_eq!(r.emf, 2, "worker {w}: the EMF plan holds {} contributions", r.emf);
     }
     assert_rejection_matches_capped_control(test, &arm, 1, "the magnetized patch face on the cut");
@@ -1135,7 +1135,7 @@ fn a_magnetized_patch_corner_on_two_cuts_corrects_every_shared_face() {
     for (w, o) in outcomes.iter().enumerate() {
         let r = o.report.as_ref().unwrap();
         // one slab of every register component per face on a cut, two faces
-        assert_eq!(r.contrib, 2 * N_COMP as u64, "worker {w}: the flux plan holds {} contributions", r.contrib);
+        assert_eq!(r.contrib, 2 * N_SLOT as u64, "worker {w}: the flux plan holds {} contributions", r.contrib);
         assert_eq!(r.emf, 2, "worker {w}: the EMF plan holds {} contributions", r.emf);
         assert_eq!(r.corrected, 2, "worker {w}: the corrected-faces plan holds {} transfers", r.corrected);
     }

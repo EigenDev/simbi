@@ -2273,6 +2273,18 @@ mod tests {
 
     /// over every tile and field kind, the owned boxes are pairwise disjoint and cover the global
     /// dataset exactly: cells with the global halo, faces with the closing face per axis.
+    /// the flux plan's slot count enters its digest, so a worker whose register units carry
+    /// another slot layout presents another plan digest and is refused at the rendezvous
+    #[test]
+    fn the_flux_plan_digest_carries_its_slot_count() {
+        let partition = Partition::explicit([32, 32], [vec![20], vec![]]).unwrap();
+        let open = crate::decomp::Topology::open();
+        let plan = |n_slot| ExchangePlan::flux_contributions(&partition, &open, [(12, 20), (12, 20)], 2, n_slot).unwrap();
+        let (four, five) = (plan(4), plan(5));
+        assert!(four.transfers().count() > 0, "the patch face is on no cut; the gate is vacuous");
+        assert_ne!(four.digest, five.digest, "the flux plan digest ignores the slot count");
+    }
+
     #[test]
     fn owned_boxes_tile_the_grid() {
         for p in [ragged(), even()] {

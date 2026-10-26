@@ -12466,9 +12466,9 @@ where
     let fine_topology = symbi::sim::decomp::Topology::wrapping(fine_wraps);
     let fine_plan = ExchangePlan::compile_shifted(&fine_partition.partition, &fine_topology, &schema, ng + 1, &fine_lo)
         .map_err(|e| e.to_string())?;
-    // the register components: the conserved gas fields and, on a magnetized plane, the
-    // out-of-plane cell field
-    let n_comp = cons_schema.len() + if magnetized { DOF - D } else { 0 };
+    // the register slots: the conserved gas fields, on a magnetized plane the out-of-plane cell
+    // field, and the unit's coefficient
+    let n_comp = cons_schema.len() + if magnetized { DOF - D } else { 0 } + 1;
     let flux_plan = ExchangePlan::flux_contributions(partition, &open, patch, ng, n_comp).map_err(|e| e.to_string())?;
     let mut digests = vec![root_plan.digest, seed_plan.digest, fine_plan.digest, flux_plan.digest];
     let magnetized_plans = if magnetized {
@@ -12704,7 +12704,8 @@ where
             nested_prim_plans.push(None);
             continue;
         }
-        let flux = ExchangePlan::flux_contributions_shifted(parent_part, &open, rel, ng + 1, cons_schema.len(), &|t: TileId| frames[t.0 as usize])
+        // the gas register slots and the unit's coefficient
+        let flux = ExchangePlan::flux_contributions_shifted(parent_part, &open, rel, ng + 1, cons_schema.len() + 1, &|t: TileId| frames[t.0 as usize])
             .map_err(|e| e.to_string())?;
         nested_flux_plans.push((flux.transfers().count() > 0).then_some(flux));
         let boxes = symbi::sim::refinement::launched::prim_stencil_boxes(parent_part, rel, ng + 1, ng + 1, prolong_order_for(&cfg.reconstruction_name), [false; D]);

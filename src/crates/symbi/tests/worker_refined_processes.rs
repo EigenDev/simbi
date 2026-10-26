@@ -70,8 +70,10 @@ const STEPS: u64 = 8;
 const T_FINAL: f64 = 10.0;
 // the refined patch of most arms: root cells 12..20 on both axes
 const PATCH: [(usize, usize); 2] = [(12, 20), (12, 20)];
-/// the register components of an adiabatic 2D run: den, two momenta, energy
+/// the conserved components of an adiabatic 2D run: den, two momenta, energy
 const N_COMP: usize = 4;
+/// the flux-register slots a transported unit carries: the components and the coefficient
+const N_SLOT: usize = N_COMP + 1;
 const TRANSFER_DEADLINE: Duration = Duration::from_secs(10);
 const STARTUP_DEADLINE: Duration = Duration::from_secs(10);
 const WATCHDOG: Duration = Duration::from_secs(120);
@@ -513,7 +515,7 @@ fn run_worker(arm: &Arm, me: WorkerId, out: PathBuf) -> Result<(), WorkerError> 
     };
     let fine_plan = ExchangePlan::compile_shifted(&fine_partition.partition, &Topology::open(), &schema, ng + 1, &fine_lo)
         .expect("fine plan");
-    let flux_plan = ExchangePlan::flux_contributions(&partition, &Topology::open(), arm.patch, ng, N_COMP).expect("flux plan");
+    let flux_plan = ExchangePlan::flux_contributions(&partition, &Topology::open(), arm.patch, ng, N_SLOT).expect("flux plan");
     let contributions = flux_plan.transfers().count();
     let table = PhaseTable::refined(2, RATIO as u8, 2).expect("table");
     let root = PlanExchange::new(&root_plan, &placement, me, table.clone());
@@ -1268,7 +1270,7 @@ fn a_patch_face_on_a_cut_refluxes_through_the_neighbor() {
     assert_matches_reference(test, "cut_face", &outcomes, &arm, "the patch face on the cut");
     for (w, o) in outcomes.iter().enumerate() {
         let r = o.report.as_ref().unwrap();
-        assert_eq!(r.contrib, 2 * N_COMP as u64, "worker {w}: the plan holds {} contributions", r.contrib);
+        assert_eq!(r.contrib, 2 * N_SLOT as u64, "worker {w}: the plan holds {} contributions", r.contrib);
     }
     let rejecting = run_arm(
         test,
