@@ -245,6 +245,11 @@ def test_an_untested_refined_structure_is_refused_by_name_on_gpus(tmp_path: Path
     """each structure outside the gated scope runs on the cpu launch and is refused by name on the
     gpu without the experimental opt-in, before any checkpoint"""
     lines, workers, prop = UNTESTED[name]
+    # the launcher refuses more workers than visible devices before any worker reaches the
+    # admission; the arm needs one visible gpu per worker
+    masks = [m for m in launcher.GPU_MASKS if os.environ.get(m)]
+    visible = len([e for e in os.environ[masks[0]].split(",") if e.strip()]) if masks else workers
+    assert visible >= workers, f"{masks[0]} exposes {visible} gpus; the {workers}-worker admission is unreachable"
     done = _gpu_launch(_variant(tmp_path, monkeypatch, name, lines), tmp_path, workers, _mode_env("gpu"))
     assert done.returncode != 0, f"the launch ran:\n{done.stdout}"
     want = f"mesh refinement on gpu device memory with {prop} is installed on the launched path without a distributed gate"
