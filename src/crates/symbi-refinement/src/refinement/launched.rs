@@ -32,7 +32,7 @@ use symbi_sim::distributed_checkpoint::{CheckpointRequest, LevelPlan, distribute
 use symbi_grid::Field;
 use symbi_hydro::regime::Regime;
 use symbi_sim::atlas::{AuditAt, ExchangePoint, FinePoint, TileId};
-use symbi_sim::decomp::{HaloTransport, plan_cons_fields, plan_fields};
+use symbi_sim::decomp::{HaloTransport, drain_devices, plan_cons_fields, plan_fields};
 use symbi_sim::driver::advance_clock;
 use symbi_sim::step_transaction::{AttemptOp, AttemptReply, RootStep, ScopedAttempt, StepHalt, take_root_step};
 use symbi_sim::hydro_ops::scan_c2p_errors;
@@ -362,6 +362,16 @@ impl Held<'_> {
 
     pub(crate) fn level_devices(&self, level: usize) -> &[i32] {
         if level == 1 { self.fine_devices } else { &self.nested[level - 2].devices }
+    }
+}
+
+/// wait for every kernel on the devices of every level the worker holds, so a host read or write
+/// of a level's fields that follows sees the values those kernels wrote
+pub fn drain_held<Mem: MemorySpace>(held: &Held<'_>) {
+    drain_devices::<Mem>(held.root_devices);
+    drain_devices::<Mem>(held.fine_devices);
+    for nested in held.nested {
+        drain_devices::<Mem>(&nested.devices);
     }
 }
 
@@ -1068,6 +1078,7 @@ where
                 for (i, nested) in plans.nested.iter().enumerate() {
                     audits.push((&nested.state, &nested_lists[i][..]));
                 }
+                drain_held::<Mem>(held);
                 let cost = audit_plans(&audits, fabric, $point, $step, $attempt, deadline)
                     .map_err(|e| match e {
                         AuditError::Fabric(e) => fail(fabric, WorkerError::Fabric(e)),
@@ -1084,6 +1095,7 @@ where
         ($plan:expr, $fields:expr, $point:expr, $step:expr, $attempt:expr) => {{
             if $plan.has_audits() {
                 let fields = $fields;
+                drain_held::<Mem>(held);
                 let cost = $plan
                     .audit_at(&fields, fabric, $point, $step, $attempt, deadline)
                     .map_err(|e| match e {
@@ -1161,6 +1173,7 @@ where
         for (k, h) in tiles.iter().enumerate() {
             with_device(root_dev(k), || h.levels[0].kernels.ghost_fill(&h.levels[0].state));
         }
+        drain_devices::<Mem>(held.root_devices);
         for (k, h) in tiles.iter().enumerate() {
             let err = scan_c2p_errors(&h.levels[0].state);
             if err.is_err() {
@@ -1289,6 +1302,7 @@ where
             }
         }
         if cfg.perturb_fine_face_after == Some(0) {
+            drain_held::<Mem>(held);
             perturb_fine_face(tiles);
         }
         // the prime audit certifies the initialized state of both levels: the root after its
@@ -1900,6 +1914,7 @@ where
         report.time = t;
         report.dt_sequence.push(dt);
         if cfg.perturb_fine_face_after == Some(iter) {
+            drain_held::<Mem>(held);
             perturb_fine_face(tiles);
         }
         if let Some((at, which, ordinal)) = cfg.clock_fault {
@@ -2014,6 +2029,7 @@ where
         for (r, &k) in mine.iter().enumerate() {
             lists[ids[r].0 as usize] = plan_fields(&tiles[k].levels[level].state);
         }
+        drain_devices::<Mem>(devices);
         let cost = plan.audit_at(&lists, fabric, point, step, attempt, deadline).map_err(|e| match e {
             AuditError::Fabric(e) => fail(fabric, WorkerError::Fabric(e)),
             AuditError::Mismatch(m) => fail(fabric, WorkerError::Interface(m)),
@@ -2272,6 +2288,7 @@ where
         for (r, &k) in ks.iter().enumerate() {
             let level = &tiles[k].levels[ll];
             with_device(devices[ids[r].0 as usize], || level.kernels.ghost_fill(&level.state));
+            drain_devices::<Mem>(devices);
             let err = scan_c2p_errors(&level.state);
             if err.is_err() {
                 return Err(fail(fabric, numerics(format!("level {ll}: the stationary target's recovery failed ({err})"))));
@@ -2352,6 +2369,7 @@ where
         if vote_retry(fabric, rejected, deadline, timing)? {
             return Err(fail(fabric, numerics(format!("level {ll}: the stationary target's probe stage was rejected by the admissibility redo"))));
         }
+        drain_devices::<Mem>(devices);
         for &k in &ks {
             let level = &tiles[k].levels[ll];
             let err = scan_c2p_errors(&level.state);
@@ -2616,6 +2634,7 @@ where
 
     fn injected_trouble(&mut self, r: usize) -> u64 {
         let Some(local) = self.injected.and_then(|cell| self.plan.local_cell(self.ids[r], cell)) else { return 0 };
+        drain_devices::<Mem>(self.devices);
         *self.tiles[self.mine[r]].levels[self.level].state.workspace.fofc_flag.view_mut().at_mut(local) = 1.0;
         1
     }
@@ -2869,6 +2888,8 @@ where
     <R as Regime<f64, DOF>>::Cons: symbi_hydro::state::SeedableCons<f64, DOF>,
     <R as Regime<f64, DOF>>::Prim: symbi_hydro::state::PrimFromSlots<f64, DOF>,
 {
+    // the checkpoint reads every level's fields on the host, after every kernel that wrote them
+    drain_held::<Mem>(held);
     // every held tile level's conserved halo published as the conserved state of its halo
     // primitives, restored once the file is written
     let halos: Vec<Vec<_>> = tiles.iter().map(|h| h.levels.iter().map(|l| l.state.prepare_checkpoint_halo()).collect()).collect();

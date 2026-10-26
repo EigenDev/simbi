@@ -12931,6 +12931,8 @@ where
             symbi_sim::checkpoint::check_census_state(path, &mut tile.levels[0].state.store.censuses, levels, 0.0)
                 .map_err(|e| format!("census restart from '{path}': {e}"))?;
         }
+        // the restored blocks are written on the host, after every kernel the build launched
+        symbi::sim::refinement::launched::drain_held::<DefaultMemory>(&held);
         load_refined_tiles(&mut tiles, &held, &plans, &grids, path).map_err(|e| e.to_string())?;
         // the censuses continue the file's sampling schedule and accumulations on every tile
         for (k, tile) in tiles.iter_mut().enumerate() {

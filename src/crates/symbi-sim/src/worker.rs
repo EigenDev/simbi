@@ -678,10 +678,20 @@ where
     T: HaloTransport,
     L: Link,
 {
+    // the kernels before the exchange complete on the clock of the compute that launched them
+    let drain = || {
+        for part in parts {
+            crate::decomp::drain_devices::<M>(part.devices);
+        }
+    };
+    drain();
     let clock = Instant::now();
     let first = parts.first().expect("at least one plan");
     let mut run = || -> Result<(), FabricError> {
         for axis in 0..D {
+            // the strips are gathered and scattered by host code, after every kernel that wrote
+            // them; a scatter is complete before the next kernel launches
+            drain();
             let epoch = first.plan.epoch(point, step, attempt, axis);
             let mut sends = Vec::new();
             let mut receives = Vec::new();
