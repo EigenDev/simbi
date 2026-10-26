@@ -18,9 +18,12 @@
 # - rollback: a rejection in the last stage of the last fine substep of one
 #   step, on the worker holding the box, rolls both workers back; stopped after
 #   that step it equals the clean launch capped at the accepted timestep
-# - on the gpu: a refined launch without SIMBI_LAUNCH_EXPERIMENTAL is refused by
-#   name, and two workers masked onto one gpu are refused at the binding
-#   agreement
+# - the public admission on the gpu: the gated scope (two workers, plm of the
+#   minmod-MC family at any validated theta, hlle, rk2, outflow, one refined
+#   region) runs without SIMBI_LAUNCH_EXPERIMENTAL, scalar parameters varied;
+#   each untested structure is refused by name without it; a tracer population
+#   on device memory and two workers masked onto one gpu are refused even with
+#   it
 #
 # run: pytest -m simulation simbi/simulation/tests/test_launch_refined_devices.py
 # =============================================================================
@@ -62,12 +65,11 @@ runner.run(RefinedBlast3D(resolution={RESOLUTION!r}, data_directory=out, checkpo
 
 
 def _mode_env(mode: str) -> dict[str, str]:
+    """the environment of a launch: no injected fault and no experimental opt-in; the gated
+    refined scope runs on either device without it"""
     env = dict(os.environ)
     env.pop("SIMBI_FABRIC_INJECT", None)
     env.pop("SIMBI_LAUNCH_EXPERIMENTAL", None)
-    if mode == "gpu":
-        # the refined launch on device memory runs as experimental until its hardware gates pass
-        env["SIMBI_LAUNCH_EXPERIMENTAL"] = "1"
     return env
 
 
@@ -181,15 +183,94 @@ def test_a_fine_substep_rejection_rolls_both_workers_back_as_the_capped_clean_la
     assert_same_checkpoint(_final(rejected), _final(capped), f"{mode}: fine-substep rejection against the capped clean launch")
 
 
-@needs_gpu
-def test_a_refined_gpu_launch_without_the_opt_in_is_refused_by_name(tmp_path: Path) -> None:
-    layout = _layout(tmp_path / "two.toml", workers=2, cuts=GEOMETRIES["cut-through-box"][0])
-    env = _mode_env("cpu")
-    cmd = [sys.executable, "-m", "simbi.cli", "launch", SCRIPT, "--layout", str(layout), "--max-steps", "1", "--gpu",
+# subclass lines of the admission variants
+VARIANT_IMPORTS = (
+    "from typing import Annotated\n"
+    "from pydantic import computed_field\n"
+    "from simbi import ProblemParam\n"
+    "from simbi.types import BoundaryCondition, Reconstruction, Solver, TimeStepping\n"
+    "from simbi.types.input import Limiter\n"
+    f"from {RefinedBlast3D.__module__} import RefinedBlast3D\n\n\n"
+)
+ADMITTED = {
+    "theta-1.2-cfl-0.3-gamma-1.4": [
+        "plm_theta: Annotated[float, ProblemParam(1.2, description='t')]",
+        "cfl_number: Annotated[float, ProblemParam(0.3, description='c')]",
+        "adiabatic_index: Annotated[float, ProblemParam(1.4, description='g')]",
+    ],
+    "theta-2.0": ["plm_theta: Annotated[float, ProblemParam(2.0, description='t')]"],
+}
+UNTESTED = {
+    "hllc": (["solver: Annotated[Solver, ProblemParam(Solver.HLLC, description='s')]"], 2, "the hllc solver"),
+    "ppm": (["reconstruction: Annotated[Reconstruction, ProblemParam(Reconstruction.PPM, description='r')]"], 2, "ppm reconstruction"),
+    "rk3": (["timestepping: Annotated[TimeStepping, ProblemParam(TimeStepping.RK3, description='t')]"], 2, "Rk3 time stepping"),
+    "van-leer": (["limiter: Annotated[Limiter, ProblemParam(Limiter.VAN_LEER, description='l')]"], 2, "the van leer limiter"),
+    "reflecting": (["boundary_conditions: Annotated[list, ProblemParam([BoundaryCondition.REFLECTING], description='b')]"], 2, "a boundary other than outflow"),
+    "three-workers": ([], 3, "3 workers"),
+}
+TRACERS = ["@computed_field", "@property", "def n_tracers(self) -> int:", "    return 64"]
+
+
+def _variant(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, name: str, lines: list[str]) -> str:
+    stem = "variant_" + name.replace("-", "_").replace(".", "_")
+    body = "\n".join(f"    {line}" for line in lines) or "    pass"
+    (tmp_path / f"{stem}.py").write_text(VARIANT_IMPORTS + f"class Variant(RefinedBlast3D):\n{body}\n")
+    monkeypatch.setenv("PYTHONPATH", os.pathsep.join([str(tmp_path), os.getcwd(), os.environ.get("PYTHONPATH", "")]))
+    return str(tmp_path / f"{stem}.py")
+
+
+def _gpu_launch(script: str, tmp_path: Path, workers: int, env: dict[str, str]) -> subprocess.CompletedProcess:
+    cuts = [[12], [], []] if workers == 2 else [[6, 12], [], []]
+    layout = _layout(tmp_path / f"{workers}.toml", workers=workers, cuts=cuts)
+    cmd = [sys.executable, "-m", "simbi.cli", "launch", script, "--layout", str(layout), "--max-steps", "1", "--gpu",
            "--resolution", ",".join(str(r) for r in RESOLUTION), "--data-directory", str(tmp_path / "out"), "--checkpoint-interval", "1e9"]
-    done = subprocess.run(cmd, capture_output=True, text=True, timeout=600, env=env)
-    assert done.returncode != 0, f"the launch succeeded:\n{done.stdout}"
-    assert "mesh refinement on gpu device memory is installed on the launched path without a distributed gate" in " ".join(done.stderr.split()), done.stderr
+    return subprocess.run(cmd, capture_output=True, text=True, timeout=600, env=env)
+
+
+@needs_gpu
+@pytest.mark.parametrize("name", list(ADMITTED))
+def test_the_gated_refined_scope_launches_on_gpus_without_the_opt_in(tmp_path: Path, monkeypatch, name: str) -> None:
+    """scalar parameters of the tested family vary freely: the launch runs a step on two gpus"""
+    done = _gpu_launch(_variant(tmp_path, monkeypatch, name, ADMITTED[name]), tmp_path, 2, _mode_env("gpu"))
+    assert done.returncode == 0, f"the gated scope was refused:\n{done.stderr[-3000:]}"
+    assert "experimental combination" not in done.stderr, "the gated scope ran as experimental"
+    bound = _bound_devices(done.stderr)
+    assert sorted(bound) == [0, 1] and bound[0] != bound[1], f"device bindings {bound}"
+    assert {int(w): (int(n), int(r)) for w, n, r in REPORT.findall(done.stderr)} == {0: (1, 0), 1: (1, 0)}
+
+
+@needs_gpu
+@pytest.mark.parametrize("name", list(UNTESTED))
+def test_an_untested_refined_structure_is_refused_by_name_on_gpus(tmp_path: Path, monkeypatch, name: str) -> None:
+    """each structure outside the gated scope runs on the cpu launch and is refused by name on the
+    gpu without the experimental opt-in, before any checkpoint"""
+    lines, workers, prop = UNTESTED[name]
+    done = _gpu_launch(_variant(tmp_path, monkeypatch, name, lines), tmp_path, workers, _mode_env("gpu"))
+    assert done.returncode != 0, f"the launch ran:\n{done.stdout}"
+    want = f"mesh refinement on gpu device memory with {prop} is installed on the launched path without a distributed gate"
+    assert want in " ".join(done.stderr.split()), done.stderr[-3000:]
+    assert not list((tmp_path / "out").glob("*.h5")), "a checkpoint was published"
+
+
+@pytest.mark.parametrize("name", list(UNTESTED))
+def test_an_untested_refined_structure_runs_on_the_cpu_launch(tmp_path: Path, monkeypatch, name: str) -> None:
+    """the gpu refusals are the device scope's: each structure is a valid refined cpu launch"""
+    lines, workers, _ = UNTESTED[name]
+    script = _variant(tmp_path, monkeypatch, name, lines)
+    cuts = [[12], [], []] if workers == 2 else [[6, 12], [], []]
+    layout = _layout(tmp_path / f"{workers}.toml", workers=workers, cuts=cuts)
+    cmd = [sys.executable, "-m", "simbi.cli", "launch", script, "--layout", str(layout), "--max-steps", "1",
+           "--resolution", ",".join(str(r) for r in RESOLUTION), "--data-directory", str(tmp_path / "out"), "--checkpoint-interval", "1e9"]
+    done = subprocess.run(cmd, capture_output=True, text=True, timeout=600, env=_mode_env("cpu"))
+    assert done.returncode == 0, f"{name} is no valid refined cpu launch:\n{done.stderr[-3000:]}"
+
+
+@needs_gpu
+def test_a_refined_tracer_population_is_refused_on_gpus_even_with_the_opt_in(tmp_path: Path, monkeypatch) -> None:
+    env = dict(_mode_env("gpu"), SIMBI_LAUNCH_EXPERIMENTAL="1")
+    done = _gpu_launch(_variant(tmp_path, monkeypatch, "tracers", TRACERS), tmp_path, 2, env)
+    assert done.returncode != 0, f"the launch ran:\n{done.stdout}"
+    assert "a tracer population on device memory with mesh refinement is outside the distributed first release" in " ".join(done.stderr.split()), done.stderr[-3000:]
     assert not list((tmp_path / "out").glob("*.h5")), "a checkpoint was published"
 
 
@@ -197,7 +278,8 @@ def test_a_refined_gpu_launch_without_the_opt_in_is_refused_by_name(tmp_path: Pa
 def test_two_refined_gpu_workers_masked_onto_one_gpu_are_refused_together(tmp_path: Path) -> None:
     present = [m for m in launcher.GPU_MASKS if m in os.environ]
     first = os.environ[present[0]].split(",")[0].strip() if present else "0"
-    env = _mode_env("gpu")
+    # with the experimental opt-in: the binding agreement refuses a shared gpu all the same
+    env = dict(_mode_env("gpu"), SIMBI_LAUNCH_EXPERIMENTAL="1")
     env.update({m: f"{first},{first}" for m in (present or ["HIP_VISIBLE_DEVICES", "CUDA_VISIBLE_DEVICES"])})
     layout = _layout(tmp_path / "two.toml", workers=2, cuts=GEOMETRIES["cut-through-box"][0])
     cmd = [sys.executable, "-m", "simbi.cli", "launch", SCRIPT, "--layout", str(layout), "--max-steps", "1", "--gpu",

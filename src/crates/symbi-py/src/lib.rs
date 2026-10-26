@@ -11550,14 +11550,95 @@ fn authorize_launch(ungated: Option<String>, opt_in: bool) -> Result<Option<Stri
 mod launch_authorization_tests {
     use super::authorize_launch;
 
+    /// the hardware-gated refined device scope
+    fn gated() -> super::RefinedDeviceFacts {
+        super::RefinedDeviceFacts {
+            regime: "newtonian".into(),
+            dims: 3,
+            coord_system: "cartesian".into(),
+            uniform_spacing: true,
+            regions: 1,
+            reconstruction: "plm".into(),
+            van_leer: false,
+            solver: "hlle".into(),
+            timestepping: symbi_sim::state::Timestepping::Rk2,
+            eos: "ideal".into(),
+            outflow_everywhere: true,
+            spacetime: "minkowski".into(),
+            workers: 2,
+            bodies: false,
+            binary: false,
+            bonded_assembly: false,
+            tracers: false,
+            passive_scalar: false,
+            sources: false,
+            censuses: false,
+            viscosity: false,
+            mesh_motion: false,
+            perturbation: false,
+            driven_or_gradient_walls: false,
+            declared_target: false,
+            excision: false,
+            well_balanced: false,
+            locally_isothermal: false,
+        }
+    }
+
     #[test]
-    fn a_refined_launch_on_device_memory_is_ungated() {
+    fn the_gated_refined_scope_runs_on_device_memory_without_the_opt_in() {
         use super::ungated_on_device;
-        assert_eq!(ungated_on_device(true, true).as_deref(), Some("mesh refinement on gpu device memory"));
-        assert_eq!(ungated_on_device(true, false), None, "a refined launch on host memory is gated");
-        assert_eq!(ungated_on_device(false, true), None, "a flat launch on device memory is gated");
-        let err = authorize_launch(ungated_on_device(true, true), false).expect_err("a refined device launch ran without the opt-in");
-        assert!(err.starts_with("mesh refinement on gpu device memory is installed on the launched path"), "{err}");
+        assert_eq!(ungated_on_device(Some(&gated()), true), None);
+        assert_eq!(authorize_launch(ungated_on_device(Some(&gated()), true), false), Ok(None));
+        // a flat launch and a refined launch on host memory are outside this rule
+        assert_eq!(ungated_on_device(None, true), None);
+        let mut nested = gated();
+        nested.regions = 2;
+        assert_eq!(ungated_on_device(Some(&nested), false), None, "a refined launch on host memory has its own gates");
+    }
+
+    #[test]
+    fn every_untested_structural_property_is_refused_by_name_on_device_memory() {
+        use super::ungated_on_device;
+        let cases: Vec<(&str, Box<dyn Fn(&mut super::RefinedDeviceFacts)>)> = vec![
+            ("the isothermal regime", Box::new(|f| f.regime = "isothermal".into())),
+            ("a 2-dimensional grid", Box::new(|f| f.dims = 2)),
+            ("the spherical chart", Box::new(|f| f.coord_system = "spherical".into())),
+            ("a non-uniform spacing", Box::new(|f| f.uniform_spacing = false)),
+            ("2 refined regions", Box::new(|f| f.regions = 2)),
+            ("ppm reconstruction", Box::new(|f| f.reconstruction = "ppm".into())),
+            ("the van leer limiter", Box::new(|f| f.van_leer = true)),
+            ("the hllc solver", Box::new(|f| f.solver = "hllc".into())),
+            ("Rk3 time stepping", Box::new(|f| f.timestepping = symbi_sim::state::Timestepping::Rk3)),
+            ("the synge equation of state", Box::new(|f| f.eos = "synge".into())),
+            ("a boundary other than outflow", Box::new(|f| f.outflow_everywhere = false)),
+            ("the schwarzschild_ks spacetime", Box::new(|f| f.spacetime = "schwarzschild_ks".into())),
+            ("3 workers", Box::new(|f| f.workers = 3)),
+            ("immersed bodies", Box::new(|f| f.bodies = true)),
+            ("a binary", Box::new(|f| f.binary = true)),
+            ("a bonded assembly", Box::new(|f| f.bonded_assembly = true)),
+            ("tracers", Box::new(|f| f.tracers = true)),
+            ("a passive scalar", Box::new(|f| f.passive_scalar = true)),
+            ("user sources", Box::new(|f| f.sources = true)),
+            ("a census", Box::new(|f| f.censuses = true)),
+            ("a viscosity", Box::new(|f| f.viscosity = true)),
+            ("mesh motion", Box::new(|f| f.mesh_motion = true)),
+            ("a perturbation", Box::new(|f| f.perturbation = true)),
+            ("driven or gradient walls", Box::new(|f| f.driven_or_gradient_walls = true)),
+            ("a declared stationary target", Box::new(|f| f.declared_target = true)),
+            ("excision", Box::new(|f| f.excision = true)),
+            ("well-balanced reconstruction", Box::new(|f| f.well_balanced = true)),
+            ("a locally isothermal closure", Box::new(|f| f.locally_isothermal = true)),
+        ];
+        assert_eq!(cases.len(), 28, "a case per structural property");
+        for (property, change) in &cases {
+            let mut facts = gated();
+            change(&mut facts);
+            let named = ungated_on_device(Some(&facts), true).unwrap_or_else(|| panic!("{property} was admitted"));
+            assert_eq!(named, format!("mesh refinement on gpu device memory with {property}"));
+            let err = authorize_launch(Some(named.clone()), false).expect_err("refused without the opt-in");
+            assert!(err.contains("SIMBI_LAUNCH_EXPERIMENTAL=1"), "{err}");
+            assert_eq!(authorize_launch(Some(named), true), Ok(Some(format!("mesh refinement on gpu device memory with {property}"))), "the opt-in runs it as experimental");
+        }
     }
 
     #[test]
@@ -11608,17 +11689,130 @@ fn grid_name(cfg: &Config) -> String {
     format!("{}-dimensional {chart} grid", cfg.dims)
 }
 
-fn ungated_launch_combination(cfg: &Config) -> Option<String> {
+fn ungated_launch_combination(cfg: &Config, workers: usize) -> Option<String> {
     if !gated_grid(cfg) {
         return Some(format!("the {} regime on the {}", cfg.regime, grid_name(cfg)));
     }
-    ungated_on_device(cfg.refinement_enabled, cfg!(feature = "gpu"))
+    ungated_on_device(cfg.refinement_enabled.then(|| RefinedDeviceFacts::of(cfg, workers)).as_ref(), cfg!(feature = "gpu"))
 }
 
-/// a refined launch on device memory: its workers build their hierarchies on the gpu build's
-/// device memory with no distributed gate on that device
-fn ungated_on_device(refined: bool, device_memory: bool) -> Option<String> {
-    (refined && device_memory).then(|| "mesh refinement on gpu device memory".to_string())
+/// the structure of a refined run that decides whether its launch on device memory lies in the
+/// hardware-gated scope. scalar parameters (the limiter's theta, the cfl number, the adiabatic
+/// index, the step bounds) keep the validation every run passes and enter no fact here
+#[derive(Clone, Debug)]
+struct RefinedDeviceFacts {
+    regime: String,
+    dims: usize,
+    coord_system: String,
+    uniform_spacing: bool,
+    regions: usize,
+    reconstruction: String,
+    /// the van leer limiter, spelled theta = -1 on the backend; the minmod-MC family carries
+    /// its validated theta in (0, 2]
+    van_leer: bool,
+    solver: String,
+    timestepping: Timestepping,
+    eos: String,
+    outflow_everywhere: bool,
+    spacetime: String,
+    workers: usize,
+    bodies: bool,
+    binary: bool,
+    bonded_assembly: bool,
+    tracers: bool,
+    passive_scalar: bool,
+    sources: bool,
+    censuses: bool,
+    viscosity: bool,
+    mesh_motion: bool,
+    perturbation: bool,
+    driven_or_gradient_walls: bool,
+    declared_target: bool,
+    excision: bool,
+    well_balanced: bool,
+    locally_isothermal: bool,
+}
+
+impl RefinedDeviceFacts {
+    fn of(cfg: &Config, workers: usize) -> Self {
+        Self {
+            regime: cfg.regime.clone(),
+            dims: cfg.dims,
+            coord_system: cfg.coord_system.clone(),
+            uniform_spacing: !axis_maps_any(cfg),
+            regions: cfg.refinement_regions.len(),
+            reconstruction: cfg.reconstruction_name.clone(),
+            van_leer: cfg.plm_theta < 0.0,
+            solver: cfg.solver_name.clone(),
+            timestepping: cfg.timestepping,
+            eos: cfg.eos_name.clone(),
+            outflow_everywhere: cfg.boundaries.iter().all(|b| *b == BoundaryType::Outflow),
+            spacetime: cfg.spacetime.clone(),
+            workers,
+            bodies: !cfg.bodies.is_empty(),
+            binary: cfg.binary.is_some(),
+            bonded_assembly: cfg.bonded_assembly.is_some(),
+            tracers: cfg.n_tracers > 0 || !cfg.cohort_ic.is_empty(),
+            passive_scalar: !cfg.chi_ic.is_empty(),
+            sources: !cfg.source_jsons.is_empty(),
+            censuses: !cfg.census_jsons.is_empty(),
+            viscosity: cfg.viscosity != 0.0 || cfg.alpha != 0.0,
+            mesh_motion: cfg.mesh_motion || cfg.motion_json.is_some(),
+            perturbation: cfg.perturbation_json.is_some(),
+            driven_or_gradient_walls: !cfg.driven_exprs.is_empty() || !cfg.gradient_bcs.is_empty(),
+            declared_target: cfg.equilibrium_json.is_some() || cfg.seed_from_equilibrium,
+            excision: cfg.excision_radius > 0.0 || cfg.horizon_ledger,
+            well_balanced: cfg.wb_reconstruction,
+            locally_isothermal: cfg.locally_isothermal,
+        }
+    }
+}
+
+/// the first structural property of a refined run outside the scope the gpu hardware gates
+/// verified: newtonian hydro on a 3D uniform cartesian grid, one refined region, plm with a limiter of
+/// the minmod-MC family (any validated theta), hlle, rk2,
+/// the ideal gas, outflow on every face, on two workers, with no body, tracer, passive scalar,
+/// source, census, viscosity, mesh motion, perturbation, driven or gradient wall, declared target,
+/// excision, well-balanced reconstruction or locally isothermal closure
+fn untested_refined_device_property(f: &RefinedDeviceFacts) -> Option<String> {
+    let checks: [(bool, String); 28] = [
+        (f.regime != "newtonian", format!("the {} regime", f.regime)),
+        (f.dims != 3, format!("a {}-dimensional grid", f.dims)),
+        (f.coord_system != "cartesian", format!("the {} chart", f.coord_system)),
+        (!f.uniform_spacing, "a non-uniform spacing".into()),
+        (f.regions != 1, format!("{} refined regions", f.regions)),
+        (f.reconstruction != "plm", format!("{} reconstruction", f.reconstruction)),
+        (f.van_leer, "the van leer limiter".into()),
+        (f.solver != "hlle", format!("the {} solver", f.solver)),
+        (f.timestepping != Timestepping::Rk2, format!("{:?} time stepping", f.timestepping)),
+        (f.eos != "ideal", format!("the {} equation of state", f.eos)),
+        (!f.outflow_everywhere, "a boundary other than outflow".into()),
+        (f.spacetime != "minkowski", format!("the {} spacetime", f.spacetime)),
+        (f.workers != 2, format!("{} workers", f.workers)),
+        (f.bodies, "immersed bodies".into()),
+        (f.binary, "a binary".into()),
+        (f.bonded_assembly, "a bonded assembly".into()),
+        (f.tracers, "tracers".into()),
+        (f.passive_scalar, "a passive scalar".into()),
+        (f.sources, "user sources".into()),
+        (f.censuses, "a census".into()),
+        (f.viscosity, "a viscosity".into()),
+        (f.mesh_motion, "mesh motion".into()),
+        (f.perturbation, "a perturbation".into()),
+        (f.driven_or_gradient_walls, "driven or gradient walls".into()),
+        (f.declared_target, "a declared stationary target".into()),
+        (f.excision, "excision".into()),
+        (f.well_balanced, "well-balanced reconstruction".into()),
+        (f.locally_isothermal, "a locally isothermal closure".into()),
+    ];
+    checks.into_iter().find(|(untested, _)| *untested).map(|(_, property)| property)
+}
+
+/// a refined launch on device memory outside the hardware-gated scope: refused by name unless
+/// the operator opts in. a flat launch, and a refined launch on host memory, have their own gates
+fn ungated_on_device(refined: Option<&RefinedDeviceFacts>, device_memory: bool) -> Option<String> {
+    let facts = refined.filter(|_| device_memory)?;
+    untested_refined_device_property(facts).map(|property| format!("mesh refinement on gpu device memory with {property}"))
 }
 
 /// whether the run spaces any axis non-uniformly
@@ -11630,7 +11824,7 @@ fn axis_maps_any(cfg: &Config) -> bool {
     }
 }
 
-fn validate_launch_scope(cfg: &Config) -> Result<(), String> {
+fn validate_launch_scope(cfg: &Config, workers: usize) -> Result<(), String> {
     let refused = |what: &str| Err(format!("{what} is outside the distributed first release"));
     if !matches!(cfg.regime.as_str(), "newtonian" | "rhd" | "isothermal" | "nmhd" | "imhd" | "rmhd") {
         return refused(&format!("the {} regime", cfg.regime));
@@ -11715,7 +11909,7 @@ fn validate_launch_scope(cfg: &Config) -> Result<(), String> {
     // gate has validated: refused by name, or run as experimental under an explicit opt-in.
     // successful construction is no evidence of validated support
     validate_tiled_balance(cfg)?;
-    if let Some(property) = authorize_launch(ungated_launch_combination(cfg), launch_experimental_opt_in())? {
+    if let Some(property) = authorize_launch(ungated_launch_combination(cfg, workers), launch_experimental_opt_in())? {
         eprintln!("SIMBI launch: experimental combination without a distributed gate: {property}");
     }
     Ok(())
@@ -13182,7 +13376,7 @@ fn run_worker_process(
     validate_run(cfg)?;
     validate_declared_target(cfg, validate_primitive_rows(cfg, prims)?)?;
     validate_tiled_march(cfg)?;
-    validate_launch_scope(cfg)?;
+    validate_launch_scope(cfg, launch.workers)?;
     let fault = LaunchFault::from_env(launch.worker)?;
     if cfg.refinement_enabled {
         return run_refined_worker_process(cfg, prims, bufs, launch, fault, drained);
