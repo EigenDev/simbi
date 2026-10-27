@@ -10,9 +10,11 @@
 # flow compresses the axial one) and moves the gas on both sides of every cut;
 # four workers publish its state bit for bit, every face and halo included,
 # and a run checkpointed halfway on four workers resumes onto three unevenly
-# owned tiles to the uninterrupted single-grid state.
+# owned tiles to the uninterrupted single-grid state. every arm runs on the
+# session's backend and placement (parity_harness).
 #
 # run: pytest -m simulation simbi/simulation/tests/test_launch_magnetized_charts.py
+#      (SIMBI_PARITY_BACKEND / SIMBI_PARITY_PLACEMENT select the session, parity_harness.py)
 # =============================================================================
 
 import os
@@ -22,8 +24,9 @@ import h5py
 import numpy as np
 import pytest
 
-from simbi.simulation.tests.test_launch import MHD_STEPS, _assert_same_state, _layout, bounded_processes  # noqa: F401  the autouse process guard
-from simbi.simulation.tests.test_launch_isothermal import _script_launch, _script_reference
+from simbi.simulation.tests import parity_harness as ph
+from simbi.simulation.tests.test_launch import MHD_STEPS, bounded_processes  # noqa: F401  the autouse process guard
+from simbi.simulation.tests.test_launch_refined import _launch, _reference
 
 pytestmark = pytest.mark.simulation
 
@@ -198,16 +201,14 @@ def _assert_exercised(initial: Path, final: Path, cuts: list[list[int]], label: 
 def test_a_magnetized_chart_launches_as_the_single_grid_runs_fresh_and_resumed(tmp_path: Path, fixtures: Path, name: str) -> None:
     cls, case = CASES[name]
     resolution = case["resolution"]
-    reference = _script_reference("magnetized_charts", cls, resolution, tmp_path / "single", MHD_STEPS)
+    reference = _reference("magnetized_charts", cls, resolution, tmp_path / "single", MHD_STEPS)
     initial = sorted(p for p in (tmp_path / "single").glob("*.h5") if "final" not in p.name)[0]
     _assert_exercised(initial, reference, case["cuts"], name)
     script = _script(fixtures, cls)
-    four = _layout(tmp_path / "four.toml", workers=4, cuts=case["cuts"])
-    launched = _script_launch(script, resolution, tmp_path / "four", four, MHD_STEPS, workers=4)
-    _assert_same_state(launched, reference, f"{name}: four workers")
-    partial = _script_launch(script, resolution, tmp_path / "first", four, MHD_STEPS // 2, workers=4)
+    launched = _launch(script, resolution, tmp_path / "four", MHD_STEPS, 4, cuts=case["cuts"])
+    ph.same_checkpoint(launched, reference, f"{name}: four workers")
+    partial = _launch(script, resolution, tmp_path / "first", MHD_STEPS // 2, 4, cuts=case["cuts"])
     with h5py.File(partial, "r") as f:
         assert 0 < int(f["level_0"].attrs["iteration"]) < MHD_STEPS
-    three = _layout(tmp_path / "three.toml", workers=3, cuts=case["restart"])
-    resumed = _script_launch(script, resolution, tmp_path / "three", three, MHD_STEPS, workers=3, checkpoint=partial)
-    _assert_same_state(resumed, reference, f"{name}: resumed onto three uneven workers")
+    resumed = _launch(script, resolution, tmp_path / "three", MHD_STEPS, 3, cuts=case["restart"], checkpoint=partial)
+    ph.same_checkpoint(resumed, reference, f"{name}: resumed onto three uneven workers")

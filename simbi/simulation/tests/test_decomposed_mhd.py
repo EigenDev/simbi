@@ -15,24 +15,27 @@
 # four tiles, both cut through the boxes, every level bit for bit. the refined
 # blast carrying a discrete or a second-order ito population on two and three
 # uneven tiles publishes the single hierarchy's population as well. a locally
-# isothermal refined run on tiles is refused by name before any output.
+# isothermal refined run on tiles carries the single hierarchy as well. every
+# arm runs as a fresh process on the session's backend (parity_harness), the
+# tiled ones as host tiles; the arms involve no launch and run under the local
+# placement.
 #
 # run: pytest -m simulation simbi/simulation/tests/test_decomposed_mhd.py
+#      (SIMBI_PARITY_BACKEND selects the session's backend, parity_harness.py)
 # =============================================================================
 
 import os
-import subprocess
-import sys
 from pathlib import Path
 
 import h5py
 import numpy as np
 import pytest
 
-from simbi.simulation.tests.checkpoint_compare import assert_same_checkpoint
+from simbi.simulation.tests import parity_harness as ph
 from simbi.simulation.tests.test_launch_refined_numerics import _all_levels
 
-pytestmark = pytest.mark.simulation
+# every arm runs single-device and host-tile processes alone, under the local placement
+pytestmark = [pytest.mark.simulation, ph.local_only]
 
 STEPS = 4
 VORTICES = {
@@ -54,7 +57,14 @@ REFINED = {
 REFINED_LAYOUTS = {2: None, 3: [[12, 20], []], 6: [[12, 20], [14]]}
 
 
-def _raw(problem: str, out: Path, gpus: int, decompose=None, steps: int = STEPS, checkpoint: Path | None = None) -> subprocess.CompletedProcess:
+def _final(out: Path) -> Path:
+    files = sorted(out.glob("*final*.h5"))
+    assert len(files) == 1, f"expected one final checkpoint in {out}, found {files}"
+    return files[0]
+
+
+def _run(problem: str, out: Path, gpus: int, decompose=None, steps: int = STEPS, checkpoint: Path | None = None) -> Path:
+    """`problem` on the session's backend, one device or `gpus` host tiles; its final checkpoint"""
     extra = f", decompose={decompose!r}" if decompose is not None else ""
     resume = f", checkpoint_file={str(checkpoint)!r}" if checkpoint is not None else ""
     module = {**VORTICES, **REFINED}[problem]
@@ -63,29 +73,27 @@ def _raw(problem: str, out: Path, gpus: int, decompose=None, steps: int = STEPS,
         "from simbi.simulation import runner\n"
         f"from {module} import {problem}\n"
         f"runner.run({problem}(resolution=(32, 32, 1), gpus={gpus}, checkpoint_interval=1e9, data_directory=sys.argv[1]{extra}{resume}), "
-        f"compute_mode='cpu', max_steps={steps})\n"
+        f"compute_mode={ph.BACKEND!r}, max_steps={steps})\n"
     )
-    env = dict(os.environ, SYMBI_GPU_OVERSUBSCRIBE="1")
-    return subprocess.run([sys.executable, "-c", snippet, str(out)], capture_output=True, text=True, timeout=900, env=env)
+    ph.python(ph.snippet_args(snippet, str(out)), f"{problem} on {gpus} device(s) to step {steps}", devices=gpus)
+    return _final(out)
 
 
-def _run(problem: str, out: Path, gpus: int, decompose=None, steps: int = STEPS, checkpoint: Path | None = None) -> Path:
-    done = _raw(problem, out, gpus, decompose, steps, checkpoint)
-    assert done.returncode == 0, f"{problem} on {gpus} device(s) failed:\n{done.stderr[-3000:]}"
-    files = sorted(out.glob("*final*.h5"))
-    assert len(files) == 1, f"expected one final checkpoint in {out}, found {files}"
-    return files[0]
+def _equal_levels(xs: dict[str, np.ndarray], ys: dict[str, np.ndarray], label: str) -> None:
+    assert xs.keys() == ys.keys(), f"{label}: datasets {sorted(set(xs) ^ set(ys))} differ"
+    for name, x in xs.items():
+        np.testing.assert_array_equal(x, ys[name], err_msg=f"{label}: {name}")
 
 
 def _assert_same(got: Path, want: Path, label: str) -> None:
+    """every level of `got` equals `want`'s bit for bit, gas, cell field and face field; a
+    difference raises a NumericalDisagreement"""
     xs, ys = _all_levels(got), _all_levels(want)
     levels = sorted({name.split("/")[0] for name in ys if name.startswith("level_") and "/" in name})
     for level in levels:
         faces = [name for name in ys if name.startswith(f"{level}/") and "/magnetic/B" in name]
         assert len(faces) >= 2 and f"{level}/conserved/b1" in ys, f"{label}: {level} publishes no face and cell field: {sorted(ys)}"
-    assert xs.keys() == ys.keys(), f"{label}: datasets {sorted(set(xs) ^ set(ys))} differ"
-    for name, x in xs.items():
-        np.testing.assert_array_equal(x, ys[name], err_msg=f"{label}: {name}")
+    ph.disagreement(_equal_levels, xs, ys, label)
 
 
 @pytest.mark.parametrize("problem", list(VORTICES))
@@ -134,7 +142,7 @@ def test_a_locally_isothermal_refined_run_on_tiles_carries_the_single_hierarchy(
         "                yield (*row, row[0] * (1.0 + 0.3 * row[1]))\n\n"
         "        return (local, *fields)\n"
     )
-    env = dict(os.environ, SYMBI_GPU_OVERSUBSCRIBE="1", PYTHONPATH=os.pathsep.join([str(tmp_path), os.getcwd(), os.environ.get("PYTHONPATH", "")]))
+    env = dict(os.environ, PYTHONPATH=os.pathsep.join([str(tmp_path), os.getcwd(), os.environ.get("PYTHONPATH", "")]))
 
     def run(out: Path, gpus: int, decompose=None) -> Path:
         cuts = "" if decompose is None else f", decompose={decompose!r}"
@@ -142,10 +150,9 @@ def test_a_locally_isothermal_refined_run_on_tiles_carries_the_single_hierarchy(
             "import sys\n"
             "from simbi.simulation import runner\n"
             "from local import LocalRefined\n"
-            f"runner.run(LocalRefined(resolution=(32, 32, 1), gpus={gpus}{cuts}, checkpoint_interval=1e9, data_directory=sys.argv[1]), compute_mode='cpu', max_steps=3)\n"
+            f"runner.run(LocalRefined(resolution=(32, 32, 1), gpus={gpus}{cuts}, checkpoint_interval=1e9, data_directory=sys.argv[1]), compute_mode={ph.BACKEND!r}, max_steps=3)\n"
         )
-        done = subprocess.run([sys.executable, "-c", snippet, str(out)], capture_output=True, text=True, timeout=900, env=env)
-        assert done.returncode == 0, f"{gpus} device(s) failed:\n{done.stderr[-3000:]}"
+        ph.python(ph.snippet_args(snippet, str(out)), f"locally isothermal on {gpus} device(s)", env=env, devices=gpus)
         (final,) = sorted(out.glob("*final*.h5"))
         return final
 
@@ -157,7 +164,7 @@ def test_a_locally_isothermal_refined_run_on_tiles_carries_the_single_hierarchy(
     assert np.ptp(fine) > 1e-3 * np.abs(fine).max(), "the fine closure is uniform; the comparison is vacuous"
     for gpus, decompose in ((2, None), (3, [[12, 20], []]), (6, [[12, 20], [14]])):
         got = run(tmp_path / f"tiles{gpus}", gpus, decompose)
-        assert_same_checkpoint(got, want, f"locally isothermal refined vortex on {gpus} tiles", exclude=("body_diagnostics",))
+        ph.same_checkpoint(got, want, f"locally isothermal refined vortex on {gpus} tiles", exclude=("body_diagnostics",))
 
 
 VORTEX_3D = "from simbi_configs.examples.newtonian.refined_mhd_3d import RefinedMhd3D as Base"
@@ -213,14 +220,11 @@ def _run_variant(where: Path, out: Path, resolution: tuple[int, ...], gpus: int,
         "from simbi.simulation import runner\n"
         "from variant import Variant\n"
         f"runner.run(Variant(resolution={resolution!r}, gpus={gpus}, checkpoint_interval=1e9, data_directory=sys.argv[1]{extra}), "
-        f"compute_mode='cpu', max_steps={STEPS})\n"
+        f"compute_mode={ph.BACKEND!r}, max_steps={STEPS})\n"
     )
-    env = dict(os.environ, SYMBI_GPU_OVERSUBSCRIBE="1", PYTHONPATH=os.pathsep.join([str(where), os.getcwd(), os.environ.get("PYTHONPATH", "")]))
-    done = subprocess.run([sys.executable, "-c", snippet, str(out)], capture_output=True, text=True, timeout=1800, env=env)
-    assert done.returncode == 0, f"variant on {gpus} device(s) failed:\n{done.stderr[-3000:]}"
-    files = sorted(out.glob("*final*.h5"))
-    assert len(files) == 1, f"expected one final checkpoint in {out}, found {files}"
-    return files[0]
+    env = dict(os.environ, PYTHONPATH=os.pathsep.join([str(where), os.getcwd(), os.environ.get("PYTHONPATH", "")]))
+    ph.python(ph.snippet_args(snippet, str(out)), f"variant on {gpus} device(s)", timeout=1800, env=env, devices=gpus)
+    return _final(out)
 
 
 @pytest.mark.parametrize("name", list(VARIANTS_3D))
@@ -302,7 +306,4 @@ def test_refined_magnetized_tiles_carry_the_single_hierarchy_population(tmp_path
     for gpus, decompose in ((2, None), (3, [[12, 20], []])):
         got = _run_variant(tmp_path, tmp_path / f"tiles{gpus}", resolution, gpus, decompose)
         _assert_same(got, want, f"traced blast ({scheme}) on {gpus} refined tiles")
-        tiled = _population(got, group)
-        assert tiled.keys() == population.keys(), f"{scheme}: tracer fields differ"
-        for name, values in population.items():
-            np.testing.assert_array_equal(tiled[name], values, err_msg=f"{scheme} on {gpus} tiles: {group}/{name}")
+        ph.disagreement(_equal_levels, _population(got, group), population, f"{scheme} on {gpus} tiles: {group}")

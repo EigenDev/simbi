@@ -1,13 +1,14 @@
 # =============================================================================
 # test_launch_bodies.py
 #
-# immersed bodies on launched workers. launched workers sum every tile's body
-# feedback in flat tile order, the order host tiles sum it in, so two launched
-# workers publish what two host tiles publish, bit for bit: every grid field,
-# the bodies group, the per-step body history and the body diagnostics file.
-# host tiles reach the single grid within the reassociation bound of their
-# cross-tile sums (test_tiled_body_ledger, test_isothermal_tile_settings). the
-# arms:
+# immersed bodies on launched workers, on the session's backend and placement
+# (parity_harness). each tile books its own cells' partial of every body
+# feedback reduction exactly, and the partials merge in flat tile order and
+# round once, so on the cpu the single device, host tiles and launched workers
+# publish the same run bit for bit: every grid field, the bodies group, the
+# per-step body history and the body diagnostics file. a gpu device rounds its
+# feedback sum once per tile, so its tiles and workers agree with each other
+# and its single-device comparisons carry that rounding. the arms:
 # - a shaped rigid wall in a driven wind tunnel, adiabatic and isothermal;
 # - a bonded fragment cluster in the same wind;
 # - an accreting bondi sink, fresh, and resumed onto three uneven workers
@@ -17,12 +18,13 @@
 # - with mesh refinement: a gravitating primary, the same with the alpha
 #   viscosity, and an accreting bondi sink under a fine central box, launched
 #   refined workers against refined host tiles; the gravitating arms' host
-#   tiles against the single hierarchy (the sink's link is
-#   test_tiled_body_ledger[refined]); three workers, one holding no fine tile;
-#   and a late fine-substep rejection against its capped clean control, which
-#   must publish no contribution of the rejected attempt.
+#   tiles against the single hierarchy (the sink's host tiles against the
+#   single hierarchy are test_tiled_body_ledger[refined]); three workers, one
+#   holding no fine tile; and a late fine-substep rejection against its capped
+#   clean control, which must publish no contribution of the rejected attempt.
 # - an accreting bondi sink under two nested fine levels on three workers, two
-#   of them holding level 1 without level 2, against the single hierarchy;
+#   of them holding level 1 without level 2, and on host tiles cut at the same
+#   cells, each against the single hierarchy bit for bit;
 # - on an unrefined grid, a stage rejected on one worker with an accreting
 #   sink and with a wall cut by the workers replays as the run capped at the
 #   accepted timestep: grid, bodies, history and diagnostics carry nothing of
@@ -32,20 +34,19 @@
 # name.
 #
 # run: pytest -m simulation simbi/simulation/tests/test_launch_bodies.py
+#      (SIMBI_PARITY_BACKEND / SIMBI_PARITY_PLACEMENT select the session, parity_harness.py)
 # =============================================================================
 
 import os
-import subprocess
-import sys
 from pathlib import Path
 
 import h5py
 import numpy as np
 import pytest
 
-from simbi.simulation.tests.test_launch import _layout, bounded_processes  # noqa: F401  the autouse process guard
+from simbi.simulation.tests import parity_harness as ph
+from simbi.simulation.tests.test_launch import bounded_processes  # noqa: F401  the autouse process guard
 from simbi.simulation.tests.test_launch_refined_numerics import _all_levels
-from simbi.simulation.tests.test_tiled_body_ledger import U, _diagnostics, _pull
 
 pytestmark = pytest.mark.simulation
 
@@ -226,8 +227,25 @@ def _iteration(path: Path) -> int:
         return int(f["level_0"].attrs["iteration"])
 
 
+def _run(problem: str, resolution: tuple | None, out: Path, steps: int, gpus: int, fields: list[str]) -> Path:
+    """`problem` on the session's backend over `gpus` devices, one device or in-process host tiles"""
+    fields = ([f"resolution={resolution!r}"] if resolution is not None else []) + fields
+    snippet = (
+        "import sys\n"
+        "from simbi.simulation import runner\n"
+        f"from variants import {problem}\n"
+        f"p = {problem}(gpus={gpus}, data_directory=sys.argv[1]{''.join(', ' + f for f in fields)})\n"
+        "p.checkpoint_interval = 1e9\n"
+        f"runner.run(p, compute_mode=sys.argv[2], max_steps={steps})\n"
+    )
+    # host tiles beyond the visible devices share them
+    env = dict(os.environ, SYMBI_GPU_OVERSUBSCRIBE="1")
+    ph.python(ph.snippet_args(snippet, str(out), ph.BACKEND), f"{problem} on {gpus} device(s)", env=env, devices=gpus)
+    return _final(out)
+
+
 def _tiles(problem: str, resolution: tuple | None, out: Path, steps: int, checkpoint: Path | None = None, cuts: list | None = None) -> Path:
-    fields = [f"resolution={resolution!r}"] if resolution is not None else []
+    fields = []
     gpus = 2
     if cuts is not None:
         fields.append(f"decompose={cuts!r}")
@@ -236,34 +254,30 @@ def _tiles(problem: str, resolution: tuple | None, out: Path, steps: int, checkp
             gpus *= len(axis) + 1
     if checkpoint is not None:
         fields.append(f"checkpoint_file={str(checkpoint)!r}")
-    snippet = (
-        "import sys\n"
-        "from simbi.simulation import runner\n"
-        f"from variants import {problem}\n"
-        f"p = {problem}(gpus={gpus}, data_directory=sys.argv[1]{''.join(', ' + f for f in fields)})\n"
-        "p.checkpoint_interval = 1e9\n"
-        f"runner.run(p, compute_mode='cpu', max_steps={steps})\n"
-    )
-    env = dict(os.environ, SYMBI_GPU_OVERSUBSCRIBE="1")
-    done = subprocess.run([sys.executable, "-c", snippet, str(out)], capture_output=True, text=True, timeout=900, env=env)
-    assert done.returncode == 0, f"{problem} on {gpus} host tiles failed:\n{done.stderr[-3000:]}"
-    return _final(out)
+    return _run(problem, resolution, out, steps, gpus, fields)
 
 
-def _launch(variants: Path, problem: str, resolution: tuple | None, out: Path, layout: Path, steps: int, checkpoint: Path | None = None) -> Path:
+def _single(problem: str, resolution: tuple | None, out: Path, steps: int) -> Path:
+    return _run(problem, resolution, out, steps, 1, [])
+
+
+def _launch(variants: Path, problem: str, resolution: tuple | None, out: Path, workers: int, steps: int, cuts: list | None = None,
+            shape: tuple | None = None, checkpoint: Path | None = None, inject: str | None = None, expect_ok: bool = True) -> ph.Launch:
+    """`problem` launched on `workers` workers partitioned by `cuts` (else `shape`), with no
+    experimental opt-in"""
     script = variants.parent / f"launched_{problem.lower()}.py"
     script.write_text(f"from variants import {problem} as Base\n\n\nclass Launched{problem}(Base):\n    pass\n")
-    cmd = [sys.executable, "-m", "simbi.cli", "launch", str(script), "--layout", str(layout), "--max-steps", str(steps),
-           "--data-directory", str(out), "--checkpoint-interval", "1e9"]
+    args = ["--max-steps", str(steps), "--checkpoint-interval", "1e9"]
     if resolution is not None:
-        cmd += ["--resolution", ",".join(str(r) for r in resolution)]
+        args += ["--resolution", ",".join(str(r) for r in resolution)]
     if checkpoint is not None:
-        cmd += ["--checkpoint", str(checkpoint)]
-    env = dict(os.environ)
-    env.pop("SIMBI_LAUNCH_EXPERIMENTAL", None)
-    done = subprocess.run(cmd, capture_output=True, text=True, timeout=900, env=env)
-    assert done.returncode == 0, f"launch failed:\nstdout:\n{done.stdout}\nstderr:\n{done.stderr[-3000:]}"
-    return _final(out)
+        args += ["--checkpoint", str(checkpoint)]
+    return ph.launch(script, out, workers=workers, cuts=cuts, shape=shape, args=args, env=ph.environment(inject), expect_ok=expect_ok)
+
+
+def _rejections(run: ph.Launch) -> set[int]:
+    """the rejection counts the workers report"""
+    return {rejections for _, rejections in run.reports().values()}
 
 
 def _body_groups(path: Path) -> dict[str, np.ndarray]:
@@ -307,11 +321,10 @@ def test_launched_workers_publish_the_host_tiles_bodies(tmp_path: Path, variants
         assert (x.min() < 0.0 < x.max()) or abs(float(x[0])) < 0.4, f"{arm}: the body lies on one side of the cut (x = {x})"
     # a planar grid cut once along x (through the body where named); the 3d sinks likewise
     planar = resolution is not None and sum(1 for r in resolution if r > 1) == 2
-    two = _layout(tmp_path / "two.toml", workers=2, cuts=cuts) if cuts is not None else _layout(tmp_path / "two.toml", workers=2, shape=(2, 1) if planar else (2, 1, 1))
-    got = _launch(variants, problem, resolution, tmp_path / "launched", two, STEPS)
-    _assert_same(got, want, f"{arm}: two launched workers")
+    got = _launch(variants, problem, resolution, tmp_path / "launched", 2, STEPS, cuts=cuts, shape=(2, 1) if planar else (2, 1, 1))
+    ph.disagreement(_assert_same, got.final, want, f"{arm}: two launched workers")
     if arm == "sink":
-        _assert_same_diagnostics(tmp_path / "launched", tmp_path / "tiles", arm)
+        ph.disagreement(_assert_same_diagnostics, tmp_path / "launched", tmp_path / "tiles", arm)
 
 
 def test_a_sink_resumed_onto_three_uneven_workers_publishes_the_host_tiles_ledger(tmp_path: Path, variants: Path) -> None:
@@ -322,9 +335,8 @@ def test_a_sink_resumed_onto_three_uneven_workers_publishes_the_host_tiles_ledge
     # past the checkpoint
     cap = _iteration(first) + STEPS - STEPS // 2
     want = _tiles("Bondi", None, tmp_path / "tiles", cap, checkpoint=first, cuts=cuts)
-    three = _layout(tmp_path / "three.toml", workers=3, cuts=cuts)
-    got = _launch(variants, "Bondi", None, tmp_path / "launched", three, cap, checkpoint=first)
-    _assert_same(got, want, "sink resumed onto three uneven workers")
+    got = _launch(variants, "Bondi", None, tmp_path / "launched", 3, cap, cuts=cuts, checkpoint=first)
+    ph.disagreement(_assert_same, got.final, want, "sink resumed onto three uneven workers")
 
 
 def test_a_magnetized_wall_takes_its_shape(tmp_path: Path, variants: Path) -> None:
@@ -350,51 +362,27 @@ def test_launched_refined_workers_publish_the_refined_host_tiles_bodies(tmp_path
     want = _tiles(problem, resolution, tmp_path / "tiles", STEPS)
     assert any(name.startswith("level_1/") for name in _all_levels(want)), f"{arm}: the host tiles published no fine level"
     planar = resolution is not None
-    two = _layout(tmp_path / "two.toml", workers=2, shape=(2, 1) if planar else (2, 1, 1))
-    got = _launch(variants, problem, resolution, tmp_path / "launched", two, STEPS)
-    _assert_same(got, want, f"{arm}: two launched refined workers")
+    got = _launch(variants, problem, resolution, tmp_path / "launched", 2, STEPS, shape=(2, 1) if planar else (2, 1, 1))
+    ph.disagreement(_assert_same, got.final, want, f"{arm}: two launched refined workers")
     if arm == "refined-sink":
-        _assert_same_diagnostics(tmp_path / "launched", tmp_path / "tiles", arm)
+        ph.disagreement(_assert_same_diagnostics, tmp_path / "launched", tmp_path / "tiles", arm)
 
 
 def test_a_refined_bonded_assembly_on_launch_is_refused(tmp_path: Path, variants: Path) -> None:
-    script = variants.parent / "launched_refinedrubble.py"
-    script.write_text("from variants import RefinedRubble as Base\n\n\nclass LaunchedRefinedRubble(Base):\n    pass\n")
-    layout = _layout(tmp_path / "two.toml", workers=2, shape=(2, 1))
-    cmd = [sys.executable, "-m", "simbi.cli", "launch", str(script), "--layout", str(layout), "--max-steps", "1",
-           "--resolution", "64,32", "--data-directory", str(tmp_path / "out"), "--checkpoint-interval", "1e9"]
-    env = dict(os.environ)
-    env.pop("SIMBI_LAUNCH_EXPERIMENTAL", None)
-    done = subprocess.run(cmd, capture_output=True, text=True, timeout=600, env=env)
-    assert done.returncode != 0, f"the launch succeeded:\n{done.stdout}"
-    assert "does not support refinement yet (no fragment step on the hierarchy)" in " ".join(done.stderr.split()), done.stderr[-2000:]
+    run = _launch(variants, "RefinedRubble", (64, 32), tmp_path / "out", 2, 1, shape=(2, 1), expect_ok=False)
+    assert run.returncode != 0, f"the launch succeeded:\n{run.stdout}"
+    assert "does not support refinement yet (no fragment step on the hierarchy)" in " ".join(run.stderr.split()), run.stderr[-2000:]
     assert not list((tmp_path / "out").glob("*.h5")), "a checkpoint was published"
-
-
-def _single(problem: str, resolution: tuple | None, out: Path, steps: int) -> Path:
-    fields = [f"resolution={resolution!r}"] if resolution is not None else []
-    snippet = (
-        "import sys\n"
-        "from simbi.simulation import runner\n"
-        f"from variants import {problem}\n"
-        f"p = {problem}(gpus=1, data_directory=sys.argv[1]{''.join(', ' + f for f in fields)})\n"
-        "p.checkpoint_interval = 1e9\n"
-        f"runner.run(p, compute_mode='cpu', max_steps={steps})\n"
-    )
-    done = subprocess.run([sys.executable, "-c", snippet, str(out)], capture_output=True, text=True, timeout=900)
-    assert done.returncode == 0, f"{problem} on one device failed:\n{done.stderr[-3000:]}"
-    return _final(out)
 
 
 @pytest.mark.parametrize("problem", ["RefinedPrimary", "RefinedAlphaPrimary", "RefinedIsothermalAlphaPrimary"])
 def test_refined_host_tiles_publish_the_single_hierarchy_bodies(tmp_path: Path, variants: Path, problem: str) -> None:
-    # a gravitating body takes no feedback, so no cross-tile sum enters its state: the refined host
-    # tiles the launch is gated against publish the single hierarchy's grid, bodies and history bit
-    # for bit. the accreting sink's link to the single hierarchy is test_tiled_body_ledger[refined],
-    # the same configuration within the reassociation bound of its cross-tile sums.
+    # the refined host tiles the launch is gated against publish the single hierarchy's grid, bodies
+    # and history bit for bit. the accreting sink's host tiles against the single hierarchy are
+    # test_tiled_body_ledger[refined].
     want = _single(problem, (64, 64), tmp_path / "single", STEPS)
     assert any(name.startswith("level_1/") for name in _all_levels(want)), f"{problem}: the single run published no fine level"
-    _assert_same(_tiles(problem, (64, 64), tmp_path / "tiles", STEPS), want, f"{problem}: two refined host tiles")
+    ph.disagreement(_assert_same, _tiles(problem, (64, 64), tmp_path / "tiles", STEPS), want, f"{problem}: two refined host tiles")
 
 
 # three workers, the first holding an unrefined tile alone: (problem, resolution, cuts). the planar
@@ -413,18 +401,18 @@ def test_a_worker_holding_no_fine_tile_joins_the_refined_body_step(tmp_path: Pat
     # global delta every tile applies
     problem, resolution, cuts = WITHOUT_FINE[arm]
     want = _tiles(problem, resolution, tmp_path / "tiles", STEPS, cuts=cuts)
-    three = _layout(tmp_path / "three.toml", workers=3, cuts=cuts)
-    got = _launch(variants, problem, resolution, tmp_path / "launched", three, STEPS)
-    _assert_same(got, want, f"{arm}: three workers, the first without a fine tile")
+    got = _launch(variants, problem, resolution, tmp_path / "launched", 3, STEPS, cuts=cuts)
+    ph.disagreement(_assert_same, got.final, want, f"{arm}: three workers, the first without a fine tile")
     if arm == "sink":
-        _assert_same_diagnostics(tmp_path / "launched", tmp_path / "tiles", arm)
+        ph.disagreement(_assert_same_diagnostics, tmp_path / "launched", tmp_path / "tiles", arm)
     # resumed on the same layout from the coordinator's own checkpoint: the history the coordinator
     # publishes after the restart is the host tiles' after theirs
-    first = _launch(variants, problem, resolution, tmp_path / "launched-first", three, STEPS // 2)
+    first = _launch(variants, problem, resolution, tmp_path / "launched-first", 3, STEPS // 2, cuts=cuts).final
     tiles_first = _tiles(problem, resolution, tmp_path / "tiles-first", STEPS // 2, cuts=cuts)
     # `max_steps` caps the absolute root iteration: each resumed run takes STEPS - STEPS // 2 steps
     # past its checkpoint
-    resumed = _launch(variants, problem, resolution, tmp_path / "launched-resumed", three, _iteration(first) + STEPS - STEPS // 2, checkpoint=first)
+    resumed = _launch(variants, problem, resolution, tmp_path / "launched-resumed", 3, _iteration(first) + STEPS - STEPS // 2, cuts=cuts,
+                      checkpoint=first).final
     tiles_resumed = _tiles(
         problem, resolution, tmp_path / "tiles-resumed", _iteration(tiles_first) + STEPS - STEPS // 2, checkpoint=tiles_first, cuts=cuts
     )
@@ -432,7 +420,7 @@ def test_a_worker_holding_no_fine_tile_joins_the_refined_body_step(tmp_path: Pat
         assert "body_diagnostics/time" in f and f["body_diagnostics/time"].shape[0] > 0, (
             f"{arm}: the coordinator published no body history after the restart"
         )
-    _assert_same(resumed, tiles_resumed, f"{arm}: resumed on three workers, the coordinator without a fine tile")
+    ph.disagreement(_assert_same, resumed, tiles_resumed, f"{arm}: resumed on three workers, the coordinator without a fine tile")
 
 
 # root cells of the 24-cell nested bondi grid: level 1 spans 6..18, level 2 spans 9..15; the cuts
@@ -449,9 +437,8 @@ def _level_root_span(path: Path, level: str) -> tuple[float, float]:
 def test_tiles_and_workers_holding_fewer_levels_publish_the_single_hierarchy_nested_sink(tmp_path: Path, variants: Path) -> None:
     # every tile applies the global body delta on its own finest level, gravity-only proxies below;
     # a worker without the run's finest level publishes the bodies and history from its deepest
-    # level. the grid matches the single hierarchy bit for bit: the drain acts on the finest level,
-    # which one worker holds whole. the body state and history take the reassociation bound of the
-    # cross-tile body sums (test_tiled_body_ledger)
+    # level. the tiles book the body sums exactly and round once, so the launch and the host tiles
+    # publish the single hierarchy's grid, bodies, history and diagnostics bit for bit
     want = _single("NestedBondi", None, tmp_path / "single", STEPS)
     lo, hi = _level_root_span(want, "level_2")
     root_lo, root_hi = _level_root_span(want, "level_0")
@@ -464,92 +451,53 @@ def test_tiles_and_workers_holding_fewer_levels_publish_the_single_hierarchy_nes
     )
     with h5py.File(want, "r") as f:
         assert float(f["bodies/total_accreted_mass"][0]) > 0.0, "the sink accreted nothing; the gate is vacuous"
-    three = _layout(tmp_path / "three.toml", workers=3, cuts=NESTED_CUTS)
-    got = _launch(variants, "NestedBondi", None, tmp_path / "launched", three, STEPS)
-    _assert_nested_sink(got, tmp_path / "launched", want, tmp_path / "single", "nested sink, launched")
+    got = _launch(variants, "NestedBondi", None, tmp_path / "launched", 3, STEPS, cuts=NESTED_CUTS)
+    _assert_nested_sink(got.final, tmp_path / "launched", want, tmp_path / "single", "nested sink, launched")
     # the host tiles on the same cuts: the tiles holding level 1 without level 2 add no reaction
     tiles = _tiles("NestedBondi", None, tmp_path / "tiles", STEPS, cuts=NESTED_CUTS)
     _assert_nested_sink(tiles, tmp_path / "tiles", want, tmp_path / "single", "nested sink, host tiles")
 
 
 def _assert_nested_sink(got: Path, out: Path, want: Path, single_out: Path, label: str) -> None:
-    """the grid bit for bit, the body state and history within the reassociation bound of the
-    cross-tile body sums"""
-    xs, ys = _all_levels(got), _all_levels(want)
-    assert xs.keys() == ys.keys(), f"datasets {sorted(set(xs) ^ set(ys))} differ"
-    for name, x in xs.items():
-        np.testing.assert_array_equal(x, ys[name], err_msg=f"{label}: {name}")
-    bx, by = _body_groups(got), _body_groups(want)
-    assert bx.keys() == by.keys(), f"body datasets {sorted(set(bx) ^ set(by))} differ"
-    for name in ("body_diagnostics/time", "body_diagnostics/dt"):
-        np.testing.assert_array_equal(bx[name], by[name], err_msg=name)
-    with h5py.File(want, "r") as f:
-        cells = sum(int(np.prod([s - 2 * int(f[k]["mesh"].attrs["halo_width"]) for s in f[k]["conserved/den"].shape]))
-                    for k in f if k.startswith("level_"))
-    pull, arm = _pull(want)
-    for name, y in by.items():
-        y = y.astype(float)
-        scale = pull if "force" in name else pull * arm if "torque" in name else np.abs(y).max()
-        worst = np.abs(bx[name].astype(float) - y).max()
-        assert worst <= cells * U * scale, f"{label}: {name} differs by {worst:.3e} against {cells * U:.1e} of {scale:.3e}"
+    """the grid, the body state and history, and the diagnostics file of the single hierarchy, bit
+    for bit"""
+    ph.disagreement(_assert_same, got, want, label)
+    ph.disagreement(_assert_same_diagnostics, out, single_out, label)
     # the published body state carries the published history: one row per step, and the accreted
-    # mass is the sum of the per-step receipts (a sum of STEPS terms of one sign)
+    # mass is the sum of the per-step receipts, a sum of STEPS terms of one sign within its
+    # rounding of STEPS u, u = 2^-53
+    bx = _body_groups(got)
     assert bx["body_diagnostics/mass_delta"].shape[0] == STEPS, f"the history books {bx['body_diagnostics/mass_delta'].shape[0]} rows for {STEPS} steps"
     receipts = float(np.sum(bx["body_diagnostics/mass_delta"]))
     published = float(bx["bodies/total_accreted_mass"][0])
-    assert abs(published - receipts) <= STEPS * U * receipts, f"the published accreted mass {published:.17e} departs from its history {receipts:.17e}"
-    rows, single_rows = _diagnostics(out), _diagnostics(single_out)
-    assert rows.shape == single_rows.shape, f"diagnostics rows {rows.shape} against {single_rows.shape}"
-    np.testing.assert_array_equal(rows[:, 0], single_rows[:, 0], err_msg="diagnostics times")
-    # nine printed significant digits (%.8e) on top of the reassociation bound; force and torque
-    # columns take the bound on their unsummed scales
-    unsummed = np.zeros(rows.shape[1])
-    unsummed[8:11], unsummed[11:14] = pull, pull * arm
-    tolerance = 1e-8 * np.maximum(np.abs(rows), np.abs(single_rows)) + cells * U * unsummed
-    excess = np.abs(rows - single_rows) - tolerance
-    assert np.all(excess <= 0.0), f"diagnostics differ beyond the printed precision: column {int(np.argmax(excess.max(axis=0)))}"
+    assert abs(published - receipts) <= STEPS * 2.0**-53 * receipts, f"the published accreted mass {published:.17e} departs from its history {receipts:.17e}"
 
 
-REJECTIONS = __import__("re").compile(r"SIMBI launch: worker=\d+/\d+ steps=\d+ rejections=(\d+)")
 # the sink's late rejection: worker 2 holds root cells 12..24, the patch's upper half; the last
 # stage (rk2) of the second fine substep of root step 2, after the first substep drained the sink
 LATE_STEP = 2
 LATE_REJECTION = f"reject_level:2:{LATE_STEP}:1:1:1"
 
 
-def _launch_counting(variants: Path, out: Path, layout: Path, inject: str | None) -> tuple[Path, set[int]]:
-    script = variants.parent / "launched_refinedbondi.py"
-    script.write_text("from variants import RefinedBondi as Base\n\n\nclass LaunchedRefinedBondi(Base):\n    pass\n")
-    cmd = [sys.executable, "-m", "simbi.cli", "launch", str(script), "--layout", str(layout), "--max-steps", str(STEPS),
-           "--data-directory", str(out), "--checkpoint-interval", "1e9"]
-    env = dict(os.environ)
-    env.pop("SIMBI_LAUNCH_EXPERIMENTAL", None)
-    if inject is not None:
-        env["SIMBI_FABRIC_INJECT"] = inject
-    done = subprocess.run(cmd, capture_output=True, text=True, timeout=900, env=env)
-    assert done.returncode == 0, f"launch failed:\nstdout:\n{done.stdout}\nstderr:\n{done.stderr[-3000:]}"
-    return _final(out), {int(r) for r in REJECTIONS.findall(done.stderr)}
-
-
 def test_a_late_fine_rejection_publishes_no_body_contribution_of_the_rejected_attempt(tmp_path: Path, variants: Path) -> None:
-    three = _layout(tmp_path / "three.toml", workers=3, cuts=WITHOUT_FINE["sink"][2])
-    rejecting, counts = _launch_counting(variants, tmp_path / "rejecting", three, LATE_REJECTION)
-    assert counts == {1}, f"the fine rejection was not counted once on every worker: {counts}"
-    clean, clean_counts = _launch_counting(variants, tmp_path / "clean", three, None)
-    assert clean_counts == {0}
-    with h5py.File(rejecting, "r") as fr, h5py.File(clean, "r") as fc:
+    cuts = WITHOUT_FINE["sink"][2]
+    rejecting = _launch(variants, "RefinedBondi", None, tmp_path / "rejecting", 3, STEPS, cuts=cuts, inject=LATE_REJECTION)
+    assert _rejections(rejecting) == {1}, f"the fine rejection was not counted once on every worker: {rejecting.reports()}"
+    clean = _launch(variants, "RefinedBondi", None, tmp_path / "clean", 3, STEPS, cuts=cuts)
+    assert _rejections(clean) == {0}
+    with h5py.File(rejecting.final, "r") as fr, h5py.File(clean.final, "r") as fc:
         accepted = float(fr["body_diagnostics/dt"][LATE_STEP])
         assert accepted < float(fc["body_diagnostics/dt"][LATE_STEP]), "the rejection never reduced the timestep"
         # the drain booked accretion in the rejected attempt's first fine substep: discarding it is
         # the transaction under test
         assert np.abs(fc["body_diagnostics/mass_delta"][LATE_STEP]).max() > 0.0, "the sink accreted nothing at the rejected step"
     cap = f"cap:{LATE_STEP}:{int(np.float64(accepted).view(np.uint64))}"
-    capped, capped_counts = _launch_counting(variants, tmp_path / "capped", three, cap)
-    assert capped_counts == {0}, "the capped control rejected a step"
+    capped = _launch(variants, "RefinedBondi", None, tmp_path / "capped", 3, STEPS, cuts=cuts, inject=cap)
+    assert _rejections(capped) == {0}, "the capped control rejected a step"
     # the accepted run publishes the capped clean control's grid, bodies, history and diagnostics:
     # no accretion, force, torque or heat of the rejected attempt survives in any of them
-    _assert_same(rejecting, capped, "late fine rejection against the capped control")
-    _assert_same_diagnostics(tmp_path / "rejecting", tmp_path / "capped", "late fine rejection")
+    ph.disagreement(_assert_same, rejecting.final, capped.final, "late fine rejection against the capped control")
+    ph.disagreement(_assert_same_diagnostics, tmp_path / "rejecting", tmp_path / "capped", "late fine rejection")
 
 
 FLAT_REJECTION_STEP = 2
@@ -557,41 +505,26 @@ FLAT_REJECTION_STEP = 2
 FLAT_REJECTING = {"sink": ("Bondi", None, None), "wall": ("WindTunnel", (64, 32), [[16], []])}
 
 
-def _launch_flat_counting(variants: Path, problem: str, resolution: tuple | None, out: Path, layout: Path,
-                          inject: str | None) -> tuple[Path, set[int]]:
-    script = variants.parent / f"launched_{problem.lower()}.py"
-    script.write_text(f"from variants import {problem} as Base\n\n\nclass Launched{problem}(Base):\n    pass\n")
-    cmd = [sys.executable, "-m", "simbi.cli", "launch", str(script), "--layout", str(layout), "--max-steps", str(STEPS),
-           "--data-directory", str(out), "--checkpoint-interval", "1e9"]
-    if resolution is not None:
-        cmd += ["--resolution", ",".join(str(r) for r in resolution)]
-    env = dict(os.environ)
-    env.pop("SIMBI_LAUNCH_EXPERIMENTAL", None)
-    if inject is not None:
-        env["SIMBI_FABRIC_INJECT"] = inject
-    done = subprocess.run(cmd, capture_output=True, text=True, timeout=900, env=env)
-    assert done.returncode == 0, f"launch failed:\nstdout:\n{done.stdout[-2000:]}\nstderr:\n{done.stderr[-3000:]}"
-    return _final(out), {int(r) for r in REJECTIONS.findall(done.stderr)}
-
-
 @pytest.mark.parametrize("arm", list(FLAT_REJECTING))
 def test_a_flat_rejection_with_bodies_replays_as_the_capped_run(tmp_path: Path, variants: Path, arm: str) -> None:
     problem, resolution, cuts = FLAT_REJECTING[arm]
-    two = _layout(tmp_path / "two.toml", workers=2, cuts=cuts) if cuts is not None else _layout(tmp_path / "two.toml", workers=2, shape=(2, 1, 1))
     step = FLAT_REJECTION_STEP
-    rejecting, counts = _launch_flat_counting(variants, problem, resolution, tmp_path / "rejecting", two, f"reject:1:{step}:1")
-    assert counts == {1}, f"{arm}: the rejection was not counted once on every worker: {counts}"
-    clean, clean_counts = _launch_flat_counting(variants, problem, resolution, tmp_path / "clean", two, None)
-    assert clean_counts == {0}
-    with h5py.File(rejecting, "r") as fr, h5py.File(clean, "r") as fc:
+
+    def launch(name: str, inject: str | None) -> ph.Launch:
+        return _launch(variants, problem, resolution, tmp_path / name, 2, STEPS, cuts=cuts, shape=(2, 1, 1), inject=inject)
+
+    rejecting = launch("rejecting", f"reject:1:{step}:1")
+    assert _rejections(rejecting) == {1}, f"{arm}: the rejection was not counted once on every worker: {rejecting.reports()}"
+    clean = launch("clean", None)
+    assert _rejections(clean) == {0}
+    with h5py.File(rejecting.final, "r") as fr, h5py.File(clean.final, "r") as fc:
         accepted = float(fr["body_diagnostics/dt"][step])
         assert accepted < float(fc["body_diagnostics/dt"][step]), f"{arm}: the rejection never reduced the timestep"
         # the rejected attempt booked body feedback: discarding it is the transaction under test
         booked = [name for name, obj in fc["body_diagnostics"].items()
                   if name not in ("dt", "time") and np.asarray(obj[()]).ndim >= 1 and np.abs(np.asarray(obj[()])[step]).max() > 0.0]
         assert booked, f"{arm}: the body booked no feedback at the rejected step"
-    capped, capped_counts = _launch_flat_counting(variants, problem, resolution, tmp_path / "capped", two,
-                                                  f"cap:{step}:{int(np.float64(accepted).view(np.uint64))}")
-    assert capped_counts == {0}, f"{arm}: the capped control rejected a step"
-    _assert_same(rejecting, capped, f"{arm}: flat rejection against the capped control")
-    _assert_same_diagnostics(tmp_path / "rejecting", tmp_path / "capped", f"{arm}: flat rejection")
+    capped = launch("capped", f"cap:{step}:{int(np.float64(accepted).view(np.uint64))}")
+    assert _rejections(capped) == {0}, f"{arm}: the capped control rejected a step"
+    ph.disagreement(_assert_same, rejecting.final, capped.final, f"{arm}: flat rejection against the capped control")
+    ph.disagreement(_assert_same_diagnostics, tmp_path / "rejecting", tmp_path / "capped", f"{arm}: flat rejection")

@@ -44,24 +44,24 @@
 # last stage of its last substep in a root step, after every earlier substep of
 # that step completed) rolls every worker back, those holding no tile of that
 # level included: every published checkpoint equals the clean run capped to the
-# accepted timestep on every level, its faces and its clocks.
+# accepted timestep on every level, its faces and its clocks. the single-process
+# references, the host tiles and the launches run on the session's backend and
+# placement (parity_harness).
 #
 # run: pytest -m simulation simbi/simulation/tests/test_launch_refined_numerics.py
+#      (SIMBI_PARITY_BACKEND / SIMBI_PARITY_PLACEMENT select the session, parity_harness.py)
 # =============================================================================
 
 import os
-import re
-import subprocess
-import sys
 from pathlib import Path
 
 import h5py
 import numpy as np
 import pytest
 
-from simbi.simulation.tests.test_launch import _layout, bounded_processes  # noqa: F401  the autouse process guard
-from simbi.simulation.tests.test_launch_isothermal import _script_launch, _script_reference
-from simbi.simulation.tests.test_launch_refined import RESOLUTION, STEPS, _assert_same_levels, _levels
+from simbi.simulation.tests import parity_harness as ph
+from simbi.simulation.tests.test_launch import bounded_processes  # noqa: F401  the autouse process guard
+from simbi.simulation.tests.test_launch_refined import RESOLUTION, STEPS, _launch, _levels, _reference, _same_levels
 
 pytestmark = pytest.mark.simulation
 
@@ -148,22 +148,22 @@ def _differs(a: Path, b: Path) -> bool:
 def test_a_refined_launch_carries_the_setting_fresh_and_resumed(tmp_path: Path, name: str, monkeypatch) -> None:
     module, cls, script = _variant_module(tmp_path, name, monkeypatch)
     (base_module, base_cls), lines = VARIANTS[name]
-    reference = _script_reference(module, cls, RESOLUTION, tmp_path / "single", STEPS)
+    reference = _reference(module, cls, RESOLUTION, tmp_path / "single", STEPS)
     if PERIODIC in lines:
         # the baseline is the same variant with the periodic walls taken out
         base_module, base_cls, _ = _variant_module(tmp_path, name, monkeypatch, [l for l in lines if l != PERIODIC])
-    base = _script_reference(base_module, base_cls, RESOLUTION, tmp_path / "base", STEPS)
+    base = _reference(base_module, base_cls, RESOLUTION, tmp_path / "base", STEPS)
     assert _differs(reference, base), f"{name}: the setting left the single-process run unchanged; the gate is vacuous"
-    four = _layout(tmp_path / "four.toml", workers=4, cuts=[[13], [18]])
-    launched = _script_launch(script, RESOLUTION, tmp_path / "four", four, STEPS, workers=4)
-    _assert_same_levels(launched, reference, f"{name}: four workers")
-    two = _layout(tmp_path / "two.toml", workers=2, shape=(2, 1))
-    first = _script_launch(script, RESOLUTION, tmp_path / "first", two, STEPS // 2, workers=2)
+    four = dict(workers=4, cuts=[[13], [18]])
+    launched = _launch(script, RESOLUTION, tmp_path / "four", STEPS, **four)
+    _same_levels(launched, reference, f"{name}: four workers")
+    two = dict(workers=2, shape=(2, 1))
+    first = _launch(script, RESOLUTION, tmp_path / "first", STEPS // 2, **two)
     with h5py.File(first, "r") as f:
         written_at = int(f["level_0"].attrs["iteration"])
     assert 0 < written_at < STEPS
-    resumed = _script_launch(script, RESOLUTION, tmp_path / "resumed", four, STEPS, workers=4, checkpoint=first)
-    _assert_same_levels(resumed, reference, f"{name}: resumed onto four workers")
+    resumed = _launch(script, RESOLUTION, tmp_path / "resumed", STEPS, checkpoint=first, **four)
+    _same_levels(resumed, reference, f"{name}: resumed onto four workers")
 
 
 KH = ("simbi_configs.examples.newtonian.refined_kh", "RefinedKelvinHelmholtz")
@@ -175,19 +175,19 @@ KH_RESOLUTION = (64, 64)
 def test_a_periodic_refined_launch_matches_fresh_and_resumed(tmp_path: Path) -> None:
     module, cls = KH
     script = module.replace(".", "/") + ".py"
-    reference = _script_reference(module, cls, KH_RESOLUTION, tmp_path / "single", STEPS)
-    walled = _script_reference(module, cls, KH_RESOLUTION, tmp_path / "walled", STEPS, fields="boundary_conditions='outflow'")
+    reference = _reference(module, cls, KH_RESOLUTION, tmp_path / "single", STEPS)
+    walled = _reference(module, cls, KH_RESOLUTION, tmp_path / "walled", STEPS, fields="boundary_conditions='outflow'")
     assert _differs(reference, walled), "the periodic seam left the kh run unchanged; the wrap is never exercised"
-    four = _layout(tmp_path / "four.toml", workers=4, cuts=[[26], [36]])
-    launched = _script_launch(script, KH_RESOLUTION, tmp_path / "four", four, STEPS, workers=4)
-    _assert_same_levels(launched, reference, "periodic kh: four workers")
-    two = _layout(tmp_path / "two.toml", workers=2, shape=(2, 1))
-    first = _script_launch(script, KH_RESOLUTION, tmp_path / "first", two, STEPS // 2, workers=2)
+    four = dict(workers=4, cuts=[[26], [36]])
+    launched = _launch(script, KH_RESOLUTION, tmp_path / "four", STEPS, **four)
+    _same_levels(launched, reference, "periodic kh: four workers")
+    two = dict(workers=2, shape=(2, 1))
+    first = _launch(script, KH_RESOLUTION, tmp_path / "first", STEPS // 2, **two)
     with h5py.File(first, "r") as f:
         written_at = int(f["level_0"].attrs["iteration"])
     assert 0 < written_at < STEPS
-    resumed = _script_launch(script, KH_RESOLUTION, tmp_path / "resumed", four, STEPS, workers=4, checkpoint=first)
-    _assert_same_levels(resumed, reference, "periodic kh: resumed onto four workers")
+    resumed = _launch(script, KH_RESOLUTION, tmp_path / "resumed", STEPS, checkpoint=first, **four)
+    _same_levels(resumed, reference, "periodic kh: resumed onto four workers")
 
 
 def test_a_patch_spanning_an_uncut_periodic_axis_launches_as_the_single_grid_runs(tmp_path: Path, monkeypatch) -> None:
@@ -204,21 +204,21 @@ def test_a_patch_spanning_an_uncut_periodic_axis_launches_as_the_single_grid_run
     )
     monkeypatch.setenv("PYTHONPATH", os.pathsep.join([str(tmp_path), os.getcwd(), os.environ.get("PYTHONPATH", "")]))
     script = str(tmp_path / f"{stem}.py")
-    reference = _script_reference(stem, "Spanning", KH_RESOLUTION, tmp_path / "single", STEPS)
-    walled = _script_reference(stem, "Spanning", KH_RESOLUTION, tmp_path / "walled", STEPS, fields="boundary_conditions='outflow'")
+    reference = _reference(stem, "Spanning", KH_RESOLUTION, tmp_path / "single", STEPS)
+    walled = _reference(stem, "Spanning", KH_RESOLUTION, tmp_path / "walled", STEPS, fields="boundary_conditions='outflow'")
     assert _differs(reference, walled), "the periodic seam left the spanning kh run unchanged; the wrap is never exercised"
     for label, workers, layout in [
-        ("two workers", 2, _layout(tmp_path / "two.toml", workers=2, cuts=[[], [36]])),
-        ("three uneven workers", 3, _layout(tmp_path / "three.toml", workers=3, cuts=[[], [30, 60]])),
+        ("two workers", 2, dict(workers=2, cuts=[[], [36]])),
+        ("three uneven workers", 3, dict(workers=3, cuts=[[], [30, 60]])),
         # the middle tile, y cells 20..41, lies wholly under the patch spanning x
-        ("a worker's tile wholly under the patch", 3, _layout(tmp_path / "under.toml", workers=3, cuts=[[], [20, 41]])),
+        ("a worker's tile wholly under the patch", 3, dict(workers=3, cuts=[[], [20, 41]])),
         # cuts across the periodic x axis itself: the patch has no face along x, and its level
         # wraps across the workers at the seam as the root does
-        ("two workers cut across the periodic axis", 2, _layout(tmp_path / "across.toml", workers=2, cuts=[[26], []])),
-        ("four uneven workers cut along both axes", 4, _layout(tmp_path / "both.toml", workers=4, cuts=[[20], [36]])),
+        ("two workers cut across the periodic axis", 2, dict(workers=2, cuts=[[26], []])),
+        ("four uneven workers cut along both axes", 4, dict(workers=4, cuts=[[20], [36]])),
     ]:
-        launched = _script_launch(script, KH_RESOLUTION, tmp_path / label.replace(" ", "_"), layout, STEPS, workers=workers)
-        _assert_same_levels(launched, reference, f"spanning kh: {label}")
+        launched = _launch(script, KH_RESOLUTION, tmp_path / label.replace(" ", "_"), STEPS, **layout)
+        _same_levels(launched, reference, f"spanning kh: {label}")
 
 
 @pytest.mark.parametrize("name", ["viscous", "ito2"])
@@ -239,10 +239,10 @@ def test_a_patch_spanning_a_cut_periodic_axis_launches_the_corner_reading_operat
     )
     monkeypatch.setenv("PYTHONPATH", os.pathsep.join([str(tmp_path), os.getcwd(), os.environ.get("PYTHONPATH", "")]))
     script = str(tmp_path / f"{stem}.py")
-    reference = _script_reference(stem, "Spanning", KH_RESOLUTION, tmp_path / "single", STEPS)
-    layout = _layout(tmp_path / "across.toml", workers=2, cuts=[[26], []])
-    launched = _script_launch(script, KH_RESOLUTION, tmp_path / "across", layout, STEPS, workers=2)
-    _assert_same_levels(launched, reference, f"{name} spanning kh on two workers cut across the periodic axis")
+    reference = _reference(stem, "Spanning", KH_RESOLUTION, tmp_path / "single", STEPS)
+    layout = dict(workers=2, cuts=[[26], []])
+    launched = _launch(script, KH_RESOLUTION, tmp_path / "across", STEPS, **layout)
+    _same_levels(launched, reference, f"{name} spanning kh on two workers cut across the periodic axis")
     if name == "ito2":
         want, got = _population(reference, "continuous_tracers"), _population(launched, "continuous_tracers")
         levels = want["owner"].astype(np.uint64) >> np.uint64(56)
@@ -265,17 +265,17 @@ def test_a_magnetized_patch_spanning_an_uncut_periodic_axis_launches_as_the_sing
     )
     monkeypatch.setenv("PYTHONPATH", os.pathsep.join([str(tmp_path), os.getcwd(), os.environ.get("PYTHONPATH", "")]))
     script = str(tmp_path / f"{stem}.py")
-    reference = _script_reference(stem, "Spanning", RESOLUTION_3D, tmp_path / "single", STEPS)
+    reference = _reference(stem, "Spanning", RESOLUTION_3D, tmp_path / "single", STEPS)
     for label, workers, layout in [
-        ("two workers", 2, _layout(tmp_path / "two.toml", workers=2, shape=(2, 1, 1))),
-        ("three uneven workers", 3, _layout(tmp_path / "three.toml", workers=3, cuts=[[12, 22], [], []])),
+        ("two workers", 2, dict(workers=2, shape=(2, 1, 1))),
+        ("three uneven workers", 3, dict(workers=3, cuts=[[12, 22], [], []])),
         # cuts across the periodic z axis itself: the patch has no face along z, and its level
         # wraps across the workers at the seam as the root does
-        ("two workers cut across the periodic axis", 2, _layout(tmp_path / "across.toml", workers=2, cuts=[[], [], [12]])),
-        ("four uneven workers cut across it and x", 4, _layout(tmp_path / "both.toml", workers=4, cuts=[[11], [], [9]])),
+        ("two workers cut across the periodic axis", 2, dict(workers=2, cuts=[[], [], [12]])),
+        ("four uneven workers cut across it and x", 4, dict(workers=4, cuts=[[11], [], [9]])),
     ]:
-        launched = _script_launch(script, RESOLUTION_3D, tmp_path / label.replace(" ", "_"), layout, STEPS, workers=workers)
-        _assert_same_levels(launched, reference, f"spanning vortex: {label}")
+        launched = _launch(script, RESOLUTION_3D, tmp_path / label.replace(" ", "_"), STEPS, **layout)
+        _same_levels(launched, reference, f"spanning vortex: {label}")
 
 
 # a second box inside the vortex box, clear of the periodic z faces
@@ -304,18 +304,18 @@ def test_a_nested_magnetized_run_spanning_an_uncut_periodic_axis_launches_as_the
 
     stem = "nested_spanning_vortex"
     script = _spanning_variant(tmp_path, monkeypatch, stem, [*NESTED_INSIDE_SPAN, *SEAM_FLOW_3D])
-    reference = _script_reference(stem, "Spanning", RESOLUTION_3D, tmp_path / "single", STEPS)
+    reference = _reference(stem, "Spanning", RESOLUTION_3D, tmp_path / "single", STEPS)
     with h5py.File(reference, "r") as f:
         assert "level_2" in f, "the single hierarchy published no second refined level"
         h = int(f["level_1"]["mesh"].attrs["halo_width"])
         fine = f["level_1/conserved/den"][()][h:-h, h:-h, h:-h]
     assert np.ptp(fine.mean(axis=(1, 2))) > 0.0, "the first fine level is uniform along z; its wrap carries nothing"
     for label, workers, layout in [
-        ("two workers", 2, _layout(tmp_path / "two.toml", workers=2, shape=(2, 1, 1))),
-        ("four uneven workers", 4, _layout(tmp_path / "four.toml", workers=4, cuts=[[11], [13], []])),
+        ("two workers", 2, dict(workers=2, shape=(2, 1, 1))),
+        ("four uneven workers", 4, dict(workers=4, cuts=[[11], [13], []])),
     ]:
-        launched = _script_launch(script, RESOLUTION_3D, tmp_path / label.replace(" ", "_"), layout, STEPS, workers=workers)
-        _assert_same_levels(launched, reference, f"nested spanning vortex: {label}")
+        launched = _launch(script, RESOLUTION_3D, tmp_path / label.replace(" ", "_"), STEPS, **layout)
+        _same_levels(launched, reference, f"nested spanning vortex: {label}")
 
 
 # both boxes span the periodic z axis: the second level wraps along z within every tile, its faces
@@ -332,7 +332,7 @@ def test_a_nested_magnetized_run_whose_boxes_span_an_uncut_periodic_axis_runs_as
 
     stem = "nested_both_spanning"
     script = _spanning_variant(tmp_path, monkeypatch, stem, [*NESTED_BOTH_SPAN, *SEAM_FLOW_3D])
-    reference = _script_reference(stem, "Spanning", RESOLUTION_3D, tmp_path / "single", STEPS)
+    reference = _reference(stem, "Spanning", RESOLUTION_3D, tmp_path / "single", STEPS)
     with h5py.File(reference, "r") as f:
         assert "level_2" in f, "the single hierarchy published no second refined level"
         h = int(f["level_2"]["mesh"].attrs["halo_width"])
@@ -340,15 +340,15 @@ def test_a_nested_magnetized_run_whose_boxes_span_an_uncut_periodic_axis_runs_as
     assert np.ptp(nested.mean(axis=(1, 2))) > 0.0, "the second fine level is uniform along z; its wrap carries nothing"
     monkeypatch.setenv("SYMBI_GPU_OVERSUBSCRIBE", "1")
     # the cuts cross both boxes in x (first 6..18, second 9..15) and y, never z
-    for label, fields in [("two host tiles", "gpus=2, decompose=[[12], [], []]"), ("four uneven host tiles", "gpus=4, decompose=[[11], [13], []]")]:
-        tiles = _script_reference(stem, "Spanning", RESOLUTION_3D, tmp_path / label.replace(" ", "_"), STEPS, fields=fields)
-        _assert_same_levels(tiles, reference, f"nested boxes spanning z: {label}")
+    for label, devices, fields in [("two host tiles", 2, "gpus=2, decompose=[[12], [], []]"), ("four uneven host tiles", 4, "gpus=4, decompose=[[11], [13], []]")]:
+        tiles = _reference(stem, "Spanning", RESOLUTION_3D, tmp_path / label.replace(" ", "_"), STEPS, fields=fields, devices=devices)
+        _same_levels(tiles, reference, f"nested boxes spanning z: {label}")
     for label, workers, layout in [
-        ("two workers", 2, _layout(tmp_path / "two.toml", workers=2, shape=(2, 1, 1))),
-        ("four uneven workers", 4, _layout(tmp_path / "four.toml", workers=4, cuts=[[11], [13], []])),
+        ("two workers", 2, dict(workers=2, shape=(2, 1, 1))),
+        ("four uneven workers", 4, dict(workers=4, cuts=[[11], [13], []])),
     ]:
-        launched = _script_launch(script, RESOLUTION_3D, tmp_path / label.replace(" ", "_"), layout, STEPS, workers=workers)
-        _assert_same_levels(launched, reference, f"nested boxes spanning z: {label}")
+        launched = _launch(script, RESOLUTION_3D, tmp_path / label.replace(" ", "_"), STEPS, **layout)
+        _same_levels(launched, reference, f"nested boxes spanning z: {label}")
 
 
 def test_a_nested_magnetized_run_whose_boxes_span_a_cut_periodic_axis_runs_as_the_single_hierarchy(tmp_path: Path, monkeypatch) -> None:
@@ -358,7 +358,7 @@ def test_a_nested_magnetized_run_whose_boxes_span_a_cut_periodic_axis_runs_as_th
 
     stem = "nested_cut_span"
     script = _spanning_variant(tmp_path, monkeypatch, stem, [*NESTED_BOTH_SPAN, *SEAM_FLOW_3D])
-    reference = _script_reference(stem, "Spanning", RESOLUTION_3D, tmp_path / "single", STEPS)
+    reference = _reference(stem, "Spanning", RESOLUTION_3D, tmp_path / "single", STEPS)
     with h5py.File(reference, "r") as f:
         assert "level_2" in f, "the single hierarchy published no second refined level"
         h = int(f["level_2"]["mesh"].attrs["halo_width"])
@@ -366,16 +366,16 @@ def test_a_nested_magnetized_run_whose_boxes_span_a_cut_periodic_axis_runs_as_th
     assert np.ptp(nested.mean(axis=(1, 2))) > 0.0, "the second fine level is uniform along z; its wrap carries nothing"
     monkeypatch.setenv("SYMBI_GPU_OVERSUBSCRIBE", "1")
     # the cuts cross both boxes along z (and x for the uneven arms), through the seam's neighbors
-    for label, fields in [("two host tiles", "gpus=2, decompose=[[], [], [12]]"), ("four uneven host tiles", "gpus=4, decompose=[[11], [], [9]]")]:
-        tiles = _script_reference(stem, "Spanning", RESOLUTION_3D, tmp_path / label.replace(" ", "_"), STEPS, fields=fields)
-        _assert_same_levels(tiles, reference, f"nested boxes spanning a cut z: {label}")
+    for label, devices, fields in [("two host tiles", 2, "gpus=2, decompose=[[], [], [12]]"), ("four uneven host tiles", 4, "gpus=4, decompose=[[11], [], [9]]")]:
+        tiles = _reference(stem, "Spanning", RESOLUTION_3D, tmp_path / label.replace(" ", "_"), STEPS, fields=fields, devices=devices)
+        _same_levels(tiles, reference, f"nested boxes spanning a cut z: {label}")
     monkeypatch.delenv("SYMBI_GPU_OVERSUBSCRIBE")
     for label, workers, layout in [
-        ("two workers", 2, _layout(tmp_path / "two.toml", workers=2, cuts=[[], [], [12]])),
-        ("four uneven workers", 4, _layout(tmp_path / "four.toml", workers=4, cuts=[[11], [], [9]])),
+        ("two workers", 2, dict(workers=2, cuts=[[], [], [12]])),
+        ("four uneven workers", 4, dict(workers=4, cuts=[[11], [], [9]])),
     ]:
-        launched = _script_launch(script, RESOLUTION_3D, tmp_path / label.replace(" ", "_"), layout, STEPS, workers=workers)
-        _assert_same_levels(launched, reference, f"nested boxes spanning a cut z: {label}")
+        launched = _launch(script, RESOLUTION_3D, tmp_path / label.replace(" ", "_"), STEPS, **layout)
+        _same_levels(launched, reference, f"nested boxes spanning a cut z: {label}")
 
 
 def test_a_nested_magnetized_patch_on_one_periodic_face_is_refused_on_launch_as_on_one_device(tmp_path: Path, monkeypatch) -> None:
@@ -383,12 +383,8 @@ def test_a_nested_magnetized_patch_on_one_periodic_face_is_refused_on_launch_as_
     # would wrap onto its own opposite side, which every driver refuses by name
     lines = [NESTED_INSIDE_SPAN[0], "refinement_regions: Annotated[list[list[float]], ProblemParam([[0.25, 0.75, 0.25, 0.75, 0.0, 1.0], [0.375, 0.625, 0.375, 0.625, 0.0, 0.5]], description='r')]", NESTED_INSIDE_SPAN[2]]
     script = _spanning_variant(tmp_path, monkeypatch, "nested_on_face", lines)
-    layout = _layout(tmp_path / "two.toml", workers=2, shape=(2, 1, 1))
-    cmd = [sys.executable, "-m", "simbi.cli", "launch", script, "--layout", str(layout), "--max-steps", "1",
-           "--resolution", ",".join(str(r) for r in RESOLUTION_3D), "--data-directory", str(tmp_path / "out"), "--checkpoint-interval", "1e9"]
-    env = dict(os.environ)
-    env.pop("SIMBI_LAUNCH_EXPERIMENTAL", None)
-    done = subprocess.run(cmd, capture_output=True, text=True, timeout=600, env=env)
+    args = ["--max-steps", "1", "--resolution", ",".join(str(r) for r in RESOLUTION_3D), "--checkpoint-interval", "1e9"]
+    done = ph.launch(script, tmp_path / "out", 2, shape=(2, 1, 1), args=args, env=ph.environment(), timeout=600, expect_ok=False)
     flat = " ".join((done.stdout + done.stderr).split())
     assert done.returncode != 0, "a nested magnetized patch on one periodic face launched"
     assert "would wrap onto its own opposite side; span the whole periodic axis or keep the patch clear of both faces" in flat, flat[-2000:]
@@ -423,19 +419,19 @@ def test_a_relativistic_refined_launch_matches_fresh_and_resumed(tmp_path: Path,
     arms = {"synge": (synge_module, synge_cls, synge_module.replace(".", "/") + ".py"), "ideal": (ideal_module, ideal_cls, ideal_script)}
     module, cls, script = arms[eos]
     other_module, other_cls, _ = arms["ideal" if eos == "synge" else "synge"]
-    reference = _script_reference(module, cls, RHD_RESOLUTION, tmp_path / "single", STEPS)
-    contrast = _script_reference(other_module, other_cls, RHD_RESOLUTION, tmp_path / "contrast", STEPS)
+    reference = _reference(module, cls, RHD_RESOLUTION, tmp_path / "single", STEPS)
+    contrast = _reference(other_module, other_cls, RHD_RESOLUTION, tmp_path / "contrast", STEPS)
     assert _differs(reference, contrast), "the equation of state left the refined run unchanged; the gate is vacuous"
-    four = _layout(tmp_path / "four.toml", workers=4, cuts=[[13], [18]])
-    launched = _script_launch(script, RHD_RESOLUTION, tmp_path / "four", four, STEPS, workers=4)
-    _assert_same_levels(launched, reference, f"rhd {eos}: four workers")
-    two = _layout(tmp_path / "two.toml", workers=2, shape=(2, 1))
-    first = _script_launch(script, RHD_RESOLUTION, tmp_path / "first", two, STEPS // 2, workers=2)
+    four = dict(workers=4, cuts=[[13], [18]])
+    launched = _launch(script, RHD_RESOLUTION, tmp_path / "four", STEPS, **four)
+    _same_levels(launched, reference, f"rhd {eos}: four workers")
+    two = dict(workers=2, shape=(2, 1))
+    first = _launch(script, RHD_RESOLUTION, tmp_path / "first", STEPS // 2, **two)
     with h5py.File(first, "r") as f:
         written_at = int(f["level_0"].attrs["iteration"])
     assert 0 < written_at < STEPS
-    resumed = _script_launch(script, RHD_RESOLUTION, tmp_path / "resumed", four, STEPS, workers=4, checkpoint=first)
-    _assert_same_levels(resumed, reference, f"rhd {eos}: resumed onto four workers")
+    resumed = _launch(script, RHD_RESOLUTION, tmp_path / "resumed", STEPS, checkpoint=first, **four)
+    _same_levels(resumed, reference, f"rhd {eos}: resumed onto four workers")
 
 
 ISO = "simbi_configs.examples.isothermal"
@@ -451,20 +447,20 @@ ISOTHERMAL = {
 def test_an_isothermal_refined_launch_matches_fresh_and_resumed(tmp_path: Path, name: str) -> None:
     module, cls, resolution, flags, fields = ISOTHERMAL[name]
     script = module.replace(".", "/") + ".py"
-    reference = _script_reference(module, cls, resolution, tmp_path / "single", STEPS, fields=fields)
+    reference = _reference(module, cls, resolution, tmp_path / "single", STEPS, fields=fields)
     if fields:
-        contact = _script_reference(module, cls, resolution, tmp_path / "contact", STEPS)
+        contact = _reference(module, cls, resolution, tmp_path / "contact", STEPS)
         assert _differs(reference, contact), f"{name}: the edge EMF left the refined run unchanged; the gate is vacuous"
-    four = _layout(tmp_path / "four.toml", workers=4, cuts=[[13], [18]])
-    launched = _script_launch(script, resolution, tmp_path / "four", four, STEPS, workers=4, flags=flags)
-    _assert_same_levels(launched, reference, f"{name}: four workers")
-    two = _layout(tmp_path / "two.toml", workers=2, shape=(2, 1))
-    first = _script_launch(script, resolution, tmp_path / "first", two, STEPS // 2, workers=2, flags=flags)
+    four = dict(workers=4, cuts=[[13], [18]])
+    launched = _launch(script, resolution, tmp_path / "four", STEPS, flags=flags, **four)
+    _same_levels(launched, reference, f"{name}: four workers")
+    two = dict(workers=2, shape=(2, 1))
+    first = _launch(script, resolution, tmp_path / "first", STEPS // 2, flags=flags, **two)
     with h5py.File(first, "r") as f:
         written_at = int(f["level_0"].attrs["iteration"])
     assert 0 < written_at < STEPS
-    resumed = _script_launch(script, resolution, tmp_path / "resumed", four, STEPS, workers=4, checkpoint=first)
-    _assert_same_levels(resumed, reference, f"{name}: resumed onto four workers")
+    resumed = _launch(script, resolution, tmp_path / "resumed", STEPS, checkpoint=first, **four)
+    _same_levels(resumed, reference, f"{name}: resumed onto four workers")
 
 
 # the fine box spans root cells 6..18 on every axis of the 24^3 root; the cuts sit at least four
@@ -524,20 +520,20 @@ def test_a_3d_refined_launch_matches_fresh_and_resumed(tmp_path: Path, name: str
         )
         monkeypatch.setenv("PYTHONPATH", os.pathsep.join([str(tmp_path), os.getcwd(), os.environ.get("PYTHONPATH", "")]))
         module, cls, script = stem, "Variant", str(tmp_path / f"{stem}.py")
-    reference = _script_reference(module, cls, RESOLUTION_3D, tmp_path / "single", STEPS)
+    reference = _reference(module, cls, RESOLUTION_3D, tmp_path / "single", STEPS)
     if name.endswith("-uct"):
-        contact = _script_reference(module, cls, RESOLUTION_3D, tmp_path / "contact", STEPS, fields="ct_method='contact'")
+        contact = _reference(module, cls, RESOLUTION_3D, tmp_path / "contact", STEPS, fields="ct_method='contact'")
         assert _differs(reference, contact), "the edge EMF left the 3d refined run unchanged; the gate is vacuous"
-    eight = _layout(tmp_path / "eight.toml", workers=8, cuts=CUTS_3D)
-    launched = _script_launch(script, RESOLUTION_3D, tmp_path / "eight", eight, STEPS, workers=8)
-    _assert_same_levels(launched, reference, f"3d {name}: eight workers")
-    two = _layout(tmp_path / "two.toml", workers=2, shape=(2, 1, 1))
-    first = _script_launch(script, RESOLUTION_3D, tmp_path / "first", two, STEPS // 2, workers=2)
+    eight = dict(workers=8, cuts=CUTS_3D)
+    launched = _launch(script, RESOLUTION_3D, tmp_path / "eight", STEPS, **eight)
+    _same_levels(launched, reference, f"3d {name}: eight workers")
+    two = dict(workers=2, shape=(2, 1, 1))
+    first = _launch(script, RESOLUTION_3D, tmp_path / "first", STEPS // 2, **two)
     with h5py.File(first, "r") as f:
         written_at = int(f["level_0"].attrs["iteration"])
     assert 0 < written_at < STEPS
-    resumed = _script_launch(script, RESOLUTION_3D, tmp_path / "resumed", eight, STEPS, workers=8, checkpoint=first)
-    _assert_same_levels(resumed, reference, f"3d {name}: resumed onto eight workers")
+    resumed = _launch(script, RESOLUTION_3D, tmp_path / "resumed", STEPS, checkpoint=first, **eight)
+    _same_levels(resumed, reference, f"3d {name}: resumed onto eight workers")
 
 
 def test_the_primed_root_reaches_the_halos_before_the_first_stage(tmp_path: Path, monkeypatch) -> None:
@@ -556,17 +552,17 @@ def test_the_primed_root_reaches_the_halos_before_the_first_stage(tmp_path: Path
     )
     monkeypatch.setenv("PYTHONPATH", os.pathsep.join([str(tmp_path), os.getcwd(), os.environ.get("PYTHONPATH", "")]))
     script = str(tmp_path / f"{stem}.py")
-    reference = _script_reference(stem, "Variant", RESOLUTION_3D, tmp_path / "single", 1)
+    reference = _reference(stem, "Variant", RESOLUTION_3D, tmp_path / "single", 1)
     # the premise: the priming changes root faces within the halo band of the cut at z = 10
-    unrefined = _script_reference(stem, "Variant", RESOLUTION_3D, tmp_path / "unrefined", 1, fields="refinement_enabled=False")
+    unrefined = _reference(stem, "Variant", RESOLUTION_3D, tmp_path / "unrefined", 1, fields="refinement_enabled=False")
     initial = lambda out: sorted(out.glob("*000_000*.h5"))[0]
     with h5py.File(initial(tmp_path / "single"), "r") as fa, h5py.File(initial(tmp_path / "unrefined"), "r") as fb:
         magnetic = "level_0/partition_0/hydro/magnetic"
         moved = [k for k in fa[magnetic] if not np.array_equal(fa[f"{magnetic}/{k}/data"][8:12], fb[f"{magnetic}/{k}/data"][8:12])]
     assert moved, "the priming changed no root face near the cut; the gate is vacuous"
-    two = _layout(tmp_path / "two.toml", workers=2, cuts=[[], [], [10]])
-    launched = _script_launch(script, RESOLUTION_3D, tmp_path / "two", two, 1, workers=2, env={"SIMBI_FABRIC_AUDIT": "all"})
-    _assert_same_levels(launched, reference, "one z cut through the box, every exchange audited")
+    two = dict(workers=2, cuts=[[], [], [10]])
+    launched = _launch(script, RESOLUTION_3D, tmp_path / "two", 1, env=dict(ph.environment(), SIMBI_FABRIC_AUDIT="all"), **two)
+    _same_levels(launched, reference, "one z cut through the box, every exchange audited")
 
 
 def test_a_refined_patch_on_a_periodic_face_is_refused_by_name(tmp_path: Path) -> None:
@@ -580,12 +576,9 @@ def test_a_refined_patch_on_a_periodic_face_is_refused_by_name(tmp_path: Path) -
         "    boundary_conditions: Annotated[list, ProblemParam([BoundaryCondition.PERIODIC], description='bc')]\n"
         "    refinement_regions: Annotated[list[list[float]], ProblemParam([[-0.5, 0.0, -0.25, 0.25]], description='r')]\n"
     )
-    layout = _layout(tmp_path / "two.toml", workers=2, shape=(2, 1))
-    cmd = [sys.executable, "-m", "simbi.cli", "launch", str(script), "--layout", str(layout), "--max-steps", "1",
-           "--resolution", "32,32,1", "--data-directory", str(tmp_path / "out"), "--checkpoint-interval", "1e9"]
-    env = dict(os.environ, PYTHONPATH=os.pathsep.join([os.getcwd(), os.environ.get("PYTHONPATH", "")]))
-    env.pop("SIMBI_LAUNCH_EXPERIMENTAL", None)
-    done = subprocess.run(cmd, capture_output=True, text=True, timeout=600, env=env)
+    env = dict(ph.environment(), PYTHONPATH=os.pathsep.join([os.getcwd(), os.environ.get("PYTHONPATH", "")]))
+    args = ["--max-steps", "1", "--resolution", "32,32,1", "--checkpoint-interval", "1e9"]
+    done = ph.launch(script, tmp_path / "out", 2, shape=(2, 1), args=args, env=env, timeout=600, expect_ok=False)
     assert done.returncode != 0, f"the launch succeeded:\n{done.stdout}"
     flat = " ".join(done.stderr.split())
     assert "a refined patch on the periodic face of axis 0 with mesh refinement is outside the distributed first release" in flat, done.stderr
@@ -662,23 +655,23 @@ def test_nested_levels_on_a_refined_launch_match_fresh_and_resumed(tmp_path: Pat
     # cuts through both boxes
     two_cuts, four_cuts = {"shape": (2, 1)}, {"cuts": [[15], [17]]}
     module, cls, script = _nested_module(tmp_path, monkeypatch, base=base, extra=extra)
-    reference = _script_reference(module, cls, RESOLUTION, tmp_path / "single", STEPS)
+    reference = _reference(module, cls, RESOLUTION, tmp_path / "single", STEPS)
     if arm == "mhd-uct":
-        contact = _script_reference(module, cls, RESOLUTION, tmp_path / "contact", STEPS, fields="ct_method='contact'")
+        contact = _reference(module, cls, RESOLUTION, tmp_path / "contact", STEPS, fields="ct_method='contact'")
         assert _differs(reference, contact), "the edge EMF left the nested run unchanged; the gate is vacuous"
     for tag, workers, kwargs in [("two", 2, two_cuts), ("four", 4, four_cuts)]:
-        layout = _layout(tmp_path / f"{tag}.toml", workers=workers, **kwargs)
-        launched = _script_launch(script, RESOLUTION, tmp_path / tag, layout, STEPS, workers=workers)
-        _assert_same_all_levels(launched, reference, f"three levels on {workers} workers")
-    two = _layout(tmp_path / "two_first.toml", workers=2, **two_cuts)
-    first = _script_launch(script, RESOLUTION, tmp_path / "first", two, STEPS // 2, workers=2)
+        layout = dict(workers=workers, **kwargs)
+        launched = _launch(script, RESOLUTION, tmp_path / tag, STEPS, **layout)
+        ph.disagreement(_assert_same_all_levels, launched, reference, f"three levels on {workers} workers")
+    two = dict(workers=2, **two_cuts)
+    first = _launch(script, RESOLUTION, tmp_path / "first", STEPS // 2, **two)
     with h5py.File(first, "r") as f:
         written_at = int(f["level_0"].attrs["iteration"])
         assert "level_2" in f, "the half-run checkpoint carries no second refined level"
     assert 0 < written_at < STEPS
-    four = _layout(tmp_path / "four_resumed.toml", workers=4, **four_cuts)
-    resumed = _script_launch(script, RESOLUTION, tmp_path / "resumed", four, STEPS, workers=4, checkpoint=first)
-    _assert_same_all_levels(resumed, reference, "three levels resumed onto four workers")
+    four = dict(workers=4, **four_cuts)
+    resumed = _launch(script, RESOLUTION, tmp_path / "resumed", STEPS, checkpoint=first, **four)
+    ph.disagreement(_assert_same_all_levels, resumed, reference, "three levels resumed onto four workers")
 
 
 # the orszag-tang vortex under two nested boxes: its field changes sign across the second box's
@@ -704,11 +697,11 @@ def _ot_nested(tmp_path: Path, monkeypatch) -> str:
 
 def test_a_nested_vortex_launches_as_the_single_hierarchy_runs_with_cuts_clear_of_the_second_box(tmp_path: Path, monkeypatch) -> None:
     script = _ot_nested(tmp_path, monkeypatch)
-    reference = _script_reference("ot_nested", "OtNested", RESOLUTION, tmp_path / "single", STEPS)
+    reference = _reference("ot_nested", "OtNested", RESOLUTION, tmp_path / "single", STEPS)
     for tag, workers, kwargs in [("two", 2, {"cuts": [[10], []]}), ("four", 4, {"cuts": [[10], [22]]})]:
-        layout = _layout(tmp_path / f"{tag}.toml", workers=workers, **kwargs)
-        launched = _script_launch(script, RESOLUTION, tmp_path / tag, layout, STEPS, workers=workers)
-        _assert_same_all_levels(launched, reference, f"nested vortex on {workers} workers")
+        layout = dict(workers=workers, **kwargs)
+        launched = _launch(script, RESOLUTION, tmp_path / tag, STEPS, **layout)
+        ph.disagreement(_assert_same_all_levels, launched, reference, f"nested vortex on {workers} workers")
 
 
 def test_a_nested_vortex_cut_through_the_second_box_launches_as_the_single_hierarchy_runs(tmp_path: Path, monkeypatch) -> None:
@@ -717,16 +710,16 @@ def test_a_nested_vortex_cut_through_the_second_box_launches_as_the_single_hiera
     # from the conserved halos alone left the tangential field beside the cut on its stale
     # values (4.4e-3 on the second level's B_y after one step of the vortex field at rest)
     script = _ot_nested(tmp_path, monkeypatch)
-    reference = _script_reference("ot_nested", "OtNested", RESOLUTION, tmp_path / "single", STEPS)
+    reference = _reference("ot_nested", "OtNested", RESOLUTION, tmp_path / "single", STEPS)
     for tag, workers, kwargs in [("two", 2, {"shape": (2, 1)}), ("four", 4, {"cuts": [[15], [17]]})]:
-        layout = _layout(tmp_path / f"{tag}.toml", workers=workers, **kwargs)
-        launched = _script_launch(script, RESOLUTION, tmp_path / tag, layout, STEPS, workers=workers)
-        _assert_same_all_levels(launched, reference, f"nested vortex cut through the second box on {workers} workers")
-    two = _layout(tmp_path / "two_first.toml", workers=2, shape=(2, 1))
-    first = _script_launch(script, RESOLUTION, tmp_path / "first", two, STEPS // 2, workers=2)
-    four = _layout(tmp_path / "four_resumed.toml", workers=4, cuts=[[15], [17]])
-    resumed = _script_launch(script, RESOLUTION, tmp_path / "resumed", four, STEPS, workers=4, checkpoint=first)
-    _assert_same_all_levels(resumed, reference, "nested vortex resumed onto four workers cut through the second box")
+        layout = dict(workers=workers, **kwargs)
+        launched = _launch(script, RESOLUTION, tmp_path / tag, STEPS, **layout)
+        ph.disagreement(_assert_same_all_levels, launched, reference, f"nested vortex cut through the second box on {workers} workers")
+    two = dict(workers=2, shape=(2, 1))
+    first = _launch(script, RESOLUTION, tmp_path / "first", STEPS // 2, **two)
+    four = dict(workers=4, cuts=[[15], [17]])
+    resumed = _launch(script, RESOLUTION, tmp_path / "resumed", STEPS, checkpoint=first, **four)
+    ph.disagreement(_assert_same_all_levels, resumed, reference, "nested vortex resumed onto four workers cut through the second box")
 
 
 def test_a_3d_nested_vortex_cut_through_the_second_box_launches_as_the_single_hierarchy_runs(tmp_path: Path, monkeypatch) -> None:
@@ -741,19 +734,15 @@ def test_a_3d_nested_vortex_cut_through_the_second_box_launches_as_the_single_hi
         "    refinement_ratios: Annotated[list[int], ProblemParam([2, 2], description='ratios')]\n"
     )
     monkeypatch.setenv("PYTHONPATH", os.pathsep.join([str(tmp_path), os.getcwd(), os.environ.get("PYTHONPATH", "")]))
-    reference = _script_reference("nested3d", "Nested3d", RESOLUTION_3D, tmp_path / "single", STEPS)
-    layout = _layout(tmp_path / "two.toml", workers=2, shape=(2, 1, 1))
-    launched = _script_launch(str(tmp_path / "nested3d.py"), RESOLUTION_3D, tmp_path / "two", layout, STEPS, workers=2)
-    _assert_same_all_levels(launched, reference, "3d nested vortex cut through the second box on two workers")
+    reference = _reference("nested3d", "Nested3d", RESOLUTION_3D, tmp_path / "single", STEPS)
+    layout = dict(workers=2, shape=(2, 1, 1))
+    launched = _launch(str(tmp_path / "nested3d.py"), RESOLUTION_3D, tmp_path / "two", STEPS, **layout)
+    ph.disagreement(_assert_same_all_levels, launched, reference, "3d nested vortex cut through the second box on two workers")
 
 
 def _refused_launch(tmp_path: Path, script: str, reason: str) -> None:
-    layout = _layout(tmp_path / "two_refused.toml", workers=2, shape=(2, 1))
-    cmd = [sys.executable, "-m", "simbi.cli", "launch", script, "--layout", str(layout), "--max-steps", "1",
-           "--resolution", "32,32,1", "--data-directory", str(tmp_path / "refused"), "--checkpoint-interval", "1e9"]
-    env = dict(os.environ)
-    env.pop("SIMBI_LAUNCH_EXPERIMENTAL", None)
-    done = subprocess.run(cmd, capture_output=True, text=True, timeout=600, env=env)
+    args = ["--max-steps", "1", "--resolution", "32,32,1", "--checkpoint-interval", "1e9"]
+    done = ph.launch(script, tmp_path / "refused", 2, shape=(2, 1), args=args, env=ph.environment(), timeout=600, expect_ok=False)
     assert done.returncode != 0, f"the launch succeeded:\n{done.stdout}"
     flat = " ".join(done.stderr.split())
     assert reason in flat, done.stderr
@@ -772,13 +761,13 @@ def test_five_levels_launch_past_the_old_phase_byte_as_the_single_hierarchy_runs
         "refinement_ratios: Annotated[list[int], ProblemParam([2, 2, 2, 2], description='ratios')]",
     ]
     module, cls, script = _nested_module(tmp_path, monkeypatch, extra=extra)
-    reference = _script_reference(module, cls, RESOLUTION, tmp_path / "single", STEPS)
+    reference = _reference(module, cls, RESOLUTION, tmp_path / "single", STEPS)
     with h5py.File(reference, "r") as f:
         assert "level_4" in f, "the single hierarchy published no fourth refined level; the depth is not past the byte"
     for tag, workers, kwargs in [("two", 2, {"shape": (2, 1)}), ("three", 3, {"cuts": [[9, 21], []]})]:
-        layout = _layout(tmp_path / f"{tag}.toml", workers=workers, **kwargs)
-        launched = _script_launch(script, RESOLUTION, tmp_path / tag, layout, STEPS, workers=workers)
-        _assert_same_all_levels(launched, reference, f"five levels on {workers} workers")
+        layout = dict(workers=workers, **kwargs)
+        launched = _launch(script, RESOLUTION, tmp_path / tag, STEPS, **layout)
+        ph.disagreement(_assert_same_all_levels, launched, reference, f"five levels on {workers} workers")
 
 
 # the deepest box spans root cells 16..20 on both axes, inside the root tile above both cuts at 12:
@@ -791,33 +780,24 @@ LATE_LINES = [
 LATE_STEP = 2
 # level 2 takes four substeps per root step; the last stage of the last one (rk2)
 LATE_REJECTION = f"reject_level:3:{LATE_STEP}:2:3:1"
-REJECTIONS = re.compile(r"SIMBI launch: worker=\d+/\d+ steps=\d+ rejections=(\d+)")
 
 
-
-
-def _per_step_launch(script: str, out: Path, layout: Path, workers: int, inject: str | None, steps: int = STEPS) -> tuple[dict[int, Path], set[int]]:
+def _per_step_launch(script: str, out: Path, cuts: list[list[int]], workers: int, inject: str | None, steps: int = STEPS) -> tuple[dict[int, Path], set[int]]:
     """the run with a checkpoint at every step's time, by iteration, the final file under the key
     -1, and every worker's rejection count. checkpoints are named by their time to three decimals,
     so two steps whose times round alike publish one file: the iterations a run keeps depend on its
     timesteps, and a comparison takes those both runs kept"""
-    cmd = [sys.executable, "-m", "simbi.cli", "launch", script, "--layout", str(layout), "--max-steps", str(steps),
-           "--resolution", ",".join(str(r) for r in RESOLUTION), "--data-directory", str(out), "--checkpoint-interval", "1e-9"]
-    env = dict(os.environ)
-    env.pop("SIMBI_LAUNCH_EXPERIMENTAL", None)
-    if inject is not None:
-        env["SIMBI_FABRIC_INJECT"] = inject
-    done = subprocess.run(cmd, capture_output=True, text=True, timeout=600, env=env)
-    assert done.returncode == 0, f"launch failed:\nstdout:\n{done.stdout}\nstderr:\n{done.stderr}"
+    args = ["--max-steps", str(steps), "--resolution", ",".join(str(r) for r in RESOLUTION), "--checkpoint-interval", "1e-9"]
+    run = ph.launch(script, out, workers, cuts=cuts, args=args, env=ph.environment(inject), timeout=600)
     files: dict[int, Path] = {}
-    for path in out.glob("*.h5"):
+    for path in run.files.values():
         if "final" in path.name:
             files[-1] = path
             continue
         with h5py.File(path, "r") as f:
             files[int(f["level_0"].attrs["iteration"])] = path
     assert -1 in files, "no final checkpoint was published"
-    return files, {int(r) for r in REJECTIONS.findall(done.stderr)}
+    return files, {r for _, r in run.reports().values()}
 
 
 def _assert_same_published(a: Path, b: Path, label: str) -> None:
@@ -834,7 +814,7 @@ def _assert_same_published(a: Path, b: Path, label: str) -> None:
 def test_a_late_rejection_on_the_deepest_level_rolls_every_worker_back(tmp_path: Path, monkeypatch, arm: str) -> None:
     base, extra = NESTED_ARMS[arm]
     _, _, script = _nested_module(tmp_path, monkeypatch, base=base, extra=LATE_LINES + extra)
-    four = _layout(tmp_path / "four.toml", workers=4, cuts=[[12], [12]])
+    four = [[12], [12]]
     # the rejected step's accepted timestep, from the run stopped right after it
     stopped, counts = _per_step_launch(script, tmp_path / "stopped", four, 4, LATE_REJECTION, steps=LATE_STEP + 1)
     assert counts == {1}, f"the deepest-level rejection was not counted once on every worker: {counts}"
@@ -851,7 +831,7 @@ def test_a_late_rejection_on_the_deepest_level_rolls_every_worker_back(tmp_path:
     with h5py.File(capped_stop[-1], "r") as fp, h5py.File(clean_stop[-1], "r") as fc:
         assert float(fp["level_0"].attrs["dt"]) == accepted, "the capped step took another timestep than the cap"
         assert accepted < float(fc["level_0"].attrs["dt"]), "the cap is no smaller than the clean timestep"
-    _assert_same_published(stopped[-1], capped_stop[-1], "stopped after the rejected step")
+    ph.disagreement(_assert_same_published, stopped[-1], capped_stop[-1], "stopped after the rejected step")
     # the full runs: every checkpoint both published, and the final one
     rejecting, counts = _per_step_launch(script, tmp_path / "rejecting", four, 4, LATE_REJECTION)
     assert counts == {1}, f"the deepest-level rejection was not counted once on every worker: {counts}"
@@ -862,9 +842,9 @@ def test_a_late_rejection_on_the_deepest_level_rolls_every_worker_back(tmp_path:
     shared = sorted(set(rejecting) & set(capped))
     assert -1 in shared and any(i > LATE_STEP for i in shared), f"the runs share no checkpoint after the rejected step: {shared}"
     for iteration in shared:
-        _assert_same_published(rejecting[iteration], capped[iteration], f"iteration {iteration}")
+        ph.disagreement(_assert_same_published, rejecting[iteration], capped[iteration], f"iteration {iteration}")
     # before the capped step, the cap leaves the run alone
     before = [i for i in sorted(set(clean) & set(capped)) if 0 <= i <= LATE_STEP]
     assert before, "no checkpoint before the capped step was published by both controls"
     for iteration in before:
-        _assert_same_published(clean[iteration], capped[iteration], f"the cap changed iteration {iteration}")
+        ph.disagreement(_assert_same_published, clean[iteration], capped[iteration], f"the cap changed iteration {iteration}")

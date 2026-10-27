@@ -18,9 +18,13 @@
 # exiting zero, the files carrying the single-process run's build, config and
 # numerics, every staggered face present, and no rendezvous or staging file
 # left behind. dispatch and addressing on one host only: cross-node routing,
-# shared-filesystem visibility and node failure need real nodes.
+# shared-filesystem visibility and node failure need real nodes. the
+# single-process references and the launches run on the session's backend and
+# placement (parity_harness); the scheduler-started sessions here start their
+# own ranks on this host and run under the local placement alone.
 #
 # run: pytest -m simulation simbi/simulation/tests/test_launch_refined.py
+#      (SIMBI_PARITY_BACKEND / SIMBI_PARITY_PLACEMENT select the session, parity_harness.py)
 # =============================================================================
 
 import os
@@ -37,13 +41,11 @@ from simbi_configs.examples.newtonian.refined_blast import RefinedBlast
 from simbi_configs.examples.newtonian.refined_mhd_blast import RefinedMhdBlast
 from simbi_configs.examples.srmhd.refined_rmhd_blast import RefinedRmhdBlast
 
+from simbi.simulation.tests import parity_harness as ph
 from simbi.simulation.tests.test_launch import (
-    EXIT,
     _lan_address,
-    _layout,
     bounded_processes,  # noqa: F401  the autouse process guard
 )
-from simbi.simulation.tests.test_launch_isothermal import _script_launch, _script_reference
 
 pytestmark = pytest.mark.simulation
 
@@ -56,6 +58,36 @@ PROVENANCE = (
     "build_source_id", "config_source", "config_sha256", "regime", "solver", "reconstruction",
     "eos", "ct_method", "timestepping", "cfl", "plm_theta", "gamma", "boundary_conditions",
 )
+
+REFERENCE_SNIPPET = """
+import sys
+from simbi.simulation import runner
+from {module} import {cls}
+out, steps, mode = sys.argv[1], int(sys.argv[2]), sys.argv[3]
+runner.run({cls}(resolution={resolution!r}, data_directory=out, checkpoint_interval=1e9{extra}), compute_mode=mode, max_steps=steps)
+"""
+
+
+def _reference(module: str, cls: str, resolution: tuple[int, ...], out: Path, steps: int, fields: str = "", devices: int = 1) -> Path:
+    """the run of `cls` on the session's backend, one device or the `devices` host tiles `fields`
+    names (`gpus=2, decompose=...`); `fields` are extra constructor arguments. its final checkpoint"""
+    snippet = REFERENCE_SNIPPET.format(module=module, cls=cls, resolution=resolution, extra=f", {fields}" if fields else "")
+    ph.python(ph.snippet_args(snippet, str(out), str(steps), ph.BACKEND), "reference", devices=devices)
+    files = sorted(out.glob("*final*.h5"))
+    assert len(files) == 1, f"expected one final checkpoint in {out}, found {files}"
+    return files[0]
+
+
+def _launch(script: str, resolution: tuple[int, ...], out: Path, steps: int, workers: int, cuts=None, shape=None,
+            checkpoint: Path | None = None, flags: list[str] | None = None, env: dict[str, str] | None = None) -> Path:
+    """`simbi launch` of `script` on the session's backend and placement, every worker exiting zero
+    without the experimental opt-in; its final checkpoint"""
+    args = ["--max-steps", str(steps), "--resolution", ",".join(str(r) for r in resolution), "--checkpoint-interval", "1e9"]
+    if checkpoint is not None:
+        args += ["--checkpoint", str(checkpoint)]
+    args += flags or []
+    run = ph.launch(script, out, workers, cuts=cuts, shape=shape, args=args, env=env or ph.environment(), timeout=600)
+    return run.final
 
 
 class Problem:
@@ -70,12 +102,12 @@ class Problem:
         self.fields = fields
 
     def reference(self, out: Path, steps: int) -> Path:
-        return _script_reference(self.cls.__module__, self.cls.__name__, RESOLUTION, out, steps, self.fields)
+        return _reference(self.cls.__module__, self.cls.__name__, RESOLUTION, out, steps, self.fields)
 
-    def launch(self, out: Path, layout: Path, steps: int, workers: int, checkpoint: Path | None = None) -> Path:
+    def launch(self, out: Path, steps: int, workers: int, checkpoint: Path | None = None, cuts=None, shape=None) -> Path:
         # a resumed launch names no scheme flag: the checkpoint's recorded numerics continue
         flags = [] if checkpoint is not None else self.flags
-        return _script_launch(self.script, RESOLUTION, out, layout, steps, workers, checkpoint=checkpoint, flags=flags)
+        return _launch(self.script, RESOLUTION, out, steps, workers, cuts=cuts, shape=shape, checkpoint=checkpoint, flags=flags)
 
 
 PROBLEMS = [
@@ -141,30 +173,32 @@ def _assert_same_levels(a: Path, b: Path, label: str) -> None:
             np.testing.assert_array_equal(x, ys[name], err_msg=f"{label}: {name}")
 
 
+def _same_levels(a: Path, b: Path, label: str) -> None:
+    """both levels equal bit for bit, a difference raised as a NumericalDisagreement"""
+    ph.disagreement(_assert_same_levels, a, b, f"{label}, {ph.BACKEND}")
+
+
 @pytest.mark.parametrize("problem", PROBLEMS)
 def test_a_refined_launch_matches_the_single_process_run(tmp_path: Path, problem: Problem) -> None:
     reference = problem.reference(tmp_path / "single", STEPS)
     # a cut through the box's center, then ragged cuts on both axes
     for tag, workers, kwargs in [("two", 2, {"shape": (2, 1)}), ("four", 4, {"cuts": [[13], [18]]})]:
-        layout = _layout(tmp_path / f"{tag}.toml", workers=workers, **kwargs)
-        final = problem.launch(tmp_path / tag, layout, STEPS, workers)
-        _assert_same_levels(final, reference, f"{workers} workers")
+        final = problem.launch(tmp_path / tag, STEPS, workers, **kwargs)
+        _same_levels(final, reference, f"{workers} workers")
 
 
 @pytest.mark.parametrize("problem", PROBLEMS)
 def test_a_refined_launch_resumed_onto_another_partition_matches(tmp_path: Path, problem: Problem) -> None:
     reference = problem.reference(tmp_path / "single", STEPS)
-    first = problem.launch(tmp_path / "first", _layout(tmp_path / "two.toml", workers=2, shape=(2, 1)), STEPS // 2, 2)
+    first = problem.launch(tmp_path / "first", STEPS // 2, 2, shape=(2, 1))
     with h5py.File(first, "r") as f:
         written_at = int(f["level_0"].attrs["iteration"])
     assert 0 < written_at < STEPS
     # the step cap is an absolute root iteration: the resume from written_at runs to STEPS
-    resumed = problem.launch(
-        tmp_path / "four", _layout(tmp_path / "four.toml", workers=4, cuts=[[13], [18]]), STEPS, 4, checkpoint=first
-    )
+    resumed = problem.launch(tmp_path / "four", STEPS, 4, checkpoint=first, cuts=[[13], [18]])
     with h5py.File(resumed, "r") as f:
         assert int(f["level_0"].attrs["iteration"]) == STEPS
-    _assert_same_levels(resumed, reference, "resumed on four workers")
+    _same_levels(resumed, reference, "resumed on four workers")
 
 
 # one overall deadline for a scheduler-started session, from the first spawn to the last exit
@@ -231,6 +265,8 @@ def _scheduler_session(
         cmd += ["--checkpoint", str(checkpoint)]
     else:
         cmd += problem.flags
+    if ph.BACKEND == "gpu":
+        cmd.append("--gpu")
     addresses = ["127.0.0.1", "localhost"] + [a for a in [_lan_address()] if a]
     envs = []
     for rank in range(workers):
@@ -266,6 +302,7 @@ def _assert_reaped(started: list[subprocess.Popen]) -> None:
         raise AssertionError(f"worker {rank} (pid {p.pid}) survives its session")
 
 
+@ph.local_only
 def test_a_held_scheduler_worker_is_ended_and_reaped_at_the_deadline(tmp_path: Path) -> None:
     # rank 1 of two, started alone: it waits for a coordinator that never writes the rendezvous
     # record, so it is running when the deadline passes
@@ -277,6 +314,7 @@ def test_a_held_scheduler_worker_is_ended_and_reaped_at_the_deadline(tmp_path: P
     _assert_reaped(started)
 
 
+@ph.local_only
 def test_a_failed_spawn_ends_and_reaps_the_workers_already_started(tmp_path: Path) -> None:
     # the second spawn fails after the first worker is running and waiting for its peer
     cmd, envs, logs = _scheduler_session(PROBLEMS[0].values[0], tmp_path / "spawn", 2, "shape = [2, 1]", 1)
@@ -330,13 +368,16 @@ def _assert_complete_faces(path: Path, magnetized: bool) -> None:
             assert magnetic["B2/data"].shape == (cells + 1, cells), f"{level_name} B2 {magnetic['B2/data'].shape}"
 
 
+# the ranks start on this host with per-rank advertised addresses; the scheduler placement starts
+# its own ranks for every launch gate
+@ph.local_only
 @pytest.mark.parametrize("problem", PROBLEMS)
 def test_scheduler_started_refined_workers_match_and_resume_onto_another_partition(tmp_path: Path, problem: Problem) -> None:
     # a problem records the edge EMF of its staggered field, and none without one
     magnetized = bool(problem.ct_method)
     reference = problem.reference(tmp_path / "single", STEPS)
     fresh = _scheduler_launch(problem, tmp_path / "fresh", 4, "cuts = [[13], [18]]", STEPS)
-    _assert_same_levels(fresh, reference, "scheduler-started, four workers")
+    _same_levels(fresh, reference, "scheduler-started, four workers")
     _assert_provenance(fresh, reference, problem.ct_method, "scheduler-started, four workers")
     _assert_complete_faces(fresh, magnetized)
     _assert_clean_output(tmp_path / "fresh")
@@ -349,22 +390,22 @@ def test_scheduler_started_refined_workers_match_and_resume_onto_another_partiti
     resumed = _scheduler_launch(problem, tmp_path / "resumed", 4, "cuts = [[13], [18]]", STEPS, checkpoint=first)
     with h5py.File(resumed, "r") as f:
         assert int(f["level_0"].attrs["iteration"]) == STEPS
-    _assert_same_levels(resumed, reference, "scheduler-started, resumed on four workers")
+    _same_levels(resumed, reference, "scheduler-started, resumed on four workers")
     _assert_provenance(resumed, reference, problem.ct_method, "scheduler-started, resumed on four workers")
     _assert_complete_faces(resumed, magnetized)
     _assert_clean_output(tmp_path / "resumed")
 
 
-def _refused(tmp_path: Path, script: str, resolution: tuple[int, ...] | None, layout: Path) -> str:
+def _refused(tmp_path: Path, script: str, resolution: tuple[int, ...] | None, workers: int, cuts) -> str:
     out = tmp_path / "out"
-    cmd = [sys.executable, "-m", "simbi.cli", "launch", script, "--layout", str(layout), "--max-steps", "1", "--data-directory", str(out), "--checkpoint-interval", "1e9"]
+    args = ["--max-steps", "1", "--checkpoint-interval", "1e9"]
     if resolution is not None:
-        cmd += ["--resolution", ",".join(str(r) for r in resolution)]
-    done = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
-    assert done.returncode != 0, f"the launch succeeded:\n{done.stdout}"
+        args += ["--resolution", ",".join(str(r) for r in resolution)]
+    run = ph.launch(script, out, workers, cuts=cuts, args=args, env=ph.environment(), timeout=600, expect_ok=False)
+    assert run.returncode != 0, f"the launch succeeded:\n{run.stdout}"
     assert not (out.exists() and list(out.glob("*.h5"))), "a checkpoint was published"
-    assert EXIT.findall(done.stdout) or done.stderr, "the launch reported nothing"
-    return " ".join(done.stderr.split())
+    assert run.exits or run.stderr, "the launch reported nothing"
+    return " ".join(run.stderr.split())
 
 
 # the coarse-fine prolongation's reach in root cells past a patch face: half the fine halo (one
@@ -382,16 +423,16 @@ def test_a_hydro_patch_face_on_a_cut_matches_the_single_process_run(tmp_path: Pa
     with h5py.File(reference, "r") as f:
         halo = int(f["level_0/mesh"].attrs["halo_width"])
     assert halo < PROLONG_REACH, f"the root halo ({halo}) holds the prolongation reach; the cut faces read no gathered cell"
-    on_faces = _layout(tmp_path / "faces.toml", workers=4, cuts=[[8], [24]])
-    _assert_same_levels(problem.launch(tmp_path / "faces", on_faces, STEPS, 4), reference, "patch faces on the cuts")
-    first = problem.launch(tmp_path / "first", _layout(tmp_path / "two.toml", workers=2, shape=(2, 1)), STEPS // 2, 2)
-    resumed = problem.launch(tmp_path / "resumed", on_faces, STEPS, 4, checkpoint=first)
-    _assert_same_levels(resumed, reference, "patch faces on the cuts, resumed")
+    on_faces = [[8], [24]]
+    _same_levels(problem.launch(tmp_path / "faces", STEPS, 4, cuts=on_faces), reference, "patch faces on the cuts")
+    first = problem.launch(tmp_path / "first", STEPS // 2, 2, shape=(2, 1))
+    resumed = problem.launch(tmp_path / "resumed", STEPS, 4, checkpoint=first, cuts=on_faces)
+    _same_levels(resumed, reference, "patch faces on the cuts, resumed")
 
 
 def test_a_magnetized_patch_face_on_a_cut_is_refused_by_name(tmp_path: Path) -> None:
     # the magnetized box's low face on axis 0 at root cell 8, on the cut: its cell and face field
     # prolong from the root halo, which plm's two ghost cells do not hold
     problem = PROBLEMS[1].values[0]
-    stderr = _refused(tmp_path, problem.script, RESOLUTION, _layout(tmp_path / "two.toml", workers=2, cuts=[[8], []]))
+    stderr = _refused(tmp_path, problem.script, RESOLUTION, 2, [[8], []])
     assert "lies on a decomposition cut" in stderr, stderr

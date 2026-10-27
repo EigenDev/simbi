@@ -10,20 +10,22 @@
 # decomposition probes at the single grid's own timestep. the target changes
 # the run: the same atmosphere without it lands elsewhere.
 #
+# every arm runs as a fresh process on the session's backend and placement
+# (parity_harness), the tiled ones as host tiles.
+#
 # run: pytest -m simulation simbi/simulation/tests/test_tiled_equilibrium_3d.py
+#      (SIMBI_PARITY_BACKEND / SIMBI_PARITY_PLACEMENT select the session, parity_harness.py)
 # =============================================================================
 
 import os
 import re
-import subprocess
-import sys
 from pathlib import Path
 
 import numpy as np
 import pytest
 
-from simbi.simulation.tests.test_launch import _assert_same_state, _layout, bounded_processes  # noqa: F401  the autouse process guard
-from simbi.simulation.tests.test_launch_isothermal import _script_launch
+from simbi.simulation.tests import parity_harness as ph
+from simbi.simulation.tests.test_launch import _assert_same_state, bounded_processes  # noqa: F401  the autouse process guard
 
 pytestmark = pytest.mark.simulation
 
@@ -102,26 +104,32 @@ def fixture(tmp_path: Path) -> Path:
 
 
 def _single(fixture: Path, cls: str, out: Path, gpus: int = 1, extra: str = "") -> tuple[Path, str]:
+    """`cls` on the session's backend, one device or `gpus` host tiles, in a fresh interpreter: its
+    final checkpoint and output"""
     snippet = (
         "import sys\n"
         f"sys.path.insert(0, {str(fixture.parent)!r})\n"
         "from simbi.simulation import runner\n"
         f"from atmosphere_3d import {cls}\n"
-        f"runner.run({cls}(gpus={gpus}, data_directory=sys.argv[1], checkpoint_interval=1e9{extra}), compute_mode='cpu', max_steps={STEPS})\n"
+        f"runner.run({cls}(gpus={gpus}, data_directory=sys.argv[1], checkpoint_interval=1e9{extra}), compute_mode={ph.BACKEND!r}, max_steps={STEPS})\n"
     )
-    done = subprocess.run([sys.executable, "-c", snippet, str(out)], capture_output=True, text=True, timeout=900, env=dict(os.environ, SYMBI_GPU_OVERSUBSCRIBE="1"))
-    assert done.returncode == 0, f"{cls} on {gpus} device(s) failed:\n{done.stderr[-3000:]}"
+    done = ph.python(ph.snippet_args(snippet, str(out)), f"{cls} on {gpus} device(s){extra}", devices=gpus)
     files = sorted(out.glob("*final*.h5"))
     assert len(files) == 1, f"expected one final checkpoint in {out}, found {files}"
     return files[0], done.stdout + done.stderr
 
 
-def _launch(fixture: Path, cls: str, resolution: tuple, out: Path, layout: Path, workers: int) -> Path:
+def _launch(fixture: Path, cls: str, resolution: tuple, out: Path, cuts: list[list[int]]) -> Path:
+    """`simbi launch` of `cls` on the session's backend and placement without the experimental
+    opt-in: its final checkpoint"""
     # the launch evolves the one problem its script defines
     script = fixture.parent / f"launched_{cls.lower()}.py"
     script.write_text(f"from atmosphere_3d import {cls} as Base\n\n\nclass Launched{cls}(Base):\n    pass\n")
-    env = {"PYTHONPATH": os.pathsep.join([str(fixture.parent), os.getcwd(), os.environ.get("PYTHONPATH", "")])}
-    return _script_launch(str(script), resolution, out, layout, STEPS, workers=workers, env=env)
+    env = ph.environment()
+    env["PYTHONPATH"] = os.pathsep.join([str(fixture.parent), os.getcwd(), os.environ.get("PYTHONPATH", "")])
+    args = ["--max-steps", str(STEPS), "--resolution", ",".join(str(r) for r in resolution), "--checkpoint-interval", "1e9"]
+    workers = int(np.prod([len(c) + 1 for c in cuts]))
+    return ph.launch(script, out, workers, cuts=cuts, args=args, env=env, timeout=600).final
 
 
 def _probe_dt(output: str, label: str) -> set[str]:
@@ -147,7 +155,6 @@ def test_a_three_dimensional_target_holds_on_every_decomposition(tmp_path: Path,
                                ("four host tiles on two axes", 4, ", decompose=[[5], [], [9]]")]:
         got, out = _single(fixture, "Atmosphere3d", tmp_path / f"tiles{gpus}", gpus=gpus, extra=extra)
         assert _probe_dt(out, label) == probe, f"{label} probed at another timestep"
-        _assert_same_state(got, reference, label)
-    layout = _layout(tmp_path / "four.toml", workers=4, cuts=[[5], [], [9]])
-    launched = _launch(fixture, "Atmosphere3d", RESOLUTION, tmp_path / "launched", layout, workers=4)
-    _assert_same_state(launched, reference, "a two-by-two launch")
+        ph.same_checkpoint(got, reference, label)
+    launched = _launch(fixture, "Atmosphere3d", RESOLUTION, tmp_path / "launched", cuts=[[5], [], [9]])
+    ph.same_checkpoint(launched, reference, "a two-by-two launch")

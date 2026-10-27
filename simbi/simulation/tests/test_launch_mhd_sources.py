@@ -8,19 +8,19 @@
 # two-by-two launch whose every tile holds a cut corner, for newtonian and
 # isothermal MHD. the force changes the run (the same vortex without it lands
 # elsewhere), so agreement is not the agreement of two runs that ignore it.
+# every arm runs on the session's backend and placement (parity_harness).
 #
 # run: pytest -m simulation simbi/simulation/tests/test_launch_mhd_sources.py
+#      (SIMBI_PARITY_BACKEND / SIMBI_PARITY_PLACEMENT select the session, parity_harness.py)
 # =============================================================================
 
-import os
-import subprocess
-import sys
 from pathlib import Path
 
 import pytest
 
-from simbi.simulation.tests.test_launch import MHD_STEPS, _assert_same_state, _layout, bounded_processes  # noqa: F401  the autouse process guard
-from simbi.simulation.tests.test_launch_isothermal import _script_launch
+from simbi.simulation.tests import parity_harness as ph
+from simbi.simulation.tests.test_launch import MHD_STEPS, _assert_same_state, bounded_processes  # noqa: F401  the autouse process guard
+from simbi.simulation.tests.test_launch_refined import _launch
 
 pytestmark = pytest.mark.simulation
 
@@ -46,17 +46,16 @@ def _script(tmp_path: Path, arm: str, sourced: bool) -> Path:
 
 
 def _single(script: Path, out: Path, gpus: int = 1) -> Path:
+    """the vortex of `script` on the session's backend, one device or `gpus` host tiles"""
     snippet = (
         "import sys\n"
         f"sys.path.insert(0, {str(script.parent)!r})\n"
         "from simbi.simulation import runner\n"
         f"from {script.stem} import Vortex\n"
         f"runner.run(Vortex(resolution={RESOLUTION!r}, gpus={gpus}, data_directory=sys.argv[1], checkpoint_interval=1e9), "
-        "compute_mode='cpu', max_steps=int(sys.argv[2]))\n"
+        "compute_mode=sys.argv[3], max_steps=int(sys.argv[2]))\n"
     )
-    env = dict(os.environ, SYMBI_GPU_OVERSUBSCRIBE="1")
-    done = subprocess.run([sys.executable, "-c", snippet, str(out), str(MHD_STEPS)], capture_output=True, text=True, timeout=600, env=env)
-    assert done.returncode == 0, f"{script.stem} on {gpus} device(s) failed:\n{done.stderr[-3000:]}"
+    ph.python(ph.snippet_args(snippet, str(out), str(MHD_STEPS), ph.BACKEND), f"{script.stem} on {gpus} device(s)", timeout=600, devices=gpus)
     files = sorted(out.glob("*final*.h5"))
     assert len(files) == 1, f"expected one final checkpoint in {out}, found {files}"
     return files[0]
@@ -76,8 +75,7 @@ def test_a_flat_magnetized_user_source_is_the_single_grids_on_every_driver(tmp_p
     reference = _single(sourced, tmp_path / "single")
     plain = _single(_script(tmp_path, arm, sourced=False), tmp_path / "plain")
     assert _differs(reference, plain), f"{arm}: the source left the run unchanged; the gate is vacuous"
-    _assert_same_state(_single(sourced, tmp_path / "tiles", gpus=2), reference, f"{arm} on two host tiles")
+    ph.same_checkpoint(_single(sourced, tmp_path / "tiles", gpus=2), reference, f"{arm} on two host tiles")
     for workers, shape in [(2, (2, 1, 1)), (4, (2, 2, 1))]:
-        layout = _layout(tmp_path / f"{workers}.toml", workers=workers, shape=shape)
-        launched = _script_launch(str(sourced), RESOLUTION, tmp_path / f"launch{workers}", layout, MHD_STEPS, workers=workers)
-        _assert_same_state(launched, reference, f"{arm} on {workers} launched workers")
+        launched = _launch(str(sourced), RESOLUTION, tmp_path / f"launch{workers}", MHD_STEPS, workers, shape=shape)
+        ph.same_checkpoint(launched, reference, f"{arm} on {workers} launched workers")

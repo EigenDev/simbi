@@ -7,9 +7,11 @@
 # included, fresh and with the correction fired against a cut (the flag
 # asserted to change the run on one worker), and a run checkpointed halfway on
 # four workers resumes onto three unevenly owned tiles to the uninterrupted
-# single-grid state under the same edge EMF.
+# single-grid state under the same edge EMF. every arm runs on the session's
+# backend and placement (parity_harness).
 #
 # run: pytest -m simulation simbi/simulation/tests/test_launch_rmhd.py
+#      (SIMBI_PARITY_BACKEND / SIMBI_PARITY_PLACEMENT select the session, parity_harness.py)
 # =============================================================================
 
 from pathlib import Path
@@ -17,13 +19,12 @@ from pathlib import Path
 import h5py
 import pytest
 
+from simbi.simulation.tests import parity_harness as ph
 from simbi.simulation.tests.test_launch import (
     MHD_STEPS,
-    _assert_same_state,
-    _layout,
     bounded_processes,  # noqa: F401  the autouse process guard
 )
-from simbi.simulation.tests.test_launch_isothermal import _script_launch, _script_reference
+from simbi.simulation.tests.test_launch_refined import _launch, _reference
 from simbi.simulation.tests.test_launch_walls import _assert_flag_changed
 
 pytestmark = pytest.mark.simulation
@@ -40,29 +41,25 @@ RESTART = [[10, 21], []]
 @pytest.mark.parametrize("ct", ["contact", "uct"])
 def test_an_rmhd_launch_matches_the_single_grid_run_fresh_and_corrected(tmp_path: Path, ct: str) -> None:
     flags = ["--ct-method", ct]
-    reference = _script_reference(MODULE, "OrszagTang", RESOLUTION, tmp_path / "single", MHD_STEPS, fields=f"ct_method={ct!r}")
-    four = _layout(tmp_path / "four.toml", workers=4, cuts=CUTS)
-    launched = _script_launch(SCRIPT, RESOLUTION, tmp_path / "four", four, MHD_STEPS, workers=4, flags=flags)
-    _assert_same_state(launched, reference, f"rmhd {ct}: four workers")
-    one = _layout(tmp_path / "one.toml", workers=1, cuts=[[], []])
-    inject = {"SIMBI_FABRIC_INJECT": TROUBLE}
-    clean = _script_launch(SCRIPT, RESOLUTION, tmp_path / "clean", one, MHD_STEPS, workers=1, flags=flags)
-    flagged = _script_launch(SCRIPT, RESOLUTION, tmp_path / "flagged", one, MHD_STEPS, workers=1, env=inject, flags=flags)
+    reference = _reference(MODULE, "OrszagTang", RESOLUTION, tmp_path / "single", MHD_STEPS, fields=f"ct_method={ct!r}")
+    launched = _launch(SCRIPT, RESOLUTION, tmp_path / "four", MHD_STEPS, 4, cuts=CUTS, flags=flags)
+    ph.same_checkpoint(launched, reference, f"rmhd {ct}: four workers")
+    one = [[], []]
+    clean = _launch(SCRIPT, RESOLUTION, tmp_path / "clean", MHD_STEPS, 1, cuts=one, flags=flags)
+    flagged = _launch(SCRIPT, RESOLUTION, tmp_path / "flagged", MHD_STEPS, 1, cuts=one, env=ph.environment(TROUBLE), flags=flags)
     _assert_flag_changed(clean, flagged)
-    corrected = _script_launch(SCRIPT, RESOLUTION, tmp_path / "corrected", four, MHD_STEPS, workers=4, env=inject, flags=flags)
-    _assert_same_state(corrected, flagged, f"rmhd {ct}: four workers, the correction against the cut")
+    corrected = _launch(SCRIPT, RESOLUTION, tmp_path / "corrected", MHD_STEPS, 4, cuts=CUTS, env=ph.environment(TROUBLE), flags=flags)
+    ph.same_checkpoint(corrected, flagged, f"rmhd {ct}: four workers, the correction against the cut")
 
 
 @pytest.mark.parametrize("ct", ["contact", "uct"])
 def test_an_rmhd_launch_resumed_onto_three_uneven_workers_matches(tmp_path: Path, ct: str) -> None:
     flags = ["--ct-method", ct]
-    reference = _script_reference(MODULE, "OrszagTang", RESOLUTION, tmp_path / "single", MHD_STEPS, fields=f"ct_method={ct!r}")
-    four = _layout(tmp_path / "four.toml", workers=4, cuts=CUTS)
-    partial = _script_launch(SCRIPT, RESOLUTION, tmp_path / "first", four, MHD_STEPS // 2, workers=4, flags=flags)
+    reference = _reference(MODULE, "OrszagTang", RESOLUTION, tmp_path / "single", MHD_STEPS, fields=f"ct_method={ct!r}")
+    partial = _launch(SCRIPT, RESOLUTION, tmp_path / "first", MHD_STEPS // 2, 4, cuts=CUTS, flags=flags)
     with h5py.File(partial, "r") as f:
         written_at = int(f["level_0"].attrs["iteration"])
     assert 0 < written_at < MHD_STEPS
-    three = _layout(tmp_path / "three.toml", workers=3, cuts=RESTART)
     # the cap is the absolute root iteration: the checkpoint's steps and the rest
-    resumed = _script_launch(SCRIPT, RESOLUTION, tmp_path / "three", three, MHD_STEPS, workers=3, checkpoint=partial, flags=flags)
-    _assert_same_state(resumed, reference, f"rmhd {ct}: resumed onto three uneven workers against the uninterrupted run")
+    resumed = _launch(SCRIPT, RESOLUTION, tmp_path / "three", MHD_STEPS, 3, cuts=RESTART, checkpoint=partial, flags=flags)
+    ph.same_checkpoint(resumed, reference, f"rmhd {ct}: resumed onto three uneven workers against the uninterrupted run")

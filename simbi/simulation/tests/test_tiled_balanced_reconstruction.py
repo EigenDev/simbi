@@ -20,22 +20,24 @@
 # recovering the band's uncovered cell before the band chains from it. a chart
 # outside that scope (the (r, z) plane) and a cut on a level-2 patch face, whose
 # band starts across a cut of level 1, are refused by name before any output.
+# every arm runs as a fresh process on the session's backend and placement
+# (parity_harness), the tiled ones as host tiles; the refusal on host tiles
+# involves no launch and runs under the local placement.
 #
 # run: pytest -m simulation simbi/simulation/tests/test_tiled_balanced_reconstruction.py
+#      (SIMBI_PARITY_BACKEND / SIMBI_PARITY_PLACEMENT select the session, parity_harness.py)
 # =============================================================================
 
 import os
-import re
 import subprocess
-import sys
 from pathlib import Path
 
 import h5py
 import numpy as np
 import pytest
 
-from simbi.simulation.tests.test_launch import _assert_same_state, _layout, bounded_processes  # noqa: F401  the autouse process guard
-from simbi.simulation.tests.test_launch_isothermal import _script_launch
+from simbi.simulation.tests import parity_harness as ph
+from simbi.simulation.tests.test_launch import bounded_processes  # noqa: F401  the autouse process guard
 
 pytestmark = pytest.mark.simulation
 
@@ -266,19 +268,29 @@ def fixture(tmp_path: Path) -> Path:
     return path
 
 
-def _run(fixture: Path, cls: str, out: Path, gpus: int = 1, extra: str = "") -> subprocess.CompletedProcess:
+def _tiles(cuts: list[list[int]]) -> int:
+    return int(np.prod([len(c) + 1 for c in cuts]))
+
+
+def _run(fixture: Path, cls: str, out: Path, gpus: int = 1, extra: str = "", steps: int = STEPS, resume: Path | None = None,
+         check: bool = True) -> subprocess.CompletedProcess:
+    """`cls` on the session's backend, one device or `gpus` host tiles, capped at the absolute root
+    iteration `steps` and resumed from `resume` when given, in a fresh interpreter"""
+    resume_arg = f", checkpoint_file={str(resume)!r}" if resume else ""
     snippet = (
         "import sys\n"
         f"sys.path.insert(0, {str(fixture.parent)!r})\n"
         "from simbi.simulation import runner\n"
         f"from balanced_atmosphere import {cls}\n"
-        f"runner.run({cls}(gpus={gpus}, data_directory=sys.argv[1], checkpoint_interval=1e9{extra}), compute_mode='cpu', max_steps={STEPS})\n"
+        f"runner.run({cls}(gpus={gpus}, data_directory=sys.argv[1], checkpoint_interval=1e9{extra}{resume_arg}), "
+        f"compute_mode={ph.BACKEND!r}, max_steps={steps})\n"
     )
-    return subprocess.run([sys.executable, "-c", snippet, str(out)], capture_output=True, text=True, timeout=900, env=dict(os.environ, SYMBI_GPU_OVERSUBSCRIBE="1"))
+    return ph.python(ph.snippet_args(snippet, str(out)), f"{cls} on {gpus} device(s){extra} to step {steps}", devices=gpus, check=check)
 
 
-def _final(done: subprocess.CompletedProcess, out: Path, label: str) -> Path:
-    assert done.returncode == 0, f"{label} failed:\n{done.stderr[-3000:]}"
+def _final(fixture: Path, cls: str, out: Path, gpus: int = 1, extra: str = "", steps: int = STEPS, resume: Path | None = None) -> Path:
+    """the final checkpoint of `_run`"""
+    _run(fixture, cls, out, gpus, extra, steps, resume)
     files = sorted(out.glob("*final*.h5"))
     assert len(files) == 1, f"expected one final checkpoint in {out}, found {files}"
     return files[0]
@@ -296,53 +308,61 @@ def _launch_script(fixture: Path, cls: str) -> Path:
     return script
 
 
-def _launch_env(fixture: Path) -> dict[str, str]:
-    return {"PYTHONPATH": os.pathsep.join([str(fixture.parent), os.getcwd(), os.environ.get("PYTHONPATH", "")])}
+def _launch(fixture: Path, cls: str, out: Path, cuts=None, shape=None, steps: int = STEPS, resolution: tuple[int, ...] | None = (24, 32),
+            checkpoint: Path | None = None, inject: str | None = None, expect_ok: bool = True) -> ph.Launch:
+    """`simbi launch` of `cls` on the session's backend and placement without the experimental
+    opt-in, capped at the absolute root iteration `steps`; with `expect_ok` every worker exits zero"""
+    workers = _tiles(cuts) if cuts is not None else int(np.prod(shape))
+    args = ["--max-steps", str(steps), "--checkpoint-interval", "1e9"]
+    if resolution is not None:
+        args += ["--resolution", ",".join(str(r) for r in resolution)]
+    if checkpoint is not None:
+        args += ["--checkpoint", str(checkpoint)]
+    env = ph.environment(inject)
+    env["PYTHONPATH"] = os.pathsep.join([str(fixture.parent), os.getcwd(), os.environ.get("PYTHONPATH", "")])
+    return ph.launch(_launch_script(fixture, cls), out, workers, cuts=cuts, shape=shape, args=args, env=env, timeout=600, expect_ok=expect_ok)
+
+
+def _rejections(run: ph.Launch) -> set[int]:
+    """every worker's rejection count"""
+    return {r for _, r in run.reports().values()}
 
 
 @pytest.mark.parametrize("grid", list(GRIDS))
-def test_the_balanced_reconstruction_on_tiles_matches_the_single_grid(tmp_path: Path, fixture: Path, grid: str, monkeypatch) -> None:
+def test_the_balanced_reconstruction_on_tiles_matches_the_single_grid(tmp_path: Path, fixture: Path, grid: str) -> None:
     cls, resolution, momentum, host_cuts, launch_cuts = GRIDS[grid]
-    want = _final(_run(fixture, cls, tmp_path / "single"), tmp_path / "single", "the single grid")
-    plain = _final(_run(fixture, cls, tmp_path / "plain", extra=", wb_reconstruction=False"), tmp_path / "plain", "the plain run")
+    want = _final(fixture, cls, tmp_path / "single")
+    plain = _final(fixture, cls, tmp_path / "plain", extra=", wb_reconstruction=False")
     # the 2D atmosphere measured over eight steps: 11.7 plain against 0.053 balanced
     assert _momentum(want, momentum) < 0.1 * _momentum(plain, momentum), f"{grid}: the balance leaves the spurious flow in place; the gate is vacuous"
     for cuts in host_cuts:
-        gpus = int(np.prod([len(c) + 1 for c in cuts]))
-        out = tmp_path / f"tiles{gpus}"
-        got = _final(_run(fixture, cls, out, gpus, f", decompose={cuts!r}"), out, f"{grid} on {gpus} host tiles")
-        _assert_same_state(got, want, f"{grid} on {gpus} host tiles cut at {cuts}")
-    monkeypatch.delenv("SIMBI_LAUNCH_EXPERIMENTAL", raising=False)
-    workers = int(np.prod([len(c) + 1 for c in launch_cuts]))
-    layout = _layout(tmp_path / "launch.toml", workers=workers, cuts=launch_cuts)
-    got = _script_launch(str(_launch_script(fixture, cls)), resolution, tmp_path / "launched", layout, STEPS, workers=workers, env=_launch_env(fixture))
-    _assert_same_state(got, want, f"{grid} launched on {workers} workers")
+        gpus = _tiles(cuts)
+        got = _final(fixture, cls, tmp_path / f"tiles{gpus}", gpus, f", decompose={cuts!r}")
+        ph.same_checkpoint(got, want, f"{grid} on {gpus} host tiles cut at {cuts}")
+    got = _launch(fixture, cls, tmp_path / "launched", cuts=launch_cuts, resolution=resolution).final
+    ph.same_checkpoint(got, want, f"{grid} launched on {_tiles(launch_cuts)} workers")
 
 
-def test_the_balanced_reconstruction_on_refined_tiles_matches_the_single_grid(tmp_path: Path, fixture: Path, monkeypatch) -> None:
+def test_the_balanced_reconstruction_on_refined_tiles_matches_the_single_grid(tmp_path: Path, fixture: Path) -> None:
     # the patch spans root cells 6..18 along x and 8..24 along y; each seam's balanced band covers
     # the four covered cells inside it, and the cuts keep every band on one tile
-    want = _final(_run(fixture, "RefinedBalancedAtmosphere", tmp_path / "single"), tmp_path / "single", "the refined single grid")
-    plain = _final(_run(fixture, "RefinedBalancedAtmosphere", tmp_path / "plain", extra=", wb_reconstruction=False"), tmp_path / "plain", "the plain refined run")
+    want = _final(fixture, "RefinedBalancedAtmosphere", tmp_path / "single")
+    plain = _final(fixture, "RefinedBalancedAtmosphere", tmp_path / "plain", extra=", wb_reconstruction=False")
     with h5py.File(want, "r") as a, h5py.File(plain, "r") as b:
         assert not np.array_equal(a["level_1/conserved/den"][()], b["level_1/conserved/den"][()]), "the balance left the refined run unchanged; the gate is vacuous"
     # the patch spans root cells 6..18 in x and 8..24 in y, its bands 6..10, 14..18 and 8..12,
     # 20..24: x = 8 and x = 16 cut inside an x band, with y = 10 the bands intersect at a corner
     # cut on both axes, and 7, 9 and 15, 17 cut each x band twice around a two-cell tile
     for cuts in [[[12], []], [[12], [16]], [[8], []], [[16], []], [[8], [10]], [[7, 9, 15, 17], []]]:
-        gpus = int(np.prod([len(c) + 1 for c in cuts]))
-        out = tmp_path / f"tiles{gpus}_{cuts[0]}_{cuts[1]}"
-        got = _final(_run(fixture, "RefinedBalancedAtmosphere", out, gpus, f", decompose={cuts!r}"), out, f"refined host tiles cut at {cuts}")
-        _assert_same_state(got, want, f"refined host tiles cut at {cuts}")
-    monkeypatch.delenv("SIMBI_LAUNCH_EXPERIMENTAL", raising=False)
+        gpus = _tiles(cuts)
+        got = _final(fixture, "RefinedBalancedAtmosphere", tmp_path / f"tiles{gpus}_{cuts[0]}_{cuts[1]}", gpus, f", decompose={cuts!r}")
+        ph.same_checkpoint(got, want, f"refined host tiles cut at {cuts}")
     # the launched workers carry a band's chains across each cut inside it at the seam's band
     # points, the cut nearest the seam first: x = 8 inside the x band, with y = 10 the bands
     # intersect at a corner cut on both axes, and 7, 9 and 15, 17 cut each x band twice
     for cuts in [[[12], [16]], [[8], []], [[8], [10]], [[7, 9, 15, 17], []]]:
-        workers = int(np.prod([len(c) + 1 for c in cuts]))
-        layout = _layout(tmp_path / f"launch_{cuts[0]}_{cuts[1]}.toml", workers=workers, cuts=cuts)
-        got = _script_launch(str(_launch_script(fixture, "RefinedBalancedAtmosphere")), (24, 32), tmp_path / f"launched_{cuts[0]}_{cuts[1]}", layout, STEPS, workers=workers, env=_launch_env(fixture))
-        _assert_same_state(got, want, f"refined launch on {workers} workers cut at {cuts}")
+        got = _launch(fixture, "RefinedBalancedAtmosphere", tmp_path / f"launched_{cuts[0]}_{cuts[1]}", cuts=cuts).final
+        ph.same_checkpoint(got, want, f"refined launch on {_tiles(cuts)} workers cut at {cuts}")
 
 
 def test_a_balanced_patch_face_on_a_cut_matches_on_host_tiles_and_launch(tmp_path: Path, fixture: Path) -> None:
@@ -351,54 +371,31 @@ def test_a_balanced_patch_face_on_a_cut_matches_on_host_tiles_and_launch(tmp_pat
     # through the balanced transfer from a parent stencil gathered across the cut, and the tile
     # across it refluxes and recovers the band's uncovered cell before the band chains from it; on
     # launch the start cell reaches the patch's worker at the band start point
-    want = _final(_run(fixture, "RefinedBalancedAtmosphere", tmp_path / "single"), tmp_path / "single", "the refined single grid")
+    want = _final(fixture, "RefinedBalancedAtmosphere", tmp_path / "single")
     for cuts in [[[6], []], [[18], [24]]]:
-        gpus = int(np.prod([len(c) + 1 for c in cuts]))
-        out = tmp_path / f"tiles{gpus}_{cuts[0]}_{cuts[1]}"
-        got = _final(_run(fixture, "RefinedBalancedAtmosphere", out, gpus, f", decompose={cuts!r}"), out, f"refined host tiles cut on a patch face at {cuts}")
-        _assert_same_state(got, want, f"refined host tiles cut on a patch face at {cuts}")
-        layout = _layout(tmp_path / f"launch_{cuts[0]}_{cuts[1]}.toml", workers=gpus, cuts=cuts)
-        got = _script_launch(str(_launch_script(fixture, "RefinedBalancedAtmosphere")), (24, 32), tmp_path / f"launched_{cuts[0]}_{cuts[1]}", layout, STEPS, workers=gpus, env=_launch_env(fixture))
-        _assert_same_state(got, want, f"refined launch on {gpus} workers cut on a patch face at {cuts}")
+        gpus = _tiles(cuts)
+        got = _final(fixture, "RefinedBalancedAtmosphere", tmp_path / f"tiles{gpus}_{cuts[0]}_{cuts[1]}", gpus, f", decompose={cuts!r}")
+        ph.same_checkpoint(got, want, f"refined host tiles cut on a patch face at {cuts}")
+        got = _launch(fixture, "RefinedBalancedAtmosphere", tmp_path / f"launched_{cuts[0]}_{cuts[1]}", cuts=cuts).final
+        ph.same_checkpoint(got, want, f"refined launch on {gpus} workers cut on a patch face at {cuts}")
 
 
-def test_the_balanced_reconstruction_on_nested_refined_tiles_matches_the_single_grid(tmp_path: Path, fixture: Path, monkeypatch) -> None:
+def test_the_balanced_reconstruction_on_nested_refined_tiles_matches_the_single_grid(tmp_path: Path, fixture: Path) -> None:
     # level 1 spans root cells 6..18 x 8..24 and level 2 root cells 9..15 x 12..20; each level's
     # bands keep cuts 4 parent cells clear of its faces, so the root cuts x = 12 and y = 16 cross
     # both boxes with every band on one tile
-    want = _final(_run(fixture, "NestedBalancedAtmosphere", tmp_path / "single"), tmp_path / "single", "the nested single grid")
-    plain = _final(_run(fixture, "NestedBalancedAtmosphere", tmp_path / "plain", extra=", wb_reconstruction=False"), tmp_path / "plain", "the plain nested run")
+    want = _final(fixture, "NestedBalancedAtmosphere", tmp_path / "single")
+    plain = _final(fixture, "NestedBalancedAtmosphere", tmp_path / "plain", extra=", wb_reconstruction=False")
     with h5py.File(want, "r") as a, h5py.File(plain, "r") as b:
         assert not np.array_equal(a["level_2/conserved/den"][()], b["level_2/conserved/den"][()]), "the balance left level 2 unchanged; the gate is vacuous"
     # root cut x = 10 falls on level-1 cell 20, inside level 2's band 18..22
     for cuts in [[[12], []], [[12], [16]], [[10], []]]:
-        gpus = int(np.prod([len(c) + 1 for c in cuts]))
-        out = tmp_path / f"tiles{gpus}_{cuts[0]}_{cuts[1]}"
-        got = _final(_run(fixture, "NestedBalancedAtmosphere", out, gpus, f", decompose={cuts!r}"), out, f"nested host tiles cut at {cuts}")
-        _assert_same_state(got, want, f"nested host tiles cut at {cuts}")
-    monkeypatch.delenv("SIMBI_LAUNCH_EXPERIMENTAL", raising=False)
+        gpus = _tiles(cuts)
+        got = _final(fixture, "NestedBalancedAtmosphere", tmp_path / f"tiles{gpus}_{cuts[0]}_{cuts[1]}", gpus, f", decompose={cuts!r}")
+        ph.same_checkpoint(got, want, f"nested host tiles cut at {cuts}")
     for cuts in [[[12], [16]], [[10], []]]:
-        workers = int(np.prod([len(c) + 1 for c in cuts]))
-        layout = _layout(tmp_path / f"launch_{cuts[0]}_{cuts[1]}.toml", workers=workers, cuts=cuts)
-        got = _script_launch(str(_launch_script(fixture, "NestedBalancedAtmosphere")), (24, 32), tmp_path / f"launched_{cuts[0]}_{cuts[1]}", layout, STEPS, workers=workers, env=_launch_env(fixture))
-        _assert_same_state(got, want, f"nested launch on {workers} workers cut at {cuts}")
-
-
-REJECTIONS = re.compile(r"SIMBI launch: worker=\d+/\d+ steps=\d+ rejections=(\d+)")
-
-
-def _launch_to(fixture: Path, cls: str, out: Path, layout: Path, workers: int, steps: int, inject: str | None) -> tuple[Path, set[int]]:
-    """the launch's final checkpoint and every worker's rejection count"""
-    cmd = [sys.executable, "-m", "simbi.cli", "launch", str(_launch_script(fixture, cls)), "--layout", str(layout), "--max-steps", str(steps),
-           "--resolution", "24,32", "--data-directory", str(out), "--checkpoint-interval", "1e9"]
-    env = dict(os.environ, **_launch_env(fixture))
-    env.pop("SIMBI_LAUNCH_EXPERIMENTAL", None)
-    if inject is not None:
-        env["SIMBI_FABRIC_INJECT"] = inject
-    done = subprocess.run(cmd, capture_output=True, text=True, timeout=600, env=env)
-    assert done.returncode == 0, f"launch failed:\n{done.stderr[-3000:]}"
-    (final,) = sorted(out.glob("*final*.h5"))
-    return final, {int(r) for r in REJECTIONS.findall(done.stderr)}
+        got = _launch(fixture, "NestedBalancedAtmosphere", tmp_path / f"launched_{cuts[0]}_{cuts[1]}", cuts=cuts).final
+        ph.same_checkpoint(got, want, f"nested launch on {_tiles(cuts)} workers cut at {cuts}")
 
 
 def test_a_rejection_after_a_band_exchange_replays_the_band_on_launch(tmp_path: Path, fixture: Path) -> None:
@@ -412,21 +409,22 @@ def test_a_rejection_after_a_band_exchange_replays_the_band_on_launch(tmp_path: 
     step = 2
     published = {}
     for cuts in ([[10], []], [[12], []]):
-        layout = _layout(tmp_path / f"two_{cuts[0][0]}.toml", workers=2, cuts=cuts)
-        final, counts = _launch_to(fixture, "NestedBalancedAtmosphere", tmp_path / f"rejecting_{cuts[0][0]}", layout, 2, step + 1, f"reject_level:1:{step}:1:1:1")
+        run = _launch(fixture, "NestedBalancedAtmosphere", tmp_path / f"rejecting_{cuts[0][0]}", cuts=cuts, steps=step + 1,
+                      inject=f"reject_level:1:{step}:1:1:1")
+        counts = _rejections(run)
         assert counts == {1}, f"cut at {cuts}: the rejection was not counted once on every worker: {counts}"
-        published[cuts[0][0]] = final
-    layout = _layout(tmp_path / "control.toml", workers=2, cuts=[[10], []])
-    clean, _ = _launch_to(fixture, "NestedBalancedAtmosphere", tmp_path / "clean", layout, 2, step + 1, None)
+        published[cuts[0][0]] = run.final
+    clean = _launch(fixture, "NestedBalancedAtmosphere", tmp_path / "clean", cuts=[[10], []], steps=step + 1).final
     with h5py.File(published[10], "r") as fr, h5py.File(clean, "r") as fc:
         accepted = float(fr["level_0"].attrs["dt"])
         assert accepted < float(fc["level_0"].attrs["dt"]), "the rejection left the timestep unreduced; the replay is never exercised"
-    _assert_same_state(published[10], published[12], "the rejecting runs cut inside and clear of level 2's band")
+    ph.same_checkpoint(published[10], published[12], "the rejecting runs cut inside and clear of level 2's band")
     # the clean control: the run whose timestep at the rejected step is capped to the one the
     # replay accepted, the replay entering from the rejected attempt's entry state
-    capped, capped_counts = _launch_to(fixture, "NestedBalancedAtmosphere", tmp_path / "capped", layout, 2, step + 1, f"cap:{step}:{int(np.float64(accepted).view(np.uint64))}")
-    assert capped_counts == {0}, "the capped control rejected a step"
-    _assert_same_state(published[10], capped, "the run replaying a step after its band exchange against the capped clean run")
+    capped = _launch(fixture, "NestedBalancedAtmosphere", tmp_path / "capped", cuts=[[10], []], steps=step + 1,
+                     inject=f"cap:{step}:{int(np.float64(accepted).view(np.uint64))}")
+    assert _rejections(capped) == {0}, "the capped control rejected a step"
+    ph.same_checkpoint(published[10], capped.final, "the run replaying a step after its band exchange against the capped clean run")
 
 
 @pytest.mark.parametrize("cut", [12, 6], ids=["clear", "on-face"])
@@ -436,27 +434,18 @@ def test_a_rejected_balanced_refined_step_replays_to_the_capped_clean_run_on_lau
     # replay enters from the rejected attempt's entry, that pressure included. a cut at x = 6 lies
     # on the patch's low x face: the replay refluxes, recovers and carries the band's start again
     step = 2
-    layout = _layout(tmp_path / "two.toml", workers=2, cuts=[[cut], []])
-    rejecting, counts = _launch_to(fixture, "RefinedBalancedAtmosphere", tmp_path / "rejecting", layout, 2, step + 1, f"reject_level:1:{step}:1:1:1")
+    cuts = [[cut], []]
+    rejecting = _launch(fixture, "RefinedBalancedAtmosphere", tmp_path / "rejecting", cuts=cuts, steps=step + 1, inject=f"reject_level:1:{step}:1:1:1")
+    counts = _rejections(rejecting)
     assert counts == {1}, f"the rejection was not counted once on every worker: {counts}"
-    clean, _ = _launch_to(fixture, "RefinedBalancedAtmosphere", tmp_path / "clean", layout, 2, step + 1, None)
-    with h5py.File(rejecting, "r") as fr, h5py.File(clean, "r") as fc:
+    clean = _launch(fixture, "RefinedBalancedAtmosphere", tmp_path / "clean", cuts=cuts, steps=step + 1).final
+    with h5py.File(rejecting.final, "r") as fr, h5py.File(clean, "r") as fc:
         accepted = float(fr["level_0"].attrs["dt"])
         assert accepted < float(fc["level_0"].attrs["dt"]), "the rejection left the timestep unreduced; the replay is never exercised"
-    capped, capped_counts = _launch_to(fixture, "RefinedBalancedAtmosphere", tmp_path / "capped", layout, 2, step + 1, f"cap:{step}:{int(np.float64(accepted).view(np.uint64))}")
-    assert capped_counts == {0}, "the capped control rejected a step"
-    _assert_same_state(rejecting, capped, "the balanced refined run replaying a rejected step against the capped clean run")
-
-
-def _launch_resumable(fixture: Path, cls: str, out: Path, layout: Path, steps: int, resume: Path | None = None) -> Path:
-    cmd = [sys.executable, "-m", "simbi.cli", "launch", str(_launch_script(fixture, cls)), "--layout", str(layout), "--max-steps", str(steps),
-           "--resolution", "24,32", "--data-directory", str(out), "--checkpoint-interval", "1e9"] + (["--checkpoint", str(resume)] if resume else [])
-    env = dict(os.environ, **_launch_env(fixture))
-    env.pop("SIMBI_LAUNCH_EXPERIMENTAL", None)
-    done = subprocess.run(cmd, capture_output=True, text=True, timeout=600, env=env)
-    assert done.returncode == 0, f"launch failed:\n{done.stderr[-3000:]}"
-    (final,) = sorted(out.glob("*final*.h5"))
-    return final
+    capped = _launch(fixture, "RefinedBalancedAtmosphere", tmp_path / "capped", cuts=cuts, steps=step + 1,
+                     inject=f"cap:{step}:{int(np.float64(accepted).view(np.uint64))}")
+    assert _rejections(capped) == {0}, "the capped control rejected a step"
+    ph.same_checkpoint(rejecting.final, capped.final, "the balanced refined run replaying a rejected step against the capped clean run")
 
 
 @pytest.mark.parametrize("cls", ["RefinedBalancedAtmosphere", "NestedBalancedAtmosphere"])
@@ -464,34 +453,20 @@ def test_a_resumed_balanced_refined_run_continues_the_uninterrupted_one(tmp_path
     # the band rewrite leaves each band's stored pressure off the recovery of its conserved state:
     # the checkpoint stores that pressure, and a resumed run continues from it on every driver.
     # the body history covers the resumed segment alone and stays out of the comparison
-    from simbi.simulation.tests.checkpoint_compare import assert_same_checkpoint
-
     total, half = 4, 2
     for label, gpus, extra in (("single grid", 1, ""), ("host tiles", 2, ", decompose=[[12], []]")):
-        whole = _run_steps(fixture, cls, tmp_path / f"w{gpus}", gpus, extra, total, None)
-        first = _run_steps(fixture, cls, tmp_path / f"h{gpus}", gpus, extra, half, None)
-        resumed = _run_steps(fixture, cls, tmp_path / f"r{gpus}", gpus, extra, total, first)
-        assert_same_checkpoint(resumed, whole, f"{cls} resumed on the {label}", exclude=("body_diagnostics",))
-    layout = _layout(tmp_path / "launch.toml", workers=2, cuts=[[12], []])
-    whole = _launch_resumable(fixture, cls, tmp_path / "lw", layout, total)
-    first = _launch_resumable(fixture, cls, tmp_path / "lh", layout, half)
-    resumed = _launch_resumable(fixture, cls, tmp_path / "lr", layout, total, first)
-    assert_same_checkpoint(resumed, whole, f"{cls} resumed on two launched workers", exclude=("body_diagnostics",))
+        whole = _final(fixture, cls, tmp_path / f"w{gpus}", gpus, extra, total)
+        first = _final(fixture, cls, tmp_path / f"h{gpus}", gpus, extra, half)
+        resumed = _final(fixture, cls, tmp_path / f"r{gpus}", gpus, extra, total, first)
+        ph.same_checkpoint(resumed, whole, f"{cls} resumed on the {label}", exclude=("body_diagnostics",))
+    cuts = [[12], []]
+    whole = _launch(fixture, cls, tmp_path / "lw", cuts=cuts, steps=total).final
+    first = _launch(fixture, cls, tmp_path / "lh", cuts=cuts, steps=half).final
+    resumed = _launch(fixture, cls, tmp_path / "lr", cuts=cuts, steps=total, checkpoint=first).final
+    ph.same_checkpoint(resumed, whole, f"{cls} resumed on two launched workers", exclude=("body_diagnostics",))
 
 
-def _run_steps(fixture: Path, cls: str, out: Path, gpus: int, extra: str, steps: int, resume: Path | None) -> Path:
-    resume_arg = f", checkpoint_file={str(resume)!r}" if resume else ""
-    snippet = (
-        "import sys\n"
-        f"sys.path.insert(0, {str(fixture.parent)!r})\n"
-        "from simbi.simulation import runner\n"
-        f"from balanced_atmosphere import {cls}\n"
-        f"runner.run({cls}(gpus={gpus}, data_directory=sys.argv[1], checkpoint_interval=1e9{extra}{resume_arg}), compute_mode='cpu', max_steps={steps})\n"
-    )
-    done = subprocess.run([sys.executable, "-c", snippet, str(out)], capture_output=True, text=True, timeout=900, env=dict(os.environ, SYMBI_GPU_OVERSUBSCRIBE="1"))
-    return _final(done, out, f"{cls} for {steps} steps")
-
-
+@ph.local_only
 @pytest.mark.parametrize(
     ("cls", "decompose", "reason"),
     [
@@ -501,21 +476,16 @@ def _run_steps(fixture: Path, cls: str, out: Path, gpus: int, extra: str, steps:
     ],
 )
 def test_the_balanced_reconstruction_outside_the_gated_scope_is_refused_on_host_tiles(tmp_path: Path, fixture: Path, cls: str, decompose, reason: str) -> None:
-    gpus = 2 if decompose is None else int(np.prod([len(c) + 1 for c in decompose]))
-    done = _run(fixture, cls, tmp_path / "out", gpus, "" if decompose is None else f", decompose={decompose!r}")
+    gpus = 2 if decompose is None else _tiles(decompose)
+    done = _run(fixture, cls, tmp_path / "out", gpus, "" if decompose is None else f", decompose={decompose!r}", check=False)
     assert done.returncode != 0, f"{cls} ran on host tiles"
     assert reason in " ".join(done.stderr.split()), done.stderr[-1500:]
     assert not list((tmp_path / "out").glob("*.h5")), "output was written before the refusal"
 
 
 def test_an_ungated_balanced_chart_is_refused_on_launch(tmp_path: Path, fixture: Path) -> None:
-    env = dict(os.environ, **_launch_env(fixture))
-    env.pop("SIMBI_LAUNCH_EXPERIMENTAL", None)
-    layout = _layout(tmp_path / "two.toml", workers=2, shape=(2, 1))
     out = tmp_path / "out"
-    cmd = [sys.executable, "-m", "simbi.cli", "launch", str(_launch_script(fixture, "CylindricalPlaneAtmosphere")), "--layout", str(layout),
-           "--max-steps", "1", "--data-directory", str(out), "--checkpoint-interval", "1e9"]
-    done = subprocess.run(cmd, capture_output=True, text=True, timeout=600, env=env)
+    done = _launch(fixture, "CylindricalPlaneAtmosphere", out, shape=(2, 1), steps=1, resolution=None, expect_ok=False)
     assert done.returncode != 0, f"the launch succeeded:\n{done.stdout}"
     assert "wb_reconstruction on the 2-dimensional (r, z) cylindrical grid with several tiles is outside the gated tiled runs" in " ".join(done.stderr.split()), done.stderr
     assert not (out.exists() and list(out.glob("*.h5"))), "a checkpoint was published"

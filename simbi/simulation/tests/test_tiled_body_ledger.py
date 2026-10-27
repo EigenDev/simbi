@@ -1,33 +1,32 @@
 # =============================================================================
 # test_tiled_body_ledger.py
 #
-# the body ledger of an accreting sink on host tiles. the spherical bondi sink,
-# on a flat grid and under one refined box, on one device and on two tiles
-# cutting through the sink:
-# - the per-step body history (time, dt, accreted mass and energy, force,
-#   normal force, torque) publishes on the tiles as on the single grid;
-# - the body diagnostics file carries the same rows, to its printed precision;
-# - the bodies group (mass, accretion, kinematics) agrees.
-# the clock columns agree bit for bit. a tile books its own cells' partial of
-# each sink reduction and the tiles sum the partials, so the summed columns
-# agree within the reassociation bound of a sum over the grid's n cells split
-# in two: n u of the sum of the terms' magnitudes, u = 2^-53. the accreted mass
-# and energy are sums of terms of one sign, so that sum is the column itself.
-# the force and torque on a sink at the center of a spherical inflow cancel to
-# roundoff; their terms are bounded by the unsummed pull of the gas,
-# G M sum rho dV / (r^2 + eps^2), and that pull times the largest lever arm.
+# the body ledger of an accreting sink on host tiles, on the session's backend
+# (parity_harness). the spherical bondi sink, on a flat grid and under one
+# refined box, on one device and on two tiles cutting through the sink. each
+# tile books its own cells' partial of every sink reduction exactly, and the
+# partials merge and round once, so on the cpu the tiles publish the single
+# grid's run bit for bit:
+# - every grid field of every level;
+# - the bodies group (mass, accretion, kinematics) and the per-step body
+#   history (time, dt, accreted mass and energy, force, normal force, torque);
+# - the body diagnostics file, character for character.
+# a gpu device rounds its feedback sum once per tile, so its single-device
+# comparison carries that rounding.
 #
 # run: pytest -m simulation simbi/simulation/tests/test_tiled_body_ledger.py
+#      (SIMBI_PARITY_BACKEND selects the session's backend, parity_harness.py)
 # =============================================================================
 
 import os
-import subprocess
-import sys
 from pathlib import Path
 
 import h5py
 import numpy as np
 import pytest
+
+from simbi.simulation.tests import parity_harness as ph
+from simbi.simulation.tests.test_launch_bodies import _assert_same, _assert_same_diagnostics
 
 pytestmark = pytest.mark.simulation
 
@@ -48,11 +47,11 @@ def _run(out: Path, gpus: int, refined: bool) -> Path:
         "    p.refinement_max_levels = 2\n"
         "    p.refinement_regions = p.refinement_regions[:1]\n"
         "    p.refinement_ratios = p.refinement_ratios[:1]\n"
-        f"runner.run(p, compute_mode='cpu', max_steps={STEPS})\n"
+        f"runner.run(p, compute_mode=sys.argv[2], max_steps={STEPS})\n"
     )
+    # host tiles beyond the visible devices share them
     env = dict(os.environ, SYMBI_GPU_OVERSUBSCRIBE="1")
-    done = subprocess.run([sys.executable, "-c", snippet, str(out)], capture_output=True, text=True, timeout=900, env=env)
-    assert done.returncode == 0, f"bondi on {gpus} device(s) failed:\n{done.stderr[-3000:]}"
+    ph.python(ph.snippet_args(snippet, str(out), ph.BACKEND), f"bondi on {gpus} device(s)", env=env, devices=gpus)
     files = sorted(out.glob("*final*.h5"))
     assert len(files) == 1, f"expected one final checkpoint in {out}, found {files}"
     return files[0]
@@ -106,33 +105,14 @@ def _diagnostics(out: Path) -> np.ndarray:
 
 @pytest.mark.parametrize("refined", [False, True], ids=["flat", "refined"])
 def test_tiles_publish_the_single_grid_body_ledger(tmp_path: Path, refined: bool) -> None:
-    want, cells = _groups(_run(tmp_path / "single", 1, refined))
-    got, _ = _groups(_run(tmp_path / "tiles", 2, refined))
-    assert "body_diagnostics/energy_delta" in want, f"the single grid published no body history: {sorted(want)}"
-    assert np.abs(want["body_diagnostics/energy_delta"]).max() > 0.0, "the sink accreted no energy; the ledger is vacuous"
-    assert got.keys() == want.keys(), f"datasets {sorted(set(got) ^ set(want))} differ"
-    for name in ("body_diagnostics/time", "body_diagnostics/dt"):
-        np.testing.assert_array_equal(got[name], want[name], err_msg=name)
-    bound = cells * U
-    pull, arm = _pull(next((tmp_path / "single").glob("*final*.h5")))
-    for name, x in want.items():
-        if "force" in name:
-            scale = pull
-        elif "torque" in name:
-            scale = pull * arm
-        else:
-            scale = np.abs(x).max()
-        worst = np.abs(got[name] - x).max()
-        assert worst <= bound * scale, f"{name}: tiles differ by {worst:.3e} against {bound:.1e} of {scale:.3e}"
-    rows, single_rows = _diagnostics(tmp_path / "tiles"), _diagnostics(tmp_path / "single")
-    assert len(single_rows) > 1, "the run wrote one diagnostics row; the cadence is never exercised"
-    assert rows.shape == single_rows.shape, f"diagnostics rows {rows.shape} against {single_rows.shape}"
-    np.testing.assert_array_equal(rows[:, 0], single_rows[:, 0], err_msg="diagnostics times")
-    # the file prints nine significant digits (%.8e), so each printed value carries its own
-    # rounding of 1e-8 relative on top of the reassociation bound; the force (fx, fy, fz) and
-    # torque columns take the bound on their unsummed scales, as in the history
-    unsummed = np.zeros(rows.shape[1])
-    unsummed[8:11], unsummed[11:14] = pull, pull * arm
-    tolerance = 1e-8 * np.maximum(np.abs(rows), np.abs(single_rows)) + bound * unsummed
-    worst = np.abs(rows - single_rows) - tolerance
-    assert np.all(worst <= 0.0), f"diagnostics rows differ beyond the printed precision: column {int(np.argmax(worst.max(axis=0)))}"
+    want = _run(tmp_path / "single", 1, refined)
+    got = _run(tmp_path / "tiles", 2, refined)
+    history, _ = _groups(want)
+    assert "body_diagnostics/energy_delta" in history, f"the single grid published no body history: {sorted(history)}"
+    assert np.abs(history["body_diagnostics/energy_delta"]).max() > 0.0, "the sink accreted no energy; the ledger is vacuous"
+    assert len(_diagnostics(tmp_path / "single")) > 1, "the run wrote one diagnostics row; the cadence is never exercised"
+    if refined:
+        with h5py.File(want, "r") as f:
+            assert "level_1" in f, "the single grid published no refined level"
+    ph.disagreement(_assert_same, got, want, "two host tiles against the single grid")
+    ph.disagreement(_assert_same_diagnostics, tmp_path / "tiles", tmp_path / "single", "two host tiles against the single grid")

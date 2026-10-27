@@ -10,20 +10,22 @@
 # and every decomposition probes at the single grid's own timestep. the target
 # changes the run: the same atmosphere without it lands elsewhere.
 #
+# every arm runs as a fresh process on the session's backend and placement
+# (parity_harness), the tiled ones as host tiles.
+#
 # run: pytest -m simulation simbi/simulation/tests/test_tiled_equilibrium_2d.py
+#      (SIMBI_PARITY_BACKEND / SIMBI_PARITY_PLACEMENT select the session, parity_harness.py)
 # =============================================================================
 
 import os
 import re
-import subprocess
-import sys
 from pathlib import Path
 
 import numpy as np
 import pytest
 
-from simbi.simulation.tests.test_launch import _assert_same_state, _layout, bounded_processes  # noqa: F401  the autouse process guard
-from simbi.simulation.tests.test_launch_isothermal import _script_launch
+from simbi.simulation.tests import parity_harness as ph
+from simbi.simulation.tests.test_launch import _assert_same_state, bounded_processes  # noqa: F401  the autouse process guard
 
 pytestmark = pytest.mark.simulation
 
@@ -109,26 +111,32 @@ def fixture(tmp_path: Path) -> Path:
 
 
 def _single(fixture: Path, cls: str, out: Path, gpus: int = 1, extra: str = "") -> tuple[Path, str]:
+    """`cls` on the session's backend, one device or `gpus` host tiles, in a fresh interpreter: its
+    final checkpoint and output"""
     snippet = (
         "import sys\n"
         f"sys.path.insert(0, {str(fixture.parent)!r})\n"
         "from simbi.simulation import runner\n"
         f"from atmosphere_2d import {cls}\n"
-        f"runner.run({cls}(gpus={gpus}, data_directory=sys.argv[1], checkpoint_interval=1e9{extra}), compute_mode='cpu', max_steps={STEPS})\n"
+        f"runner.run({cls}(gpus={gpus}, data_directory=sys.argv[1], checkpoint_interval=1e9{extra}), compute_mode={ph.BACKEND!r}, max_steps={STEPS})\n"
     )
-    done = subprocess.run([sys.executable, "-c", snippet, str(out)], capture_output=True, text=True, timeout=900, env=dict(os.environ, SYMBI_GPU_OVERSUBSCRIBE="1"))
-    assert done.returncode == 0, f"{cls} on {gpus} device(s) failed:\n{done.stderr[-3000:]}"
+    done = ph.python(ph.snippet_args(snippet, str(out)), f"{cls} on {gpus} device(s){extra}", devices=gpus)
     files = sorted(out.glob("*final*.h5"))
     assert len(files) == 1, f"expected one final checkpoint in {out}, found {files}"
     return files[0], done.stdout + done.stderr
 
 
-def _launch(fixture: Path, cls: str, resolution: tuple, out: Path, layout: Path, workers: int) -> Path:
+def _launch(fixture: Path, cls: str, resolution: tuple, out: Path, cuts: list[list[int]]) -> Path:
+    """`simbi launch` of `cls` on the session's backend and placement without the experimental
+    opt-in: its final checkpoint"""
     # the launch evolves the one problem its script defines
     script = fixture.parent / f"launched_{cls.lower()}.py"
     script.write_text(f"from atmosphere_2d import {cls} as Base\n\n\nclass Launched{cls}(Base):\n    pass\n")
-    env = {"PYTHONPATH": os.pathsep.join([str(fixture.parent), os.getcwd(), os.environ.get("PYTHONPATH", "")])}
-    return _script_launch(str(script), resolution, out, layout, STEPS, workers=workers, env=env)
+    env = ph.environment()
+    env["PYTHONPATH"] = os.pathsep.join([str(fixture.parent), os.getcwd(), os.environ.get("PYTHONPATH", "")])
+    args = ["--max-steps", str(STEPS), "--resolution", ",".join(str(r) for r in resolution), "--checkpoint-interval", "1e9"]
+    workers = int(np.prod([len(c) + 1 for c in cuts]))
+    return ph.launch(script, out, workers, cuts=cuts, args=args, env=env, timeout=600).final
 
 
 def _probe_dt(output: str, label: str) -> set[str]:
@@ -153,10 +161,16 @@ def test_a_two_dimensional_target_holds_on_every_decomposition(tmp_path: Path, f
     for label, gpus, extra in [("two host tiles across the stratification", 2, ", decompose=[[], [13]]"), ("four host tiles", 4, ", decompose=[[11], [17]]")]:
         got, out = _single(fixture, "Atmosphere2d", tmp_path / f"tiles{gpus}", gpus=gpus, extra=extra)
         assert _probe_dt(out, label) == probe, f"{label} probed at another timestep"
-        _assert_same_state(got, reference, label)
-    layout = _layout(tmp_path / "four.toml", workers=4, cuts=[[11], [17]])
-    launched = _launch(fixture, "Atmosphere2d", RESOLUTION, tmp_path / "launched", layout, workers=4)
-    _assert_same_state(launched, reference, "a two-by-two launch")
+        ph.same_checkpoint(got, reference, label)
+    launched = _launch(fixture, "Atmosphere2d", RESOLUTION, tmp_path / "launched", cuts=[[11], [17]])
+    ph.same_checkpoint(launched, reference, "a two-by-two launch")
+
+
+def _same_levels(got: dict, want: dict, label: str) -> None:
+    """every cell and face dataset of every level, halos trimmed, bit for bit"""
+    assert got.keys() == want.keys(), f"{label}: datasets {sorted(got.keys() ^ want.keys())} differ"
+    for name, x in want.items():
+        np.testing.assert_array_equal(got[name], x, err_msg=f"{label}: {name}")
 
 
 PROBE_LEVEL = re.compile(r"SIMBI equilibrium probe: level=(\d+) dt_bits=([0-9a-f]+)")
@@ -172,12 +186,6 @@ def test_a_refined_two_dimensional_target_holds_on_every_decomposition(tmp_path:
     assert "level_1/conserved/den" in want, "the single hierarchy published no fine level; the refined arm is vacuous"
     got, out = _single(fixture, "RefinedAtmosphere2d", tmp_path / "tiles", gpus=2, extra=", decompose=[[16], []]")
     assert set(PROBE_LEVEL.findall(out)) == probes, "the refined host tiles probed at other timesteps"
-    tiles = _all_levels(got)
-    assert tiles.keys() == want.keys(), f"datasets {sorted(tiles.keys() ^ want.keys())} differ"
-    for name, x in want.items():
-        np.testing.assert_array_equal(tiles[name], x, err_msg=f"two refined host tiles: {name}")
-    layout = _layout(tmp_path / "two.toml", workers=2, cuts=[[16], []])
-    launched = _all_levels(_launch(fixture, "RefinedAtmosphere2d", (32, 32), tmp_path / "launched", layout, workers=2))
-    assert launched.keys() == want.keys(), f"datasets {sorted(launched.keys() ^ want.keys())} differ"
-    for name, x in want.items():
-        np.testing.assert_array_equal(launched[name], x, err_msg=f"two launched refined workers: {name}")
+    ph.disagreement(_same_levels, _all_levels(got), want, "two refined host tiles")
+    launched = _launch(fixture, "RefinedAtmosphere2d", (32, 32), tmp_path / "launched", cuts=[[16], []])
+    ph.disagreement(_same_levels, _all_levels(launched), want, "two launched refined workers")
