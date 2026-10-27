@@ -5,7 +5,9 @@
 # process group (`process_guard.run_reaped`): a timeout kills and reaps the
 # command's descendants, a launcher's workers included, and a descendant
 # outliving a finished command fails the call. a launch whose worker never
-# exits therefore ends its test with no process left behind.
+# exits therefore ends its test with no process left behind. SIGTERM and
+# SIGINT raise KeyboardInterrupt in the running test, so a batch ended at its
+# bound unwinds through the same reaping.
 #
 # with SIMBI_PARITY_RESULTS set (a parity batch), the session records one json
 # line per test: its outcome, the category of a failure (parity_harness), the
@@ -19,6 +21,7 @@
 # =============================================================================
 import json
 import os
+import signal
 import subprocess
 import time
 from pathlib import Path
@@ -29,6 +32,18 @@ from simbi.simulation.tests import parity_harness as ph
 from simbi.simulation.tests.process_guard import run_reaped
 
 RESULTS = os.environ.get("SIMBI_PARITY_RESULTS")
+
+
+def _interrupted(signum, _frame):
+    raise KeyboardInterrupt(f"signal {signum}")
+
+
+# a bounded batch ends its session with SIGTERM (`timeout`, or srun forwarding it): raised as
+# KeyboardInterrupt inside the running test, it unwinds through `run_reaped`, which kills and reaps
+# the command's process group, a launch's workers included. a session started as a background job
+# inherits SIGINT ignored; the default handler is restored so an interrupt unwinds the same way
+signal.signal(signal.SIGTERM, _interrupted)
+signal.signal(signal.SIGINT, signal.default_int_handler)
 MIN_FREE_GB = float(os.environ.get("SIMBI_PARITY_MIN_FREE_GB", "20"))
 _identity: dict[str, str] = {}
 

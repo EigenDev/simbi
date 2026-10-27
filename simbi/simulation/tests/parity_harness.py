@@ -342,18 +342,25 @@ def _emulated_scheduler(cmd: list[str], workers: int, environ: dict[str, str], t
         env.pop("SLURM_STEP_ID", None)
         procs.append(subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, env=env, start_new_session=True))
     outs: list[tuple[str, str]] = []
-    try:
-        for p in procs:
-            remaining = max(1.0, timeout - (time.monotonic() - start))
-            outs.append(p.communicate(timeout=remaining))
-    except subprocess.TimeoutExpired as e:
+
+    def reap() -> None:
         for p in procs:
             try:
                 os.killpg(p.pid, signal.SIGKILL)
             except ProcessLookupError:
                 pass
             p.wait()
+
+    try:
+        for p in procs:
+            remaining = max(1.0, timeout - (time.monotonic() - start))
+            outs.append(p.communicate(timeout=remaining))
+    except subprocess.TimeoutExpired as e:
+        reap()
         raise Timeout(f"{label}: scheduler-started workers did not exit within {timeout} s") from e
+    except BaseException:
+        reap()
+        raise
     exits = {rank: p.returncode for rank, p in enumerate(procs)}
     stdout = "".join(o for o, _ in outs)
     stderr = "".join(e for _, e in outs)

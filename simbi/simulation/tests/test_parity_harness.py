@@ -57,3 +57,35 @@ def test_failures_classify_by_their_text() -> None:
     }
     for text, kind in cases.items():
         assert ph.classify(text) is kind, f"{text!r}: {ph.classify(text).__name__}, expected {kind.__name__}"
+
+
+INTERRUPTED = """
+import os, signal, subprocess, sys, threading
+from simbi.simulation.tests import conftest  # noqa: F401  installs the session's signal handlers
+from simbi.simulation.tests.process_guard import run_reaped
+threading.Timer(2.0, lambda: os.kill(os.getpid(), getattr(signal, sys.argv[1]))).start()
+try:
+    run_reaped([sys.executable, "-c", "import subprocess, time; subprocess.Popen(['sleep', sys.argv[2]]); time.sleep(300)".replace("sys.argv[2]", repr(sys.argv[2]))],
+               capture_output=True, timeout=600)
+except KeyboardInterrupt:
+    print("interrupted")
+"""
+
+
+def _alive(marker: str) -> int:
+    done = subprocess.run(["pgrep", "-f", f"sleep {marker}"], capture_output=True, text=True)
+    return len(done.stdout.split())
+
+
+def test_a_signalled_session_reaps_the_running_commands_process_group() -> None:
+    """SIGTERM (a batch's bound) and SIGINT (also from a session started with SIGINT ignored, as a
+    background job is) raise KeyboardInterrupt in the waiting test, and the command's process
+    group, a grandchild included, is killed and reaped before the interrupt propagates"""
+    import signal
+
+    for number, name in ((331, "SIGTERM"), (337, "SIGINT")):
+        marker = str(number)
+        done = subprocess.run([sys.executable, "-c", INTERRUPTED, name, marker], capture_output=True, text=True, timeout=120,
+                              preexec_fn=lambda: signal.signal(signal.SIGINT, signal.SIG_IGN))
+        assert "interrupted" in done.stdout, f"{name}: {done.stdout!r} {done.stderr[-1500:]!r}"
+        assert _alive(marker) == 0, f"{name}: the command's grandchild outlived the interrupt"
