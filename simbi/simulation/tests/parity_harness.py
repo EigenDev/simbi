@@ -108,12 +108,15 @@ class NumericalDisagreement(AssertionError):
 
 
 # the text a command prints for each category, checked in order; a refusal names its combination
+_DEVICE_SCOPE = re.compile(r"(tracer population|horizon body|magnetic-slip body) on device memory")
 _INFRASTRUCTURE = re.compile(r"bound one physical gpu|gpu workers but \S+ makes \d+ devices visible|the gpu extension")
 _CLASSIFIERS = [
     (ResourceExhaustion, ("No space left on device", "Disk quota exceeded", "out of memory", "OutOfMemory", "hipErrorOutOfMemory",
                           "CUDA_ERROR_OUT_OF_MEMORY", "Cannot allocate memory")),
     (AdmissionRefusal, ("outside the distributed first release", "without a distributed gate", "run on one device or")),
-    (MissingImplementation, ("not implemented", "no device path", "unimplemented", "does not support")),
+    (MissingImplementation, ("not implemented", "no device path", "unimplemented", "does not support",
+                             "device path is outside the gated scope", "runs on host-dereferenceable storage",
+                             "device storage reduces on the device")),
 ]
 
 
@@ -122,6 +125,9 @@ def classify(text: str) -> type[ParityFailure]:
     flat = " ".join(text.split())
     if _INFRASTRUCTURE.search(flat):
         return InfrastructureFailure
+    # the device-scope refusals name a population or body whose device path does not exist yet
+    if _DEVICE_SCOPE.search(flat):
+        return MissingImplementation
     for kind, needles in _CLASSIFIERS:
         if any(n in flat for n in needles):
             return kind
