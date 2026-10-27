@@ -54,6 +54,8 @@ EXIT = re.compile(r"launch: worker (\d+) exit (-?\d+)")
 REPORT = re.compile(r"SIMBI launch: worker=(\d+)/\d+ steps=(\d+) rejections=(\d+)")
 REMOTE = re.compile(r"SIMBI launch refined plans: worker=(\d+)/\d+ remote_sends=(\S+)")
 BOUND = re.compile(r"SIMBI launch: worker=(\d+) host=(\S*) pci=(\S+) device=")
+# every launched worker announces the host it started on, on either backend
+STARTUP = re.compile(r"SIMBI launch startup: worker=(\d+)/\d+ host=(\S+)")
 EXPERIMENTAL = "experimental combination"
 
 
@@ -124,12 +126,18 @@ def classify(text: str) -> type[ParityFailure]:
 # command execution with durable logs
 # ------------------------------------------------------------------------------------------------
 _calls: dict[str, int] = {}
+# the workers' hosts of every launch the current test ran, by test id: one set per launch
+observed_launch_hosts: dict[str, list[list[str]]] = {}
+
+
+def _current_test() -> str:
+    return os.environ.get("PYTEST_CURRENT_TEST", "session (call)").rsplit(" ", 1)[0]
 
 
 def _log_dir() -> Path | None:
     if not LOGS:
         return None
-    test = os.environ.get("PYTEST_CURRENT_TEST", "session").split(" ")[0]
+    test = os.environ.get("PYTEST_CURRENT_TEST", "session (call)").rsplit(" ", 1)[0]
     path = Path(LOGS) / re.sub(r"[^A-Za-z0-9_.-]+", "_", test)
     path.mkdir(parents=True, exist_ok=True)
     return path
@@ -238,6 +246,10 @@ class Launch:
     def bindings(self) -> dict[int, tuple[str, str]]:
         return {int(w): (h, p) for w, h, p in BOUND.findall(self.stderr)}
 
+    def hosts(self) -> dict[int, str]:
+        """the host each worker announced at startup"""
+        return {int(w): h for w, h in STARTUP.findall(self.stderr)}
+
     @property
     def experimental(self) -> bool:
         return EXPERIMENTAL in self.stderr
@@ -283,6 +295,9 @@ def launch(script: str | Path, out: Path, workers: int, cuts=None, shape=None, a
         done = subprocess.CompletedProcess(full, result.returncode, result.stdout, result.stderr)
     _record(label, full, done, time.monotonic() - start)
     result.files = {p.name: p for p in out.glob("*.h5")} if out.exists() else {}
+    hosts = result.hosts()
+    if hosts:
+        observed_launch_hosts.setdefault(_current_test(), []).append(sorted(set(hosts.values())))
     if expect_ok:
         if result.returncode != 0 or any(c != 0 for c in result.exits.values()):
             raise classify(result.stdout + result.stderr)(f"{label} failed (exit {result.returncode}, workers {result.exits}):\n{result.stderr[-3000:]}")
@@ -292,8 +307,12 @@ def launch(script: str | Path, out: Path, workers: int, cuts=None, shape=None, a
             bound = result.bindings()
             if sorted(bound) != list(range(workers)) or len(set(bound.values())) != workers:
                 raise InfrastructureFailure(f"{label}: device bindings {bound} for {workers} workers")
-            if PLACEMENT == "scheduler" and SRUN and len({h for h, _ in bound.values()}) != min(NODES, workers):
-                raise InfrastructureFailure(f"{label}: workers on hosts {sorted({h for h, _ in bound.values()})}, expected {min(NODES, workers)}")
+        # srun spreads the workers over the allocation's nodes: the hosts they started on must span
+        # as many nodes as there are workers to place, the evidence a cross-node result rests on
+        if PLACEMENT == "scheduler" and SRUN:
+            hosts = result.hosts()
+            if sorted(hosts) != list(range(workers)) or len(set(hosts.values())) != min(NODES, workers):
+                raise InfrastructureFailure(f"{label}: workers started on hosts {hosts}, expected {min(NODES, workers)} distinct hosts")
     return result
 
 
