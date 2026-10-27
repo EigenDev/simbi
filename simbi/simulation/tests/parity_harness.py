@@ -62,7 +62,8 @@ REMOTE = re.compile(r"SIMBI launch refined plans: worker=(\d+)/\d+ remote_sends=
 BOUND = re.compile(r"SIMBI launch: worker=(\d+) host=(\S*) pci=(\S+) device=")
 # every launched worker announces the host it started on, on either backend
 STARTUP = re.compile(r"SIMBI launch startup: worker=(\d+)/\d+ host=(\S+)")
-EXPERIMENTAL = "experimental combination"
+# the line a launch prints when it runs a combination under the experimental opt-in
+EXPERIMENTAL_ANNOUNCEMENT = "experimental combination"
 
 
 class ParityFailure(Exception):
@@ -264,7 +265,7 @@ class Launch:
 
     @property
     def experimental(self) -> bool:
-        return EXPERIMENTAL in self.stderr
+        return EXPERIMENTAL_ANNOUNCEMENT in self.stderr
 
 
 def launch(script: str | Path, out: Path, workers: int, cuts=None, shape=None, args: list[str] | None = None,
