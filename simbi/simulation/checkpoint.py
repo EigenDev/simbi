@@ -83,7 +83,8 @@ def metadata_to_config_dict(
         "regime": Regime(regime_str),
         "solver": Solver(metadata.solver),
         "reconstruction": Reconstruction(metadata.reconstruction),
-        "timestepping": TimeStepping(metadata.timestepping),
+        # the backend records first-order time stepping as "euler", the name its parser reads as rk1
+        "timestepping": TimeStepping("rk1" if str(metadata.timestepping) == "euler" else str(metadata.timestepping)),
         "cfl_number": float(metadata.cfl),
         "checkpoint_index": int(metadata.checkpoint_index),
     }
