@@ -8,7 +8,7 @@
 # on two devices equals the synge single-grid run and differs from the ideal
 # gas. a refined patch face on the device cut under the production halo
 # equals the single grid bit for bit, uninterrupted and resumed; a face one
-# cell off the cut, and a magnetized, an isothermal and a relativistic face on
+# cell off the cut, and a magnetized and a relativistic face on
 # the cut are refused by name, as are a magnetized level-2 face on the cut of
 # level 1 and one under a level 1 spanning a periodic axis. every arm runs as a
 # fresh process on the session's backend (parity_harness), the decomposed ones
@@ -185,15 +185,13 @@ def test_a_patch_face_near_the_device_cut_is_refused_by_name(tmp_path: Path) -> 
 @ph.local_only
 def test_a_patch_face_on_the_device_cut_prolonging_further_inputs_is_refused_by_name(tmp_path: Path) -> None:
     """the gathered parent stencil carries the newtonian gas primitives and the dye: a magnetized
-    level (cell and face field), an isothermal closure (the sound speed) and a relativistic level
-    keep the root halo requirement, and each is refused by name before any output"""
+    level (cell and face field) and a relativistic level keep the root halo requirement, and each
+    is refused by name before any output. an isothermal level runs on a cut face
+    (test_isothermal_face_on_cut)"""
     flags = ["--resolution", "32,32,1", "--end-time", "1e-6"]
     magnetized = _patch_on_cut_script(tmp_path / "mhd.py", 0.0, "newtonian.refined_mhd_blast:RefinedMhdBlast")
     flat = _refused(magnetized, tmp_path / "mhd", flags)
     assert "lies on a decomposition cut" in flat and "beyond the root halo" in flat, flat[-1500:]
-    isothermal = _patch_on_cut_script(tmp_path / "iso.py", 0.5, "isothermal.refined_isothermal_blob:RefinedIsothermalBlob", (0.25, 0.75), 0.75)
-    flat = _refused(isothermal, tmp_path / "iso", ["--resolution", "32,32", "--end-time", "1e-6"])
-    assert "patch face on a decomposition cut" in flat and "the isothermal closure prolongs" in flat, flat[-1500:]
     relativistic = _patch_on_cut_script(tmp_path / "rhd.py", 0.5, "srhd.refined_synge_blast:RefinedSyngeBlast", (0.25, 0.75), 0.75)
     flat = _refused(relativistic, tmp_path / "rhd", ["--resolution", "32,32", "--end-time", "1e-6"])
     assert "lies on a decomposition cut" in flat and "this level is relativistic" in flat, flat[-1500:]

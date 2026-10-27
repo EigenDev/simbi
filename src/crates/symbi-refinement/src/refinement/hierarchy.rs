@@ -1633,8 +1633,10 @@ where
     }
 
     /// whether a run of this tile prolongs every input from its gathered prim stencil: the gas
-    /// primitives and the dye do, through the plain and the hydrostatically balanced transfer; the
-    /// continuous tracers' ito coefficients, an isothermal closure's sound speed and a declared
+    /// primitives and the dye do, through the plain and the hydrostatically balanced transfer. an
+    /// isothermal closure's sound speed is fixed at construction on every cell a tile allocates:
+    /// a locally isothermal closure is sliced from the whole patch, and a uniform one continues
+    /// exactly into a clipped seed band. the continuous tracers' ito coefficients and a declared
     /// stationary target read their parent past the root halo, and a tile carrying one of them
     /// with a stencil is refused by name
     pub fn prim_stencil_admission(&self) -> Result<(), String> {
@@ -1651,9 +1653,6 @@ where
         };
         if self.levels.iter().any(|l| l.state.continuous_tracers.is_some()) {
             return refusal("the continuous tracers' ito transport");
-        }
-        if self.levels.iter().any(|l| l.state.fields.cs2.is_some()) {
-            return refusal("the isothermal closure");
         }
         if self.levels.iter().any(|l| l.prim_eq.is_some()) {
             return refusal("a declared stationary target");
