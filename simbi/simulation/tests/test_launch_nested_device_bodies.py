@@ -184,3 +184,33 @@ def test_a_deepest_substep_rejection_with_a_cut_sink_replays_as_the_capped_launc
         assert float(f["body_diagnostics/dt"][REJECTED_STEP]) == accepted, "the capped control's step took another timestep"
     ph.disagreement(_assert_same, rejected.final, capped.final, f"{ph.BACKEND}: level-2 substep rejection against the capped clean launch")
     ph.disagreement(_assert_same_diagnostics, tmp_path / "rejected", tmp_path / "capped", f"{ph.BACKEND}: level-2 substep rejection")
+
+
+# root cells 6 and 9: the cuts lie on level 1's and on level 2's low x faces, so the session
+# gathers a parent prim stencil on both levels
+BOTH_FACES = [[6, FACE_CELL], [], []]
+
+
+def test_a_nested_sink_cut_on_both_level_faces_publishes_the_host_tiles_bodies(tmp_path: Path, sink: Path) -> None:
+    """three workers, one cut on each refined level's low x face: the launch gathers prim stencils on
+    level 1 (from the root) and level 2 (from level 1) and publishes the three host tiles' grid,
+    bodies, body history and diagnostics"""
+    snippet = (
+        "import sys\n"
+        "from simbi.simulation import runner\n"
+        "from nested_sink import NestedSink\n"
+        f"p = NestedSink(gpus=3, decompose={BOTH_FACES!r}, data_directory=sys.argv[1])\n"
+        "p.checkpoint_interval = 1e9\n"
+        f"runner.run(p, compute_mode={ph.BACKEND!r}, max_steps={STEPS})\n"
+    )
+    ph.python(ph.snippet_args(snippet, str(tmp_path / "tiles")), "host tiles", devices=3)
+    want = _final(tmp_path / "tiles")
+    assert np.all(np.abs(_accreted(want)) > 0.0), "the sink accreted nothing at some step"
+    run = ph.launch(sink, tmp_path / "launched", workers=3, cuts=BOTH_FACES, args=["--max-steps", str(STEPS), "--checkpoint-interval", "1e9"],
+                    env=ph.environment())
+    remote = run.remote_sends()
+    for role in ("PrimStencil", "NestedPrimStencil{level:2}"):
+        assert any(r.get(role, 0) > 0 for r in remote.values()), f"the plans schedule no remote {role} transfer ({remote}); the gate is vacuous"
+    assert run.reports() == {w: (STEPS, 0) for w in range(3)}, f"(steps, rejections) per worker {run.reports()}"
+    ph.disagreement(_assert_same, run.final, want, f"{ph.BACKEND}: three launched workers cut on both level faces")
+    ph.disagreement(_assert_same_diagnostics, tmp_path / "launched", tmp_path / "tiles", f"{ph.BACKEND}: cut on both level faces")

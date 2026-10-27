@@ -530,17 +530,6 @@ where
             ),
         ));
     }
-    let stencil_levels = usize::from(plans.prim_stencil.is_some()) + plans.nested.iter().filter(|n| n.prim_stencil.is_some()).count();
-    if stencil_levels > 1 {
-        return Err(fail(
-            fabric,
-            WorkerError::Refused(format!(
-                "parent prim stencils on {stencil_levels} levels of one launched session: the primed point gathers \
-                 them in one phase, before a finer stencil's parent level holds the coarse-fine ghosts a coarser \
-                 stencil prolongs; keep the patch faces of all but one level off the cuts"
-            )),
-        ));
-    }
     // a gas run refluxes the tiles beside a neighbor's patch before the root's bands; a
     // magnetized run applies its units around the corrected-faces exchange after the subcycle
     let gas_reflux_first = plans.emf.is_none() && plans.corrected.is_none() && tiles.iter().all(|h| h.levels[0].state.fields.mhd.is_none());

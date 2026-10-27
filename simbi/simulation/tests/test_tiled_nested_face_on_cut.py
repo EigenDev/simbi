@@ -19,8 +19,13 @@
 # a launch publishes the same state: the faces on two and four workers, a
 # two-worker checkpoint resumed on four, and the rejected stage replayed alike
 # on and clear of the face, counted once on every worker, equal to the capped
-# clean launch. a nested unit listed twice ends the session before any output,
-# and a launch carrying parent prim stencils on two levels is refused by name.
+# clean launch. a nested unit listed twice ends the session before any output.
+# four workers cut on both axes gather prim stencils on two levels (level 1's
+# face on the root cut, level 2's on level 1's cut, and level 2 close enough to
+# level 1's face that its stencil reads cells level 1's stencil fills): the
+# launch and the host tiles equal the single grid, a two-worker checkpoint
+# resumes on the four, and a rejection in the last level-2 substep replays as
+# the capped clean launch.
 # a ppm level-2 face and a plm level-3 face on cuts prime from their parents'
 # crossed cut halos: their step-zero and evolved checkpoints equal the single
 # grid's on host tiles and launch. every arm runs as a fresh process on the
@@ -245,16 +250,70 @@ def test_a_duplicated_nested_unit_ends_the_launch(tmp_path: Path) -> None:
     assert "this phase sends it" in done.stderr + done.stdout, (done.stderr + done.stdout)[-3000:]
 
 
-def test_parent_prim_stencils_on_two_levels_are_refused_on_launch(tmp_path: Path) -> None:
-    """level 1's low x face lies on the root cut at x = 0 and level 2's low y face on level 1's cut
-    at y = 0, each past its parent's halo: the launch gathers every stencil at the primed point in
-    one phase, so it refuses the second level by name before any output"""
-    script = _script(tmp_path / "two_levels.py", [0.0625, 0.1875, 0.0, 0.125], [0.0, 0.25, -0.25, 0.25])
-    out = tmp_path / "out"
-    done = _launch(script, out, 4, [[16], [16]], STEPS, expect_ok=False)
-    assert done.returncode != 0, "the launch with stencils on two levels ran"
-    assert not list(out.glob("*.h5")), "output was written before the refusal"
-    assert "parent prim stencils on 2 levels of one launched session" in " ".join((done.stderr + done.stdout).split()), done.stderr[-3000:]
+# level 1's low x face on the root cut at x = 0 and level 2's low y face on level 1's cut at y = 0,
+# each past its parent's halo: the launch gathers level 1's prim stencil from the root and level 2's
+# from level 1, each at its level's primed point and at its parent level's last stage. "coupled"
+# places level 2 two level-1 cells inside level 1's face on the root cut, so level 2's stencil
+# prolongs from level-1 cells whose coarse-fine ghosts level 1's own stencil fills
+STENCIL_LEVELS = {
+    "two-levels": ([0.0625, 0.1875, 0.0, 0.125], [0.0, 0.25, -0.25, 0.25]),
+    "coupled": ([0.03125, 0.15625, 0.0, 0.125], [0.0, 0.25, -0.25, 0.25]),
+}
+STENCIL_CUTS = [[16], [16]]
+
+
+def _stencil_roles_cross(run: ph.Launch) -> None:
+    """both prim stencil roles schedule transfers to another worker"""
+    remote = run.remote_sends()
+    for role in ("PrimStencil", "NestedPrimStencil{level:2}"):
+        assert any(r.get(role, 0) > 0 for r in remote.values()), f"the plans schedule no remote {role} transfer ({remote}); the gate is vacuous"
+
+
+@pytest.mark.parametrize("layout", list(STENCIL_LEVELS))
+def test_parent_prim_stencils_on_two_levels_launch_as_the_single_grid(tmp_path: Path, layout: str) -> None:
+    """four workers cut on both axes gather a prim stencil on level 1 and on level 2: the launch and
+    four host tiles equal the single grid bit for bit at the final step, every level included"""
+    script = _script(tmp_path / f"{layout}.py", *STENCIL_LEVELS[layout])
+    one = _capped(script, tmp_path / "one", 1, STEPS)
+    with h5py.File(one, "r") as f:
+        assert "level_2" in f, "the single grid wrote no level 2; the gate is vacuous"
+    tiles = _capped(script, tmp_path / "tiles", 4, STEPS, STENCIL_CUTS)
+    ph.same_checkpoint(tiles, one, f"{layout}: four host tiles", expect=["level_1", "level_2"])
+    run = _launch(script, tmp_path / "launched", 4, STENCIL_CUTS, STEPS)
+    _stencil_roles_cross(run)
+    ph.same_checkpoint(run.final, one, f"{layout}: four launched workers", expect=["level_1", "level_2"])
+
+
+def test_parent_prim_stencils_on_two_levels_resume_onto_more_workers(tmp_path: Path) -> None:
+    """two workers cut on level 1's face (one stencil level) write step 3; four workers cut on both
+    axes (stencils on both levels) resume it and equal the uninterrupted single grid"""
+    script = _script(tmp_path / "coupled.py", *STENCIL_LEVELS["coupled"])
+    one = _capped(script, tmp_path / "one", 1, STEPS)
+    half = _launch(script, tmp_path / "half", 2, [[16], []], STEPS // 2)
+    resumed = _launch(script, tmp_path / "resumed", 4, STENCIL_CUTS, STEPS, checkpoint=half.final)
+    _stencil_roles_cross(resumed)
+    ph.same_checkpoint(resumed.final, one, "stencils on two levels resumed on four workers", expect=["level_1", "level_2"])
+
+
+# worker 3 holds the tile of level 2 (x > 0, y > 0); level 2 takes four substeps per root step under
+# rk2, so substep 3 stage 1 is the last stage of the last level-2 substep, after both stencils gathered
+STENCIL_REJECTION = f"reject_level:3:{REJECTED_STEP}:2:3:1"
+
+
+def test_a_rejection_with_stencils_on_two_levels_replays_as_the_capped_clean_launch(tmp_path: Path) -> None:
+    """a rejection in the last level-2 substep of root step 2 rolls the four workers back past both
+    levels' gathered stencils: every worker counts it once and the run equals the clean launch capped
+    at the accepted timestep"""
+    script = _script(tmp_path / "coupled.py", *STENCIL_LEVELS["coupled"])
+    rejected = _launch(script, tmp_path / "rejected", 4, STENCIL_CUTS, REJECTED_STEP + 1, inject=STENCIL_REJECTION)
+    assert {r for _, r in rejected.reports().values()} == {1}, f"the rejection was not counted once on every worker: {rejected.reports()}"
+    clean = _launch(script, tmp_path / "clean", 4, STENCIL_CUTS, REJECTED_STEP + 1)
+    accepted = _accepted_dt(rejected.final, clean.final)
+    capped = _launch(script, tmp_path / "capped", 4, STENCIL_CUTS, REJECTED_STEP + 1,
+                     inject=f"cap:{REJECTED_STEP}:{int(np.float64(accepted).view(np.uint64))}")
+    assert {r for _, r in capped.reports().values()} == {0}, "the capped control rejected a step"
+    ph.same_checkpoint(rejected.final, capped.final, "a rejection with stencils on two levels against the capped clean launch",
+                       expect=["level_1", "level_2"])
 
 
 @pytest.mark.parametrize(
