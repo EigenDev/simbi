@@ -18,8 +18,11 @@
 # annulus wraps its radius: the first and last radial faces are two different
 # faces the curl gives different values, which the interface audit leaves to
 # their own tiles while it audits the interior cut.
+# the single-grid references and the launches run on the session's backend
+# and placement (parity_harness).
 #
 # run: pytest -m simulation simbi/simulation/tests/test_launch_grid_matrix.py
+#      (SIMBI_PARITY_BACKEND / SIMBI_PARITY_PLACEMENT select the session, parity_harness.py)
 # =============================================================================
 
 import os
@@ -28,10 +31,10 @@ from pathlib import Path
 import h5py
 import pytest
 
+from simbi.simulation.tests import parity_harness as ph
 from simbi.simulation.tests.test_launch import (
     MHD_STEPS,
     STEPS,
-    _assert_same_state,
     _layout,
     bounded_processes,  # noqa: F401  the autouse process guard
 )
@@ -96,16 +99,16 @@ def test_a_launch_matches_the_single_grid_run_fresh_and_corrected(tmp_path: Path
     module, cls, script, case = _case(name)
     resolution, steps, flags = case["resolution"], case["steps"], case.get("flags", [])
     reference = _script_reference(module, cls, resolution, tmp_path / "single", steps, fields=case.get("fields", ""))
-    four = _layout(tmp_path / "four.toml", workers=4, cuts=case["cuts"])
+    four = _layout(tmp_path / "four-layout.toml", workers=4, cuts=case["cuts"])
     launched = _script_launch(script, resolution, tmp_path / "four", four, steps, workers=4, flags=flags)
-    _assert_same_state(launched, reference, f"{name}: four workers")
-    one = _layout(tmp_path / "one.toml", workers=1, cuts=[[] for _ in case["cuts"]])
+    ph.same_checkpoint(launched, reference, f"{name}: four workers")
+    one = _layout(tmp_path / "one-layout.toml", workers=1, cuts=[[] for _ in case["cuts"]])
     inject = {"SIMBI_FABRIC_INJECT": case["trouble"]}
     clean = _script_launch(script, resolution, tmp_path / "clean", one, steps, workers=1, flags=flags)
     flagged = _script_launch(script, resolution, tmp_path / "flagged", one, steps, workers=1, env=inject, flags=flags)
     _assert_flag_changed(clean, flagged)
     corrected = _script_launch(script, resolution, tmp_path / "corrected", four, steps, workers=4, env=inject, flags=flags)
-    _assert_same_state(corrected, flagged, f"{name}: four workers, the correction against the cut")
+    ph.same_checkpoint(corrected, flagged, f"{name}: four workers, the correction against the cut")
 
 
 @pytest.mark.parametrize("name", list(CASES))
@@ -113,14 +116,14 @@ def test_a_launch_resumed_onto_three_uneven_workers_matches(tmp_path: Path, name
     module, cls, script, case = _case(name)
     resolution, steps, flags = case["resolution"], case["steps"], case.get("flags", [])
     reference = _script_reference(module, cls, resolution, tmp_path / "single", steps, fields=case.get("fields", ""))
-    four = _layout(tmp_path / "four.toml", workers=4, cuts=case["cuts"])
+    four = _layout(tmp_path / "four-layout.toml", workers=4, cuts=case["cuts"])
     partial = _script_launch(script, resolution, tmp_path / "first", four, steps // 2, workers=4, flags=flags)
     with h5py.File(partial, "r") as f:
         written_at = int(f["level_0"].attrs["iteration"])
     assert 0 < written_at < steps
-    three = _layout(tmp_path / "three.toml", workers=3, cuts=case["restart"])
+    three = _layout(tmp_path / "three-layout.toml", workers=3, cuts=case["restart"])
     resumed = _script_launch(script, resolution, tmp_path / "three", three, steps, workers=3, checkpoint=partial, flags=flags)
-    _assert_same_state(resumed, reference, f"{name}: resumed onto three uneven workers against the uninterrupted run")
+    ph.same_checkpoint(resumed, reference, f"{name}: resumed onto three uneven workers against the uninterrupted run")
 
 
 
@@ -167,20 +170,20 @@ def test_mhd_on_an_annulus_wrapped_in_radius_matches_fresh_corrected_and_resumed
     reference = _script_reference(module, "OrszagTangAnnulus", resolution, tmp_path / "single", steps, fields=f"ct_method={ct!r}")
     assert _wrap_faces_differ(reference), "the first and last radial faces agree; the wrap is indistinguishable from one face"
     audit = {"SIMBI_FABRIC_AUDIT": "all"}
-    four = _layout(tmp_path / "four.toml", workers=4, cuts=case["cuts"])
+    four = _layout(tmp_path / "four-layout.toml", workers=4, cuts=case["cuts"])
     launched = _script_launch(script, resolution, tmp_path / "four", four, steps, workers=4, env=audit, flags=flags)
-    _assert_same_state(launched, reference, f"annulus {ct}: four workers auditing every exchange")
-    one = _layout(tmp_path / "one.toml", workers=1, cuts=[[], [], []])
+    ph.same_checkpoint(launched, reference, f"annulus {ct}: four workers auditing every exchange")
+    one = _layout(tmp_path / "one-layout.toml", workers=1, cuts=[[], [], []])
     inject = {"SIMBI_FABRIC_INJECT": case["trouble"]}
     clean = _script_launch(script, resolution, tmp_path / "clean", one, steps, workers=1, flags=flags)
     flagged = _script_launch(script, resolution, tmp_path / "flagged", one, steps, workers=1, env=inject, flags=flags)
     _assert_flag_changed(clean, flagged)
     corrected = _script_launch(script, resolution, tmp_path / "corrected", four, steps, workers=4, env=dict(inject, **audit), flags=flags)
-    _assert_same_state(corrected, flagged, f"annulus {ct}: four workers, the correction against the radial cut")
+    ph.same_checkpoint(corrected, flagged, f"annulus {ct}: four workers, the correction against the radial cut")
     partial = _script_launch(script, resolution, tmp_path / "first", four, steps // 2, workers=4, flags=flags)
     with h5py.File(partial, "r") as f:
         written_at = int(f["level_0"].attrs["iteration"])
     assert 0 < written_at < steps
-    three = _layout(tmp_path / "three.toml", workers=3, cuts=case["restart"])
+    three = _layout(tmp_path / "three-layout.toml", workers=3, cuts=case["restart"])
     resumed = _script_launch(script, resolution, tmp_path / "three", three, steps, workers=3, checkpoint=partial, env=audit, flags=flags)
-    _assert_same_state(resumed, reference, f"annulus {ct}: resumed onto three uneven workers")
+    ph.same_checkpoint(resumed, reference, f"annulus {ct}: resumed onto three uneven workers")

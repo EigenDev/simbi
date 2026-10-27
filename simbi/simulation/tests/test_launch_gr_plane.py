@@ -9,22 +9,23 @@
 # and the schwarzschild plane without it (rows of one momentum per axis, the
 # torus with its rotation dropped). each on two launched workers and on three
 # uneven workers cut along the radius publishes the single grid's state bit
-# for bit, and the gas moves off its initial state in the steps compared.
+# for bit, and the gas moves off its initial state in the steps compared. the
+# single grid and the launches run on the session's backend and placement
+# (parity_harness).
 #
 # run: pytest -m simulation simbi/simulation/tests/test_launch_gr_plane.py
+#      (SIMBI_PARITY_BACKEND / SIMBI_PARITY_PLACEMENT select the session, parity_harness.py)
 # =============================================================================
 
 import os
-import subprocess
-import sys
 from pathlib import Path
 
 import h5py
 import numpy as np
 import pytest
 
-from simbi.simulation.tests.test_launch import _layout, bounded_processes  # noqa: F401  the autouse process guard
-from simbi.simulation.tests.test_launch_isothermal import EXIT
+from simbi.simulation.tests import parity_harness as ph
+from simbi.simulation.tests.test_launch import bounded_processes  # noqa: F401  the autouse process guard
 from simbi.simulation.tests.test_launch_refined_numerics import _all_levels
 
 pytestmark = pytest.mark.simulation
@@ -78,31 +79,29 @@ def _single(script: Path, out: Path) -> Path:
         f"from {script.stem} import Plane\n"
         f"p = Plane(nr={NR}, npolar={NPOLAR}, data_directory=sys.argv[1])\n"
         "p.checkpoint_interval = 1e9\n"
-        f"runner.run(p, compute_mode='cpu', max_steps={STEPS})\n"
+        f"runner.run(p, compute_mode={ph.BACKEND!r}, max_steps={STEPS})\n"
     )
-    done = subprocess.run([sys.executable, "-c", snippet, str(out)], capture_output=True, text=True, timeout=1800)
-    assert done.returncode == 0, f"the single grid failed:\n{done.stderr[-3000:]}"
+    ph.python(ph.snippet_args(snippet, str(out)), "the single grid", timeout=1800)
     files = sorted(out.glob("*final*.h5"))
     assert len(files) == 1, f"expected one final checkpoint in {out}, found {files}"
     return files[0]
 
 
-def _launch(script: Path, out: Path, layout: Path, workers: int) -> Path:
+def _launch(script: Path, out: Path, workers: int, cuts=None, shape=None) -> Path:
+    """the launch on the session's backend and placement; its final checkpoint"""
     # the torus derives its resolution from nr and npolar
-    cmd = [sys.executable, "-m", "simbi.cli", "launch", str(script), "--layout", str(layout), "--max-steps", str(STEPS),
-           "--nr", str(NR), "--npolar", str(NPOLAR), "--data-directory", str(out), "--checkpoint-interval", "1e9"]
-    env = dict(os.environ)
+    args = ["--max-steps", str(STEPS), "--nr", str(NR), "--npolar", str(NPOLAR), "--checkpoint-interval", "1e9"]
+    env = ph.environment()
     env["PYTHONPATH"] = os.pathsep.join([str(script.parent), str(Path.cwd()), env.get("PYTHONPATH", "")])
-    done = subprocess.run(cmd, capture_output=True, text=True, timeout=1800, env=env)
-    assert done.returncode == 0, f"launch failed:\nstdout:\n{done.stdout}\nstderr:\n{done.stderr}"
-    exits = {int(w): int(c) for w, c in EXIT.findall(done.stdout)}
-    assert sorted(exits) == list(range(workers)) and all(c == 0 for c in exits.values()), f"worker exit codes {exits}"
-    files = sorted(out.glob("*final*.h5"))
-    assert len(files) == 1, f"expected one final checkpoint in {out}, found {files}"
-    return files[0]
+    return ph.launch(script, out, workers, cuts=cuts, shape=shape, args=args, env=env, timeout=1800).final
 
 
 def _assert_same(got: Path, want: Path, label: str) -> None:
+    """every level dataset bit for bit, a difference raised as a NumericalDisagreement"""
+    ph.disagreement(_assert_same_levels, got, want, label)
+
+
+def _assert_same_levels(got: Path, want: Path, label: str) -> None:
     xs, ys = _all_levels(got), _all_levels(want)
     assert "level_0/conserved/den" in ys, f"{label}: the reference publishes no density; the comparison is vacuous"
     assert xs.keys() == ys.keys(), f"{label}: datasets {sorted(set(xs) ^ set(ys))} differ"
@@ -122,7 +121,7 @@ def test_the_kerr_schild_plane_launches_as_the_single_grid_runs(tmp_path: Path, 
     # the layout the dispatch picked: the azimuthal momentum is carried unless the rows drop it
     assert len(momenta) == (2 if case == "schwarzschild-plane" else 3), f"{case}: momentum datasets {momenta}"
     for label, workers, layout in [
-        ("two workers", 2, _layout(tmp_path / "two.toml", workers=2, shape=(2, 1))),
-        ("three uneven workers", 3, _layout(tmp_path / "three.toml", workers=3, cuts=[[15, 33], []])),
+        ("two workers", 2, {"shape": (2, 1)}),
+        ("three uneven workers", 3, {"cuts": [[15, 33], []]}),
     ]:
-        _assert_same(_launch(script, tmp_path / label.replace(" ", "_"), layout, workers), want, f"{case}: {label}")
+        _assert_same(_launch(script, tmp_path / label.replace(" ", "_"), workers, **layout), want, f"{case}: {label}")

@@ -5,10 +5,16 @@
 # carries the run's coordinate maps, so a logarithmic radial mesh records the same cell
 # counts, axis order, spacing types, bounds, ratios and reconstructed coordinates from
 # two tiles as from one; and a checkpoint that cannot be written fails the run with the
-# target path in the error. both run the decomposed path as host tiles on a cpu build,
-# through the same construction and writer a multi-gpu run uses.
+# target path in the error. both run the decomposed path as host tiles on the session's
+# backend (parity_harness), each run a fresh process, through the same construction and
+# writer a multi-gpu run uses. host tiles alone involve no launch, so every gate runs
+# under the local placement.
+#
+# run: pytest -m simulation simbi/simulation/tests/test_decomposed_checkpoint.py
+#      (SIMBI_PARITY_BACKEND selects the session, parity_harness.py)
 # =============================================================================
 import os
+import re
 import stat
 from pathlib import Path
 
@@ -16,15 +22,23 @@ import numpy as np
 import pytest
 
 from simbi.reader import read_simulation
-from simbi.simulation import runner
-from simbi_configs.examples.newtonian.sedov import SedovTaylor
+from simbi.simulation.tests import parity_harness as ph
 
 pytestmark = pytest.mark.simulation
 
+# eight radial zones per decade over one decade, log spaced, on a quarter sphere
+SEDOV = (
+    "import sys\n"
+    "from simbi.simulation import runner\n"
+    "from simbi_configs.examples.newtonian.sedov import SedovTaylor\n"
+    "p = SedovTaylor(zpd=8, rinit=0.1, rend=1.0, gpus=int(sys.argv[2]), data_directory=sys.argv[1])\n"
+    "runner.run(p, compute_mode=sys.argv[3], validate=True, max_steps=1)\n"
+)
 
-def _sedov(gpus: int, out: Path) -> SedovTaylor:
-    # eight radial zones per decade over one decade, log spaced, on a quarter sphere.
-    return SedovTaylor(zpd=8, rinit=0.1, rend=1.0, gpus=gpus, data_directory=out)
+
+def _sedov(out: Path, gpus: int, check: bool = True):
+    """the log-radial sedov blast to step one on the session's backend over `gpus` devices"""
+    return ph.python(ph.snippet_args(SEDOV, str(out), str(gpus), ph.BACKEND), f"sedov on {gpus} device(s)", devices=gpus, check=check)
 
 
 def _final_checkpoint(out: Path) -> Path:
@@ -33,12 +47,7 @@ def _final_checkpoint(out: Path) -> Path:
     return files[0]
 
 
-def test_two_host_tiles_record_the_log_radial_mesh_like_one(tmp_path: Path, monkeypatch) -> None:
-    monkeypatch.setenv("SYMBI_GPU_OVERSUBSCRIBE", "1")
-    one, two = tmp_path / "one", tmp_path / "two"
-    runner.run(_sedov(1, one), compute_mode="cpu", validate=True, max_steps=1)
-    runner.run(_sedov(2, two), compute_mode="cpu", validate=True, max_steps=1)
-    a, b = read_simulation(str(_final_checkpoint(one))), read_simulation(str(_final_checkpoint(two)))
+def _assert_same_mesh(b, a) -> None:
     assert b.mesh.shape == a.mesh.shape
     assert b.mesh.spacing_types == a.mesh.spacing_types
     # storage order runs x_n .. x1: the radial axis is the last entry.
@@ -52,35 +61,46 @@ def test_two_host_tiles_record_the_log_radial_mesh_like_one(tmp_path: Path, monk
     assert b.metadata.x2_spacing == a.metadata.x2_spacing
 
 
-def test_a_failed_decomposed_checkpoint_write_fails_the_run(tmp_path: Path, monkeypatch) -> None:
+@ph.local_only
+def test_two_host_tiles_record_the_log_radial_mesh_like_one(tmp_path: Path) -> None:
+    one, two = tmp_path / "one", tmp_path / "two"
+    _sedov(one, 1)
+    _sedov(two, 2)
+    a, b = read_simulation(str(_final_checkpoint(one))), read_simulation(str(_final_checkpoint(two)))
+    ph.disagreement(_assert_same_mesh, b, a)
+
+
+@ph.local_only
+def test_a_failed_decomposed_checkpoint_write_fails_the_run(tmp_path: Path) -> None:
     if os.geteuid() == 0:
         pytest.skip("a read-only directory does not refuse root")
-    monkeypatch.setenv("SYMBI_GPU_OVERSUBSCRIBE", "1")
     out = tmp_path / "sealed"
     out.mkdir()
-    problem = _sedov(2, out)
     out.chmod(stat.S_IRUSR | stat.S_IXUSR)
     try:
-        with pytest.raises(RuntimeError, match=r"checkpoint write failed: .*sealed") as err:
-            runner.run(problem, compute_mode="cpu", validate=True, max_steps=1)
+        done = _sedov(out, 2, check=False)
     finally:
         out.chmod(stat.S_IRWXU)
-    assert "sealed" in str(err.value)
+    assert done.returncode != 0, f"the run wrote into a read-only directory:\n{done.stdout[-1500:]}"
+    assert re.search(r"RuntimeError: checkpoint write failed: .*sealed", done.stderr), done.stderr[-3000:]
 
 
-def test_a_refined_decomposed_run_reports_and_writes_its_final_checkpoint(
-    tmp_path: Path, monkeypatch, capfd
-) -> None:
+REFINED = (
+    "import sys\n"
+    "from simbi.simulation import runner\n"
+    "from simbi_configs.examples.newtonian.refined_blast import RefinedBlast\n"
+    "p = RefinedBlast(resolution=(16, 16, 1), gpus=2, data_directory=sys.argv[1])\n"
+    "runner.run(p, compute_mode=sys.argv[2], validate=True, max_steps=2)\n"
+)
+
+
+@ph.local_only
+def test_a_refined_decomposed_run_reports_and_writes_its_final_checkpoint(tmp_path: Path) -> None:
     # the refined decomposed loop draws the same report as the single-level one: the setup
     # milestones, the checkpoint notices and the completion line, and its final snapshot lands.
-    from simbi_configs.examples.newtonian.refined_blast import RefinedBlast
-
-    monkeypatch.setenv("SYMBI_GPU_OVERSUBSCRIBE", "1")
     out = tmp_path / "refined"
-    problem = RefinedBlast(resolution=(16, 16, 1), gpus=2, data_directory=out)
-    runner.run(problem, compute_mode="cpu", validate=True, max_steps=2)
-    captured = capfd.readouterr()
-    text = captured.out + captured.err
+    done = ph.python(ph.snippet_args(REFINED, str(out), ph.BACKEND), "refined blast on two host tiles", devices=2)
+    text = done.stdout + done.stderr
     assert "tiles carry a fine level" in text
     assert "complete —" in text
     assert len(list(out.glob("*final*.h5"))) == 1

@@ -9,17 +9,20 @@
 #   global position;
 # - the synge perfect gas: a relativistic blast whose hot core walks the
 #   effective adiabatic index toward 4/3 while the cold medium stays at 5/3.
+# the single-grid references and the launches run on the session's backend
+# and placement (parity_harness).
 #
 # run: pytest -m simulation simbi/simulation/tests/test_launch_spacing_and_eos.py
+#      (SIMBI_PARITY_BACKEND / SIMBI_PARITY_PLACEMENT select the session, parity_harness.py)
 # =============================================================================
 
 from pathlib import Path
 
 import pytest
 
+from simbi.simulation.tests import parity_harness as ph
 from simbi.simulation.tests.test_launch import (
     STEPS,
-    _assert_same_state,
     _layout,
     bounded_processes,  # noqa: F401  the autouse process guard
 )
@@ -40,13 +43,13 @@ def test_a_launch_matches_the_single_grid_run_fresh_and_corrected(tmp_path: Path
     module, cls, resolution, trouble = CASES[name]
     script = module.replace(".", "/") + ".py"
     reference = _script_reference(module, cls, resolution, tmp_path / "single", STEPS)
-    four = _layout(tmp_path / "four.toml", workers=4, shape=(2, 2))
+    four = _layout(tmp_path / "four-layout.toml", workers=4, shape=(2, 2))
     launched = _script_launch(script, resolution, tmp_path / "four", four, STEPS, workers=4)
-    _assert_same_state(launched, reference, f"{name}: four workers")
-    one = _layout(tmp_path / "one.toml", workers=1, shape=(1, 1))
+    ph.same_checkpoint(launched, reference, f"{name}: four workers")
+    one = _layout(tmp_path / "one-layout.toml", workers=1, shape=(1, 1))
     inject = {"SIMBI_FABRIC_INJECT": trouble}
     clean = _script_launch(script, resolution, tmp_path / "clean", one, STEPS, workers=1)
     flagged = _script_launch(script, resolution, tmp_path / "flagged", one, STEPS, workers=1, env=inject)
     _assert_flag_changed(clean, flagged)
     corrected = _script_launch(script, resolution, tmp_path / "corrected", four, STEPS, workers=4, env=inject)
-    _assert_same_state(corrected, flagged, f"{name}: four workers, the correction against both cuts")
+    ph.same_checkpoint(corrected, flagged, f"{name}: four workers, the correction against both cuts")

@@ -8,21 +8,22 @@
 # schwarzschild hole and around a hole spinning at a = 0.5 M. each launches on
 # two workers and on three uneven workers cut along the radius and publishes
 # the single grid's state bit for bit; the gas moves in the steps compared and
-# the spin changes the run.
+# the spin changes the run. the single grid and the launches run on the
+# session's backend and placement (parity_harness).
 #
 # run: pytest -m simulation simbi/simulation/tests/test_launch_gr_cylinder.py
+#      (SIMBI_PARITY_BACKEND / SIMBI_PARITY_PLACEMENT select the session, parity_harness.py)
 # =============================================================================
 
 import os
-import subprocess
-import sys
 from pathlib import Path
 
 import h5py
 import numpy as np
 import pytest
 
-from simbi.simulation.tests.test_launch import EXIT, _assert_same_state, _layout, bounded_processes  # noqa: F401  the autouse process guard
+from simbi.simulation.tests import parity_harness as ph
+from simbi.simulation.tests.test_launch import bounded_processes  # noqa: F401  the autouse process guard
 
 pytestmark = pytest.mark.simulation
 
@@ -97,29 +98,23 @@ def _single(fixtures: Path, case: str, out: Path) -> Path:
         f"from {module} import {cls}\n"
         f"p = {cls}(resolution={resolution!r}, data_directory=sys.argv[1])\n"
         "p.checkpoint_interval = 1e9\n"
-        f"runner.run(p, compute_mode='cpu', max_steps={STEPS})\n"
+        f"runner.run(p, compute_mode={ph.BACKEND!r}, max_steps={STEPS})\n"
     )
-    done = subprocess.run([sys.executable, "-c", snippet, str(out)], capture_output=True, text=True, timeout=1800)
-    assert done.returncode == 0, f"{case} on one device failed:\n{done.stderr[-3000:]}"
+    ph.python(ph.snippet_args(snippet, str(out)), f"{case} on one device", timeout=1800)
     files = sorted(out.glob("*final*.h5"))
     assert len(files) == 1, f"expected one final checkpoint in {out}, found {files}"
     return files[0]
 
 
-def _launch(fixtures: Path, case: str, out: Path, layout: Path, workers: int) -> Path:
+def _launch(fixtures: Path, case: str, out: Path, workers: int, cuts=None, shape=None) -> Path:
+    """the launch on the session's backend and placement without the experimental opt-in; its final
+    checkpoint"""
     resolution, _ = CASES[case]
     script = fixtures / f"{case.replace('-', '_')}.py"
-    cmd = [sys.executable, "-m", "simbi.cli", "launch", str(script), "--layout", str(layout), "--max-steps", str(STEPS),
-           "--resolution", ",".join(str(r) for r in resolution), "--data-directory", str(out), "--checkpoint-interval", "1e9"]
-    env = {k: v for k, v in os.environ.items() if k != "SIMBI_LAUNCH_EXPERIMENTAL"}
+    args = ["--max-steps", str(STEPS), "--resolution", ",".join(str(r) for r in resolution), "--checkpoint-interval", "1e9"]
+    env = ph.environment()
     env["PYTHONPATH"] = os.pathsep.join([str(fixtures), str(Path.cwd()), env.get("PYTHONPATH", "")])
-    done = subprocess.run(cmd, capture_output=True, text=True, timeout=1800, env=env)
-    assert done.returncode == 0, f"launch failed:\nstdout:\n{done.stdout}\nstderr:\n{done.stderr}"
-    exits = {int(w): int(c) for w, c in EXIT.findall(done.stdout)}
-    assert sorted(exits) == list(range(workers)) and all(c == 0 for c in exits.values()), f"worker exit codes {exits}"
-    files = sorted(out.glob("*final*.h5"))
-    assert len(files) == 1, f"expected one final checkpoint in {out}, found {files}"
-    return files[0]
+    return ph.launch(script, out, workers, cuts=cuts, shape=shape, args=args, env=env, timeout=1800).final
 
 
 def _moved(out: Path, final: Path) -> bool:
@@ -140,7 +135,7 @@ def test_the_cylindrical_kerr_schild_chart_launches_as_the_single_grid_runs(tmp_
     _, cuts = CASES[case]
     ndim = len(cuts)
     for label, workers, layout in [
-        ("two workers", 2, _layout(tmp_path / "two.toml", workers=2, shape=(2,) + (1,) * (ndim - 1))),
-        ("three uneven workers", 3, _layout(tmp_path / "three.toml", workers=3, cuts=cuts)),
+        ("two workers", 2, {"shape": (2,) + (1,) * (ndim - 1)}),
+        ("three uneven workers", 3, {"cuts": cuts}),
     ]:
-        _assert_same_state(_launch(fixtures, case, tmp_path / label.replace(" ", "_"), layout, workers), want, f"{case}: {label}")
+        ph.same_checkpoint(_launch(fixtures, case, tmp_path / label.replace(" ", "_"), workers, **layout), want, f"{case}: {label}")

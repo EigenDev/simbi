@@ -9,20 +9,21 @@
 # grid's state bit for bit. the prescription changes the run: the same problem
 # with an outflow face lands elsewhere. a magnetized face prescribing in-plane
 # vectors alone on the 2.5d grid, whose kernels fill three components, is
-# refused by name.
+# refused by name. the single-grid runs and the launches run on the session's
+# backend and placement (parity_harness).
 #
 # run: pytest -m simulation simbi/simulation/tests/test_launch_driven_boundary.py
+#      (SIMBI_PARITY_BACKEND / SIMBI_PARITY_PLACEMENT select the session, parity_harness.py)
 # =============================================================================
 
 import os
-import subprocess
-import sys
 from pathlib import Path
 
 import numpy as np
 import pytest
 
-from simbi.simulation.tests.test_launch import _layout, bounded_processes  # noqa: F401  the autouse process guard
+from simbi.simulation.tests import parity_harness as ph
+from simbi.simulation.tests.test_launch import bounded_processes  # noqa: F401  the autouse process guard
 from simbi.simulation.tests.test_launch_refined_numerics import _all_levels
 
 pytestmark = pytest.mark.simulation
@@ -131,35 +132,42 @@ def _final(out: Path) -> Path:
     return files[0]
 
 
-def _single(problem: str, resolution: tuple, out: Path) -> Path:
+def _run_single(problem: str, resolution: tuple, out: Path, steps: int, check: bool = True):
+    """the single grid of `problem` on the session's backend"""
     snippet = (
         "import sys\n"
         "from simbi.simulation import runner\n"
         f"from variants import {problem}\n"
-        f"runner.run({problem}(resolution={resolution!r}, checkpoint_interval=1e9, data_directory=sys.argv[1]), compute_mode='cpu', max_steps={STEPS})\n"
+        f"runner.run({problem}(resolution={resolution!r}, checkpoint_interval=1e9, data_directory=sys.argv[1]), compute_mode=sys.argv[2], max_steps={steps})\n"
     )
-    done = subprocess.run([sys.executable, "-c", snippet, str(out)], capture_output=True, text=True, timeout=900)
-    assert done.returncode == 0, f"{problem} failed:\n{done.stderr[-3000:]}"
+    return ph.python(ph.snippet_args(snippet, str(out), ph.BACKEND), f"{problem} on one device", timeout=900, check=check)
+
+
+def _single(problem: str, resolution: tuple, out: Path) -> Path:
+    _run_single(problem, resolution, out, STEPS)
     return _final(out)
 
 
-def _launch(variants: Path, problem: str, resolution: tuple, out: Path, layout: Path) -> Path:
+def _launch(variants: Path, problem: str, resolution: tuple, out: Path, workers: int, shape: tuple) -> Path:
+    """the launch of `problem` on the session's backend and placement without the experimental
+    opt-in; its final checkpoint"""
     script = variants.parent / f"launched_{problem.lower()}.py"
     script.write_text(f"from variants import {problem} as Base\n\n\nclass Launched{problem}(Base):\n    pass\n")
-    cmd = [sys.executable, "-m", "simbi.cli", "launch", str(script), "--layout", str(layout), "--max-steps", str(STEPS),
-           "--resolution", ",".join(str(r) for r in resolution), "--data-directory", str(out), "--checkpoint-interval", "1e9"]
-    env = dict(os.environ)
-    env.pop("SIMBI_LAUNCH_EXPERIMENTAL", None)
-    done = subprocess.run(cmd, capture_output=True, text=True, timeout=900, env=env)
-    assert done.returncode == 0, f"launch failed:\nstdout:\n{done.stdout}\nstderr:\n{done.stderr[-3000:]}"
+    args = ["--max-steps", str(STEPS), "--resolution", ",".join(str(r) for r in resolution), "--checkpoint-interval", "1e9"]
+    ph.launch(script, out, workers, shape=shape, args=args, env=ph.environment(), timeout=900)
     return _final(out)
 
 
-def _assert_same(got: Path, want: Path, label: str) -> None:
+def _assert_same_levels(got: Path, want: Path, label: str) -> None:
     xs, ys = _all_levels(got), _all_levels(want)
     assert xs.keys() == ys.keys(), f"{label}: datasets {sorted(set(xs) ^ set(ys))} differ"
     for name, x in xs.items():
         np.testing.assert_array_equal(x, ys[name], err_msg=f"{label}: {name}")
+
+
+def _assert_same(got: Path, want: Path, label: str) -> None:
+    """every level equal bit for bit, a difference raised as a NumericalDisagreement"""
+    ph.disagreement(_assert_same_levels, got, want, f"{label}, {ph.BACKEND}")
 
 
 def test_the_driven_face_changes_the_run(tmp_path: Path, variants: Path) -> None:
@@ -173,18 +181,11 @@ def test_the_driven_face_changes_the_run(tmp_path: Path, variants: Path) -> None
 def test_launched_workers_drive_the_face_as_the_single_grid(tmp_path: Path, variants: Path, arm: str, shape: tuple) -> None:
     problem, resolution = ARMS[arm]
     want = _single(problem, resolution, tmp_path / "single")
-    layout = _layout(tmp_path / "two.toml", workers=2, shape=shape)
-    _assert_same(_launch(variants, problem, resolution, tmp_path / "launched", layout), want, f"{arm} {shape}: two launched workers")
+    _assert_same(_launch(variants, problem, resolution, tmp_path / "launched", 2, shape), want, f"{arm} {shape}: two launched workers")
 
 
 def test_a_magnetized_face_prescribing_planar_vectors_is_refused(tmp_path: Path, variants: Path) -> None:
-    snippet = (
-        "import sys\n"
-        "from simbi.simulation import runner\n"
-        "from variants import PlanarDrivenOrszagTang\n"
-        "runner.run(PlanarDrivenOrszagTang(resolution=(32, 32, 1), checkpoint_interval=1e9, data_directory=sys.argv[1]), compute_mode='cpu', max_steps=1)\n"
-    )
-    done = subprocess.run([sys.executable, "-c", snippet, str(tmp_path / "out")], capture_output=True, text=True, timeout=600)
+    done = _run_single("PlanarDrivenOrszagTang", (32, 32, 1), tmp_path / "out", 1, check=False)
     assert done.returncode != 0
     assert "three-component velocity and field" in done.stderr.replace("\n", " "), done.stderr[-1500:]
     assert not list((tmp_path / "out").glob("*.h5")), "output was written before the refusal"

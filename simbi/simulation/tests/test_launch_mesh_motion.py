@@ -10,20 +10,23 @@
 # changes the run (the static mesh lands elsewhere). a moving mesh with
 # refinement or on a magnetized grid is refused by name on one device and on
 # host tiles, given as callables or as an expression law alike.
+# the single-grid runs, the host tiles and the launches run on the session's
+# backend and placement (parity_harness); the in-process refusals run on the
+# local placement alone.
 #
 # run: pytest -m simulation simbi/simulation/tests/test_launch_mesh_motion.py
+#      (SIMBI_PARITY_BACKEND / SIMBI_PARITY_PLACEMENT select the session, parity_harness.py)
 # =============================================================================
 
 import os
-import subprocess
-import sys
 from pathlib import Path
 
 import h5py
 import numpy as np
 import pytest
 
-from simbi.simulation.tests.test_launch import _layout, bounded_processes  # noqa: F401  the autouse process guard
+from simbi.simulation.tests import parity_harness as ph
+from simbi.simulation.tests.test_launch import bounded_processes  # noqa: F401  the autouse process guard
 from simbi.simulation.tests.test_launch_refined_numerics import _all_levels
 
 pytestmark = pytest.mark.simulation
@@ -131,30 +134,29 @@ def _final(out: Path) -> Path:
 
 
 def _single(problem: str, out: Path, steps: int = STEPS, gpus: int = 1) -> Path:
+    """`problem` on the session's backend over `gpus` devices, one device or in-process host tiles"""
     snippet = (
         "import sys\n"
         "from simbi.simulation import runner\n"
         f"from variants import {problem}\n"
-        f"runner.run({problem}(resolution={RESOLUTION!r}, gpus={gpus}, checkpoint_interval=1e9, data_directory=sys.argv[1]), compute_mode='cpu', max_steps={steps})\n"
+        f"runner.run({problem}(resolution={RESOLUTION!r}, gpus={gpus}, checkpoint_interval=1e9, data_directory=sys.argv[1]), compute_mode=sys.argv[2], max_steps={steps})\n"
     )
+    # host tiles beyond the visible devices share them
     env = dict(os.environ, SYMBI_GPU_OVERSUBSCRIBE="1")
-    done = subprocess.run([sys.executable, "-c", snippet, str(out)], capture_output=True, text=True, timeout=900, env=env)
-    assert done.returncode == 0, f"{problem} failed:\n{done.stderr[-3000:]}"
+    ph.python(ph.snippet_args(snippet, str(out), ph.BACKEND), f"{problem} on {gpus} device(s)", env=env, devices=gpus)
     return _final(out)
 
 
-def _launch(variants: Path, problem: str, out: Path, layout: Path, steps: int, checkpoint: Path | None = None) -> Path:
+def _launch(variants: Path, problem: str, out: Path, steps: int, workers: int, cuts=None, shape=None,
+            checkpoint: Path | None = None) -> Path:
+    """`simbi launch` of `problem` on the session's backend and placement, every worker exiting zero
+    without the experimental opt-in; its final checkpoint"""
     script = variants.parent / f"launched_{problem.lower()}.py"
     script.write_text(f"from variants import {problem} as Base\n\n\nclass Launched{problem}(Base):\n    pass\n")
-    cmd = [sys.executable, "-m", "simbi.cli", "launch", str(script), "--layout", str(layout), "--max-steps", str(steps),
-           "--resolution", ",".join(str(r) for r in RESOLUTION), "--data-directory", str(out), "--checkpoint-interval", "1e9"]
+    args = ["--max-steps", str(steps), "--resolution", ",".join(str(r) for r in RESOLUTION), "--checkpoint-interval", "1e9"]
     if checkpoint is not None:
-        cmd += ["--checkpoint", str(checkpoint)]
-    env = dict(os.environ)
-    env.pop("SIMBI_LAUNCH_EXPERIMENTAL", None)
-    done = subprocess.run(cmd, capture_output=True, text=True, timeout=900, env=env)
-    assert done.returncode == 0, f"launch failed:\nstdout:\n{done.stdout}\nstderr:\n{done.stderr[-3000:]}"
-    return _final(out)
+        args += ["--checkpoint", str(checkpoint)]
+    return ph.launch(script, out, workers, cuts=cuts, shape=shape, args=args, env=ph.environment()).final
 
 
 def _state(path: Path) -> dict[str, np.ndarray]:
@@ -173,22 +175,27 @@ def _assert_same(got: Path, want: Path, label: str) -> None:
         np.testing.assert_array_equal(x, ys[name], err_msg=f"{label}: {name}")
 
 
+def _same(got: Path, want: Path, label: str) -> None:
+    """every level and the scale factor bit for bit, a difference raised as a NumericalDisagreement"""
+    ph.disagreement(_assert_same, got, want, f"{label}, {ph.BACKEND}")
+
+
 @pytest.mark.parametrize("problem", ARMS)
 def test_launched_workers_move_the_mesh_as_the_single_grid(tmp_path: Path, variants: Path, problem: str) -> None:
     want = _single(problem, tmp_path / "single")
     static = _all_levels(_single("FlatBlast", tmp_path / "static"))
     assert not np.array_equal(_all_levels(want)["level_0/conserved/den"], static["level_0/conserved/den"]), "the motion left the run unchanged"
-    _assert_same(_single(problem, tmp_path / "tiles", gpus=2), want, f"{problem}: two host tiles")
-    two = _layout(tmp_path / "two.toml", workers=2, shape=(2, 1))
-    _assert_same(_launch(variants, problem, tmp_path / "launched", two, STEPS), want, f"{problem}: two launched workers")
-    first = _launch(variants, problem, tmp_path / "first", two, STEPS // 2)
-    three = _layout(tmp_path / "three.toml", workers=3, cuts=[[10, 21], []])
+    _same(_single(problem, tmp_path / "tiles", gpus=2), want, f"{problem}: two host tiles")
+    _same(_launch(variants, problem, tmp_path / "launched", STEPS, 2, shape=(2, 1)), want, f"{problem}: two launched workers")
+    first = _launch(variants, problem, tmp_path / "first", STEPS // 2, 2, shape=(2, 1))
     # `max_steps` caps the absolute root iteration: the checkpoint sits at STEPS // 2 and the
     # resumed launch takes the remaining STEPS - STEPS // 2 steps
-    resumed = _launch(variants, problem, tmp_path / "resumed", three, STEPS, checkpoint=first)
-    _assert_same(resumed, want, f"{problem}: resumed onto three uneven workers")
+    resumed = _launch(variants, problem, tmp_path / "resumed", STEPS, 3, cuts=[[10, 21], []], checkpoint=first)
+    _same(resumed, want, f"{problem}: resumed onto three uneven workers")
 
 
+# runs on one device and on in-process host tiles alone
+@ph.local_only
 @pytest.mark.parametrize("problem", list(UNWIRED_ARMS))
 @pytest.mark.parametrize("gpus", [1, 2])
 def test_an_unwired_moving_mesh_is_refused_by_name_on_every_in_process_driver(tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
@@ -199,10 +206,11 @@ def test_an_unwired_moving_mesh_is_refused_by_name_on_every_in_process_driver(tm
         "import sys\n"
         "from simbi.simulation import runner\n"
         f"from unwired import {problem}\n"
-        f"runner.run({problem}(resolution=(32, 32, 1), gpus={gpus}, checkpoint_interval=1e9, data_directory=sys.argv[1]), compute_mode='cpu', max_steps=2)\n"
+        f"runner.run({problem}(resolution=(32, 32, 1), gpus={gpus}, checkpoint_interval=1e9, data_directory=sys.argv[1]), compute_mode=sys.argv[2], max_steps=2)\n"
     )
     env = dict(os.environ, SYMBI_GPU_OVERSUBSCRIBE="1", PYTHONPATH=os.pathsep.join([str(tmp_path), os.getcwd(), os.environ.get("PYTHONPATH", "")]))
-    done = subprocess.run([sys.executable, "-c", snippet, str(out)], capture_output=True, text=True, timeout=600, env=env)
+    done = ph.python(ph.snippet_args(snippet, str(out), ph.BACKEND), f"{problem} on {gpus} device(s)", timeout=600, env=env, devices=gpus,
+                     check=False)
     assert done.returncode != 0, f"{problem} on {gpus} device(s) ran:\n{done.stdout[-1500:]}"
     assert UNWIRED_ARMS[problem] in " ".join(done.stderr.split()), done.stderr[-2000:]
     assert "panicked" not in done.stderr, f"{problem}: refused by a panic, not by name:\n{done.stderr[-2000:]}"

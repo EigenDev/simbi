@@ -12,12 +12,13 @@
 # regime is refused by name, since the magnetized kernel set carries no
 # gradient table, and so is a user source on a refined magnetized launch,
 # which the refined magnetized march carries on no driver.
+# the single-grid references and the launches run on the session's backend
+# and placement (parity_harness).
 #
 # run: pytest -m simulation simbi/simulation/tests/test_launch_walls.py
+#      (SIMBI_PARITY_BACKEND / SIMBI_PARITY_PLACEMENT select the session, parity_harness.py)
 # =============================================================================
 
-import subprocess
-import sys
 from pathlib import Path
 
 import h5py
@@ -28,10 +29,10 @@ from simbi_configs.examples.newtonian.gradient_box import GradientBox
 from simbi_configs.examples.newtonian.nmhd_rotor import NewtonianRotor
 from simbi_configs.examples.newtonian.rt import RayleighTaylor
 
+from simbi.simulation.tests import parity_harness as ph
 from simbi.simulation.tests.test_launch import (
     MHD_STEPS,
     STEPS,
-    _assert_same_state,
     _interior,
     _layout,
     _max_div_b,
@@ -59,18 +60,18 @@ def _assert_flag_changed(clean: Path, flagged: Path) -> None:
 
 def _wall_gates(tmp_path: Path, script: str, module: str, cls: str, resolution: tuple[int, ...], steps: int, trouble: str, env: dict[str, str] | None = None, magnetized: bool = False) -> None:
     reference = _script_reference(module, cls, resolution, tmp_path / "single", steps)
-    four = _layout(tmp_path / "four.toml", workers=4, shape=(2, 2))
+    four = _layout(tmp_path / "four-layout.toml", workers=4, shape=(2, 2))
     launched = _script_launch(script, resolution, tmp_path / "four", four, steps, workers=4, env=env)
-    _assert_same_state(launched, reference, "four workers, cuts meeting the walls")
+    ph.same_checkpoint(launched, reference, "four workers, cuts meeting the walls")
     if magnetized:
         assert _max_div_b(launched) < 1e-10
-    one = _layout(tmp_path / "one.toml", workers=1, shape=(1, 1))
+    one = _layout(tmp_path / "one-layout.toml", workers=1, shape=(1, 1))
     inject = dict(env or {}, SIMBI_FABRIC_INJECT=trouble)
     clean = _script_launch(script, resolution, tmp_path / "clean", one, steps, workers=1, env=env)
     flagged = _script_launch(script, resolution, tmp_path / "flagged", one, steps, workers=1, env=inject)
     _assert_flag_changed(clean, flagged)
     corrected = _script_launch(script, resolution, tmp_path / "corrected", four, steps, workers=4, env=inject)
-    _assert_same_state(corrected, flagged, "four workers, the correction on a wall-corner cell")
+    ph.same_checkpoint(corrected, flagged, "four workers, the correction on a wall-corner cell")
     if magnetized:
         assert _max_div_b(corrected) < 1e-10
 
@@ -96,6 +97,14 @@ def test_gradient_walls_match_the_single_grid_run(tmp_path: Path) -> None:
     _wall_gates(tmp_path, GRADIENT_SCRIPT, GradientBox.__module__, "GradientBox", (32, 32), STEPS, "trouble:3:1:16:31")
 
 
+def _refused(script: Path, out: Path) -> ph.Launch:
+    """a one-step two-worker launch on the session's backend and placement that exits nonzero"""
+    done = ph.launch(script, out, 2, shape=(2, 1), args=["--max-steps", "1", "--resolution", "16,16,1", "--checkpoint-interval", "1e9"],
+                     env=ph.environment(), timeout=600, expect_ok=False)
+    assert done.returncode != 0, f"the launch succeeded:\n{done.stdout}"
+    return done
+
+
 def test_a_gradient_wall_with_a_magnetized_regime_is_refused_by_name(tmp_path: Path) -> None:
     script = tmp_path / "gradient_wall_vortex.py"
     script.write_text(
@@ -106,10 +115,7 @@ def test_a_gradient_wall_with_a_magnetized_regime_is_refused_by_name(tmp_path: P
         "class GradientWallVortex(NewtonianOrszagTang):\n"
         "    boundary_conditions: Annotated[list, ProblemParam([Neumann(rho=0.1)], description='boundary conditions')]\n"
     )
-    layout = _layout(tmp_path / "two.toml", workers=2, shape=(2, 1))
-    cmd = [sys.executable, "-m", "simbi.cli", "launch", str(script), "--layout", str(layout), "--max-steps", "1", "--resolution", "16,16,1", "--data-directory", str(tmp_path / "out"), "--checkpoint-interval", "1e9"]
-    done = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
-    assert done.returncode != 0, f"the launch succeeded:\n{done.stdout}"
+    done = _refused(script, tmp_path / "out")
     flat = " ".join(done.stderr.split())
     assert "a neumann or robin wall with the nmhd regime: the magnetized substrates fill no gradient ghost" in flat, done.stderr
     assert not list((tmp_path / "out").glob("*.h5")), "a refused launch published a checkpoint"
@@ -135,10 +141,7 @@ def test_a_user_source_on_a_refined_magnetized_launch_is_refused_by_name(tmp_pat
         "    def source_expressions(self):\n"
         "        return [expr.force([0.0, -0.1, 0.0], dim=3)]\n"
     )
-    layout = _layout(tmp_path / "two.toml", workers=2, shape=(2, 1))
-    cmd = [sys.executable, "-m", "simbi.cli", "launch", str(script), "--layout", str(layout), "--max-steps", "1", "--resolution", "16,16,1", "--data-directory", str(tmp_path / "out"), "--checkpoint-interval", "1e9"]
-    done = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
-    assert done.returncode != 0, f"the launch succeeded:\n{done.stdout}"
+    done = _refused(script, tmp_path / "out")
     flat = " ".join(done.stderr.split())
     assert "user source expressions are not yet supported with mesh refinement" in flat, done.stderr
     assert not list((tmp_path / "out").glob("*.h5")), "a refused launch published a checkpoint"

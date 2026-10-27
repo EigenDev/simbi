@@ -23,22 +23,24 @@
 # relativistic gas, ito-3, two nested boxes with workers holding level 1
 # without level 2, newtonian magnetized ito-2, relativistic and isothermal
 # magnetized discrete), two and three uneven host tiles and launched workers
-# publish the single hierarchy's population.
+# publish the single hierarchy's population. every arm runs on the session's
+# backend and placement (parity_harness), its single-device references and host
+# tiles as fresh processes.
 #
 # run: pytest -m simulation simbi/simulation/tests/test_launch_tracers.py
+#      (SIMBI_PARITY_BACKEND / SIMBI_PARITY_PLACEMENT select the session, parity_harness.py)
 # =============================================================================
 
 import os
 import re
-import subprocess
-import sys
 from pathlib import Path
 
 import h5py
 import numpy as np
 import pytest
 
-from simbi.simulation.tests.test_launch import _layout, bounded_processes  # noqa: F401  the autouse process guard
+from simbi.simulation.tests import parity_harness as ph
+from simbi.simulation.tests.test_launch import bounded_processes  # noqa: F401  the autouse process guard
 from simbi.simulation.tests.test_tiled_tracers import GROUP, INJECTING, RESOLUTION, STEPS, VARIANTS, _assert_same, _final, _iteration, _population, _run
 
 pytestmark = pytest.mark.simulation
@@ -204,35 +206,30 @@ def variants(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     return tmp_path / "variants.py"
 
 
-def _launch_run(variants: Path, problem: str, out: Path, layout: Path, steps: int, checkpoint: Path | None = None, inject: str | None = None) -> subprocess.CompletedProcess:
+def _launch_run(variants: Path, problem: str, out: Path, workers: int, steps: int, cuts: list | None = None, shape: tuple | None = None,
+                checkpoint: Path | None = None, inject: str | None = None) -> ph.Launch:
+    """`problem` launched on `workers` workers partitioned by `cuts` (else `shape`) on the session's
+    backend and placement, with no experimental opt-in; every worker exits zero"""
     script = variants.parent / f"launched_{problem.lower()}.py"
     script.write_text(f"from variants import {problem} as Base\n\n\nclass Launched{problem}(Base):\n    pass\n")
-    cmd = [sys.executable, "-m", "simbi.cli", "launch", str(script), "--layout", str(layout), "--max-steps", str(steps),
-           "--resolution", ",".join(str(r) for r in RESOLUTION), "--data-directory", str(out), "--checkpoint-interval", "1e9"]
+    args = ["--max-steps", str(steps), "--resolution", ",".join(str(r) for r in RESOLUTION), "--checkpoint-interval", "1e9"]
     if checkpoint is not None:
-        cmd += ["--checkpoint", str(checkpoint)]
-    env = dict(os.environ)
-    env.pop("SIMBI_LAUNCH_EXPERIMENTAL", None)
-    if inject is not None:
-        env["SIMBI_FABRIC_INJECT"] = inject
-    return subprocess.run(cmd, capture_output=True, text=True, timeout=900, env=env)
+        args += ["--checkpoint", str(checkpoint)]
+    return ph.launch(script, out, workers=workers, cuts=cuts, shape=shape, args=args, env=ph.environment(inject))
 
 
-def _launch(variants: Path, problem: str, out: Path, layout: Path, steps: int, checkpoint: Path | None = None, inject: str | None = None) -> Path:
-    done = _launch_run(variants, problem, out, layout, steps, checkpoint, inject)
-    assert done.returncode == 0, f"launch failed:\nstdout:\n{done.stdout}\nstderr:\n{done.stderr[-3000:]}"
-    return _final(out)
+def _launch(variants: Path, problem: str, out: Path, workers: int, steps: int, cuts: list | None = None, shape: tuple | None = None,
+            checkpoint: Path | None = None, inject: str | None = None) -> Path:
+    return _launch_run(variants, problem, out, workers, steps, cuts, shape, checkpoint, inject).final
 
 
 @pytest.mark.parametrize("problem", LAUNCHED)
 def test_launched_workers_carry_the_single_grid_tracer_population(tmp_path: Path, variants: Path, problem: str) -> None:
     group = GROUP[problem]
     want = _run(problem, tmp_path / "single", 1, STEPS)
-    two = _layout(tmp_path / "two.toml", workers=2, shape=(2, 1))
-    _assert_same(_launch(variants, problem, tmp_path / "two", two, STEPS), want, group, f"{problem}: two workers")
-    four = _layout(tmp_path / "four.toml", workers=4, shape=(2, 2))
-    _assert_same(_launch(variants, problem, tmp_path / "four", four, STEPS), want, group, f"{problem}: a 2x2 launch")
-    first = _launch(variants, problem, tmp_path / "first", two, STEPS // 2)
+    ph.disagreement(_assert_same, _launch(variants, problem, tmp_path / "two", 2, STEPS, shape=(2, 1)), want, group, f"{problem}: two workers")
+    ph.disagreement(_assert_same, _launch(variants, problem, tmp_path / "four", 4, STEPS, shape=(2, 2)), want, group, f"{problem}: a 2x2 launch")
+    first = _launch(variants, problem, tmp_path / "first", 2, STEPS // 2, shape=(2, 1))
     if group == "continuous_tracers" and problem in INJECTING:
         # the resume carries the stochastic continuation, not positions alone
         with h5py.File(first, "r") as f:
@@ -240,10 +237,9 @@ def test_launched_workers_carry_the_single_grid_tracer_population(tmp_path: Path
             assert np.any(g["random_counter"][:] > 0), "no tracer drew noise before the checkpoint; the resume arm is vacuous"
             assert float(g.attrs["injection_remainder"]) != 0.0, "the checkpoint carries no injection remainder"
             assert int(g.attrs["next_id"]) > int(g.attrs["n_tracers"]) - 1
-    three = _layout(tmp_path / "three.toml", workers=3, cuts=[[10, 21], []])
-    resumed = _launch(variants, problem, tmp_path / "resumed", three, STEPS, checkpoint=first)
+    resumed = _launch(variants, problem, tmp_path / "resumed", 3, STEPS, cuts=[[10, 21], []], checkpoint=first)
     assert _iteration(resumed) == STEPS
-    _assert_same(resumed, want, group, f"{problem}: resumed onto three uneven workers")
+    ph.disagreement(_assert_same, resumed, want, group, f"{problem}: resumed onto three uneven workers")
 
 
 MAGNETIZED = {"TracedNmhd": "tracers", "TracedRmhd": "tracers", "TracedImhd": "tracers", "Ito3Nmhd": "continuous_tracers"}
@@ -253,29 +249,26 @@ MAGNETIZED = {"TracedNmhd": "tracers", "TracedRmhd": "tracers", "TracedImhd": "t
 def test_magnetized_tiles_and_workers_carry_the_single_grid_tracer_population(tmp_path: Path, variants: Path, problem: str) -> None:
     group = MAGNETIZED[problem]
     want = _run(problem, tmp_path / "single", 1, STEPS)
-    _assert_same(_run(problem, tmp_path / "tiles", 2, STEPS), want, group, f"{problem}: two host tiles")
-    two = _layout(tmp_path / "two.toml", workers=2, shape=(2, 1))
-    _assert_same(_launch(variants, problem, tmp_path / "two", two, STEPS), want, group, f"{problem}: two workers")
-    first = _launch(variants, problem, tmp_path / "first", two, STEPS // 2)
-    three = _layout(tmp_path / "three.toml", workers=3, cuts=[[10, 21], []])
-    resumed = _launch(variants, problem, tmp_path / "resumed", three, STEPS, checkpoint=first)
-    _assert_same(resumed, want, group, f"{problem}: resumed onto three uneven workers")
+    ph.disagreement(_assert_same, _run(problem, tmp_path / "tiles", 2, STEPS), want, group, f"{problem}: two host tiles")
+    ph.disagreement(_assert_same, _launch(variants, problem, tmp_path / "two", 2, STEPS, shape=(2, 1)), want, group, f"{problem}: two workers")
+    first = _launch(variants, problem, tmp_path / "first", 2, STEPS // 2, shape=(2, 1))
+    resumed = _launch(variants, problem, tmp_path / "resumed", 3, STEPS, cuts=[[10, 21], []], checkpoint=first)
+    ph.disagreement(_assert_same, resumed, want, group, f"{problem}: resumed onto three uneven workers")
     # the population moved: the gate compares a population the magnetized transport displaced
     start, end = _population(first, group), _population(want, group)
     assert not np.array_equal(start["owner"], end["owner"]), f"{problem}: no tracer changed cell; the arm is vacuous"
 
 
 def test_a_troubled_cell_against_a_cut_moves_the_tracers_alike(tmp_path: Path, variants: Path) -> None:
-    one = _layout(tmp_path / "one.toml", workers=1, shape=(1, 1))
-    three = _layout(tmp_path / "three.toml", workers=3, cuts=[[], [10, 21]])
     # the inflow cell beside the cut at y index 10, in the first stage of step 3: its first-order
     # flux changes the mass entering through the inner x face, which the injection books
     inject = "trouble:3:0:0:9"
-    clean = _launch(variants, "DiscreteDrift", tmp_path / "clean", one, STEPS)
-    flagged = _launch(variants, "DiscreteDrift", tmp_path / "flagged", one, STEPS, inject=inject)
+    clean = _launch(variants, "DiscreteDrift", tmp_path / "clean", 1, STEPS, shape=(1, 1))
+    flagged = _launch(variants, "DiscreteDrift", tmp_path / "flagged", 1, STEPS, shape=(1, 1), inject=inject)
     a, b = _population(clean, "tracers"), _population(flagged, "tracers")
     assert any(not np.array_equal(x, b[n]) for n, x in a.items()), "the flag left the population unchanged; the correction arm is vacuous"
-    _assert_same(_launch(variants, "DiscreteDrift", tmp_path / "corrected", three, STEPS, inject=inject), flagged, "tracers", "corrected on three")
+    corrected = _launch(variants, "DiscreteDrift", tmp_path / "corrected", 3, STEPS, cuts=[[], [10, 21]], inject=inject)
+    ph.disagreement(_assert_same, corrected, flagged, "tracers", "corrected on three")
 
 
 MIGRATIONS = re.compile(r"SIMBI launch tracers: worker=\d+/\d+ migrations=(\d+) corner_migrations=(\d+)")
@@ -283,10 +276,8 @@ MIGRATIONS = re.compile(r"SIMBI launch tracers: worker=\d+/\d+ migrations=(\d+) 
 
 def test_ito_tracers_crossing_a_cut_and_a_corner_land_as_on_the_single_grid(tmp_path: Path, variants: Path) -> None:
     want = _run("DiagonalIto3Drift", tmp_path / "single", 1, STEPS)
-    four = _layout(tmp_path / "four.toml", workers=4, cuts=[[12], [12]])
-    done = _launch_run(variants, "DiagonalIto3Drift", tmp_path / "four", four, STEPS)
-    assert done.returncode == 0, f"launch failed:\nstdout:\n{done.stdout}\nstderr:\n{done.stderr[-3000:]}"
-    _assert_same(_final(tmp_path / "four"), want, "continuous_tracers", "DiagonalIto3Drift: an uneven 2x2 launch")
+    done = _launch_run(variants, "DiagonalIto3Drift", tmp_path / "four", 4, STEPS, cuts=[[12], [12]])
+    ph.disagreement(_assert_same, done.final, want, "continuous_tracers", "DiagonalIto3Drift: an uneven 2x2 launch")
     # every worker counts the session's moves from the same assembled records
     counts = {(int(m), int(c)) for m, c in MIGRATIONS.findall(done.stderr)}
     assert len(counts) == 1, f"the workers report different migration counts: {counts}"
@@ -303,20 +294,14 @@ def test_the_traced_kelvin_helmholtz_example_launches_as_it_runs(tmp_path: Path)
         "import sys\n"
         "from simbi.simulation import runner\n"
         f"from {module} import TracedKelvinHelmholtz\n"
-        "runner.run(TracedKelvinHelmholtz(resolution=(32, 32), tracers=400, checkpoint_interval=1e9, data_directory=sys.argv[1]), compute_mode='cpu', max_steps=6)\n"
+        "runner.run(TracedKelvinHelmholtz(resolution=(32, 32), tracers=400, checkpoint_interval=1e9, data_directory=sys.argv[1]), compute_mode=sys.argv[2], max_steps=6)\n"
     )
-    done = subprocess.run([sys.executable, "-c", snippet, str(tmp_path / "single")], capture_output=True, text=True, timeout=900)
-    assert done.returncode == 0, done.stderr[-3000:]
+    ph.python(ph.snippet_args(snippet, str(tmp_path / "single"), ph.BACKEND), "traced kelvin-helmholtz on one device")
     want = _final(tmp_path / "single")
     script = str(Path(module.replace(".", "/") + ".py"))
-    two = _layout(tmp_path / "two.toml", workers=2, shape=(2, 1))
-    cmd = [sys.executable, "-m", "simbi.cli", "launch", script, "--layout", str(two), "--max-steps", "6", "--resolution", "32,32",
-           "--tracers", "400", "--data-directory", str(tmp_path / "two"), "--checkpoint-interval", "1e9"]
-    env = dict(os.environ)
-    env.pop("SIMBI_LAUNCH_EXPERIMENTAL", None)
-    done = subprocess.run(cmd, capture_output=True, text=True, timeout=900, env=env)
-    assert done.returncode == 0, f"launch failed:\nstdout:\n{done.stdout}\nstderr:\n{done.stderr[-3000:]}"
-    _assert_same(_final(tmp_path / "two"), want, "continuous_tracers", "traced kelvin-helmholtz on two workers")
+    args = ["--max-steps", "6", "--resolution", "32,32", "--tracers", "400", "--checkpoint-interval", "1e9"]
+    got = ph.launch(script, tmp_path / "two", workers=2, shape=(2, 1), args=args, env=ph.environment()).final
+    ph.disagreement(_assert_same, got, want, "continuous_tracers", "traced kelvin-helmholtz on two workers")
 
 
 SINKS = {"SinkDrift": "tracers", "SinkIto2Drift": "continuous_tracers"}
@@ -337,13 +322,11 @@ def test_tracers_cross_into_a_sink_on_tiles_and_workers_as_on_the_single_grid(tm
     at = np.searchsorted(end["id"], half["id"][frozen])
     for name in ["position", "crossing_time"] + (["random_counter"] if group == "continuous_tracers" else []):
         np.testing.assert_array_equal(end[name][at], half[name][frozen], err_msg=f"{problem}: an absorbed tracer's {name} moved")
-    _assert_same(_run(problem, tmp_path / "tiles", 2, STEPS), want, group, f"{problem}: two host tiles")
-    two = _layout(tmp_path / "two.toml", workers=2, shape=(2, 1))
-    _assert_same(_launch(variants, problem, tmp_path / "two", two, STEPS), want, group, f"{problem}: two workers")
-    first = _launch(variants, problem, tmp_path / "first", two, STEPS // 2)
-    three = _layout(tmp_path / "three.toml", workers=3, cuts=[[10, 21], []])
-    resumed = _launch(variants, problem, tmp_path / "resumed", three, STEPS, checkpoint=first)
-    _assert_same(resumed, want, group, f"{problem}: resumed onto three uneven workers")
+    ph.disagreement(_assert_same, _run(problem, tmp_path / "tiles", 2, STEPS), want, group, f"{problem}: two host tiles")
+    ph.disagreement(_assert_same, _launch(variants, problem, tmp_path / "two", 2, STEPS, shape=(2, 1)), want, group, f"{problem}: two workers")
+    first = _launch(variants, problem, tmp_path / "first", 2, STEPS // 2, shape=(2, 1))
+    resumed = _launch(variants, problem, tmp_path / "resumed", 3, STEPS, cuts=[[10, 21], []], checkpoint=first)
+    ph.disagreement(_assert_same, resumed, want, group, f"{problem}: resumed onto three uneven workers")
 
 
 @pytest.mark.parametrize(("problem", "group"), [("RefinedDiscreteDrift", "tracers"), ("RefinedIto2Drift", "continuous_tracers")])
@@ -354,12 +337,13 @@ def test_launched_refined_workers_carry_the_single_hierarchy_population(tmp_path
         assert {0, 1} <= set(levels), "the records do not span both levels; the comparison is vacuous"
         assert int(f[group].attrs["n_tracers"]) > 400, "no tracer was injected; the spawn arm is vacuous"
     layouts = [
-        ("two", _layout(tmp_path / "two.toml", workers=2, shape=(2, 1))),
-        ("four", _layout(tmp_path / "four.toml", workers=4, shape=(2, 2))),
-        ("three", _layout(tmp_path / "three.toml", workers=3, cuts=[[12, 20], []])),
+        ("two", 2, {"shape": (2, 1)}),
+        ("four", 4, {"shape": (2, 2)}),
+        ("three", 3, {"cuts": [[12, 20], []]}),
     ]
-    for name, layout in layouts:
-        _assert_same(_launch(variants, problem, tmp_path / name, layout, STEPS), want, group, f"{problem} on {name} workers")
+    for name, workers, partition in layouts:
+        got = _launch(variants, problem, tmp_path / name, workers, STEPS, **partition)
+        ph.disagreement(_assert_same, got, want, group, f"{problem} on {name} workers")
 
 
 # refined populations across regimes, schemes and depths: (group, levels the records span, whether
@@ -387,12 +371,10 @@ def test_refined_tiles_and_workers_carry_the_single_hierarchy_population_across_
         assert levels <= spanned, f"{problem}: the records span levels {sorted(spanned)}, short of {sorted(levels)}; the comparison is vacuous"
         if injects:
             assert int(f[group].attrs["n_tracers"]) > 400, f"{problem}: no tracer was injected; the spawn arm is vacuous"
-    _assert_same(_run(problem, tmp_path / "tiles2", 2, STEPS), want, group, f"{problem} on two host tiles")
-    _assert_same(_run(problem, tmp_path / "tiles3", 3, STEPS, extra=f", decompose={cuts!r}"), want, group, f"{problem} on three uneven host tiles")
-    two = _layout(tmp_path / "two.toml", workers=2, shape=(2, 1))
-    _assert_same(_launch(variants, problem, tmp_path / "two", two, STEPS), want, group, f"{problem} on two workers")
-    three = _layout(tmp_path / "three.toml", workers=3, cuts=cuts)
-    _assert_same(_launch(variants, problem, tmp_path / "three", three, STEPS), want, group, f"{problem} on three uneven workers")
+    ph.disagreement(_assert_same, _run(problem, tmp_path / "tiles2", 2, STEPS), want, group, f"{problem} on two host tiles")
+    ph.disagreement(_assert_same, _run(problem, tmp_path / "tiles3", 3, STEPS, extra=f", decompose={cuts!r}"), want, group, f"{problem} on three uneven host tiles")
+    ph.disagreement(_assert_same, _launch(variants, problem, tmp_path / "two", 2, STEPS, shape=(2, 1)), want, group, f"{problem} on two workers")
+    ph.disagreement(_assert_same, _launch(variants, problem, tmp_path / "three", 3, STEPS, cuts=cuts), want, group, f"{problem} on three uneven workers")
 
 
 # a rejection forced on worker 1 in the corrector of step 3, after the predictor carried tracers
@@ -402,14 +384,11 @@ def test_refined_tiles_and_workers_carry_the_single_hierarchy_population_across_
 @pytest.mark.parametrize("problem", ["DiscreteDrift", "Ito3Drift"])
 def test_a_rejection_with_tracers_rolls_every_worker_back(tmp_path: Path, variants: Path, problem: str) -> None:
     group = GROUP[problem]
-    one = _layout(tmp_path / "one.toml", workers=1, shape=(1, 1))
-    three = _layout(tmp_path / "three.toml", workers=3, cuts=[[10, 21], []])
-    clean = _launch(variants, problem, tmp_path / "clean", one, STEPS)
-    want = _launch(variants, problem, tmp_path / "one", one, STEPS, inject="reject:0:3:1")
+    clean = _launch(variants, problem, tmp_path / "clean", 1, STEPS, shape=(1, 1))
+    want = _launch(variants, problem, tmp_path / "one", 1, STEPS, shape=(1, 1), inject="reject:0:3:1")
     a, b = _population(clean, group), _population(want, group)
     assert any(not np.array_equal(x, b[n]) for n, x in a.items()), f"{problem}: the rejection left the population unchanged; the arm is vacuous"
-    done = _launch_run(variants, problem, tmp_path / "three", three, STEPS, inject="reject:1:3:1")
-    assert done.returncode == 0, f"launch failed:\nstdout:\n{done.stdout}\nstderr:\n{done.stderr[-3000:]}"
+    done = _launch_run(variants, problem, tmp_path / "three", 3, STEPS, cuts=[[10, 21], []], inject="reject:1:3:1")
     counts = {(int(m), int(c)) for m, c in MIGRATIONS.findall(done.stderr)}
     assert counts and all(m > 0 for m, _ in counts), f"{problem}: no tracer crossed a cut; the restore arm is vacuous ({counts})"
-    _assert_same(_final(tmp_path / "three"), want, group, f"{problem}: three uneven workers under the rejection")
+    ph.disagreement(_assert_same, done.final, want, group, f"{problem}: three uneven workers under the rejection")

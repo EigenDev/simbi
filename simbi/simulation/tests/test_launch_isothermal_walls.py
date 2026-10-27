@@ -11,7 +11,11 @@
 # with outflow walls, and the isothermal vortex under an ohmic resistivity, shown
 # to act against the ideal launch.
 #
+# the single-grid references and the launches run on the session's backend and
+# placement (parity_harness).
+#
 # run: pytest -m simulation simbi/simulation/tests/test_launch_isothermal_walls.py
+#      (SIMBI_PARITY_BACKEND / SIMBI_PARITY_PLACEMENT select the session, parity_harness.py)
 # =============================================================================
 
 from pathlib import Path
@@ -20,11 +24,9 @@ import pytest
 
 from simbi.simulation.tests.test_launch import (
     STEPS,
-    _assert_same_state,
-    _layout,
     bounded_processes,  # noqa: F401  the autouse process guard
 )
-from simbi.simulation.tests.test_launch_isothermal import _script_launch, _script_reference
+from simbi.simulation.tests.test_launch_isothermal import _launch, _same_state, _script_reference
 from simbi.simulation.tests.test_launch_walls import _assert_flag_changed
 
 pytestmark = pytest.mark.simulation
@@ -46,16 +48,16 @@ def test_an_isothermal_launch_matches_the_single_grid_run(tmp_path: Path, name: 
     script = module.replace(".", "/") + ".py"
     planar = len(resolution) == 2
     reference = _script_reference(module, cls, resolution, tmp_path / "single", STEPS)
-    four = _layout(tmp_path / "four.toml", workers=4, shape=(2, 2) if planar else (2, 2, 1))
-    launched = _script_launch(script, resolution, tmp_path / "four", four, STEPS, workers=4)
-    _assert_same_state(launched, reference, f"{name}: four workers")
-    one = _layout(tmp_path / "one.toml", workers=1, shape=(1, 1) if planar else (1, 1, 1))
+    four = dict(workers=4, shape=(2, 2) if planar else (2, 2, 1))
+    launched = _launch(script, resolution, tmp_path / "four", STEPS, **four)
+    _same_state(launched, reference, f"{name}: four workers")
+    one = dict(workers=1, shape=(1, 1) if planar else (1, 1, 1))
     if off:
-        switched_off = _script_launch(script, resolution, tmp_path / "off", one, STEPS, workers=1, flags=off)
+        switched_off = _launch(script, resolution, tmp_path / "off", STEPS, **one, flags=off)
         _assert_flag_changed(switched_off, launched)
     inject = {"SIMBI_FABRIC_INJECT": trouble}
-    clean = _script_launch(script, resolution, tmp_path / "clean", one, STEPS, workers=1)
-    flagged = _script_launch(script, resolution, tmp_path / "flagged", one, STEPS, workers=1, env=inject)
+    clean = _launch(script, resolution, tmp_path / "clean", STEPS, **one)
+    flagged = _launch(script, resolution, tmp_path / "flagged", STEPS, **one, env=inject)
     _assert_flag_changed(clean, flagged)
-    corrected = _script_launch(script, resolution, tmp_path / "corrected", four, STEPS, workers=4, env=inject)
-    _assert_same_state(corrected, flagged, f"{name}: four workers, the correction")
+    corrected = _launch(script, resolution, tmp_path / "corrected", STEPS, **four, env=inject)
+    _same_state(corrected, flagged, f"{name}: four workers, the correction")

@@ -11,19 +11,20 @@
 # cell off the cut, and a magnetized, an isothermal and a relativistic face on
 # the cut are refused by name, as are a magnetized level-2 face on the cut of
 # level 1 and one under a level 1 spanning a periodic axis. every arm runs as a
-# fresh process through the public command, the decomposed ones as host tiles
-# on a cpu build.
+# fresh process on the session's backend (parity_harness), the decomposed ones
+# as host tiles; host tiles alone involve no launch, so every gate runs under
+# the local placement.
+#
+# run: pytest -m simulation simbi/simulation/tests/test_decomposed_settings.py
+#      (SIMBI_PARITY_BACKEND selects the session, parity_harness.py)
 # =============================================================================
-import os
-import subprocess
-import sys
 from pathlib import Path
 
 import h5py
 import numpy as np
 import pytest
 
-from simbi.simulation.tests.checkpoint_compare import assert_same_checkpoint
+from simbi.simulation.tests import parity_harness as ph
 
 pytestmark = pytest.mark.simulation
 
@@ -33,14 +34,13 @@ SYNGE = "simbi_configs/examples/srhd/synge_blast.py"
 
 
 def _command(script: str, out: Path, ngpus: int, flags: list[str]) -> list[str]:
-    return [sys.executable, "-m", "simbi.cli", "run", script, "--mode", "cpu", "--ngpus", str(ngpus),
+    """the interpreter arguments of the public run command on the session's backend"""
+    return ["-m", "simbi.cli", "run", script, "--mode", ph.BACKEND, "--ngpus", str(ngpus),
             "--checkpoint-interval", "1e9", "--data-directory", str(out), *flags]
 
 
 def _run(script: str, out: Path, ngpus: int, flags: list[str]) -> Path:
-    env = dict(os.environ, SYMBI_GPU_OVERSUBSCRIBE="1")
-    done = subprocess.run(_command(script, out, ngpus, flags), capture_output=True, text=True, timeout=900, env=env)
-    assert done.returncode == 0, f"{script} on {ngpus} devices failed:\n{done.stderr[-3000:]}"
+    ph.python(_command(script, out, ngpus, flags), f"{Path(script).stem} on {ngpus} device(s)", devices=ngpus)
     files = sorted(out.glob("*final*.h5"))
     assert len(files) == 1, f"expected one final checkpoint in {out}, found {files}"
     return files[0]
@@ -60,15 +60,17 @@ def _conserved(path: Path) -> tuple[dict[str, np.ndarray], int]:
         return {name: data[()] for name, data in level["conserved"].items()}, int(level.attrs["iteration"])
 
 
+@ph.local_only
 def test_a_viscous_run_on_two_devices_is_viscous(tmp_path: Path) -> None:
     base = ["--resolution", "32,32,1", "--end-time", "0.05"]
     one = _run(VISCOUS, tmp_path / "v1", 1, base + ["--nu", "0.05"])
     viscous_1, _ = _density(one)
     inviscid_1, _ = _density(_run(VISCOUS, tmp_path / "i1", 1, base + ["--nu", "0.0"]))
     assert np.abs(viscous_1 - inviscid_1).max() > 0.0, "viscosity does not act on this setup; the gate is vacuous"
-    assert_same_checkpoint(_run(VISCOUS, tmp_path / "v2", 2, base + ["--nu", "0.05"]), one, "a viscous run on two devices")
+    ph.same_checkpoint(_run(VISCOUS, tmp_path / "v2", 2, base + ["--nu", "0.05"]), one, "a viscous run on two devices")
 
 
+@ph.local_only
 def test_an_excised_run_on_two_devices_is_excised(tmp_path: Path) -> None:
     base = ["--resolution", "24,24,24", "--end-time", "0.6", "--domain-radius", "0.12"]
     excised = _run(BONDI, tmp_path / "e1", 1, base + ["--excision-radius", "1.6"])
@@ -77,16 +79,17 @@ def test_an_excised_run_on_two_devices_is_excised(tmp_path: Path) -> None:
     assert not np.array_equal(one["den"], bare["den"]), "excision does not act on this setup; the gate is vacuous"
     # every tile evaluates the metric at whole-grid cell centers (the global origin plus its index
     # offset), so the excised relativistic march is the single grid's, bit for bit
-    assert_same_checkpoint(_run(BONDI, tmp_path / "e2", 2, base + ["--excision-radius", "1.6"]), excised, "an excised run on two devices")
+    ph.same_checkpoint(_run(BONDI, tmp_path / "e2", 2, base + ["--excision-radius", "1.6"]), excised, "an excised run on two devices")
 
 
+@ph.local_only
 def test_the_synge_gas_on_two_devices_is_the_synge_gas(tmp_path: Path) -> None:
     base = ["--resolution", "32,32", "--end-time", "0.02"]
     one = _run(SYNGE, tmp_path / "s1", 1, base)
     synge_1, _ = _density(one)
     ideal_1, _ = _density(_run(SYNGE, tmp_path / "i1", 1, base + ["--eos", "ideal", "--adiabatic-index", "1.4"]))
     assert np.abs(synge_1 - ideal_1).max() > 0.0, "the closure does not act on this setup; the gate is vacuous"
-    assert_same_checkpoint(_run(SYNGE, tmp_path / "s2", 2, base), one, "the synge gas on two devices")
+    ph.same_checkpoint(_run(SYNGE, tmp_path / "s2", 2, base), one, "the synge gas on two devices")
 
 
 def _patch_on_cut_script(path: Path, x_lo: float, base: str = "newtonian.refined_blast:RefinedBlast", y: tuple[float, float] = (-0.25, 0.25),
@@ -108,8 +111,7 @@ def _patch_on_cut_script(path: Path, x_lo: float, base: str = "newtonian.refined
 
 
 def _refused(script: str, out: Path, flags: list[str]) -> str:
-    env = dict(os.environ, SYMBI_GPU_OVERSUBSCRIBE="1")
-    done = subprocess.run(_command(script, out, 2, flags), capture_output=True, text=True, timeout=900, env=env)
+    done = ph.python(_command(script, out, 2, flags), f"{Path(script).stem} on two devices, expecting a refusal", devices=2, check=False)
     assert done.returncode != 0, f"the run succeeded:\n{done.stdout[-1500:]}"
     assert not list(out.glob("*.h5")), "output was written before the refusal"
     return " ".join(done.stderr.split())
@@ -135,15 +137,14 @@ def _capped(script: str, out: Path, gpus: int, steps: int, flags: list[str], che
         "p.checkpoint_interval = 1e9\n"
         "p.data_directory = sys.argv[2]\n"
         + resume
-        + f"runner.run(p, compute_mode='cpu', max_steps={steps})\n"
+        + f"runner.run(p, compute_mode={ph.BACKEND!r}, max_steps={steps})\n"
     )
-    done = subprocess.run([sys.executable, "-c", snippet, script, str(out)], capture_output=True, text=True, timeout=900,
-                          env=dict(os.environ, SYMBI_GPU_OVERSUBSCRIBE="1"))
-    assert done.returncode == 0, f"{script} on {gpus} device(s) to step {steps} failed:\n{done.stderr[-3000:]}"
+    ph.python(ph.snippet_args(snippet, script, str(out)), f"{Path(script).stem} on {gpus} device(s) to step {steps}", devices=gpus)
     (final,) = sorted(out.glob("*final*.h5"))
     return final
 
 
+@ph.local_only
 @pytest.mark.parametrize("order", ["2", "3"], ids=["plm", "ppm"])
 def test_a_patch_face_on_the_device_cut_matches_the_single_grid(tmp_path: Path, order: str) -> None:
     """a patch face lying on the device cut prolongs its fine ghosts from parent cells past the
@@ -158,12 +159,13 @@ def test_a_patch_face_on_the_device_cut_matches_the_single_grid(tmp_path: Path, 
         assert "level_1" in f, "the single grid wrote no refined level; the gate is vacuous"
         assert int(f["level_0"].attrs["iteration"]) == 6
     assert halo < PROLONG_REACH, f"the root halo ({halo}) holds the prolongation reach; the cut face reads no gathered cell"
-    assert_same_checkpoint(_capped(on_cut, tmp_path / "two", 2, 6, flags), one, "a patch face on the cut", expect=["level_1"])
+    ph.same_checkpoint(_capped(on_cut, tmp_path / "two", 2, 6, flags), one, "a patch face on the cut", expect=["level_1"])
     half = _capped(on_cut, tmp_path / "half", 2, 3, flags)
     resumed = _capped(on_cut, tmp_path / "resumed", 2, 6, flags, checkpoint=half)
-    assert_same_checkpoint(resumed, one, "a patch face on the cut, resumed", expect=["level_1"])
+    ph.same_checkpoint(resumed, one, "a patch face on the cut, resumed", expect=["level_1"])
 
 
+@ph.local_only
 def test_a_patch_face_near_the_device_cut_is_refused_by_name(tmp_path: Path) -> None:
     """a patch face one root cell past the cut prolongs its fine ghosts from the root halo, which
     the plm stencil reaches past: the run is refused with the clearance to move the face by, and
@@ -180,6 +182,7 @@ def test_a_patch_face_near_the_device_cut_is_refused_by_name(tmp_path: Path) -> 
     _run(two_cells_past, tmp_path / "admitted", 2, flags)
 
 
+@ph.local_only
 def test_a_patch_face_on_the_device_cut_prolonging_further_inputs_is_refused_by_name(tmp_path: Path) -> None:
     """the gathered parent stencil carries the newtonian gas primitives and the dye: a magnetized
     level (cell and face field), an isothermal closure (the sound speed) and a relativistic level
@@ -219,6 +222,7 @@ def _nested_script(path: Path, level_1: list[float], level_2: list[float], base:
     return str(path)
 
 
+@ph.local_only
 def test_a_level_2_face_on_the_cut_of_level_1_outside_the_gated_scope_is_refused_by_name(tmp_path: Path) -> None:
     """a level-2 face on the cut of level 1 runs on host tiles for the newtonian gas inside the
     domain; a magnetized one carries no edge-field register across the cut, and one under a level 1

@@ -16,22 +16,23 @@
 # the mapped problems are the examples with their spacing set by a subclass
 # written for the test. ppm outside newtonian hydro on a flat cartesian grid is
 # refused by name, even under the experimental opt-in.
+# the single-grid references and the launches run on the session's backend
+# and placement (parity_harness).
 #
 # run: pytest -m simulation simbi/simulation/tests/test_launch_order_and_spacing.py
+#      (SIMBI_PARITY_BACKEND / SIMBI_PARITY_PLACEMENT select the session, parity_harness.py)
 # =============================================================================
 
 import os
-import subprocess
-import sys
 from pathlib import Path
 
 import h5py
 import pytest
 
+from simbi.simulation.tests import parity_harness as ph
 from simbi.simulation.tests.test_launch import (
     MHD_STEPS,
     STEPS,
-    _assert_same_state,
     _layout,
     bounded_processes,  # noqa: F401  the autouse process guard
 )
@@ -104,14 +105,14 @@ def _mapped_module(tmp_path: Path, module: str, cls: str, lines: list[str], monk
 
 def _resume(tmp_path: Path, script: str, module: str, cls: str, resolution, steps: int, layout: dict, flags=None, fields="") -> None:
     reference = _script_reference(module, cls, resolution, tmp_path / "single", steps, fields=fields)
-    four = _layout(tmp_path / "four.toml", workers=4, cuts=layout["cuts"])
+    four = _layout(tmp_path / "four-layout.toml", workers=4, cuts=layout["cuts"])
     partial = _script_launch(script, resolution, tmp_path / "first", four, steps // 2, workers=4, flags=flags)
     with h5py.File(partial, "r") as f:
         written_at = int(f["level_0"].attrs["iteration"])
     assert 0 < written_at < steps
-    three = _layout(tmp_path / "three.toml", workers=3, cuts=layout["restart"])
+    three = _layout(tmp_path / "three-layout.toml", workers=3, cuts=layout["restart"])
     resumed = _script_launch(script, resolution, tmp_path / "three", three, steps, workers=3, checkpoint=partial, flags=flags)
-    _assert_same_state(resumed, reference, "resumed onto three uneven workers against the uninterrupted run")
+    ph.same_checkpoint(resumed, reference, "resumed onto three uneven workers against the uninterrupted run")
 
 
 @pytest.mark.parametrize("name", list(ORDER_CASES))
@@ -119,10 +120,10 @@ def test_a_first_order_launch_matches_the_single_grid_run(tmp_path: Path, name: 
     module, cls, resolution, steps, layout = ORDER_CASES[name]
     script = _script(module)
     reference = _script_reference(module, cls, resolution, tmp_path / "single", steps, fields=PCM["fields"])
-    four = _layout(tmp_path / "four.toml", workers=4, cuts=layout["cuts"])
+    four = _layout(tmp_path / "four-layout.toml", workers=4, cuts=layout["cuts"])
     launched = _script_launch(script, resolution, tmp_path / "four", four, steps, workers=4, flags=PCM["flags"])
-    _assert_same_state(launched, reference, f"{name}: four workers under pcm")
-    one = _layout(tmp_path / "one.toml", workers=1, cuts=[[] for _ in layout["cuts"]])
+    ph.same_checkpoint(launched, reference, f"{name}: four workers under pcm")
+    one = _layout(tmp_path / "one-layout.toml", workers=1, cuts=[[] for _ in layout["cuts"]])
     plm = _script_launch(script, resolution, tmp_path / "plm", one, steps, workers=1)
     _assert_flag_changed(plm, launched)
     _resume(tmp_path / "resume", script, module, cls, resolution, steps, layout, flags=PCM["flags"], fields=PCM["fields"])
@@ -133,10 +134,10 @@ def test_a_mapped_launch_matches_the_single_grid_run_fresh_corrected_and_resumed
     base_module, base_cls, resolution, steps, lines, _fields, layout = SPACING_CASES[name]
     module, cls, script = _mapped_module(tmp_path, base_module, base_cls, lines, monkeypatch)
     reference = _script_reference(module, cls, resolution, tmp_path / "single", steps)
-    four = _layout(tmp_path / "four.toml", workers=4, cuts=layout["cuts"])
+    four = _layout(tmp_path / "four-layout.toml", workers=4, cuts=layout["cuts"])
     launched = _script_launch(script, resolution, tmp_path / "four", four, steps, workers=4)
-    _assert_same_state(launched, reference, f"{name}: four workers on the mapped grid")
-    one = _layout(tmp_path / "one.toml", workers=1, cuts=[[] for _ in layout["cuts"]])
+    ph.same_checkpoint(launched, reference, f"{name}: four workers on the mapped grid")
+    one = _layout(tmp_path / "one-layout.toml", workers=1, cuts=[[] for _ in layout["cuts"]])
     uniform = _script_launch(_script(base_module), resolution, tmp_path / "uniform", one, steps, workers=1)
     _assert_flag_changed(uniform, launched)
     inject = {"SIMBI_FABRIC_INJECT": layout["trouble"]}
@@ -144,7 +145,7 @@ def test_a_mapped_launch_matches_the_single_grid_run_fresh_corrected_and_resumed
     flagged = _script_launch(script, resolution, tmp_path / "flagged", one, steps, workers=1, env=inject)
     _assert_flag_changed(clean, flagged)
     corrected = _script_launch(script, resolution, tmp_path / "corrected", four, steps, workers=4, env=inject)
-    _assert_same_state(corrected, flagged, f"{name}: four workers, the correction against the cut")
+    ph.same_checkpoint(corrected, flagged, f"{name}: four workers, the correction against the cut")
     _resume(tmp_path / "resume", script, module, cls, resolution, steps, layout)
 
 
@@ -152,14 +153,8 @@ def test_ppm_outside_newtonian_cartesian_hydro_is_refused_by_name(tmp_path: Path
     # the isothermal, magnetized and relativistic tile builders carry no ppm kernel; a request is
     # refused at startup rather than run as plm
     module, cls, resolution, steps, layout = ORDER_CASES["isothermal"]
-    two = _layout(tmp_path / "two.toml", workers=2, cuts=[[16], []])
-    cmd = [
-        sys.executable, "-m", "simbi.cli", "launch", _script(module), "--layout", str(two), "--max-steps", "1",
-        "--resolution", ",".join(str(r) for r in resolution), "--data-directory", str(tmp_path / "out"),
-        "--checkpoint-interval", "1e9", "--reconstruction", "ppm",
-    ]
-    env = dict(os.environ, SIMBI_LAUNCH_EXPERIMENTAL="1")
-    done = subprocess.run(cmd, capture_output=True, text=True, timeout=600, env=env)
+    args = ["--max-steps", "1", "--resolution", ",".join(str(r) for r in resolution), "--checkpoint-interval", "1e9", "--reconstruction", "ppm"]
+    done = ph.launch(_script(module), tmp_path / "out", 2, cuts=[[16], []], args=args, env=ph.environment(opt_in=True), timeout=600, expect_ok=False)
     assert done.returncode != 0, f"the launch ran a ppm request:\n{done.stdout}"
     flat = " ".join(done.stderr.split())
     assert "ppm reconstruction is wired for the newtonian (adiabatic ideal-gas) regime only; got 'isothermal'" in flat, done.stderr

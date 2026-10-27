@@ -6,11 +6,22 @@
 # through the coordinator. a fresh launch on two workers reaches the state the
 # single-grid run reaches, interior cell for interior cell. a launch resumed
 # from a two-worker checkpoint onto three unevenly cut workers reaches the
-# state the uninterrupted single-grid run reaches at the same final time. both
+# state the uninterrupted single-grid run reaches at the same final time. the
 # gates drive the public command through a subprocess, so argument parsing,
 # worker startup, execution, and checkpoint publication are covered together,
-# and both record the backend hash every worker reports and each worker's exit
+# and they record the backend hash every worker reports and each worker's exit
 # code.
+#
+# the parity gates run their single-grid references and their launches on the
+# session's backend and placement (parity_harness). the gates of the local
+# launcher's own process tree (a killed worker, a failed spawn, a terminated
+# launcher, the process guard, device masks and duplicate bindings) and the
+# gates that start scheduler ranks of their own on this host run on the local
+# placement alone. `_layout`, `_launch` and `_launch_command` drive the local
+# launcher for the modules that import them.
+#
+# run: pytest -m simulation simbi/simulation/tests/test_launch.py
+#      (SIMBI_PARITY_BACKEND / SIMBI_PARITY_PLACEMENT select the session, parity_harness.py)
 # =============================================================================
 import os
 import re
@@ -33,6 +44,7 @@ from simbi_configs.examples.newtonian.ordered_sources import OrderedSources
 from simbi_configs.examples.newtonian.refined_mhd_3d import RefinedMhd3D
 from simbi_configs.examples.srhd.ram44 import Ram44
 
+from simbi.simulation.tests import parity_harness as ph
 from simbi.simulation.tests.checkpoint_compare import assert_same_checkpoint
 from simbi.simulation.tests.process_guard import ProcessGuard, descendants
 from simbi.simulation.tests.staggered_div_b import DIV_B_TOLERANCE, normalized_div_b
@@ -91,13 +103,14 @@ runner.run(KelvinHelmholtz(resolution=({rx}, {ry}), data_directory=out, checkpoi
 
 
 def _reference(out: Path, steps: int, **extra: str) -> tuple[Path, set[str]]:
-    """the single-grid run in a fresh interpreter: the example seeds its perturbation once
-    per process, so a reference drawn in the test process would carry a different realization
-    from the launched workers, which each start a process of their own."""
+    """the single-grid run on the session's backend (`compute_mode` overrides it) in a fresh
+    interpreter: the example seeds its perturbation once per process, so a reference drawn in the
+    test process would carry a different realization from the launched workers, which each start
+    a process of their own."""
+    extra.setdefault("compute_mode", ph.BACKEND)
     snippet = REFERENCE_SNIPPET.format(rx=RESOLUTION[0], ry=RESOLUTION[1])
     args = [f"{k}={v}" for k, v in extra.items()]
-    done = subprocess.run([sys.executable, "-c", snippet, str(out), str(steps), *args], capture_output=True, text=True, timeout=600)
-    assert done.returncode == 0, f"reference failed:\n{done.stderr}"
+    ph.python(ph.snippet_args(snippet, str(out), str(steps), *args), "reference", timeout=600)
     files = sorted(out.glob("*final*.h5"))
     assert len(files) == 1, f"expected one final checkpoint in {out}, found {files}"
     # a single-grid run records its backend build in the checkpoint metadata and the run log; the
@@ -106,6 +119,15 @@ def _reference(out: Path, steps: int, **extra: str) -> tuple[Path, set[str]]:
         backend = {str(f["metadata"].attrs["build_source_id"])}
     assert all(PROVENANCE.fullmatch(f"backend={b} config=") for b in backend), f"the reference records backend {backend}"
     return files[0], backend
+
+
+def _snippet_reference(snippet: str, out: Path, steps: int) -> Path:
+    """the single-grid run of a snippet reading (out, steps, compute_mode) on the session's
+    backend in a fresh interpreter; its final checkpoint"""
+    ph.python(ph.snippet_args(snippet, str(out), str(steps), ph.BACKEND), "reference", timeout=600)
+    files = sorted(out.glob("*final*.h5"))
+    assert len(files) == 1, f"expected one final checkpoint in {out}, found {files}"
+    return files[0]
 
 
 def _layout(path: Path, workers: int, cuts=None, shape=None, staging_mb: int = 1, directory: Path | None = None) -> Path:
@@ -146,6 +168,7 @@ def _launch_command(out: Path, layout: Path, steps: int, checkpoint: Path | None
 
 
 def _launch(out: Path, layout: Path, steps: int, workers: int, checkpoint: Path | None = None, interval: float = 1e9, flags: list[str] | None = None, output: Path | None = None, env: dict[str, str] | None = None) -> Launched:
+    """the shear layer through the local launcher over a layout file of the caller's"""
     cmd = _launch_command(out, layout, steps, checkpoint, interval, flags)
     done = subprocess.run(cmd, capture_output=True, text=True, timeout=600, env=env)
     assert done.returncode == 0, f"launch failed:\nstdout:\n{done.stdout}\nstderr:\n{done.stderr}"
@@ -158,6 +181,28 @@ def _launch(out: Path, layout: Path, steps: int, workers: int, checkpoint: Path 
     files = sorted(where.glob("*final*.h5"))
     assert len(files) == 1, f"expected one final checkpoint in {where}, found {files}"
     return Launched(final=files[0], backend=backend, exits=exits, stderr=done.stderr)
+
+
+def _session(script: str, resolution: str, out: Path, steps: int, workers: int, cuts=None, shape=None,
+             checkpoint: Path | None = None, interval: float = 1e9, flags: list[str] | None = None,
+             env: dict[str, str] | None = None) -> Launched:
+    """`simbi launch` of `script` on the session's backend and placement without the experimental
+    opt-in, `env` adding variables (an injected fault, an audit) to this process's environment:
+    every worker exits zero and reports one backend, and one final checkpoint is published"""
+    args = ["--max-steps", str(steps), "--resolution", resolution, "--checkpoint-interval", str(interval)]
+    if checkpoint is not None:
+        args += ["--checkpoint", str(checkpoint)]
+    args += flags or []
+    run = ph.launch(script, out, workers, cuts=cuts, shape=shape, args=args, env=dict(ph.environment(), **(env or {})), timeout=600)
+    assert sorted(run.exits) == list(range(workers)) and all(c == 0 for c in run.exits.values()), f"worker exit codes {run.exits}"
+    backend = _backend_of(run.stderr)
+    assert len(backend) == 1, f"the workers report backends {backend}"
+    return Launched(final=run.final, backend=backend, exits=run.exits, stderr=run.stderr)
+
+
+def _kh_launch(out: Path, steps: int, workers: int, **kwargs) -> Launched:
+    """the shear layer at RESOLUTION through `_session`"""
+    return _session(SCRIPT, ",".join(str(r) for r in RESOLUTION), out, steps, workers, **kwargs)
 
 
 def _interior(f: h5py.File) -> dict[str, np.ndarray]:
@@ -186,54 +231,57 @@ def _assert_same_state(a: Path, b: Path, label: str) -> None:
     assert_same_checkpoint(a, b, label)
 
 
+def _same_state(got: Path, want: Path, label: str) -> None:
+    """`_assert_same_state`, a difference raised as a NumericalDisagreement"""
+    ph.disagreement(_assert_same_state, got, want, f"{label}, {ph.BACKEND}")
+
+
+def _mode_flags(mode: str) -> list[str]:
+    return ["--gpu"] if mode == "gpu" else []
+
+
 def test_a_fresh_launch_matches_the_single_grid_run(tmp_path: Path) -> None:
     reference, backend = _reference(tmp_path / "single", STEPS)
-    layout = _layout(tmp_path / "two.toml", workers=2, shape=(2, 1))
-    launched = _launch(tmp_path / "two", layout, STEPS, workers=2)
+    launched = _kh_launch(tmp_path / "two", STEPS, workers=2, shape=(2, 1))
     assert launched.backend == backend, f"launched {launched.backend} against reference {backend}"
     assert launched.exits == {0: 0, 1: 0}
-    _assert_same_state(launched.final, reference, "two workers")
+    _same_state(launched.final, reference, "two workers")
 
 
 def test_a_launch_resumed_onto_three_uneven_workers_matches(tmp_path: Path) -> None:
     reference, backend = _reference(tmp_path / "single", STEPS)
     # two workers write a bounded run's final checkpoint partway through the reference run
-    first = tmp_path / "first"
-    layout2 = _layout(tmp_path / "two.toml", workers=2, shape=(2, 1))
-    partial = _launch(first, layout2, STEPS // 2, workers=2)
+    partial = _kh_launch(tmp_path / "first", STEPS // 2, workers=2, shape=(2, 1))
     assert partial.backend == backend
     with h5py.File(partial.final, "r") as f:
         written_at = int(f["level_0"].attrs["iteration"])
     assert 0 < written_at < STEPS
     # three unevenly cut workers resume that file up to the reference's absolute step cap
-    layout3 = _layout(tmp_path / "three.toml", workers=3, cuts=[[10, 21], []])
-    resumed = _launch(tmp_path / "three", layout3, STEPS, workers=3, checkpoint=partial.final)
+    resumed = _kh_launch(tmp_path / "three", STEPS, workers=3, cuts=[[10, 21], []], checkpoint=partial.final)
     assert resumed.backend == backend
     assert resumed.exits == {0: 0, 1: 0, 2: 0}
     with h5py.File(resumed.final, "r") as fr, h5py.File(reference, "r") as fs:
         assert fr["level_0"].attrs["time"] == fs["level_0"].attrs["time"], "the continuation ends at the reference's final time"
         assert int(fr["level_0"].attrs["iteration"]) == STEPS
-    _assert_same_state(resumed.final, reference, "resumed on three workers")
+    _same_state(resumed.final, reference, "resumed on three workers")
 
 
-def test_trouble_on_one_side_of_a_cut_matches_the_one_worker_launch(tmp_path: Path, monkeypatch) -> None:
+def test_trouble_on_one_side_of_a_cut_matches_the_one_worker_launch(tmp_path: Path) -> None:
     """a troubled cell in the column against the cut, its neighbor across the cut clean: both
     workers take the first-order flux on the shared face, so two workers equal one bitwise and
     the corrected run differs from the clean one."""
     cell = (RESOLUTION[0] // 2 - 1, RESOLUTION[1] // 3)
-    one = _layout(tmp_path / "one.toml", workers=1, shape=(1, 1))
-    two = _layout(tmp_path / "two.toml", workers=2, shape=(2, 1))
-    clean = _launch(tmp_path / "clean", one, STEPS, workers=1)
-    monkeypatch.setenv("SIMBI_FABRIC_INJECT", f"trouble:3:0:{cell[0]}:{cell[1]}")
-    reference = _launch(tmp_path / "one", one, STEPS, workers=1)
-    launched = _launch(tmp_path / "two", two, STEPS, workers=2)
+    inject = {"SIMBI_FABRIC_INJECT": f"trouble:3:0:{cell[0]}:{cell[1]}"}
+    clean = _kh_launch(tmp_path / "clean", STEPS, workers=1, shape=(1, 1))
+    reference = _kh_launch(tmp_path / "one", STEPS, workers=1, shape=(1, 1), env=inject)
+    launched = _kh_launch(tmp_path / "two", STEPS, workers=2, shape=(2, 1), env=inject)
     with h5py.File(clean.final, "r") as fc, h5py.File(reference.final, "r") as fr:
         xs, ys = _interior(fc), _interior(fr)
         assert any(not np.array_equal(xs[name], ys[name]) for name in xs), (
             "the troubled cell left the one-worker run unchanged; the gate is vacuous"
         )
     assert launched.backend == reference.backend
-    _assert_same_state(launched.final, reference.final, "two workers, trouble against the cut")
+    _same_state(launched.final, reference.final, "two workers, trouble against the cut")
 
 
 def test_a_ppm_launch_matches_the_single_grid_ppm_run(tmp_path: Path) -> None:
@@ -243,23 +291,26 @@ def test_a_ppm_launch_matches_the_single_grid_ppm_run(tmp_path: Path) -> None:
     plm, _ = _reference(tmp_path / "plm", STEPS)
     with h5py.File(reference, "r") as fp, h5py.File(plm, "r") as fl:
         assert fp["level_0"].attrs["time"] != fl["level_0"].attrs["time"], "ppm and plm references coincide; the gate would be vacuous"
-    layout = _layout(tmp_path / "two.toml", workers=2, shape=(2, 1))
-    launched = _launch(tmp_path / "two", layout, STEPS, workers=2, flags=["--reconstruction", "ppm"])
+    launched = _kh_launch(tmp_path / "two", STEPS, workers=2, shape=(2, 1), flags=["--reconstruction", "ppm"])
     assert launched.backend == backend
-    _assert_same_state(launched.final, reference, "ppm on two workers")
+    _same_state(launched.final, reference, "ppm on two workers")
 
 
+@ph.local_only
 def test_the_layout_checkpoint_directory_is_where_the_files_land(tmp_path: Path) -> None:
+    # the local launcher's layout names the directory; the scheduler placement's own layout
+    # always names one
     reference, _ = _reference(tmp_path / "single", STEPS)
     directory = tmp_path / "elsewhere"
     layout = _layout(tmp_path / "two.toml", workers=2, shape=(2, 1), directory=directory)
-    launched = _launch(tmp_path / "two", layout, STEPS, workers=2, output=directory)
+    launched = _launch(tmp_path / "two", layout, STEPS, workers=2, output=directory, flags=_mode_flags(ph.BACKEND), env=ph.environment())
     assert launched.final.parent == directory
     assert not (tmp_path / "two").exists() or not list((tmp_path / "two").glob("*.h5")), "files landed in the problem's data directory"
     assert not list(directory.glob(".rendezvous-*")), "the rendezvous file was left behind"
-    _assert_same_state(launched.final, reference, "checkpoint directory")
+    _same_state(launched.final, reference, "checkpoint directory")
 
 
+@ph.local_only
 def test_a_failed_spawn_terminates_the_workers_already_started(tmp_path: Path, monkeypatch) -> None:
     """the second spawn fails: the first worker is terminated and reaped, and no rendezvous
     file remains."""
@@ -282,6 +333,7 @@ def test_a_failed_spawn_terminates_the_workers_already_started(tmp_path: Path, m
     assert not list((tmp_path / "out").glob(".rendezvous-*"))
 
 
+@ph.local_only
 def test_a_terminated_launcher_ends_its_workers(tmp_path: Path) -> None:
     """SIGTERM to a running launcher terminates every worker and removes the rendezvous file."""
     layout = _layout(tmp_path / "two.toml", workers=2, shape=(2, 1))
@@ -344,6 +396,7 @@ def test_the_configuration_digest_is_canonical() -> None:
         backend.config_digest(unsupported)
 
 
+@ph.local_only
 def test_workers_with_different_resolved_parameters_refuse_to_rendezvous(tmp_path: Path) -> None:
     """two workers of one session started by hand with different cfl numbers: the handshake
     refuses the session as a configuration disagreement and both exit nonzero."""
@@ -379,6 +432,7 @@ def _lan_address() -> str | None:
     return None if address.startswith("127.") else address
 
 
+@ph.local_only
 def test_workers_rendezvous_over_a_non_loopback_address(tmp_path: Path) -> None:
     """the layout binds every worker on all interfaces and advertises this host's address:
     the rendezvous file carries that address, and the run equals the reference."""
@@ -393,14 +447,15 @@ def test_workers_rendezvous_over_a_non_loopback_address(tmp_path: Path) -> None:
         "keep_rendezvous = true\n"
     )
     out = tmp_path / "lan"
-    launched = _launch(out, layout, STEPS, workers=2)
-    _assert_same_state(launched.final, reference, "non-loopback rendezvous")
+    launched = _launch(out, layout, STEPS, workers=2, flags=_mode_flags(ph.BACKEND), env=ph.environment())
+    _same_state(launched.final, reference, "non-loopback rendezvous")
     kept = sorted(out.glob(".rendezvous-*.kept"))
     assert kept, "the rendezvous record was not kept for inspection"
     first = kept[0].read_text().splitlines()[0]
     assert first.startswith(address + ":"), f"the coordinator advertised {first!r}, expected {address}"
 
 
+@ph.local_only
 def test_scheduler_started_workers_rendezvous_through_the_restricted_file(tmp_path: Path) -> None:
     """two workers started as a scheduler would, with rank and size in the environment and no
     launcher parent: the coordinator writes its advertised address and a fresh credential into
@@ -417,10 +472,11 @@ def test_scheduler_started_workers_rendezvous_through_the_restricted_file(tmp_pa
         sys.executable, "-m", "simbi.cli", "launch", SCRIPT, "--layout", str(layout),
         "--max-steps", str(STEPS), "--resolution", ",".join(str(r) for r in RESOLUTION),
         "--data-directory", str(tmp_path / "ignored"), "--checkpoint-interval", "1e9",
+        *_mode_flags(ph.BACKEND),
     ]
     procs = []
     for rank in range(2):
-        env = dict(os.environ, SLURM_PROCID=str(rank), SLURM_NTASKS="2")
+        env = dict(ph.environment(), SLURM_PROCID=str(rank), SLURM_NTASKS="2")
         procs.append(subprocess.Popen(cmd, env=env, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, text=True))
     errs = [p.communicate(timeout=300)[1] for p in procs]
     for rank, (p, err) in enumerate(zip(procs, errs)):
@@ -433,9 +489,10 @@ def test_scheduler_started_workers_rendezvous_through_the_restricted_file(tmp_pa
     assert (kept.stat().st_mode & 0o777) == 0o600, "the rendezvous file is not owner-only"
     lines = kept.read_text().splitlines()
     assert len(lines) == 2 and int(lines[1]) != 0, "the file carries the address and a credential"
-    _assert_same_state(finals[0], reference, "scheduler-started workers")
+    _same_state(finals[0], reference, "scheduler-started workers")
 
 
+@ph.local_only
 def test_the_guard_kills_its_own_descendants_alone() -> None:
     """a bystander started outside the guarded root survives a trip; the root's descendants
     end."""
@@ -471,41 +528,18 @@ MHD_REFERENCE_SNIPPET = """
 import sys
 from simbi.simulation import runner
 from simbi_configs.examples.newtonian.nmhd_orszag_tang import NewtonianOrszagTang
-out, steps = sys.argv[1], int(sys.argv[2])
-runner.run(NewtonianOrszagTang(resolution=({rx}, {ry}, 1), data_directory=out, checkpoint_interval=1e9), compute_mode="cpu", max_steps=steps)
+out, steps, mode = sys.argv[1], int(sys.argv[2]), sys.argv[3]
+runner.run(NewtonianOrszagTang(resolution=({rx}, {ry}, 1), data_directory=out, checkpoint_interval=1e9), compute_mode=mode, max_steps=steps)
 """
 
 
 def _mhd_reference(out: Path, steps: int) -> Path:
-    snippet = MHD_REFERENCE_SNIPPET.format(rx=MHD_RESOLUTION[0], ry=MHD_RESOLUTION[1])
-    done = subprocess.run([sys.executable, "-c", snippet, str(out), str(steps)], capture_output=True, text=True, timeout=600)
-    assert done.returncode == 0, f"reference failed:\n{done.stderr}"
-    files = sorted(out.glob("*final*.h5"))
-    assert len(files) == 1, f"expected one final checkpoint in {out}, found {files}"
-    return files[0]
+    return _snippet_reference(MHD_REFERENCE_SNIPPET.format(rx=MHD_RESOLUTION[0], ry=MHD_RESOLUTION[1]), out, steps)
 
 
-def _mhd_launch_command(out: Path, layout: Path, steps: int, checkpoint: Path | None = None) -> list[str]:
-    cmd = [
-        sys.executable, "-m", "simbi.cli", "launch", MHD_SCRIPT,
-        "--layout", str(layout), "--max-steps", str(steps),
-        "--resolution", f"{MHD_RESOLUTION[0]},{MHD_RESOLUTION[1]},1",
-        "--data-directory", str(out), "--checkpoint-interval", "1e9",
-    ]
-    if checkpoint is not None:
-        cmd += ["--checkpoint", str(checkpoint)]
-    return cmd
-
-
-def _mhd_launch(out: Path, layout: Path, steps: int, workers: int, checkpoint: Path | None = None, env: dict[str, str] | None = None) -> Launched:
-    full_env = dict(os.environ, **(env or {}))
-    done = subprocess.run(_mhd_launch_command(out, layout, steps, checkpoint), capture_output=True, text=True, timeout=600, env=full_env)
-    assert done.returncode == 0, f"launch failed:\nstdout:\n{done.stdout}\nstderr:\n{done.stderr}"
-    exits = {int(w): int(c) for w, c in EXIT.findall(done.stdout)}
-    assert sorted(exits) == list(range(workers)) and all(c == 0 for c in exits.values()), f"worker exit codes {exits}"
-    files = sorted(out.glob("*final*.h5"))
-    assert len(files) == 1, f"expected one final checkpoint in {out}, found {files}"
-    return Launched(final=files[0], backend=_backend_of(done.stderr), exits=exits)
+def _mhd_launch(out: Path, steps: int, workers: int, **kwargs) -> Launched:
+    """the orszag-tang vortex at MHD_RESOLUTION through `_session`"""
+    return _session(MHD_SCRIPT, f"{MHD_RESOLUTION[0]},{MHD_RESOLUTION[1]},1", out, steps, workers, **kwargs)
 
 
 def _max_div_b(path: Path) -> float:
@@ -523,27 +557,24 @@ def _max_div_b(path: Path) -> float:
 
 def test_a_magnetized_launch_matches_the_single_grid_run(tmp_path: Path) -> None:
     reference = _mhd_reference(tmp_path / "single", MHD_STEPS)
-    layout = _layout(tmp_path / "two.toml", workers=2, shape=(2, 1))
-    launched = _mhd_launch(tmp_path / "two", layout, MHD_STEPS, workers=2)
+    launched = _mhd_launch(tmp_path / "two", MHD_STEPS, workers=2, shape=(2, 1))
     with h5py.File(reference, "r") as f:
         assert "level_0/partition_0/hydro/magnetic/B1/data" in f, "the reference carries no staggered faces"
-    _assert_same_state(launched.final, reference, "two magnetized workers")
+    _same_state(launched.final, reference, "two magnetized workers")
     assert _max_div_b(launched.final) < 1e-10
 
 
 def test_a_magnetized_launch_resumed_onto_three_uneven_workers_matches(tmp_path: Path) -> None:
     reference = _mhd_reference(tmp_path / "single", MHD_STEPS)
-    layout2 = _layout(tmp_path / "two.toml", workers=2, shape=(2, 1))
-    partial = _mhd_launch(tmp_path / "first", layout2, MHD_STEPS // 2, workers=2)
+    partial = _mhd_launch(tmp_path / "first", MHD_STEPS // 2, workers=2, shape=(2, 1))
     with h5py.File(partial.final, "r") as f:
         written_at = int(f["level_0"].attrs["iteration"])
     assert 0 < written_at < MHD_STEPS
-    layout3 = _layout(tmp_path / "three.toml", workers=3, cuts=[[10, 21], []])
-    resumed = _mhd_launch(tmp_path / "three", layout3, MHD_STEPS, workers=3, checkpoint=partial.final)
+    resumed = _mhd_launch(tmp_path / "three", MHD_STEPS, workers=3, cuts=[[10, 21], []], checkpoint=partial.final)
     with h5py.File(resumed.final, "r") as fr, h5py.File(reference, "r") as fs:
         assert fr["level_0"].attrs["time"] == fs["level_0"].attrs["time"]
         assert int(fr["level_0"].attrs["iteration"]) == MHD_STEPS
-    _assert_same_state(resumed.final, reference, "magnetized, resumed on three workers")
+    _same_state(resumed.final, reference, "magnetized, resumed on three workers")
     assert _max_div_b(resumed.final) < 1e-10
 
 
@@ -551,31 +582,32 @@ def test_a_magnetized_launch_with_a_correction_against_the_cut_matches_one_worke
     """the flag raised on the cell against the cut at step 3 in the predictor, on whichever
     worker holds it, with the shared faces audited after every exchange: two workers equal one
     worker under the same flag, and the flag changed the run."""
-    one = _layout(tmp_path / "one.toml", workers=1, shape=(1, 1))
-    two = _layout(tmp_path / "two.toml", workers=2, shape=(2, 1))
-    clean = _mhd_launch(tmp_path / "clean", one, MHD_STEPS, workers=1)
+    clean = _mhd_launch(tmp_path / "clean", MHD_STEPS, workers=1, shape=(1, 1))
     inject = {"SIMBI_FABRIC_INJECT": f"trouble:3:0:{MHD_RESOLUTION[0] // 2 - 1}:{MHD_RESOLUTION[1] // 3}", "SIMBI_FABRIC_AUDIT": "all"}
-    reference = _mhd_launch(tmp_path / "one", one, MHD_STEPS, workers=1, env=inject)
-    launched = _mhd_launch(tmp_path / "two", two, MHD_STEPS, workers=2, env=inject)
+    reference = _mhd_launch(tmp_path / "one", MHD_STEPS, workers=1, shape=(1, 1), env=inject)
+    launched = _mhd_launch(tmp_path / "two", MHD_STEPS, workers=2, shape=(2, 1), env=inject)
     with h5py.File(clean.final, "r") as fc, h5py.File(reference.final, "r") as fr:
         xs, ys = _interior(fc), _interior(fr)
         assert any(not np.array_equal(xs[name], ys[name]) for name in xs), "the flag left the one-worker run unchanged; the gate is vacuous"
-    _assert_same_state(launched.final, reference.final, "two magnetized workers, trouble against the cut")
+    _same_state(launched.final, reference.final, "two magnetized workers, trouble against the cut")
     assert _max_div_b(launched.final) < 1e-10
+
+
+def _mhd_refused(out: Path, workers: int, shape, args: list[str], env: dict[str, str] | None = None) -> ph.Launch:
+    """a magnetized launch on the session's backend and placement expected to fail, its output kept"""
+    full = ["--resolution", f"{MHD_RESOLUTION[0]},{MHD_RESOLUTION[1]},1", "--checkpoint-interval", "1e9", *args]
+    return ph.launch(MHD_SCRIPT, out, workers, shape=shape, args=full, env=dict(ph.environment(), **(env or {})), timeout=600, expect_ok=False)
 
 
 def test_a_shared_face_mismatch_exits_every_worker_and_publishes_no_checkpoint(tmp_path: Path) -> None:
     """worker 1's opening copy of a shared face moved by a unit in the last place after step
     3: the audit before the next checkpoint names it, every worker exits nonzero, and no
     checkpoint is published."""
-    layout = _layout(tmp_path / "two.toml", workers=2, shape=(2, 1))
     out = tmp_path / "two"
-    env = dict(os.environ, SIMBI_FABRIC_INJECT="face:1:3")
-    done = subprocess.run(_mhd_launch_command(out, layout, MHD_STEPS), capture_output=True, text=True, timeout=600, env=env)
-    assert done.returncode != 0, f"the launch succeeded:\n{done.stdout}"
-    exits = {int(w): int(c) for w, c in EXIT.findall(done.stdout)}
-    assert sorted(exits) == [0, 1] and all(c != 0 for c in exits.values()), f"worker exit codes {exits}"
-    assert "shared-face mismatch on bface0" in done.stderr, done.stderr
+    run = _mhd_refused(out, 2, (2, 1), ["--max-steps", str(MHD_STEPS)], env={"SIMBI_FABRIC_INJECT": "face:1:3"})
+    assert run.returncode != 0, f"the launch succeeded:\n{run.stdout}"
+    assert sorted(run.exits) == [0, 1] and all(c != 0 for c in run.exits.values()), f"worker exit codes {run.exits}"
+    assert "shared-face mismatch on bface0" in run.stderr, run.stderr
     # the checkpoint of the primed state, written before the march, is the only file: no
     # checkpoint of a state after the perturbation, the final one included, was published
     published = sorted(out.glob("*.h5"))
@@ -600,15 +632,12 @@ def test_out_of_scope_problems_are_refused_by_name(tmp_path: Path, region: list[
         "class OneSided(RefinedMhd3D):\n"
         f"    refinement_regions: Annotated[list[list[float]], ProblemParam([{region!r}], description='r')]\n"
     )
-    layout = _layout(tmp_path / "two.toml", workers=2, shape=(1, 1, 2))
     out = tmp_path / "out"
-    cmd = [sys.executable, "-m", "simbi.cli", "launch", str(script), "--layout", str(layout), "--max-steps", "1", "--data-directory", str(out), "--checkpoint-interval", "1e9"]
-    env = dict(os.environ, PYTHONPATH=os.pathsep.join([os.getcwd(), os.environ.get("PYTHONPATH", "")]))
-    env.pop("SIMBI_LAUNCH_EXPERIMENTAL", None)
-    done = subprocess.run(cmd, capture_output=True, text=True, timeout=600, env=env)
-    assert done.returncode != 0, f"the launch succeeded:\n{done.stdout}"
+    env = dict(ph.environment(), PYTHONPATH=os.pathsep.join([os.getcwd(), os.environ.get("PYTHONPATH", "")]))
+    run = ph.launch(script, out, 2, shape=(1, 1, 2), args=["--max-steps", "1", "--checkpoint-interval", "1e9"], env=env, timeout=600, expect_ok=False)
+    assert run.returncode != 0, f"the launch succeeded:\n{run.stdout}"
     # the traceback renderer wraps a long message across lines
-    assert f"{reason} is outside the distributed first release" in " ".join(done.stderr.split()), done.stderr
+    assert f"{reason} is outside the distributed first release" in " ".join(run.stderr.split()), run.stderr
     assert not (out.exists() and list(out.glob("*.h5"))), "a checkpoint was published"
 
 
@@ -616,17 +645,23 @@ def test_a_magnetized_launch_refuses_the_numerics_its_substrate_has_no_door_for(
     """a magnetized run installs the limiter, the solver and the edge EMF; a request for a
     reconstruction, a flattening or an equation of state it cannot install is refused by
     name rather than ignored, so a comparison never appears to exercise it."""
-    layout = _layout(tmp_path / "two.toml", workers=2, shape=(2, 1))
     # a synge equation of state is refused by the problem's own validation before the launch
     # scope sees it, so the reconstruction request is the one that reaches the scope
     for flags, reason in [(["--reconstruction", "ppm"], "ppm reconstruction is wired for the newtonian (adiabatic ideal-gas) regime only; got 'nmhd'")]:
         out = tmp_path / reason.split()[0]
-        cmd = _mhd_launch_command(out, layout, 1) + flags
-        done = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
-        assert done.returncode != 0, f"the launch succeeded with {flags}:\n{done.stdout}"
+        run = _mhd_refused(out, 2, (2, 1), ["--max-steps", "1", *flags])
+        assert run.returncode != 0, f"the launch succeeded with {flags}:\n{run.stdout}"
         # the error printer wraps long messages at the terminal width
-        flat = " ".join(done.stderr.split())
-        assert reason in flat, done.stderr
+        flat = " ".join(run.stderr.split())
+        assert reason in flat, run.stderr
+
+
+REPORT_LINE = re.compile(r"SIMBI launch: worker=(\d+)/\d+ steps=(\d+) rejections=(\d+)")
+
+
+def _rejections(stderr: str) -> set[int]:
+    """the rejection counts the workers report"""
+    return {int(r) for _, _, r in REPORT_LINE.findall(stderr)}
 
 
 def test_a_rejection_on_one_worker_rolls_every_worker_back(tmp_path: Path) -> None:
@@ -634,45 +669,25 @@ def test_a_rejection_on_one_worker_rolls_every_worker_back(tmp_path: Path) -> No
     one worker reaches under the same rejection, both count it, and the rejection changed the
     run. the replay starts from the step entry on every worker, which the worker-level gate
     establishes against a clean run on the accepted timestep sequence."""
-    one = _layout(tmp_path / "one.toml", workers=1, shape=(1, 1))
-    two = _layout(tmp_path / "two.toml", workers=2, shape=(2, 1))
-    rejections = re.compile(r"SIMBI launch: worker=\d+/\d+ steps=\d+ rejections=(\d+)")
-
-    def launch(out: Path, layout: Path, workers: int, inject: str | None) -> tuple[Path, set[int]]:
-        env = dict(os.environ)
-        if inject is not None:
-            env["SIMBI_FABRIC_INJECT"] = inject
-        done = subprocess.run(_launch_command(out, layout, STEPS), capture_output=True, text=True, timeout=600, env=env)
-        assert done.returncode == 0, f"launch failed:\nstdout:\n{done.stdout}\nstderr:\n{done.stderr}"
-        exits = {int(w): int(c) for w, c in EXIT.findall(done.stdout)}
-        assert sorted(exits) == list(range(workers)) and all(c == 0 for c in exits.values()), f"worker exit codes {exits}"
-        files = sorted(out.glob("*final*.h5"))
-        assert len(files) == 1, f"expected one final checkpoint in {out}, found {files}"
-        return files[0], {int(r) for r in rejections.findall(done.stderr)}
-
-    clean, clean_rejections = launch(tmp_path / "clean", one, 1, None)
-    assert clean_rejections == {0}
-    reference, reference_rejections = launch(tmp_path / "one", one, 1, "reject:0:5:1")
-    assert reference_rejections == {1}, "the one-worker run did not count its rejection"
-    launched, launched_rejections = launch(tmp_path / "two", two, 2, "reject:1:5:1")
-    assert launched_rejections == {1}, "a worker did not count the rejection"
-    with h5py.File(clean, "r") as fc, h5py.File(reference, "r") as fr:
+    clean = _kh_launch(tmp_path / "clean", STEPS, workers=1, shape=(1, 1))
+    assert _rejections(clean.stderr) == {0}
+    reference = _kh_launch(tmp_path / "one", STEPS, workers=1, shape=(1, 1), env={"SIMBI_FABRIC_INJECT": "reject:0:5:1"})
+    assert _rejections(reference.stderr) == {1}, "the one-worker run did not count its rejection"
+    launched = _kh_launch(tmp_path / "two", STEPS, workers=2, shape=(2, 1), env={"SIMBI_FABRIC_INJECT": "reject:1:5:1"})
+    assert _rejections(launched.stderr) == {1}, "a worker did not count the rejection"
+    with h5py.File(clean.final, "r") as fc, h5py.File(reference.final, "r") as fr:
         xs, ys = _interior(fc), _interior(fr)
         assert any(not np.array_equal(xs[name], ys[name]) for name in xs), "the rejection left the run unchanged; the gate is vacuous"
-    _assert_same_state(launched, reference, "two workers, rejection on worker 1")
+    _same_state(launched.final, reference.final, "two workers, rejection on worker 1")
 
 
-REPORT_LINE = re.compile(r"SIMBI launch: worker=(\d+)/\d+ steps=(\d+) rejections=(\d+)")
+# the backends a gate of an importing module parametrizes over; the gates here run on the
+# session's backend
 MODES = ["cpu", pytest.param("gpu", marks=needs_gpu)]
 
 
-def _mode_flags(mode: str) -> list[str]:
-    return ["--gpu"] if mode == "gpu" else []
-
-
-@pytest.mark.parametrize("mode", MODES)
 @pytest.mark.parametrize("magnetized", [False, True], ids=["hydro", "mhd"])
-def test_a_rejection_on_one_worker_replays_every_worker_against_the_capped_clean_launch(tmp_path: Path, magnetized: bool, mode: str) -> None:
+def test_a_rejection_on_one_worker_replays_every_worker_against_the_capped_clean_launch(tmp_path: Path, magnetized: bool) -> None:
     """a rejection forced on worker 1 at step 5 in the corrector replays the step on every
     worker from its entry: the conserved state, and on a magnetized store the cell field and the
     staggered faces. the launch stops after that step. every worker counts the one rejection, and
@@ -682,45 +697,35 @@ def test_a_rejection_on_one_worker_replays_every_worker_against_the_capped_clean
     one worker under the same rejection."""
     rejected_step = 5
     steps = rejected_step + 1
-    one = _layout(tmp_path / "one.toml", workers=1, shape=(1, 1))
-    two = _layout(tmp_path / "two.toml", workers=2, shape=(2, 1))
 
-    def launch(out: Path, layout: Path, workers: int, inject: str | None) -> tuple[Path, dict[int, int]]:
-        env = dict(os.environ)
-        env.pop("SIMBI_FABRIC_INJECT", None)
-        if inject is not None:
-            env["SIMBI_FABRIC_INJECT"] = inject
-        command = _mhd_launch_command(out, layout, steps) if magnetized else _launch_command(out, layout, steps)
-        done = subprocess.run(command + _mode_flags(mode), capture_output=True, text=True, timeout=600, env=env)
-        assert done.returncode == 0, f"launch failed:\nstdout:\n{done.stdout}\nstderr:\n{done.stderr}"
-        exits = {int(w): int(c) for w, c in EXIT.findall(done.stdout)}
-        assert sorted(exits) == list(range(workers)) and all(c == 0 for c in exits.values()), f"worker exit codes {exits}"
-        reports = {int(w): (int(n), int(r)) for w, n, r in REPORT_LINE.findall(done.stderr)}
+    def launch(out: Path, workers: int, inject: str | None) -> tuple[Path, dict[int, int]]:
+        env = {} if inject is None else {"SIMBI_FABRIC_INJECT": inject}
+        shape = (workers, 1)
+        run = _mhd_launch(out, steps, workers, shape=shape, env=env) if magnetized else _kh_launch(out, steps, workers, shape=shape, env=env)
+        reports = {int(w): (int(n), int(r)) for w, n, r in REPORT_LINE.findall(run.stderr)}
         assert sorted(reports) == list(range(workers)), f"the workers reported {reports}"
         assert all(n == steps for n, _ in reports.values()), f"the workers accepted {reports} steps, expected {steps}"
-        files = sorted(out.glob("*final*.h5"))
-        assert len(files) == 1, f"expected one final checkpoint in {out}, found {files}"
-        with h5py.File(files[0], "r") as f:
+        with h5py.File(run.final, "r") as f:
             assert int(f["level_0"].attrs["iteration"]) == steps, "the launch did not stop after the replayed step"
             if magnetized:
                 assert "level_0/partition_0/hydro/magnetic/B1/data" in f, "the checkpoint carries no staggered faces"
-        return files[0], {w: r for w, (_, r) in reports.items()}
+        return run.final, {w: r for w, (_, r) in reports.items()}
 
-    launched, launched_rejections = launch(tmp_path / "two", two, 2, f"reject:1:{rejected_step}:1")
+    launched, launched_rejections = launch(tmp_path / "two", 2, f"reject:1:{rejected_step}:1")
     assert launched_rejections == {0: 1, 1: 1}, f"rejections per worker {launched_rejections}: a worker kept out of the rollback"
-    clean, clean_rejections = launch(tmp_path / "clean", two, 2, None)
+    clean, clean_rejections = launch(tmp_path / "clean", 2, None)
     assert clean_rejections == {0: 0, 1: 0}
     with h5py.File(launched, "r") as fr, h5py.File(clean, "r") as fc:
         accepted = float(fr["level_0"].attrs["dt"])
         assert accepted < float(fc["level_0"].attrs["dt"]), "the rejection left the timestep unreduced; the replay is never exercised"
-    capped, capped_rejections = launch(tmp_path / "capped", two, 2, f"cap:{rejected_step}:{int(np.float64(accepted).view(np.uint64))}")
+    capped, capped_rejections = launch(tmp_path / "capped", 2, f"cap:{rejected_step}:{int(np.float64(accepted).view(np.uint64))}")
     assert capped_rejections == {0: 0, 1: 0}, "the capped control rejected a step"
     with h5py.File(capped, "r") as f:
         assert float(f["level_0"].attrs["dt"]) == accepted, "the capped control's last step took another timestep"
-    _assert_same_state(launched, capped, "two workers, rejection on worker 1, against the capped clean launch")
-    reference, reference_rejections = launch(tmp_path / "one", one, 1, f"reject:0:{rejected_step}:1")
+    _same_state(launched, capped, "two workers, rejection on worker 1, against the capped clean launch")
+    reference, reference_rejections = launch(tmp_path / "one", 1, f"reject:0:{rejected_step}:1")
     assert reference_rejections == {0: 1}, "the one-worker run did not count its rejection"
-    _assert_same_state(launched, reference, "two workers, rejection on worker 1, against one worker")
+    _same_state(launched, reference, "two workers, rejection on worker 1, against one worker")
 
 # -----------------------------------------------------------------------------
 # relativistic hydro through the public path, on the two-dimensional riemann problem of
@@ -735,92 +740,63 @@ RHD_REFERENCE_SNIPPET = """
 import sys
 from simbi.simulation import runner
 from simbi_configs.examples.srhd.ram44 import Ram44
-out, steps = sys.argv[1], int(sys.argv[2])
-runner.run(Ram44(resolution=({rx}, {ry}), data_directory=out, checkpoint_interval=1e9), compute_mode="cpu", max_steps=steps)
+out, steps, mode = sys.argv[1], int(sys.argv[2]), sys.argv[3]
+runner.run(Ram44(resolution=({rx}, {ry}), data_directory=out, checkpoint_interval=1e9), compute_mode=mode, max_steps=steps)
 """
 
 
 def _rhd_reference(out: Path, steps: int) -> Path:
-    snippet = RHD_REFERENCE_SNIPPET.format(rx=RHD_RESOLUTION[0], ry=RHD_RESOLUTION[1])
-    done = subprocess.run([sys.executable, "-c", snippet, str(out), str(steps)], capture_output=True, text=True, timeout=600)
-    assert done.returncode == 0, f"reference failed:\n{done.stderr}"
-    files = sorted(out.glob("*final*.h5"))
-    assert len(files) == 1, f"expected one final checkpoint in {out}, found {files}"
-    return files[0]
+    return _snippet_reference(RHD_REFERENCE_SNIPPET.format(rx=RHD_RESOLUTION[0], ry=RHD_RESOLUTION[1]), out, steps)
 
 
-def _rhd_launch_command(out: Path, layout: Path, steps: int, checkpoint: Path | None = None) -> list[str]:
-    cmd = [
-        sys.executable, "-m", "simbi.cli", "launch", RHD_SCRIPT,
-        "--layout", str(layout), "--max-steps", str(steps),
-        "--resolution", f"{RHD_RESOLUTION[0]},{RHD_RESOLUTION[1]}",
-        "--data-directory", str(out), "--checkpoint-interval", "1e9",
-    ]
-    if checkpoint is not None:
-        cmd += ["--checkpoint", str(checkpoint)]
-    return cmd
-
-
-def _rhd_launch(out: Path, layout: Path, steps: int, workers: int, checkpoint: Path | None = None, env: dict[str, str] | None = None) -> tuple[Path, set[int]]:
-    full_env = dict(os.environ, **(env or {}))
-    done = subprocess.run(_rhd_launch_command(out, layout, steps, checkpoint), capture_output=True, text=True, timeout=600, env=full_env)
-    assert done.returncode == 0, f"launch failed:\nstdout:\n{done.stdout}\nstderr:\n{done.stderr}"
-    exits = {int(w): int(c) for w, c in EXIT.findall(done.stdout)}
-    assert sorted(exits) == list(range(workers)) and all(c == 0 for c in exits.values()), f"worker exit codes {exits}"
-    files = sorted(out.glob("*final*.h5"))
-    assert len(files) == 1, f"expected one final checkpoint in {out}, found {files}"
-    rejections = {int(r) for r in re.findall(r"SIMBI launch: worker=\d+/\d+ steps=\d+ rejections=(\d+)", done.stderr)}
-    return files[0], rejections
+def _rhd_launch(out: Path, steps: int, workers: int, **kwargs) -> tuple[Path, set[int]]:
+    """the ram44 riemann problem at RHD_RESOLUTION through `_session`: its final checkpoint and
+    the rejection counts the workers report"""
+    run = _session(RHD_SCRIPT, f"{RHD_RESOLUTION[0]},{RHD_RESOLUTION[1]}", out, steps, workers, **kwargs)
+    return run.final, _rejections(run.stderr)
 
 
 def test_a_relativistic_launch_matches_the_single_grid_run(tmp_path: Path) -> None:
     reference = _rhd_reference(tmp_path / "single", RHD_STEPS)
-    layout = _layout(tmp_path / "two.toml", workers=2, shape=(2, 1))
-    launched, _ = _rhd_launch(tmp_path / "two", layout, RHD_STEPS, workers=2)
-    _assert_same_state(launched, reference, "two relativistic workers")
+    launched, _ = _rhd_launch(tmp_path / "two", RHD_STEPS, workers=2, shape=(2, 1))
+    _same_state(launched, reference, "two relativistic workers")
 
 
 def test_a_relativistic_launch_resumed_onto_three_uneven_workers_matches(tmp_path: Path) -> None:
     reference = _rhd_reference(tmp_path / "single", RHD_STEPS)
-    layout2 = _layout(tmp_path / "two.toml", workers=2, shape=(2, 1))
-    partial, _ = _rhd_launch(tmp_path / "first", layout2, RHD_STEPS // 2, workers=2)
+    partial, _ = _rhd_launch(tmp_path / "first", RHD_STEPS // 2, workers=2, shape=(2, 1))
     with h5py.File(partial, "r") as f:
         written_at = int(f["level_0"].attrs["iteration"])
     assert 0 < written_at < RHD_STEPS
-    layout3 = _layout(tmp_path / "three.toml", workers=3, cuts=[[10, 21], []])
-    resumed, _ = _rhd_launch(tmp_path / "three", layout3, RHD_STEPS, workers=3, checkpoint=partial)
+    resumed, _ = _rhd_launch(tmp_path / "three", RHD_STEPS, workers=3, cuts=[[10, 21], []], checkpoint=partial)
     with h5py.File(resumed, "r") as fr, h5py.File(reference, "r") as fs:
         assert fr["level_0"].attrs["time"] == fs["level_0"].attrs["time"]
         assert int(fr["level_0"].attrs["iteration"]) == RHD_STEPS
-    _assert_same_state(resumed, reference, "relativistic, resumed on three workers")
+    _same_state(resumed, reference, "relativistic, resumed on three workers")
 
 
 def test_a_relativistic_launch_with_a_correction_against_the_cut_matches_one_worker(tmp_path: Path) -> None:
-    one = _layout(tmp_path / "one.toml", workers=1, shape=(1, 1))
-    two = _layout(tmp_path / "two.toml", workers=2, shape=(2, 1))
-    clean, _ = _rhd_launch(tmp_path / "clean", one, RHD_STEPS, workers=1)
+    clean, _ = _rhd_launch(tmp_path / "clean", RHD_STEPS, workers=1, shape=(1, 1))
     inject = {"SIMBI_FABRIC_INJECT": f"trouble:3:0:{RHD_RESOLUTION[0] // 2 - 1}:{RHD_RESOLUTION[1] // 3}"}
-    reference, _ = _rhd_launch(tmp_path / "one", one, RHD_STEPS, workers=1, env=inject)
-    launched, _ = _rhd_launch(tmp_path / "two", two, RHD_STEPS, workers=2, env=inject)
+    reference, _ = _rhd_launch(tmp_path / "one", RHD_STEPS, workers=1, shape=(1, 1), env=inject)
+    launched, _ = _rhd_launch(tmp_path / "two", RHD_STEPS, workers=2, shape=(2, 1), env=inject)
     with h5py.File(clean, "r") as fc, h5py.File(reference, "r") as fr:
         xs, ys = _interior(fc), _interior(fr)
         assert any(not np.array_equal(xs[name], ys[name]) for name in xs), "the flag left the one-worker run unchanged; the gate is vacuous"
-    _assert_same_state(launched, reference, "two relativistic workers, trouble against the cut")
+    _same_state(launched, reference, "two relativistic workers, trouble against the cut")
 
 
 def test_a_relativistic_rejection_on_one_worker_rolls_every_worker_back(tmp_path: Path) -> None:
-    one = _layout(tmp_path / "one.toml", workers=1, shape=(1, 1))
-    two = _layout(tmp_path / "two.toml", workers=2, shape=(2, 1))
-    clean, clean_rejections = _rhd_launch(tmp_path / "clean", one, RHD_STEPS, workers=1)
+    clean, clean_rejections = _rhd_launch(tmp_path / "clean", RHD_STEPS, workers=1, shape=(1, 1))
     assert clean_rejections == {0}
-    reference, reference_rejections = _rhd_launch(tmp_path / "one", one, RHD_STEPS, workers=1, env={"SIMBI_FABRIC_INJECT": "reject:0:5:1"})
+    reference, reference_rejections = _rhd_launch(tmp_path / "one", RHD_STEPS, workers=1, shape=(1, 1), env={"SIMBI_FABRIC_INJECT": "reject:0:5:1"})
     assert reference_rejections == {1}
-    launched, launched_rejections = _rhd_launch(tmp_path / "two", two, RHD_STEPS, workers=2, env={"SIMBI_FABRIC_INJECT": "reject:1:5:1"})
+    launched, launched_rejections = _rhd_launch(tmp_path / "two", RHD_STEPS, workers=2, shape=(2, 1), env={"SIMBI_FABRIC_INJECT": "reject:1:5:1"})
     assert launched_rejections == {1}
     with h5py.File(clean, "r") as fc, h5py.File(reference, "r") as fr:
         xs, ys = _interior(fc), _interior(fr)
         assert any(not np.array_equal(xs[name], ys[name]) for name in xs), "the rejection left the run unchanged; the gate is vacuous"
-    _assert_same_state(launched, reference, "two relativistic workers, rejection on worker 1")
+    _same_state(launched, reference, "two relativistic workers, rejection on worker 1")
 
 
 # -----------------------------------------------------------------------------
@@ -834,32 +810,17 @@ SOURCES_REFERENCE_SNIPPET = """
 import sys
 from simbi.simulation import runner
 from simbi_configs.examples.newtonian.ordered_sources import OrderedSources
-out, steps = sys.argv[1], int(sys.argv[2])
-runner.run(OrderedSources(resolution=({rx}, {ry}), data_directory=out, checkpoint_interval=1e9), compute_mode="cpu", max_steps=steps)
+out, steps, mode = sys.argv[1], int(sys.argv[2]), sys.argv[3]
+runner.run(OrderedSources(resolution=({rx}, {ry}), data_directory=out, checkpoint_interval=1e9), compute_mode=mode, max_steps=steps)
 """
 
 
 def test_a_launch_with_user_sources_matches_the_single_grid_run(tmp_path: Path) -> None:
     snippet = SOURCES_REFERENCE_SNIPPET.format(rx=SOURCES_RESOLUTION[0], ry=SOURCES_RESOLUTION[1])
-    done = subprocess.run([sys.executable, "-c", snippet, str(tmp_path / "single"), str(STEPS)], capture_output=True, text=True, timeout=600)
-    assert done.returncode == 0, f"reference failed:\n{done.stderr}"
-    references = sorted((tmp_path / "single").glob("*final*.h5"))
-    assert len(references) == 1
-    layout = _layout(tmp_path / "two.toml", workers=2, shape=(2, 1))
-    cmd = [
-        sys.executable, "-m", "simbi.cli", "launch", SOURCES_SCRIPT,
-        "--layout", str(layout), "--max-steps", str(STEPS),
-        "--resolution", f"{SOURCES_RESOLUTION[0]},{SOURCES_RESOLUTION[1]}",
-        "--data-directory", str(tmp_path / "two"), "--checkpoint-interval", "1e9",
-    ]
-    done = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
-    assert done.returncode == 0, f"launch failed:\nstdout:\n{done.stdout}\nstderr:\n{done.stderr}"
-    exits = {int(w): int(c) for w, c in EXIT.findall(done.stdout)}
-    assert exits == {0: 0, 1: 0}, f"worker exit codes {exits}"
-    launched = sorted((tmp_path / "two").glob("*final*.h5"))
-    assert len(launched) == 1
-    _assert_same_state(launched[0], references[0], "two workers with user sources")
-
+    reference = _snippet_reference(snippet, tmp_path / "single", STEPS)
+    launched = _session(SOURCES_SCRIPT, f"{SOURCES_RESOLUTION[0]},{SOURCES_RESOLUTION[1]}", tmp_path / "two", STEPS, workers=2, shape=(2, 1))
+    assert launched.exits == {0: 0, 1: 0}, f"worker exit codes {launched.exits}"
+    _same_state(launched.final, reference, "two workers with user sources")
 
 
 def test_a_final_checkpoint_after_a_cadence_checkpoint_of_the_same_step_is_published(tmp_path: Path) -> None:
@@ -869,27 +830,18 @@ def test_a_final_checkpoint_after_a_cadence_checkpoint_of_the_same_step_is_publi
     every worker exits zero and the final file equals the single-grid run. the run ends on its
     end time: the step that exhausts a step budget publishes through the final checkpoint alone."""
     end_time = 0.02
-    layout = _layout(tmp_path / "two.toml", workers=2, shape=(2, 1))
-    cmd = _mhd_launch_command(tmp_path / "two", layout, 0) + ["--end-time", repr(end_time)]
-    cmd[cmd.index("--checkpoint-interval") + 1] = "1e-9"
-    done = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
-    assert done.returncode == 0, f"launch failed:\nstdout:\n{done.stdout}\nstderr:\n{done.stderr}"
-    exits = {int(w): int(c) for w, c in EXIT.findall(done.stdout)}
-    assert sorted(exits) == [0, 1] and all(c == 0 for c in exits.values()), f"worker exit codes {exits}"
-    finals = sorted((tmp_path / "two").glob("*final*.h5"))
-    assert len(finals) == 1, f"no final checkpoint was published: {sorted(p.name for p in (tmp_path / 'two').glob('*'))}"
-    cadence = [p for p in (tmp_path / "two").glob("*.h5") if "final" not in p.name]
-    with h5py.File(finals[0], "r") as f:
+    out = tmp_path / "two"
+    launched = _mhd_launch(out, 0, workers=2, shape=(2, 1), interval=1e-9, flags=["--end-time", repr(end_time)])
+    assert launched.exits == {0: 0, 1: 0}, f"worker exit codes {launched.exits}"
+    cadence = [p for p in out.glob("*.h5") if "final" not in p.name]
+    with h5py.File(launched.final, "r") as f:
         last, time = int(f["level_0"].attrs["iteration"]), float(f["level_0"].attrs["time"])
     assert time == end_time and last > 1, f"the launch ended at iteration {last}, t = {time!r}"
     assert any(int(h5py.File(p, "r")["level_0"].attrs["iteration"]) == last for p in cadence), "no cadence checkpoint shares the last step; the gate is vacuous"
     snippet = MHD_REFERENCE_SNIPPET.format(rx=MHD_RESOLUTION[0], ry=MHD_RESOLUTION[1]).replace(
         "checkpoint_interval=1e9", f"checkpoint_interval=1e9, end_time={end_time!r}")
-    done = subprocess.run([sys.executable, "-c", snippet, str(tmp_path / "single"), "0"], capture_output=True, text=True, timeout=600)
-    assert done.returncode == 0, f"reference failed:\n{done.stderr}"
-    reference = sorted((tmp_path / "single").glob("*final*.h5"))
-    assert len(reference) == 1, f"expected one final checkpoint, found {reference}"
-    _assert_same_state(finals[0], reference[0], "two workers, a checkpoint every step")
+    reference = _snippet_reference(snippet, tmp_path / "single", 0)
+    _same_state(launched.final, reference, "two workers, a checkpoint every step")
 
 
 DEVICE_LINE = re.compile(r"SIMBI launch: worker=(\d+) host=(\S*) pci=(\S+) device=")
@@ -900,30 +852,34 @@ def _bound_devices(stderr: str) -> dict[int, tuple[str, str]]:
     return {int(w): (host, pci) for w, host, pci in DEVICE_LINE.findall(stderr)}
 
 
-@needs_gpu
+def _assert_two_gpus(stderr: str) -> None:
+    """two workers bound two physical gpus, on the hosts the session's placement spans"""
+    bound = _bound_devices(stderr)
+    assert sorted(bound) == [0, 1], f"the workers reported device bindings {bound}"
+    hosts = min(ph.NODES, 2) if ph.SRUN else 1
+    assert len({h for h, _ in bound.values()}) == hosts, f"the workers span hosts {bound}, expected {hosts}"
+    assert bound[0] != bound[1], f"both workers bound one gpu: {bound}"
+
+
+@ph.gpu_only
 def test_a_two_gpu_launch_matches_the_single_gpu_run(tmp_path: Path) -> None:
     """two workers, one gpu each, against the one-gpu single grid: the whole checkpoint bit for bit"""
-    reference, backend = _reference(tmp_path / "single", STEPS, compute_mode="gpu")
-    layout = _layout(tmp_path / "two.toml", workers=2, shape=(2, 1))
-    launched = _launch(tmp_path / "two", layout, STEPS, workers=2, flags=["--gpu"])
+    reference, backend = _reference(tmp_path / "single", STEPS)
+    launched = _kh_launch(tmp_path / "two", STEPS, workers=2, shape=(2, 1))
     assert launched.backend == backend, f"launched {launched.backend} against reference {backend}"
-    bound = _bound_devices(launched.stderr)
-    assert sorted(bound) == [0, 1], f"the workers reported device bindings {bound}"
-    assert bound[0][0] == bound[1][0], f"a local launch spanned hosts: {bound}"
-    assert bound[0][1] != bound[1][1], f"both workers bound the gpu at one pci address: {bound}"
-    _assert_same_state(launched.final, reference, "two gpu workers")
+    _assert_two_gpus(launched.stderr)
+    _same_state(launched.final, reference, "two gpu workers")
 
 
-@needs_gpu
+@ph.gpu_only
 def test_a_two_gpu_launch_resumed_from_its_checkpoint_matches(tmp_path: Path) -> None:
     """half the steps on two gpus, a checkpoint, and the other half resumed on two gpus, against
     the uninterrupted single-gpu run"""
-    reference, backend = _reference(tmp_path / "single", STEPS, compute_mode="gpu")
-    layout = _layout(tmp_path / "two.toml", workers=2, shape=(2, 1))
-    partial = _launch(tmp_path / "first", layout, STEPS // 2, workers=2, flags=["--gpu"])
-    resumed = _launch(tmp_path / "second", layout, STEPS, workers=2, checkpoint=partial.final, flags=["--gpu"])
+    reference, backend = _reference(tmp_path / "single", STEPS)
+    partial = _kh_launch(tmp_path / "first", STEPS // 2, workers=2, shape=(2, 1))
+    resumed = _kh_launch(tmp_path / "second", STEPS, workers=2, shape=(2, 1), checkpoint=partial.final)
     assert resumed.backend == backend
-    _assert_same_state(resumed.final, reference, "two gpu workers, resumed")
+    _same_state(resumed.final, reference, "two gpu workers, resumed")
 
 
 # -----------------------------------------------------------------------------
@@ -932,6 +888,7 @@ def test_a_two_gpu_launch_resumed_from_its_checkpoint_matches(tmp_path: Path) ->
 # -----------------------------------------------------------------------------
 
 
+@ph.local_only
 def test_workers_bound_to_one_gpu_of_one_host_are_refused_together(tmp_path: Path) -> None:
     """two workers reporting one pci address on one host: every worker refuses at the binding
     agreement, before any state moves, within the session's startup, and nothing is published"""
@@ -958,16 +915,15 @@ def test_one_pci_address_on_two_hosts_is_two_gpus(tmp_path: Path) -> None:
     """the same pci address on two hosts names two gpus: the session runs and equals the
     single-grid run"""
     reference, _ = _reference(tmp_path / "single", STEPS)
-    layout = _layout(tmp_path / "two.toml", workers=2, shape=(2, 1))
-    env = dict(os.environ, SIMBI_FABRIC_INJECT="device:hosts:0000:c1:00.0")
-    launched = _launch(tmp_path / "two", layout, STEPS, workers=2, env=env)
+    launched = _kh_launch(tmp_path / "two", STEPS, workers=2, shape=(2, 1), env={"SIMBI_FABRIC_INJECT": "device:hosts:0000:c1:00.0"})
     bound = _bound_devices(launched.stderr)
     assert sorted(bound) == [0, 1], f"device bindings {bound}"
     assert bound[0][1] == bound[1][1] and bound[0][0] != bound[1][0], f"the fault did not share a pci address across hosts: {bound}"
-    _assert_same_state(launched.final, reference, "one pci address on two hosts")
+    _same_state(launched.final, reference, "one pci address on two hosts")
 
 
-@needs_gpu
+@ph.local_only
+@ph.gpu_only
 def test_two_gpu_workers_masked_onto_one_gpu_are_refused_together(tmp_path: Path) -> None:
     """a parent mask naming one device twice hands both workers the same physical gpu, each as
     its logical device 0: the binding agreement refuses on every worker and nothing is published"""
@@ -1003,39 +959,32 @@ runner.run(NewtonianOrszagTang(resolution=({rx}, {ry}, 1), data_directory=out, e
 """
 
 
-@pytest.mark.parametrize("mode", MODES)
-def test_a_magnetized_launch_equals_one_device_at_every_checkpoint_to_its_end_time(tmp_path: Path, mode: str) -> None:
+def test_a_magnetized_launch_equals_one_device_at_every_checkpoint_to_its_end_time(tmp_path: Path) -> None:
     """orszag-tang to t = 0.05 with a checkpoint every 0.0125: two workers against one device,
     every checkpoint of the run bit for bit with its staggered faces, the shared faces audited
     after every exchange, and the divergence of the stored faces at every checkpoint of both runs
     within DIV_B_TOLERANCE of the largest field per cell width"""
     snippet = MHD_RUN_SNIPPET.format(rx=MHD_RESOLUTION[0], ry=MHD_RESOLUTION[1])
     single = tmp_path / "single"
-    done = subprocess.run([sys.executable, "-c", snippet, str(single), mode, repr(MHD_END_TIME), repr(MHD_INTERVAL)], capture_output=True, text=True, timeout=600)
-    assert done.returncode == 0, f"reference failed:\n{done.stderr}"
-    layout = _layout(tmp_path / "two.toml", workers=2, shape=(2, 1))
+    ph.python(ph.snippet_args(snippet, str(single), ph.BACKEND, repr(MHD_END_TIME), repr(MHD_INTERVAL)), "reference", timeout=600)
     out = tmp_path / "two"
-    cmd = _mhd_launch_command(out, layout, 0) + ["--end-time", repr(MHD_END_TIME)] + _mode_flags(mode)
-    cmd[cmd.index("--checkpoint-interval") + 1] = repr(MHD_INTERVAL)
-    done = subprocess.run(cmd, capture_output=True, text=True, timeout=600, env=dict(os.environ, SIMBI_FABRIC_AUDIT="all"))
-    assert done.returncode == 0, f"launch failed:\nstdout:\n{done.stdout}\nstderr:\n{done.stderr}"
-    exits = {int(w): int(c) for w, c in EXIT.findall(done.stdout)}
-    assert sorted(exits) == [0, 1] and all(c == 0 for c in exits.values()), f"worker exit codes {exits}"
+    run = _mhd_launch(out, 0, workers=2, shape=(2, 1), interval=MHD_INTERVAL, flags=["--end-time", repr(MHD_END_TIME)],
+                      env={"SIMBI_FABRIC_AUDIT": "all"})
+    assert run.exits == {0: 0, 1: 0}, f"worker exit codes {run.exits}"
     launched, references = sorted(out.glob("*.h5")), sorted(single.glob("*.h5"))
     assert [p.name for p in launched] == [p.name for p in references], f"checkpoints {launched} against {references}"
     assert len(launched) >= 4, f"the run published {len(launched)} checkpoints; the cadence is not exercised"
     for got, want in zip(launched, references):
-        _assert_same_state(got, want, f"two workers against one device, {got.name}")
+        _same_state(got, want, f"two workers against one device, {got.name}")
     for path in (launched[-1], references[-1]):
         with h5py.File(path, "r") as f:
             assert "final" in path.name and float(f["level_0"].attrs["time"]) == MHD_END_TIME, f"{path} ends at t = {f['level_0'].attrs['time']!r}"
     divergence = {p.name: normalized_div_b(p) for p in launched + references}
     assert all(d <= DIV_B_TOLERANCE for d in divergence.values()), f"normalized div B {divergence}"
-    audits = {int(w): (int(n), int(faces)) for w, n, faces in AUDIT_LINE.findall(done.stderr)}
+    audits = {int(w): (int(n), int(faces)) for w, n, faces in AUDIT_LINE.findall(run.stderr)}
     assert sorted(audits) == [0, 1] and all(n > 0 and faces > 0 for n, faces in audits.values()), f"shared-face audits {audits}"
-    if mode == "gpu":
-        bound = _bound_devices(done.stderr)
-        assert sorted(bound) == [0, 1] and bound[0] != bound[1], f"device bindings {bound}"
+    if ph.BACKEND == "gpu":
+        _assert_two_gpus(run.stderr)
 
 
 # -----------------------------------------------------------------------------
@@ -1064,19 +1013,19 @@ def _published_iterations(out: Path) -> dict[Path, int]:
     return found
 
 
+@ph.local_only
 @pytest.mark.parametrize("victim", [0, 1], ids=["coordinator", "peer"])
-@pytest.mark.parametrize("mode", MODES)
-def test_a_killed_worker_ends_the_session_and_keeps_the_last_complete_checkpoint(tmp_path: Path, mode: str, victim: int) -> None:
+def test_a_killed_worker_ends_the_session_and_keeps_the_last_complete_checkpoint(tmp_path: Path, victim: int) -> None:
     """a worker killed by SIGKILL once a checkpoint past the second step is published: the
     survivor detects the loss itself and exits nonzero within the launcher's 5 s grace, the
     launcher exits nonzero and records both exits, no final checkpoint is published, and the last
     published checkpoint resumes"""
     layout = _layout(tmp_path / "two.toml", workers=2, shape=(2, 1))
     out = tmp_path / "two"
-    cmd = _launch_command(out, layout, 1_000_000, interval=0.02, flags=["--end-time", "1e9", *_mode_flags(mode)])
+    cmd = _launch_command(out, layout, 1_000_000, interval=0.02, flags=["--end-time", "1e9", *_mode_flags(ph.BACKEND)])
     stdout, stderr = tmp_path / "launcher.out", tmp_path / "launcher.err"
     with open(stdout, "w") as so, open(stderr, "w") as se:
-        proc = subprocess.Popen(cmd, stdout=so, stderr=se, text=True)
+        proc = subprocess.Popen(cmd, stdout=so, stderr=se, text=True, env=ph.environment())
         try:
             pids = _wait_for(lambda: (lambda p: p if len(p) == 2 else None)({int(w): int(pid) for w, pid in PID_LINE.findall(stdout.read_text())}), 120, "two worker pids")
             _wait_for(lambda: any(it >= 2 for it in _published_iterations(out).values()), 300, "a checkpoint past the second step")
@@ -1101,7 +1050,7 @@ def test_a_killed_worker_ends_the_session_and_keeps_the_last_complete_checkpoint
     assert published and not [p for p in published if "final" in p.name], f"published {sorted(p.name for p in published)}"
     assert not list(out.glob(".rendezvous-*")), "the rendezvous file was left behind"
     last = max(published, key=published.get)
-    resumed = _launch(tmp_path / "resumed", layout, published[last] + 2, workers=2, checkpoint=last, flags=_mode_flags(mode))
+    resumed = _kh_launch(tmp_path / "resumed", published[last] + 2, workers=2, shape=(2, 1), checkpoint=last)
     with h5py.File(resumed.final, "r") as f:
         assert int(f["level_0"].attrs["iteration"]) == published[last] + 2
 
@@ -1113,12 +1062,13 @@ def test_a_killed_worker_ends_the_session_and_keeps_the_last_complete_checkpoint
 
 
 def _scheduler_session(out: Path, layout: Path, steps: int, step_id: int, checkpoint: Path | None = None, coordinator_delay: float = 0.0) -> None:
-    """two workers started as one slurm step would start them, worker 1 first; worker 0 starts
-    `coordinator_delay` seconds later"""
+    """two workers on the session's backend started as one slurm step would start them, worker 1
+    first; worker 0 starts `coordinator_delay` seconds later"""
     cmd = [
         sys.executable, "-m", "simbi.cli", "launch", SCRIPT, "--layout", str(layout),
         "--max-steps", str(steps), "--resolution", ",".join(str(r) for r in RESOLUTION),
         "--data-directory", str(out / "ignored"), "--checkpoint-interval", "1e9",
+        *_mode_flags(ph.BACKEND),
     ]
     if checkpoint is not None:
         cmd += ["--checkpoint", str(checkpoint)]
@@ -1126,7 +1076,7 @@ def _scheduler_session(out: Path, layout: Path, steps: int, step_id: int, checkp
     for rank in (1, 0):
         if rank == 0:
             time.sleep(coordinator_delay)
-        env = dict(os.environ, SLURM_PROCID=str(rank), SLURM_NTASKS="2", SLURM_JOB_ID="4242", SLURM_STEP_ID=str(step_id))
+        env = dict(ph.environment(), SLURM_PROCID=str(rank), SLURM_NTASKS="2", SLURM_JOB_ID="4242", SLURM_STEP_ID=str(step_id))
         procs[rank] = subprocess.Popen(cmd, env=env, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, text=True)
     errs = {rank: p.communicate(timeout=300)[1] for rank, p in procs.items()}
     for rank, p in procs.items():
@@ -1141,6 +1091,7 @@ def _scheduler_layout(path: Path, directory: Path) -> Path:
     return path
 
 
+@ph.local_only
 def test_a_scheduler_session_ignores_the_record_a_killed_session_left(tmp_path: Path) -> None:
     """records a killed coordinator left behind, under the unscoped name and under an earlier
     step's name, each naming a dead address and another credential; worker 1 starts 3 s before
@@ -1159,9 +1110,10 @@ def test_a_scheduler_session_ignores_the_record_a_killed_session_left(tmp_path: 
     kept = out / ".rendezvous-4242.7.kept"
     assert kept.exists(), f"the session's record was not kept: {sorted(p.name for p in out.iterdir())}"
     assert int(kept.read_text().splitlines()[1]) != 12345, "the session took the stale credential"
-    _assert_same_state(finals[0], reference, "scheduler session beside stale records")
+    _same_state(finals[0], reference, "scheduler session beside stale records")
 
 
+@ph.local_only
 def test_a_scheduler_session_resumed_in_its_directory_matches_the_uninterrupted_run(tmp_path: Path) -> None:
     """half the steps in one scheduler step, the rest resumed from its final checkpoint in a later
     step over the same directory: each session rendezvous under a fresh record and credential, and
@@ -1180,7 +1132,7 @@ def test_a_scheduler_session_resumed_in_its_directory_matches_the_uninterrupted_
     assert len(finals) == 1, f"expected one final checkpoint in {out}, found {finals}"
     credentials = [int((out / f".rendezvous-4242.{step}.kept").read_text().splitlines()[1]) for step in (1, 2)]
     assert credentials[0] != credentials[1], "the resumed session reused the first session's credential"
-    _assert_same_state(finals[0], reference, "scheduler session resumed in its directory")
+    _same_state(finals[0], reference, "scheduler session resumed in its directory")
 
 
 TIMING_LINE = re.compile(
@@ -1193,8 +1145,7 @@ def test_a_launch_divides_its_march_into_disjoint_timing_buckets(tmp_path: Path)
     """every worker reports its march and the four buckets that divide it: compute, collectives,
     exchange, and the callback where the cadence checkpoints run. the buckets sum to the march
     within the six-decimal print rounding (five values, 5e-7 each)."""
-    layout = _layout(tmp_path / "two.toml", workers=2, shape=(2, 1))
-    launched = _launch(tmp_path / "two", layout, STEPS, workers=2, interval=1e-3)
+    launched = _kh_launch(tmp_path / "two", STEPS, workers=2, shape=(2, 1), interval=1e-3)
     cadence = [p for p in (tmp_path / "two").glob("*.h5") if "final" not in p.name]
     assert len(cadence) >= 3, f"{len(cadence)} cadence checkpoints; the callback bucket is not exercised"
     timing = {int(w): [float(v) for v in vals] for w, *vals in TIMING_LINE.findall(launched.stderr)}

@@ -17,20 +17,22 @@
 # publishes the single hierarchy's gas and population bit for bit, records
 # crossing the coarse-fine interface and the cuts included; the second-order
 # ito population likewise, relocated onto the finest level holding it once per
-# root step.
+# root step. every arm runs as a fresh process on the session's backend
+# (parity_harness); the arms run on host tiles alone, involve no launch and run
+# under the local placement.
 #
 # run: pytest -m simulation simbi/simulation/tests/test_tiled_tracers.py
+#      (SIMBI_PARITY_BACKEND / SIMBI_PARITY_PLACEMENT select the session, parity_harness.py)
 # =============================================================================
 
 import os
-import subprocess
-import sys
 from pathlib import Path
 
 import h5py
 import numpy as np
 import pytest
 
+from simbi.simulation.tests import parity_harness as ph
 from simbi.simulation.tests.test_launch_refined_numerics import _all_levels
 
 pytestmark = pytest.mark.simulation
@@ -170,17 +172,16 @@ def _iteration(path: Path) -> int:
 
 
 def _run(problem: str, out: Path, gpus: int, steps: int, extra: str = "", checkpoint: Path | None = None) -> Path:
+    """`problem` on the session's backend, one device or `gpus` host tiles; its final checkpoint"""
     resume = f", checkpoint_file={str(checkpoint)!r}" if checkpoint is not None else ""
     snippet = (
         "import sys\n"
         "from simbi.simulation import runner\n"
         f"from variants import {problem}\n"
         f"runner.run({problem}(resolution={RESOLUTION!r}, gpus={gpus}, checkpoint_interval=1e9, data_directory=sys.argv[1]{extra}{resume}), "
-        f"compute_mode='cpu', max_steps={steps})\n"
+        f"compute_mode=sys.argv[2], max_steps={steps})\n"
     )
-    env = dict(os.environ, SYMBI_GPU_OVERSUBSCRIBE="1")
-    done = subprocess.run([sys.executable, "-c", snippet, str(out)], capture_output=True, text=True, timeout=900, env=env)
-    assert done.returncode == 0, f"{problem} on {gpus} device(s) failed:\n{done.stderr[-3000:]}"
+    ph.python(ph.snippet_args(snippet, str(out), ph.BACKEND), f"{problem} on {gpus} device(s)", devices=gpus)
     return _final(out)
 
 
@@ -208,6 +209,7 @@ def _assert_same(got: Path, want: Path, group: str, label: str) -> None:
         np.testing.assert_array_equal(p, qs[name], err_msg=f"{label}: {group}/{name}")
 
 
+@ph.local_only
 @pytest.mark.parametrize("problem", list(GROUP))
 def test_tiles_carry_the_single_grid_tracer_population(tmp_path: Path, variants: Path, problem: str) -> None:
     group = GROUP[problem]
@@ -216,17 +218,18 @@ def test_tiles_carry_the_single_grid_tracer_population(tmp_path: Path, variants:
         with h5py.File(want, "r") as f:
             grown = int(f[group].attrs["n_tracers"])
         assert grown > SEEDED, f"the inflow injected no tracer ({grown}); the injection arm is vacuous"
-    _assert_same(_run(problem, tmp_path / "two", 2, STEPS), want, group, f"{problem}: two tiles")
-    _assert_same(_run(problem, tmp_path / "uneven", 3, STEPS, extra=", decompose=[[10, 21], []]"), want, group, f"{problem}: three uneven tiles")
+    ph.disagreement(_assert_same, _run(problem, tmp_path / "two", 2, STEPS), want, group, f"{problem}: two tiles")
+    ph.disagreement(_assert_same, _run(problem, tmp_path / "uneven", 3, STEPS, extra=", decompose=[[10, 21], []]"), want, group, f"{problem}: three uneven tiles")
 
 
+@ph.local_only
 @pytest.mark.parametrize("problem", list(GROUP))
 def test_tiles_resume_the_tracer_population(tmp_path: Path, variants: Path, problem: str) -> None:
     group = GROUP[problem]
     want = _run(problem, tmp_path / "single", 1, STEPS)
     # the single grid resumed from its own checkpoint; the step cap is an absolute root iteration
     single_first = _run(problem, tmp_path / "single-first", 1, STEPS // 2)
-    _assert_same(_run(problem, tmp_path / "single-resumed", 1, STEPS, checkpoint=single_first), want, group, f"{problem}: the single grid resumed")
+    ph.disagreement(_assert_same, _run(problem, tmp_path / "single-resumed", 1, STEPS, checkpoint=single_first), want, group, f"{problem}: the single grid resumed")
     first = _run(problem, tmp_path / "first", 2, STEPS // 2)
     if problem in INJECTING:
         with h5py.File(first, "r") as f:
@@ -235,9 +238,10 @@ def test_tiles_resume_the_tracer_population(tmp_path: Path, variants: Path, prob
     assert 0 < _iteration(first) < STEPS
     resumed = _run(problem, tmp_path / "resumed", 3, STEPS, extra=", decompose=[[10, 21], []]", checkpoint=first)
     assert _iteration(resumed) == STEPS
-    _assert_same(resumed, want, group, f"{problem}: resumed onto three uneven tiles")
+    ph.disagreement(_assert_same, resumed, want, group, f"{problem}: resumed onto three uneven tiles")
 
 
+@ph.local_only
 def test_tiles_carry_the_traced_kelvin_helmholtz_population(tmp_path: Path) -> None:
     # ito-3 tracers with cohorts on a doubly periodic box: positions folded across the seams
     # land as on the single grid, and a position inside the domain keeps its bits
@@ -248,15 +252,13 @@ def test_tiles_carry_the_traced_kelvin_helmholtz_population(tmp_path: Path) -> N
             "import sys\n"
             "from simbi.simulation import runner\n"
             f"from {TracedKelvinHelmholtz.__module__} import TracedKelvinHelmholtz\n"
-            f"runner.run(TracedKelvinHelmholtz(resolution=(32, 32), tracers=400, gpus={gpus}, checkpoint_interval=1e9, data_directory=sys.argv[1]), compute_mode='cpu', max_steps=6)\n"
+            f"runner.run(TracedKelvinHelmholtz(resolution=(32, 32), tracers=400, gpus={gpus}, checkpoint_interval=1e9, data_directory=sys.argv[1]), compute_mode=sys.argv[2], max_steps=6)\n"
         )
-        env = dict(os.environ, SYMBI_GPU_OVERSUBSCRIBE="1")
-        done = subprocess.run([sys.executable, "-c", snippet, str(out)], capture_output=True, text=True, timeout=900, env=env)
-        assert done.returncode == 0, f"traced kelvin-helmholtz on {gpus} device(s) failed:\n{done.stderr[-3000:]}"
+        ph.python(ph.snippet_args(snippet, str(out), ph.BACKEND), f"traced kelvin-helmholtz on {gpus} device(s)", devices=gpus)
         return _final(out)
 
     want = run(1, tmp_path / "single")
-    _assert_same(run(2, tmp_path / "two"), want, "continuous_tracers", "traced kelvin-helmholtz on two tiles")
+    ph.disagreement(_assert_same, run(2, tmp_path / "two"), want, "continuous_tracers", "traced kelvin-helmholtz on two tiles")
 
 
 # the refined box covers root cells 8..24 of 32 on both axes; every cut lies four or more cells
@@ -264,6 +266,7 @@ def test_tiles_carry_the_traced_kelvin_helmholtz_population(tmp_path: Path) -> N
 REFINED_LAYOUTS = {2: "", 3: ", decompose=[[12, 20], []]", 6: ", decompose=[[12, 20], [14]]"}
 
 
+@ph.local_only
 @pytest.mark.parametrize(("problem", "group"), [("RefinedDiscreteDrift", "tracers"), ("RefinedIto2Drift", "continuous_tracers")])
 def test_refined_tiles_carry_the_single_hierarchy_population(tmp_path: Path, variants: Path, problem: str, group: str) -> None:
     want = _run(problem, tmp_path / "single", 1, STEPS)
@@ -275,4 +278,4 @@ def test_refined_tiles_carry_the_single_hierarchy_population(tmp_path: Path, var
     with h5py.File(want, "r") as f:
         assert int(f[group].attrs["n_tracers"]) > SEEDED, "no tracer was injected; the spawn arm is vacuous"
     for gpus, extra in REFINED_LAYOUTS.items():
-        _assert_same(_run(problem, tmp_path / f"tiles{gpus}", gpus, STEPS, extra=extra), want, group, f"{problem} on {gpus} tiles")
+        ph.disagreement(_assert_same, _run(problem, tmp_path / f"tiles{gpus}", gpus, STEPS, extra=extra), want, group, f"{problem} on {gpus} tiles")

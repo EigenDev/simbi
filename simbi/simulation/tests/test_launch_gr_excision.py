@@ -17,21 +17,24 @@
 # launches on two workers and on four uneven workers that leave the workers
 # around the core without the slab, and resumes onto them, publishing every
 # level of the single hierarchy bit for bit; the excision changes the run.
+# every run is a fresh process on the session's backend and placement
+# (parity_harness); the host tiles involve no launch and run under the local
+# placement.
 #
 # run: pytest -m simulation simbi/simulation/tests/test_launch_gr_excision.py
+#      (SIMBI_PARITY_BACKEND / SIMBI_PARITY_PLACEMENT select the session, parity_harness.py)
 # =============================================================================
 
 import os
 import subprocess
-import sys
 from pathlib import Path
 
 import h5py
 import numpy as np
 import pytest
 
-from simbi.simulation.tests.test_launch import _layout, bounded_processes  # noqa: F401  the autouse process guard
-from simbi.simulation.tests.test_launch_isothermal import _script_launch, _script_reference
+from simbi.simulation.tests import parity_harness as ph
+from simbi.simulation.tests.test_launch import bounded_processes  # noqa: F401  the autouse process guard
 from simbi.simulation.tests.test_launch_refined_numerics import _all_levels
 
 pytestmark = pytest.mark.simulation
@@ -43,6 +46,38 @@ BOX_FIELDS = {"domain_radius": "0.12", "excision_radius": "1.6"}
 LINE = ("simbi_configs.examples.grhd.gr_bondi", "GrBondi")
 LINE_RESOLUTION = (128,)
 LINE_FIELDS = {"excision_radius": "1.4"}
+
+
+def _reference_run(module: str, cls: str, resolution, out: Path, steps: int, fields: str = "", check: bool = True) -> subprocess.CompletedProcess:
+    """the single-grid run of `cls` on the session's backend; `fields` are extra constructor
+    arguments, `excision_radius=1.4`"""
+    extra = f", {fields}" if fields else ""
+    snippet = f"""
+import sys
+from simbi.simulation import runner
+from {module} import {cls}
+runner.run({cls}(resolution={resolution!r}, data_directory=sys.argv[1], checkpoint_interval=1e9{extra}), compute_mode={ph.BACKEND!r}, max_steps=int(sys.argv[2]))
+"""
+    return ph.python(ph.snippet_args(snippet, str(out), str(steps)), f"{cls} on one device", timeout=600, check=check)
+
+
+def _script_reference(module: str, cls: str, resolution, out: Path, steps: int, fields: str = "") -> Path:
+    """the single grid's final checkpoint"""
+    _reference_run(module, cls, resolution, out, steps, fields)
+    files = sorted(out.glob("*final*.h5"))
+    assert len(files) == 1, f"expected one final checkpoint in {out}, found {files}"
+    return files[0]
+
+
+def _script_launch(script: str, resolution: tuple[int, ...], out: Path, steps: int, workers: int, cuts=None, shape=None,
+                   checkpoint: Path | None = None, flags: list[str] | None = None) -> Path:
+    """the launch on the session's backend and placement without the experimental opt-in; its final
+    checkpoint"""
+    args = ["--max-steps", str(steps), "--resolution", ",".join(str(r) for r in resolution), "--checkpoint-interval", "1e9"]
+    if checkpoint is not None:
+        args += ["--checkpoint", str(checkpoint)]
+    args += flags or []
+    return ph.launch(script, out, workers, cuts=cuts, shape=shape, args=args, env=ph.environment(), timeout=600).final
 
 
 def _script(module: str) -> str:
@@ -63,6 +98,11 @@ def _iteration(path: Path) -> int:
 
 
 def _assert_same(got: Path, want: Path, label: str) -> None:
+    """every level dataset bit for bit, a difference raised as a NumericalDisagreement"""
+    ph.disagreement(_assert_same_levels, got, want, label)
+
+
+def _assert_same_levels(got: Path, want: Path, label: str) -> None:
     xs, ys = _all_levels(got), _all_levels(want)
     assert "level_0/conserved/den" in ys, f"{label}: the reference publishes no density; the comparison is vacuous"
     assert xs.keys() == ys.keys(), f"{label}: datasets {sorted(set(xs) ^ set(ys))} differ"
@@ -95,22 +135,21 @@ def test_an_excised_relativistic_launch_matches_the_single_grid(tmp_path: Path, 
             start, end = float(dim["start"]), float(dim["end"])
         cut_radius = start * (end / start) ** (uneven[0][0] / resolution[0])
         assert cut_radius < float(fields["excision_radius"]), f"the cut at r = {cut_radius:.3f} misses the excised region"
-    shape = (2,) + (1,) * (len(resolution) - 1)
-    two = _layout(tmp_path / "two.toml", workers=2, shape=shape)
-    _assert_same(_script_launch(_script(module), resolution, tmp_path / "two", two, STEPS, workers=2, flags=_flags(fields)), want, "two workers")
+    two = {"workers": 2, "shape": (2,) + (1,) * (len(resolution) - 1)}
+    _assert_same(_script_launch(_script(module), resolution, tmp_path / "two", STEPS, **two, flags=_flags(fields)), want, "two workers")
     workers = int(np.prod([len(cuts) + 1 for cuts in uneven]))
-    many = _layout(tmp_path / "uneven.toml", workers=workers, cuts=uneven)
+    many = {"workers": workers, "cuts": uneven}
     _assert_same(
-        _script_launch(_script(module), resolution, tmp_path / "uneven", many, STEPS, workers=workers, flags=_flags(fields)),
+        _script_launch(_script(module), resolution, tmp_path / "uneven", STEPS, **many, flags=_flags(fields)),
         want,
         f"{workers} uneven workers",
     )
-    first = _script_launch(_script(module), resolution, tmp_path / "first", two, STEPS // 2, workers=2, flags=_flags(fields))
+    first = _script_launch(_script(module), resolution, tmp_path / "first", STEPS // 2, **two, flags=_flags(fields))
     written_at = _iteration(first)
     assert 0 < written_at < STEPS
     # `max_steps` caps the absolute root iteration: the resumed launch steps from written_at to STEPS
     resumed = _script_launch(
-        _script(module), resolution, tmp_path / "resumed", many, STEPS, workers=workers, checkpoint=first, flags=_flags(fields)
+        _script(module), resolution, tmp_path / "resumed", STEPS, **many, checkpoint=first, flags=_flags(fields)
     )
     _assert_same(resumed, want, f"resumed onto {workers} uneven workers")
 
@@ -127,12 +166,10 @@ def test_a_tracer_population_on_a_curved_spacetime_is_refused(tmp_path: Path) ->
         "    def n_tracers(self) -> int:\n"
         "        return 100\n"
     )
-    layout = _layout(tmp_path / "two.toml", workers=2, shape=(2,))
-    cmd = [sys.executable, "-m", "simbi.cli", "launch", str(script), "--layout", str(layout), "--max-steps", "1",
-           "--resolution", "128", "--data-directory", str(tmp_path / "out"), "--checkpoint-interval", "1e9"]
-    env = dict(os.environ, PYTHONPATH=os.pathsep.join([str(tmp_path), os.getcwd(), os.environ.get("PYTHONPATH", "")]))
-    env.pop("SIMBI_LAUNCH_EXPERIMENTAL", None)
-    done = subprocess.run(cmd, capture_output=True, text=True, timeout=600, env=env)
+    env = ph.environment()
+    env["PYTHONPATH"] = os.pathsep.join([str(tmp_path), os.getcwd(), os.environ.get("PYTHONPATH", "")])
+    done = ph.launch(script, tmp_path / "out", 2, shape=(2,), args=["--max-steps", "1", "--resolution", "128", "--checkpoint-interval", "1e9"],
+                     env=env, timeout=600, expect_ok=False)
     assert done.returncode != 0, f"the launch ran tracers on a curved spacetime:\n{done.stdout}"
     flat = " ".join((done.stdout + done.stderr).split())
     assert "requires a flat cartesian chart until curvilinear decomposed transport geometry is wired; got (spherical, schwarzschild_ks)" in flat, flat[-2000:]
@@ -149,15 +186,15 @@ def _tiles(out: Path, gpus: int, steps: int, checkpoint: Path | None = None, dec
         "from simbi.simulation import runner\n"
         f"from {module} import {cls}\n"
         f"runner.run({cls}(resolution={LINE_RESOLUTION[0]}, gpus={gpus}, checkpoint_interval=1e9, data_directory=sys.argv[1], "
-        f"{_kwargs(LINE_FIELDS)}{extra}), compute_mode='cpu', max_steps={steps})\n"
+        f"{_kwargs(LINE_FIELDS)}{extra}), compute_mode={ph.BACKEND!r}, max_steps={steps})\n"
     )
-    done = subprocess.run([sys.executable, "-c", snippet, str(out)], capture_output=True, text=True, timeout=600, env=dict(os.environ, SYMBI_GPU_OVERSUBSCRIBE="1"))
-    assert done.returncode == 0, f"{gpus} host tiles failed:\n{done.stderr[-3000:]}"
+    ph.python(ph.snippet_args(snippet, str(out)), f"{gpus} host tiles", timeout=600, devices=gpus)
     files = sorted(out.glob("*final*.h5"))
     assert len(files) == 1, f"expected one final checkpoint in {out}, found {files}"
     return files[0]
 
 
+@ph.local_only
 def test_excised_host_tiles_resume_on_the_stored_primitives(tmp_path: Path) -> None:
     module, cls = LINE
     want = _script_reference(module, cls, LINE_RESOLUTION[0], tmp_path / "single", STEPS, fields=_kwargs(LINE_FIELDS))
@@ -265,35 +302,31 @@ def test_a_spinning_box_launches_as_the_single_grid(tmp_path: Path, gr_variants:
         module, base = BOX
         static = _script_reference(module, base, resolution, tmp_path / "static", STEPS, fields=_kwargs(fields))
         assert not np.array_equal(den, _all_levels(static)["level_0/conserved/den"]), f"{case}: the spin left the run unchanged"
-    shape = (2,) + (1,) * (len(resolution) - 1)
-    two = _layout(tmp_path / "two.toml", workers=2, shape=shape)
-    _assert_same(_script_launch(str(script), resolution, tmp_path / "two", two, STEPS, workers=2, flags=_flags(fields)), want, f"{case}: two workers")
+    two = {"workers": 2, "shape": (2,) + (1,) * (len(resolution) - 1)}
+    _assert_same(_script_launch(str(script), resolution, tmp_path / "two", STEPS, **two, flags=_flags(fields)), want, f"{case}: two workers")
     workers = int(np.prod([len(cuts) + 1 for cuts in uneven]))
-    many = _layout(tmp_path / "uneven.toml", workers=workers, cuts=uneven)
+    many = {"workers": workers, "cuts": uneven}
     _assert_same(
-        _script_launch(str(script), resolution, tmp_path / "uneven", many, STEPS, workers=workers, flags=_flags(fields)), want, f"{case}: {workers} uneven workers"
+        _script_launch(str(script), resolution, tmp_path / "uneven", STEPS, **many, flags=_flags(fields)), want, f"{case}: {workers} uneven workers"
     )
-    first = _script_launch(str(script), resolution, tmp_path / "first", two, STEPS // 2, workers=2, flags=_flags(fields))
+    first = _script_launch(str(script), resolution, tmp_path / "first", STEPS // 2, **two, flags=_flags(fields))
     written_at = _iteration(first)
     assert 0 < written_at < STEPS
     # `max_steps` caps the absolute root iteration: the resumed launch steps from written_at to STEPS
-    resumed = _script_launch(str(script), resolution, tmp_path / "resumed", many, STEPS, workers=workers, checkpoint=first, flags=_flags(fields))
+    resumed = _script_launch(str(script), resolution, tmp_path / "resumed", STEPS, **many, checkpoint=first, flags=_flags(fields))
     _assert_same(resumed, want, f"{case}: resumed onto {workers} uneven workers")
 
 
 def test_the_plane_of_the_box_is_refused_on_launch_as_on_the_single_grid(tmp_path: Path, gr_variants: Path) -> None:
     # the single grid bakes no GR-hydro kernel for the 2d cartesian chart; the launch refuses the
     # same combination by name before any output
-    with pytest.raises(AssertionError, match="no baked GR-hydro kernel"):
-        _script_reference("gr_variants", "BondiPlane", (48, 48), tmp_path / "single", 1)
+    single = _reference_run("gr_variants", "BondiPlane", (48, 48), tmp_path / "single", 1, check=False)
+    assert single.returncode != 0, f"the single grid ran the 2d cartesian kerr-schild plane:\n{single.stdout[-2000:]}"
+    assert "no baked GR-hydro kernel" in single.stderr, single.stderr[-3000:]
     script = tmp_path / "launched_bondiplane.py"
     script.write_text("from gr_variants import BondiPlane as Base\n\n\nclass LaunchedBondiPlane(Base):\n    pass\n")
-    layout = _layout(tmp_path / "two.toml", workers=2, shape=(2, 1))
-    cmd = [sys.executable, "-m", "simbi.cli", "launch", str(script), "--layout", str(layout), "--max-steps", "1",
-           "--resolution", "48,48", "--data-directory", str(tmp_path / "out"), "--checkpoint-interval", "1e9"]
-    env = dict(os.environ)
-    env.pop("SIMBI_LAUNCH_EXPERIMENTAL", None)
-    done = subprocess.run(cmd, capture_output=True, text=True, timeout=600, env=env)
+    done = ph.launch(script, tmp_path / "out", 2, shape=(2, 1), args=["--max-steps", "1", "--resolution", "48,48", "--checkpoint-interval", "1e9"],
+                     env=ph.environment(), timeout=600, expect_ok=False)
     assert done.returncode != 0, f"the launch ran the 2d cartesian kerr-schild plane:\n{done.stdout}"
     flat = " ".join((done.stdout + done.stderr).split())
     assert "the schwarzschild_ks spacetime on the 2-dimensional cartesian chart is outside the distributed first release" in flat, flat[-2000:]
@@ -312,15 +345,15 @@ def test_a_refined_excised_box_launches_as_the_single_hierarchy(tmp_path: Path, 
     assert "level_1/conserved/den" in levels, f"{cls}: the single hierarchy published no fine level; the refined arm is vacuous"
     bare = _script_reference("gr_variants", cls, BOX_RESOLUTION, tmp_path / "bare", STEPS, fields=_kwargs({**REFINED_FIELDS, "excision_radius": "0.0"}))
     assert not np.array_equal(levels["level_0/conserved/den"], _all_levels(bare)["level_0/conserved/den"]), f"{cls}: the excision left the run unchanged"
-    two = _layout(tmp_path / "two.toml", workers=2, shape=(2, 1, 1))
-    _assert_same(_script_launch(str(script), BOX_RESOLUTION, tmp_path / "two", two, STEPS, workers=2, flags=_flags(REFINED_FIELDS)), want, f"{cls}: two workers")
+    two = {"workers": 2, "shape": (2, 1, 1)}
+    _assert_same(_script_launch(str(script), BOX_RESOLUTION, tmp_path / "two", STEPS, **two, flags=_flags(REFINED_FIELDS)), want, f"{cls}: two workers")
     # the y cut at 13 leaves the workers around the excised core without the fine slab
-    many = _layout(tmp_path / "uneven.toml", workers=4, cuts=[[11], [13], []])
+    many = {"workers": 4, "cuts": [[11], [13], []]}
     _assert_same(
-        _script_launch(str(script), BOX_RESOLUTION, tmp_path / "uneven", many, STEPS, workers=4, flags=_flags(REFINED_FIELDS)), want, f"{cls}: four uneven workers"
+        _script_launch(str(script), BOX_RESOLUTION, tmp_path / "uneven", STEPS, **many, flags=_flags(REFINED_FIELDS)), want, f"{cls}: four uneven workers"
     )
-    first = _script_launch(str(script), BOX_RESOLUTION, tmp_path / "first", two, STEPS // 2, workers=2, flags=_flags(REFINED_FIELDS))
+    first = _script_launch(str(script), BOX_RESOLUTION, tmp_path / "first", STEPS // 2, **two, flags=_flags(REFINED_FIELDS))
     written_at = _iteration(first)
     assert 0 < written_at < STEPS
-    resumed = _script_launch(str(script), BOX_RESOLUTION, tmp_path / "resumed", many, STEPS, workers=4, checkpoint=first, flags=_flags(REFINED_FIELDS))
+    resumed = _script_launch(str(script), BOX_RESOLUTION, tmp_path / "resumed", STEPS, **many, checkpoint=first, flags=_flags(REFINED_FIELDS))
     _assert_same(resumed, want, f"{cls}: resumed onto four uneven workers")

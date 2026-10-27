@@ -7,20 +7,23 @@
 # coordinates; the single grid lays it over every level's own cell centers.
 # host tiles and two launched workers publish the single grid's state, every
 # level bit for bit, at the start and after a few steps. the perturbation
-# changes the run: the unperturbed problem lands elsewhere.
+# changes the run: the unperturbed problem lands elsewhere. every arm runs on
+# the session's backend and placement (parity_harness), its single-device
+# references and host tiles as fresh processes; the gate on single devices
+# alone involves no launch and runs under the local placement.
 #
 # run: pytest -m simulation simbi/simulation/tests/test_tiled_perturbation.py
+#      (SIMBI_PARITY_BACKEND / SIMBI_PARITY_PLACEMENT select the session, parity_harness.py)
 # =============================================================================
 
 import os
-import subprocess
-import sys
 from pathlib import Path
 
 import numpy as np
 import pytest
 
-from simbi.simulation.tests.test_launch import _layout, bounded_processes  # noqa: F401  the autouse process guard
+from simbi.simulation.tests import parity_harness as ph
+from simbi.simulation.tests.test_launch import bounded_processes  # noqa: F401  the autouse process guard
 from simbi.simulation.tests.test_launch_refined_numerics import _all_levels
 
 pytestmark = pytest.mark.simulation
@@ -90,28 +93,25 @@ def _published(out: Path) -> tuple[Path, Path]:
 
 
 def _single(problem: str, resolution: tuple, out: Path, gpus: int = 1) -> tuple[Path, Path]:
+    """`problem` on the session's backend in a fresh process, one device or `gpus` host tiles"""
     snippet = (
         "import sys\n"
         "from simbi.simulation import runner\n"
         f"from variants import {problem}\n"
         f"runner.run({problem}(resolution={resolution!r}, gpus={gpus}, checkpoint_interval=1e9, data_directory=sys.argv[1]), "
-        f"compute_mode='cpu', max_steps={STEPS})\n"
+        f"compute_mode=sys.argv[2], max_steps={STEPS})\n"
     )
-    env = dict(os.environ, SYMBI_GPU_OVERSUBSCRIBE="1")
-    done = subprocess.run([sys.executable, "-c", snippet, str(out)], capture_output=True, text=True, timeout=900, env=env)
-    assert done.returncode == 0, f"{problem} on {gpus} device(s) failed:\n{done.stderr[-3000:]}"
+    ph.python(ph.snippet_args(snippet, str(out), ph.BACKEND), f"{problem} on {gpus} device(s)", devices=gpus)
     return _published(out)
 
 
-def _launch(variants: Path, problem: str, resolution: tuple, out: Path, layout: Path) -> tuple[Path, Path]:
+def _launch(variants: Path, problem: str, resolution: tuple, out: Path, workers: int, shape: tuple) -> tuple[Path, Path]:
+    """`problem` launched on `workers` workers partitioned by `shape` on the session's backend and
+    placement, with no experimental opt-in"""
     script = variants.parent / f"launched_{problem.lower()}.py"
     script.write_text(f"from variants import {problem} as Base\n\n\nclass Launched{problem}(Base):\n    pass\n")
-    cmd = [sys.executable, "-m", "simbi.cli", "launch", str(script), "--layout", str(layout), "--max-steps", str(STEPS),
-           "--resolution", ",".join(str(r) for r in resolution), "--data-directory", str(out), "--checkpoint-interval", "1e9"]
-    env = dict(os.environ)
-    env.pop("SIMBI_LAUNCH_EXPERIMENTAL", None)
-    done = subprocess.run(cmd, capture_output=True, text=True, timeout=900, env=env)
-    assert done.returncode == 0, f"launch failed:\nstdout:\n{done.stdout}\nstderr:\n{done.stderr[-3000:]}"
+    args = ["--max-steps", str(STEPS), "--resolution", ",".join(str(r) for r in resolution), "--checkpoint-interval", "1e9"]
+    ph.launch(script, out, workers=workers, shape=shape, args=args, env=ph.environment())
     return _published(out)
 
 
@@ -123,6 +123,7 @@ def _assert_same(got: tuple[Path, Path], want: tuple[Path, Path], label: str) ->
             np.testing.assert_array_equal(x, ys[name], err_msg=f"{label} {which}: {name}")
 
 
+@ph.local_only
 def test_the_perturbation_changes_the_run(tmp_path: Path, variants: Path) -> None:
     perturbed = _all_levels(_single("FlatPerturbedBlast", (32, 32, 1), tmp_path / "perturbed")[0])
     plain = _all_levels(_single("FlatBlast", (32, 32, 1), tmp_path / "plain")[0])
@@ -133,6 +134,6 @@ def test_the_perturbation_changes_the_run(tmp_path: Path, variants: Path) -> Non
 def test_tiles_and_launched_workers_lay_the_single_grid_perturbation(tmp_path: Path, variants: Path, arm: str) -> None:
     problem, resolution = ARMS[arm]
     want = _single(problem, resolution, tmp_path / "single")
-    _assert_same(_single(problem, resolution, tmp_path / "tiles", gpus=2), want, f"{arm}: two host tiles")
-    layout = _layout(tmp_path / "two.toml", workers=2, shape=(2, 1))
-    _assert_same(_launch(variants, problem, resolution, tmp_path / "launched", layout), want, f"{arm}: two launched workers")
+    ph.disagreement(_assert_same, _single(problem, resolution, tmp_path / "tiles", gpus=2), want, f"{arm}: two host tiles")
+    got = _launch(variants, problem, resolution, tmp_path / "launched", 2, (2, 1))
+    ph.disagreement(_assert_same, got, want, f"{arm}: two launched workers")

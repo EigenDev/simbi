@@ -8,7 +8,11 @@
 # bit for bit, every staggered face included, fresh and with the correction fired
 # on a cell against both cuts.
 #
+# the single-grid references and the launches run on the session's backend and
+# placement (parity_harness).
+#
 # run: pytest -m simulation simbi/simulation/tests/test_launch_isothermal_3d.py
+#      (SIMBI_PARITY_BACKEND / SIMBI_PARITY_PLACEMENT select the session, parity_harness.py)
 # =============================================================================
 
 from pathlib import Path
@@ -17,11 +21,9 @@ import pytest
 
 from simbi.simulation.tests.test_launch import (
     STEPS,
-    _assert_same_state,
-    _layout,
     bounded_processes,  # noqa: F401  the autouse process guard
 )
-from simbi.simulation.tests.test_launch_isothermal import _script_launch, _script_reference
+from simbi.simulation.tests.test_launch_isothermal import _launch, _same_state, _script_reference
 from simbi.simulation.tests.test_launch_walls import _assert_flag_changed
 
 pytestmark = pytest.mark.simulation
@@ -42,13 +44,13 @@ def test_an_isothermal_3d_launch_matches_the_single_grid_run(tmp_path: Path, nam
     script = module.replace(".", "/") + ".py"
     resolution = (16, 16, 16)
     reference = _script_reference(module, cls, resolution, tmp_path / "single", STEPS, fields)
-    four = _layout(tmp_path / "four.toml", workers=4, shape=(2, 1, 2))
-    launched = _script_launch(script, resolution, tmp_path / "four", four, STEPS, workers=4, flags=flags)
-    _assert_same_state(launched, reference, f"{name}: four workers, cuts along x and z")
-    one = _layout(tmp_path / "one.toml", workers=1, shape=(1, 1, 1))
+    four = dict(workers=4, shape=(2, 1, 2))
+    launched = _launch(script, resolution, tmp_path / "four", STEPS, **four, flags=flags)
+    _same_state(launched, reference, f"{name}: four workers, cuts along x and z")
+    one = dict(workers=1, shape=(1, 1, 1))
     inject = {"SIMBI_FABRIC_INJECT": "trouble:3:0:7:3:7"}
-    clean = _script_launch(script, resolution, tmp_path / "clean", one, STEPS, workers=1, flags=flags)
-    flagged = _script_launch(script, resolution, tmp_path / "flagged", one, STEPS, workers=1, env=inject, flags=flags)
+    clean = _launch(script, resolution, tmp_path / "clean", STEPS, **one, flags=flags)
+    flagged = _launch(script, resolution, tmp_path / "flagged", STEPS, **one, env=inject, flags=flags)
     _assert_flag_changed(clean, flagged)
-    corrected = _script_launch(script, resolution, tmp_path / "corrected", four, STEPS, workers=4, env=inject, flags=flags)
-    _assert_same_state(corrected, flagged, f"{name}: four workers, the correction against both cuts")
+    corrected = _launch(script, resolution, tmp_path / "corrected", STEPS, **four, env=inject, flags=flags)
+    _same_state(corrected, flagged, f"{name}: four workers, the correction against both cuts")

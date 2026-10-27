@@ -16,21 +16,25 @@
 #   continues the first segment's schedule (the two segments' rows concatenate
 #   with no duplicate and no early interval sample), a per-level census on the
 #   added level included.
-# a checkpoint deeper than the run is refused by name.
+# a checkpoint deeper than the run is refused by name. every arm runs on the
+# session's backend and placement (parity_harness), its single-device runs and
+# host tiles as fresh processes; the refusal on host tiles involves no launch
+# and runs under the local placement.
 #
 # run: pytest -m simulation simbi/simulation/tests/test_tiled_deeper_restart.py
+#      (SIMBI_PARITY_BACKEND / SIMBI_PARITY_PLACEMENT select the session, parity_harness.py)
 # =============================================================================
 
 import os
 import subprocess
-import sys
 from pathlib import Path
 
 import h5py
 import numpy as np
 import pytest
 
-from simbi.simulation.tests.test_launch import _layout, bounded_processes  # noqa: F401  the autouse process guard
+from simbi.simulation.tests import parity_harness as ph
+from simbi.simulation.tests.test_launch import bounded_processes  # noqa: F401  the autouse process guard
 from simbi.simulation.tests.test_launch_refined_numerics import _all_levels
 
 pytestmark = pytest.mark.simulation
@@ -96,6 +100,9 @@ def _levels(path: Path) -> int:
 
 def _in_process(problem: str, out: Path, steps: int, gpus: int = 1, cuts: list | None = None, checkpoint: Path | None = None,
                 expect_failure: bool = False) -> subprocess.CompletedProcess:
+    """`problem` on the session's backend in a fresh process, one device or `gpus` host tiles cut at
+    `cuts`, capped at the absolute root iteration `steps`; a failure raises its category unless
+    `expect_failure`"""
     fields = [f"resolution={RESOLUTION!r}", f"gpus={gpus}", "checkpoint_interval=1e9", "data_directory=sys.argv[1]"]
     if cuts is not None:
         fields.append(f"decompose={cuts!r}")
@@ -105,25 +112,20 @@ def _in_process(problem: str, out: Path, steps: int, gpus: int = 1, cuts: list |
         "import sys\n"
         "from simbi.simulation import runner\n"
         f"from variants import {problem}\n"
-        f"runner.run({problem}({', '.join(fields)}), compute_mode='cpu', max_steps={steps})\n"
+        f"runner.run({problem}({', '.join(fields)}), compute_mode=sys.argv[2], max_steps={steps})\n"
     )
-    done = subprocess.run([sys.executable, "-c", snippet, str(out)], capture_output=True, text=True, timeout=900,
-                          env=dict(os.environ, SYMBI_GPU_OVERSUBSCRIBE="1"))
-    if not expect_failure:
-        assert done.returncode == 0, f"{problem} on {gpus} device(s) failed:\n{done.stderr[-3000:]}"
-    return done
+    return ph.python(ph.snippet_args(snippet, str(out), ph.BACKEND), f"{problem} on {gpus} device(s) to step {steps}", devices=gpus,
+                     check=not expect_failure)
 
 
-def _launch(variants: Path, problem: str, out: Path, layout: Path, checkpoint: Path, steps: int = STEPS) -> Path:
+def _launch(variants: Path, problem: str, out: Path, workers: int, cuts: list, checkpoint: Path, steps: int = STEPS) -> Path:
+    """`problem` launched on `workers` workers cut at `cuts` on the session's backend and placement,
+    resumed from `checkpoint` with no experimental opt-in; its final checkpoint"""
     script = variants.parent / f"launched_{problem.lower()}.py"
     script.write_text(f"from variants import {problem} as Base\n\n\nclass Launched{problem}(Base):\n    pass\n")
-    cmd = [sys.executable, "-m", "simbi.cli", "launch", str(script), "--layout", str(layout), "--max-steps", str(steps),
-           "--resolution", ",".join(str(r) for r in RESOLUTION), "--data-directory", str(out), "--checkpoint-interval", "1e9",
-           "--checkpoint", str(checkpoint)]
-    env = dict(os.environ)
-    env.pop("SIMBI_LAUNCH_EXPERIMENTAL", None)
-    done = subprocess.run(cmd, capture_output=True, text=True, timeout=900, env=env)
-    assert done.returncode == 0, f"launch failed:\nstdout:\n{done.stdout[-2000:]}\nstderr:\n{done.stderr[-3000:]}"
+    args = ["--max-steps", str(steps), "--resolution", ",".join(str(r) for r in RESOLUTION), "--checkpoint-interval", "1e9",
+            "--checkpoint", str(checkpoint)]
+    ph.launch(script, out, workers=workers, cuts=cuts, args=args, env=ph.environment())
     return _final(out)
 
 
@@ -190,26 +192,26 @@ def test_a_deeper_restart_on_tiles_and_workers_publishes_the_single_hierarchys_l
     assert _levels(first) == stored, f"the checkpoint holds {_levels(first)} levels, not {stored}; the rung is vacuous"
     # resumed at the checkpoint's own cap: the load and the seeding alone
     _in_process(deep, tmp_path / "loaded", FIRST_STEPS, checkpoint=first)
-    _assert_load_reinitializes_nothing(_final(tmp_path / "loaded"), first, stored, depth, f"{rung}: one device")
+    ph.disagreement(_assert_load_reinitializes_nothing, _final(tmp_path / "loaded"), first, stored, depth, f"{rung}: one device")
     _in_process(deep, tmp_path / "loaded-tiles", FIRST_STEPS, gpus=3, cuts=[[8, 13], []], checkpoint=first)
-    _assert_load_reinitializes_nothing(_final(tmp_path / "loaded-tiles"), first, stored, depth, f"{rung}: three host tiles")
-    three_layout = _layout(tmp_path / "three.toml", workers=3, cuts=[[4, 20], []])
-    loaded = _launch(variants, deep, tmp_path / "loaded-three", three_layout, first, steps=FIRST_STEPS)
-    _assert_load_reinitializes_nothing(loaded, first, stored, depth, f"{rung}: three workers")
+    ph.disagreement(_assert_load_reinitializes_nothing, _final(tmp_path / "loaded-tiles"), first, stored, depth, f"{rung}: three host tiles")
+    loaded = _launch(variants, deep, tmp_path / "loaded-three", 3, [[4, 20], []], first, steps=FIRST_STEPS)
+    ph.disagreement(_assert_load_reinitializes_nothing, loaded, first, stored, depth, f"{rung}: three workers")
     # resumed onward
     _in_process(deep, tmp_path / "single", STEPS, checkpoint=first)
     want = _final(tmp_path / "single")
     assert _levels(want) == depth, f"the single hierarchy resumed with {_levels(want)} levels"
     _assert_continues(want, first, f"{rung}: one device")
     _in_process(deep, tmp_path / "tiles", STEPS, gpus=3, cuts=[[8, 13], []], checkpoint=first)
-    _assert_same(_final(tmp_path / "tiles"), want, f"{rung}: three uneven host tiles")
-    two = _launch(variants, deep, tmp_path / "two", _layout(tmp_path / "two.toml", workers=2, cuts=[[12], []]), first)
-    _assert_same(two, want, f"{rung}: two workers")
+    ph.disagreement(_assert_same, _final(tmp_path / "tiles"), want, f"{rung}: three uneven host tiles")
+    two = _launch(variants, deep, tmp_path / "two", 2, [[12], []], first)
+    ph.disagreement(_assert_same, two, want, f"{rung}: two workers")
     # the patches span root cells 6..18: the cuts at 4 and 20 leave the outer workers no added tile
-    three = _launch(variants, deep, tmp_path / "three", three_layout, first)
-    _assert_same(three, want, f"{rung}: three workers, two holding no tile of an added level")
+    three = _launch(variants, deep, tmp_path / "three", 3, [[4, 20], []], first)
+    ph.disagreement(_assert_same, three, want, f"{rung}: three workers, two holding no tile of an added level")
 
 
+@ph.local_only
 def test_a_checkpoint_deeper_than_the_run_is_refused_by_name_on_tiles(tmp_path: Path, variants: Path) -> None:
     _in_process("NestedBlast", tmp_path / "first", FIRST_STEPS)
     done = _in_process("RefinedBlast", tmp_path / "tiles", STEPS, gpus=2, cuts=[[12], []], checkpoint=_final(tmp_path / "first"),

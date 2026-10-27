@@ -11,20 +11,21 @@
 # spherical kerr torus, and the magnetized
 # radial line, kerr frame dragging, spherical torus and cartesian torus. each
 # reference run moves its density off the initial state, so the comparison
-# exercises the evolution.
+# exercises the evolution. every run is a fresh process on the session's
+# backend (parity_harness); the host tiles involve no launch and run under the
+# local placement.
 #
 # run: pytest -m simulation simbi/simulation/tests/test_decomposed_gr.py
+#      (SIMBI_PARITY_BACKEND / SIMBI_PARITY_PLACEMENT select the session, parity_harness.py)
 # =============================================================================
 
-import os
-import subprocess
-import sys
 from pathlib import Path
 
 import h5py
 import numpy as np
 import pytest
 
+from simbi.simulation.tests import parity_harness as ph
 from simbi.simulation.tests.test_launch_refined_numerics import _all_levels
 
 pytestmark = pytest.mark.simulation
@@ -59,16 +60,20 @@ def _run(case: str, out: Path, gpus: int, cuts=None) -> Path:
         f"from {module} import {cls}\n"
         f"p = {cls}({fields}, gpus={gpus}, data_directory=sys.argv[1]{extra})\n"
         "p.checkpoint_interval = 1e9\n"
-        f"runner.run(p, compute_mode='cpu', max_steps={STEPS})\n"
+        f"runner.run(p, compute_mode={ph.BACKEND!r}, max_steps={STEPS})\n"
     )
-    done = subprocess.run([sys.executable, "-c", snippet, str(out)], capture_output=True, text=True, timeout=1800, env=dict(os.environ, SYMBI_GPU_OVERSUBSCRIBE="1"))
-    assert done.returncode == 0, f"{case} on {gpus} device(s) failed:\n{done.stderr[-3000:]}"
+    ph.python(ph.snippet_args(snippet, str(out)), f"{case} on {gpus} device(s)", timeout=1800, devices=gpus)
     files = sorted(out.glob("*final*.h5"))
     assert len(files) == 1, f"expected one final checkpoint in {out}, found {files}"
     return files[0]
 
 
 def _assert_same(got: Path, want: Path, label: str) -> None:
+    """every level dataset bit for bit, a difference raised as a NumericalDisagreement"""
+    ph.disagreement(_assert_same_levels, got, want, label)
+
+
+def _assert_same_levels(got: Path, want: Path, label: str) -> None:
     xs, ys = _all_levels(got), _all_levels(want)
     assert "level_0/conserved/den" in ys, f"{label}: the reference publishes no density; the comparison is vacuous"
     assert xs.keys() == ys.keys(), f"{label}: datasets {sorted(set(xs) ^ set(ys))} differ"
@@ -76,6 +81,7 @@ def _assert_same(got: Path, want: Path, label: str) -> None:
         np.testing.assert_array_equal(x, ys[name], err_msg=f"{label}: {name}")
 
 
+@ph.local_only
 @pytest.mark.parametrize("case", list(CASES))
 def test_curved_spacetime_host_tiles_match_the_single_grid(tmp_path: Path, case: str) -> None:
     want = _run(case, tmp_path / "single", 1)

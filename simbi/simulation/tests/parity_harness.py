@@ -250,7 +250,7 @@ def launch(script: str | Path, out: Path, workers: int, cuts=None, shape=None, a
     the layout is written beside `out`. with `expect_ok` a failed launch raises its category, and
     on the gpu every worker must hold a gpu of its own (a shared one is an infrastructure failure)"""
     out = Path(out)
-    layout = write_layout(out.parent / f"{out.name}.toml", workers, cuts=cuts, shape=shape, staging_mb=staging_mb,
+    layout = write_layout(out.parent / f"{out.name}.harness-layout.toml", workers, cuts=cuts, shape=shape, staging_mb=staging_mb,
                           directory=out if PLACEMENT == "scheduler" else None)
     cmd = ["-m", "simbi.cli", "launch", str(script), "--layout", str(layout), "--data-directory", str(out), *(args or [])]
     if BACKEND == "gpu":

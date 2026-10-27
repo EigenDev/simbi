@@ -16,24 +16,25 @@
 # a relativistic regime, which carries no viscous operator, is refused at
 # startup by name rather than dropped.
 #
+# the single-grid references and the launches run on the session's backend and
+# placement (parity_harness).
+#
 # run: pytest -m simulation simbi/simulation/tests/test_launch_viscous_charts.py
+#      (SIMBI_PARITY_BACKEND / SIMBI_PARITY_PLACEMENT select the session, parity_harness.py)
 # =============================================================================
 
 import os
-import subprocess
-import sys
 from pathlib import Path
 
 import h5py
 import pytest
 
+from simbi.simulation.tests import parity_harness as ph
 from simbi.simulation.tests.test_launch import (
     STEPS,
-    _assert_same_state,
-    _layout,
     bounded_processes,  # noqa: F401  the autouse process guard
 )
-from simbi.simulation.tests.test_launch_isothermal import _script_launch, _script_reference
+from simbi.simulation.tests.test_launch_isothermal import _launch, _same_state, _script_reference
 from simbi.simulation.tests.test_launch_walls import _assert_flag_changed
 
 pytestmark = pytest.mark.simulation
@@ -77,8 +78,8 @@ CASES = {
 }
 
 
-def _one(path: Path, case: dict) -> Path:
-    return _layout(path, workers=1, cuts=[[] for _ in case["cuts"]])
+def _one(case: dict) -> dict:
+    return dict(workers=1, cuts=[[] for _ in case["cuts"]])
 
 
 @pytest.mark.parametrize("name", list(CASES))
@@ -87,18 +88,18 @@ def test_a_viscous_launch_matches_the_single_grid_run(tmp_path: Path, name: str)
     script = module.replace(".", "/") + ".py"
     resolution = case["resolution"]
     reference = _script_reference(module, cls, resolution, tmp_path / "single", STEPS)
-    four = _layout(tmp_path / "four.toml", workers=4, cuts=case["cuts"])
-    launched = _script_launch(script, resolution, tmp_path / "four", four, STEPS, workers=4)
-    _assert_same_state(launched, reference, f"{name}: four workers")
-    one = _one(tmp_path / "one.toml", case)
-    inviscid = _script_launch(script, resolution, tmp_path / "inviscid", one, STEPS, workers=1, flags=["--nu", "0.0"])
+    four = dict(workers=4, cuts=case["cuts"])
+    launched = _launch(script, resolution, tmp_path / "four", STEPS, **four)
+    _same_state(launched, reference, f"{name}: four workers")
+    one = _one(case)
+    inviscid = _launch(script, resolution, tmp_path / "inviscid", STEPS, **one, flags=["--nu", "0.0"])
     _assert_flag_changed(inviscid, launched)
     inject = {"SIMBI_FABRIC_INJECT": case["trouble"]}
-    clean = _script_launch(script, resolution, tmp_path / "clean", one, STEPS, workers=1)
-    flagged = _script_launch(script, resolution, tmp_path / "flagged", one, STEPS, workers=1, env=inject)
+    clean = _launch(script, resolution, tmp_path / "clean", STEPS, **one)
+    flagged = _launch(script, resolution, tmp_path / "flagged", STEPS, **one, env=inject)
     _assert_flag_changed(clean, flagged)
-    corrected = _script_launch(script, resolution, tmp_path / "corrected", four, STEPS, workers=4, env=inject)
-    _assert_same_state(corrected, flagged, f"{name}: four workers, the correction against the cut")
+    corrected = _launch(script, resolution, tmp_path / "corrected", STEPS, **four, env=inject)
+    _same_state(corrected, flagged, f"{name}: four workers, the correction against the cut")
 
 
 @pytest.mark.parametrize("name", list(CASES))
@@ -107,20 +108,18 @@ def test_a_viscous_launch_resumed_onto_another_partition_matches(tmp_path: Path,
     script = module.replace(".", "/") + ".py"
     resolution = case["resolution"]
     reference = _script_reference(module, cls, resolution, tmp_path / "single", STEPS)
-    one = _one(tmp_path / "one.toml", case)
-    partial_one = _script_launch(script, resolution, tmp_path / "half", one, STEPS // 2, workers=1)
+    one = _one(case)
+    partial_one = _launch(script, resolution, tmp_path / "half", STEPS // 2, **one)
     with h5py.File(partial_one, "r") as f:
         written_at = int(f["level_0"].attrs["iteration"])
     assert 0 < written_at < STEPS
     # `max_steps` caps the absolute root iteration: each resumed launch steps from its checkpoint
     # at written_at to STEPS
-    resumed_one = _script_launch(script, resolution, tmp_path / "resumed_one", one, STEPS, workers=1, checkpoint=partial_one)
-    _assert_same_state(resumed_one, reference, f"{name}: resumed on one worker against the uninterrupted run")
-    four = _layout(tmp_path / "four.toml", workers=4, cuts=case["cuts"])
-    partial = _script_launch(script, resolution, tmp_path / "first", four, STEPS // 2, workers=4)
-    three = _layout(tmp_path / "three.toml", workers=3, cuts=case["restart"])
-    resumed = _script_launch(script, resolution, tmp_path / "three", three, STEPS, workers=3, checkpoint=partial)
-    _assert_same_state(resumed, reference, f"{name}: resumed onto three uneven workers against the uninterrupted run")
+    resumed_one = _launch(script, resolution, tmp_path / "resumed_one", STEPS, **one, checkpoint=partial_one)
+    _same_state(resumed_one, reference, f"{name}: resumed on one worker against the uninterrupted run")
+    partial = _launch(script, resolution, tmp_path / "first", STEPS // 2, workers=4, cuts=case["cuts"])
+    resumed = _launch(script, resolution, tmp_path / "three", STEPS, workers=3, cuts=case["restart"], checkpoint=partial)
+    _same_state(resumed, reference, f"{name}: resumed onto three uneven workers against the uninterrupted run")
 
 
 
@@ -139,17 +138,12 @@ class ViscousSyngeBlast(SyngeBlast):
 def test_viscosity_on_a_relativistic_regime_is_refused_by_name(tmp_path: Path) -> None:
     script = tmp_path / "viscous_synge_blast.py"
     script.write_text(VISCOUS_BLAST)
-    layout = _layout(tmp_path / "two.toml", workers=2, cuts=[[8], []])
-    cmd = [
-        sys.executable, "-m", "simbi.cli", "launch", str(script), "--layout", str(layout), "--max-steps", "1",
-        "--resolution", "16,16", "--data-directory", str(tmp_path / "refused"), "--checkpoint-interval", "1e9",
-    ]
-    env = {k: v for k, v in os.environ.items() if k != "SIMBI_LAUNCH_EXPERIMENTAL"}
-    env["SIMBI_LAUNCH_EXPERIMENTAL"] = "1"
+    env = ph.environment(opt_in=True)
     env["PYTHONPATH"] = os.pathsep.join([str(Path.cwd()), env.get("PYTHONPATH", "")])
     # the opt-in admits every ungated combination, so the refusal comes from the regime itself
-    done = subprocess.run(cmd, capture_output=True, text=True, timeout=600, env=env)
-    assert done.returncode != 0, f"the launch succeeded:\n{done.stdout}"
-    flat = " ".join(done.stderr.split())
-    assert "viscous transport is not built for the rhd regime" in flat, done.stderr
+    args = ["--max-steps", "1", "--resolution", "16,16", "--checkpoint-interval", "1e9"]
+    run = ph.launch(script, tmp_path / "refused", 2, cuts=[[8], []], args=args, env=env, timeout=600, expect_ok=False)
+    assert run.returncode != 0, f"the launch succeeded:\n{run.stdout}"
+    flat = " ".join(run.stderr.split())
+    assert "viscous transport is not built for the rhd regime" in flat, run.stderr
     assert not list((tmp_path / "refused").glob("*.h5")), "a checkpoint was published"
