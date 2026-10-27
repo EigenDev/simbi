@@ -13,7 +13,9 @@
 # line per test: its outcome, the category of a failure (parity_harness), the
 # session's backend, placement and source identity, the runner version
 # (SIMBI_PARITY_RUNNER), the hosts every launch's workers started on and the
-# most distinct hosts one launch spanned, and its duration. the
+# most distinct hosts one launch spanned, the device count of every in-process
+# run it made (its single-device and same-partition host-tile references), and
+# its duration. the
 # batch refuses a stale or dirty backend build before any test, and stops at
 # an infrastructure failure: wrong device placement, storage below
 # SIMBI_PARITY_MIN_FREE_GB (default 20) on the test directory's filesystem, or
@@ -129,6 +131,7 @@ def pytest_runtest_makereport(item, call):
     if report.failed or report.skipped:
         message = str(report.longrepr)[-1500:]
     launches = ph.observed_launch_hosts.pop(item.nodeid, [])
+    references = ph.observed_reference_devices.pop(item.nodeid, [])
     _write({
         "test": item.nodeid,
         "phase": report.when,
@@ -138,6 +141,8 @@ def pytest_runtest_makereport(item, call):
         "message": message,
         "runner": os.environ.get("SIMBI_PARITY_RUNNER", ""),
         "launch_hosts": launches,
+        # the in-process runs the gate made: 1 a single device, more the same partition's host tiles
+        "reference_devices": references,
         "max_hosts_per_launch": max((len(h) for h in launches), default=0),
         **{k: _identity.get(k, "") for k in ("backend", "placement", "nodes", "built", "head", "experimental")},
     })

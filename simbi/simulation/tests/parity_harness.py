@@ -141,6 +141,9 @@ def classify(text: str) -> type[ParityFailure]:
 _calls: dict[str, int] = {}
 # the workers' hosts of every launch the current test ran, by test id: one set per launch
 observed_launch_hosts: dict[str, list[list[str]]] = {}
+# the in-process runs of every test, by test id: the device count of each (1 a single device,
+# more the same partition's host tiles), the references a gate compares against
+observed_reference_devices: dict[str, list[int]] = {}
 
 
 def _current_test() -> str:
@@ -198,6 +201,7 @@ def python(args: list[str], label: str, timeout: float = 900, env: dict[str, str
         _record(label, cmd, None, time.monotonic() - start, f"timeout after {timeout} s")
         raise Timeout(f"{label}: no exit within {timeout} s") from e
     _record(label, cmd, done, time.monotonic() - start)
+    observed_reference_devices.setdefault(_current_test(), []).append(devices)
     if check and done.returncode != 0:
         raise classify(done.stdout + done.stderr)(f"{label} exited {done.returncode}:\n{done.stderr[-3000:]}")
     return done
