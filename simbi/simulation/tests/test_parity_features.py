@@ -23,6 +23,13 @@
 # - hllc+: the kelvin-helmholtz plane and the refined 3D blast
 # - moving binaries: a prescribed circular accreting binary on a plane, flat
 #   and under a fine box covering the orbit
+# - a moving body under its own feedback: the bondi sink launched across the
+#   grid with two-way coupling, flat and under one fine box; the gas reaction
+#   and the accretion receipts set its trajectory, so every step's body state
+#   carries the exact feedback sums (their transverse components cancel to
+#   roundoff by symmetry)
+# entries outside the gpu admission run under SIMBI_LAUNCH_EXPERIMENTAL, the
+# explicit route for a combination whose gates are being established.
 # each table entry is a module of one problem class, written beside the test.
 #
 # run: pytest -m simulation simbi/simulation/tests/test_parity_features.py
@@ -152,6 +159,28 @@ class {name}(SimbiProblem):
 
         return gas_state
 '''
+TWO_WAY_SINK = '''
+from dataclasses import replace
+from typing import Annotated
+
+from pydantic import computed_field
+
+from simbi import ProblemParam
+from simbi_configs.examples.newtonian.bondi import SphericalBondiTest
+
+
+class {name}(SphericalBondiTest):
+    """the bondi sink launched along x at 0.3 with two-way coupling on a 24-cell root on [-5, 5]^3"""
+
+    base_resolution: Annotated[int, ProblemParam(24, description="base")]
+    use_sponge: Annotated[bool, ProblemParam(False, description="no sponge source")]
+{refinement}
+    @computed_field
+    @property
+    def immersed_bodies(self) -> list:
+        (body,) = super().immersed_bodies
+        return [replace(body, velocity=(0.3, 0.0, 0.0), two_way_coupling=True)]
+'''
 BINARY_BOX = '''    refinement_enabled: Annotated[bool, ProblemParam(True, description="refined")]
     refinement_max_levels: Annotated[int, ProblemParam(2, description="levels")]
     refinement_regions: Annotated[list[list[float]], ProblemParam([[-1.0, 1.0, -1.0, 1.0]], description="box over the orbit")]
@@ -167,6 +196,7 @@ class Feature:
     even: list
     uneven: list
     rejection: str
+    opt_in: bool = False
 
 
 FEATURES = {
@@ -184,6 +214,10 @@ FEATURES = {
                                 f"reject:1:{REJECTED_STEP}:1"),
     "moving-binary-refined-2d": Feature(BINARY.format(name="MovingBinaryRefined", refinement=BINARY_BOX), "MovingBinaryRefined", (48, 48),
                                         [[24], []], [[14, 30], []], f"reject_level:1:{REJECTED_STEP}:1:1:1"),
+    "two-way-sink-3d": Feature(TWO_WAY_SINK.format(name="TwoWaySink", refinement=""), "TwoWaySink", None,
+                               [[12], [], []], [[7, 15], [], []], f"reject:1:{REJECTED_STEP}:1", opt_in=True),
+    "two-way-sink-refined-3d": Feature(TWO_WAY_SINK.format(name="TwoWaySinkRefined", refinement=ONE_BOX), "TwoWaySinkRefined", None,
+                                       [[12], [], []], [[7, 15], [], []], f"reject_level:1:{REJECTED_STEP}:1:1:1", opt_in=True),
 }
 
 
@@ -234,7 +268,7 @@ def _launch(f: Feature, script: Path, out: Path, cuts: list, steps: int = STEPS,
         args += ["--resolution", ",".join(str(r) for r in f.resolution)]
     if checkpoint is not None:
         args += ["--checkpoint", str(checkpoint)]
-    return ph.launch(script, out, workers=workers, cuts=cuts, args=args, env=ph.environment(inject))
+    return ph.launch(script, out, workers=workers, cuts=cuts, args=args, env=ph.environment(inject, opt_in=f.opt_in))
 
 
 def _files(out: Path) -> dict[str, Path]:
@@ -330,3 +364,19 @@ def test_a_rejected_stage_replays_as_the_capped_clean_launch(tmp_path: Path, fea
         assert float(h["level_0"].attrs["dt"]) == accepted, "the capped control's step took another timestep"
     _same_run({"final": rejected.final}, {"final": capped.final}, tmp_path / "rejected", tmp_path / "capped",
               "rejected stage against the capped clean launch")
+
+
+@pytest.mark.parametrize("feature", ["two-way-sink-3d", "two-way-sink-refined-3d"], indirect=True)
+def test_the_two_way_sink_moves_under_its_feedback(tmp_path: Path, feature) -> None:
+    """the trajectory entries' premise: the sink moves, and the feedback changes its velocity, in
+    the transverse components by a roundoff-level amount that only exact sums reproduce"""
+    f, script = feature
+    single = _final(_single(f, script, tmp_path / "single"))
+    with h5py.File(single, "r") as h:
+        position = np.asarray(h["bodies/position"][()])[0]
+        velocity = np.asarray(h["bodies/velocity"][()])[0]
+        force = np.asarray(h["body_diagnostics/force"][()])
+    assert position[0] > 0.0, f"the sink stayed at x = {position[0]}"
+    assert velocity[0] != 0.3, "the feedback left the launch velocity unchanged"
+    assert np.any(np.abs(velocity[1:]) > 0.0), "the transverse velocity is exactly zero; the sums it tests cancel trivially"
+    assert np.abs(force).max() > 0.0, "the body history books no force"

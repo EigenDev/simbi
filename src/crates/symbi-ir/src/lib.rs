@@ -108,6 +108,7 @@ pub use backends::kernel::{
     KernelEmitInputs, REDUCTION_BLOCK_SIZE, SEGMENT_EXCLUDED_OFFSET, SEGMENTED_LDS_BUDGET_BYTES,
     SEGMENTED_MAX_BLOCKS, emit_kernel_from_lowering, prepared_from_ir, prepared_to_ir,
     render_field_reduction, render_field_segmented_reduction, render_from_ir, segmented_privatizes,
+    EXACT_SUM_WORDS, render_exact_sum_fold, render_field_exact_sum,
 };
 pub use backends::kernel_cpu::{emit_kernel_cpu, emit_kernel_cpu_serial};
 pub use backends::render::{

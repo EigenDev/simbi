@@ -872,6 +872,156 @@ pub fn render_field_reduction(
     }
 }
 
+/// the words of one block's exact partial and of the folded total: the 70 signed base-2^32 digits
+/// of the long accumulator (symbi_algebra::exact_sum, digit k weighing 2^(32 k - 1074)) and a flag
+/// word (bit 0 a NaN term, 1 a positive infinity, 2 a negative infinity, 3 a term other than
+/// negative zero, 4 at least one term)
+pub const EXACT_SUM_WORDS: usize = 71;
+const EXACT_SUM_DIGITS: usize = EXACT_SUM_WORDS - 1;
+
+/// render the block pass of the exact device sum: every cell of the dispatch window decomposes
+/// into three signed 32-bit digit slices exactly as `symbi_algebra::exact_sum::term_digits` does
+/// (mantissa shifted by position mod 32 from digit position / 32, position = biased exponent - 1,
+/// 0 for a subnormal) and adds them into the block's 70 shared 64-bit digits with integer atomic
+/// adds; the term's flags or into the block's flag word. integer addition is associative, so a
+/// block's digits are the same for every thread schedule. each block writes its
+/// EXACT_SUM_WORDS words to `partials[block * EXACT_SUM_WORDS ..]`. a digit sum of fewer than
+/// 2^31 terms stays inside an i64.
+///
+/// ABI: field0 (the view struct), total_cells, grid_size_{0..}, dom_lo_{0..}, partials
+pub fn render_field_exact_sum(kernel_name: &str, ndim: usize, precision: Precision) -> KernelDescriptor {
+    assert!((1..=3).contains(&ndim), "render_field_exact_sum: ndim must be 1..=3 (got {ndim})");
+    assert!(REDUCTION_BLOCK_SIZE as usize > EXACT_SUM_WORDS, "a block writes its words with one thread each");
+    let ty = precision.c_type();
+    let words = EXACT_SUM_WORDS;
+    let digits = EXACT_SUM_DIGITS;
+    let mut out = String::new();
+    out.push_str(emit::header(Target::Cuda));
+    out.push_str(&format!(
+        "struct __symbi_View {{ {ty}* __restrict__ data; int lo[4]; int strides[4]; int extent[4]; }};\n",
+    ));
+    let mut params: Vec<String> = vec!["    __symbi_View field0".to_string(), "    unsigned int total_cells".to_string()];
+    for aa in 0..ndim {
+        params.push(format!("    unsigned int grid_size_{aa}"));
+    }
+    for aa in 0..ndim {
+        params.push(format!("    int dom_lo_{aa}"));
+    }
+    params.push("    unsigned long long* partials".to_string());
+    out.push_str(&format!("{} void {kernel_name}(\n", emit::global_qualifier(Target::Cuda)));
+    out.push_str(&params.join(",\n"));
+    out.push_str("\n) {\n");
+    out.push_str(&format!("    __shared__ unsigned long long sdig[{digits}];\n"));
+    out.push_str("    __shared__ unsigned long long sflags;\n");
+    out.push_str("    unsigned int tid = threadIdx.x;\n");
+    out.push_str(&format!("    if (tid < {digits}u) sdig[tid] = 0ull;\n"));
+    out.push_str("    if (tid == 0u) sflags = 0ull;\n");
+    out.push_str("    __syncthreads();\n");
+    out.push_str("    unsigned int gid = blockIdx.x * blockDim.x + threadIdx.x;\n");
+    out.push_str("    if (gid < total_cells) {\n");
+    match ndim {
+        1 => out.push_str("        int ii = (int)gid + dom_lo_0;\n"),
+        2 => {
+            out.push_str("        int ii = (int)(gid / grid_size_1) + dom_lo_0;\n");
+            out.push_str("        int jj = (int)(gid % grid_size_1) + dom_lo_1;\n");
+        }
+        _ => {
+            out.push_str("        int ii = (int)(gid / (grid_size_1 * grid_size_2)) + dom_lo_0;\n");
+            out.push_str("        int jj = (int)((gid / grid_size_2) % grid_size_1) + dom_lo_1;\n");
+            out.push_str("        int kk = (int)(gid % grid_size_2) + dom_lo_2;\n");
+        }
+    }
+    out.push_str("    ");
+    out.push_str(&emit::emit_cell_index_base(emit::IndexLang::Cuda, ndim as u8, 0, false));
+    out.push('\n');
+    let comps: &[&str] = &["ii", "jj", "kk"][..ndim];
+    let flat = emit::emit_flat_index(emit::IndexLang::Cuda, ndim as u8, 0, comps);
+    out.push_str(&format!("        double x = (double)field0.data[{flat}];\n"));
+    out.push_str(concat!(
+        "        unsigned long long bits = (unsigned long long)__double_as_longlong(x);\n",
+        "        int negative = (int)(bits >> 63);\n",
+        "        unsigned long long exponent = (bits >> 52) & 0x7ffull;\n",
+        "        unsigned long long fraction = bits & 0xfffffffffffffull;\n",
+        "        unsigned long long flags = 16ull;\n",
+        "        if (exponent == 0x7ffull) {\n",
+        "            flags |= 8ull | (fraction != 0ull ? 1ull : (negative ? 4ull : 2ull));\n",
+        "        } else {\n",
+        "            if (!(exponent == 0ull && fraction == 0ull && negative)) flags |= 8ull;\n",
+        "            unsigned long long mantissa = exponent == 0ull ? fraction : (fraction | (1ull << 52));\n",
+        "            unsigned int position = exponent == 0ull ? 0u : (unsigned int)(exponent - 1ull);\n",
+        "            if (mantissa != 0ull) {\n",
+        "                unsigned int k = position / 32u;\n",
+        "                unsigned int r = position % 32u;\n",
+        "                unsigned long long lo = mantissa << r;\n",
+        "                unsigned long long hi = r == 0u ? 0ull : (mantissa >> (64u - r));\n",
+        "                unsigned long long s0 = lo & 0xffffffffull;\n",
+        "                unsigned long long s1 = lo >> 32;\n",
+        "                unsigned long long s2 = hi & 0xffffffffull;\n",
+        "                if (negative) { s0 = 0ull - s0; s1 = 0ull - s1; s2 = 0ull - s2; }\n",
+        "                atomicAdd(&sdig[k], s0);\n",
+        "                atomicAdd(&sdig[k + 1u], s1);\n",
+        "                atomicAdd(&sdig[k + 2u], s2);\n",
+        "            }\n",
+        "        }\n",
+        "        atomicOr(&sflags, flags);\n",
+        "    }\n",
+        "    __syncthreads();\n",
+    ));
+    out.push_str(&format!(
+        "    if (tid < {digits}u) partials[(unsigned long long)blockIdx.x * {words}ull + tid] = sdig[tid];\n"
+    ));
+    out.push_str(&format!(
+        "    if (tid == {digits}u) partials[(unsigned long long)blockIdx.x * {words}ull + {digits}ull] = sflags;\n"
+    ));
+    out.push_str("}\n");
+    KernelDescriptor {
+        source: out,
+        kernel_name: kernel_name.to_string(),
+        field_bindings: vec![crate::emit::FieldBinding {
+            field: symbi_abi::FieldBind::scratch("buf0"),
+            buffer_index: 0,
+            is_output: false,
+        }],
+        param_names: vec![],
+        scalar_is_int: vec![],
+        tile_spec: None,
+    }
+}
+
+/// render the fold pass of the exact device sum: one thread per word adds word `d` of every
+/// block's partial (`partials[b * EXACT_SUM_WORDS + d]`, b < n_blocks) in 64-bit integers, the
+/// flag word or-ed, and writes the EXACT_SUM_WORDS totals to `total`; the host carries them into
+/// the accumulator.
+///
+/// ABI: partials, n_blocks, total
+pub fn render_exact_sum_fold(kernel_name: &str) -> KernelDescriptor {
+    let words = EXACT_SUM_WORDS;
+    let digits = EXACT_SUM_DIGITS;
+    let mut out = String::new();
+    out.push_str(emit::header(Target::Cuda));
+    out.push_str(&format!(
+        "{} void {kernel_name}(const unsigned long long* partials, unsigned int n_blocks, unsigned long long* total) {{\n",
+        emit::global_qualifier(Target::Cuda)
+    ));
+    out.push_str("    unsigned int d = blockIdx.x * blockDim.x + threadIdx.x;\n");
+    out.push_str(&format!("    if (d >= {words}u) return;\n"));
+    out.push_str("    unsigned long long acc = 0ull;\n");
+    out.push_str("    for (unsigned int b = 0u; b < n_blocks; ++b) {\n");
+    out.push_str(&format!("        unsigned long long w = partials[(unsigned long long)b * {words}ull + d];\n"));
+    out.push_str(&format!("        if (d < {digits}u) acc += w; else acc |= w;\n"));
+    out.push_str("    }\n");
+    out.push_str("    total[d] = acc;\n");
+    out.push_str("}\n");
+    KernelDescriptor {
+        source: out,
+        kernel_name: kernel_name.to_string(),
+        field_bindings: vec![],
+        param_names: vec![],
+        scalar_is_int: vec![],
+        tile_spec: None,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

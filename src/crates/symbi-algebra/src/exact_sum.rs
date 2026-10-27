@@ -24,7 +24,58 @@
 
 /// the digit count: 66 digits of 32 bits span the 2098 bits of a finite f64 term's position and
 /// mantissa (2^-1074 to 2^1024), and the rest absorb the carries of up to 2^60 terms
-const DIGITS: usize = 70;
+pub const DIGITS: usize = 70;
+
+/// the flag bits of a term and of a sum's flag word: a NaN term, a positive infinity, a negative
+/// infinity, a term other than negative zero, and at least one term
+pub const FLAG_NAN: u64 = 1;
+pub const FLAG_POS_INF: u64 = 2;
+pub const FLAG_NEG_INF: u64 = 4;
+pub const FLAG_NOT_NEGATIVE_ZERO: u64 = 8;
+pub const FLAG_NONEMPTY: u64 = 16;
+
+/// one term's exact contribution: three signed 32-bit slices added at digits `k`, `k + 1` and
+/// `k + 2`, and the term's flags. a zero or non-finite term carries zero slices at digit 0
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct TermDigits {
+    pub k: usize,
+    pub slices: [i64; 3],
+    pub flags: u64,
+}
+
+/// the decomposition every exact accumulation shares: a finite term is mantissa * 2^(position -
+/// 1074) with position = biased exponent - 1 (0 for a subnormal), its mantissa shifted by
+/// position mod 32 and cut into three 32-bit slices from digit position / 32 upward, signed by
+/// the term's sign
+pub fn term_digits(x: f64) -> TermDigits {
+    let bits = x.to_bits();
+    let negative = bits >> 63 == 1;
+    if !x.is_finite() {
+        let flags = if x.is_nan() {
+            FLAG_NAN
+        } else if negative {
+            FLAG_NEG_INF
+        } else {
+            FLAG_POS_INF
+        };
+        return TermDigits { k: 0, slices: [0; 3], flags: flags | FLAG_NOT_NEGATIVE_ZERO | FLAG_NONEMPTY };
+    }
+    let mut flags = FLAG_NONEMPTY;
+    if !(x == 0.0 && negative) {
+        flags |= FLAG_NOT_NEGATIVE_ZERO;
+    }
+    let exponent = ((bits >> 52) & 0x7ff) as i64;
+    let fraction = bits & ((1u64 << 52) - 1);
+    let (mantissa, position) = if exponent == 0 { (fraction, 0) } else { (fraction | (1u64 << 52), exponent - 1) };
+    if mantissa == 0 {
+        return TermDigits { k: 0, slices: [0; 3], flags };
+    }
+    let (k, r) = ((position / 32) as usize, (position % 32) as u32);
+    let wide = (mantissa as u128) << r;
+    let sign = if negative { -1 } else { 1 };
+    let slices = std::array::from_fn(|j| sign * ((wide >> (32 * j)) as u64 & 0xffff_ffff) as i64);
+    TermDigits { k, slices, flags }
+}
 /// digit additions between carry propagations, far below the 2^31 that fill an i64 limb
 const CARRY_INTERVAL: u32 = 1 << 24;
 
@@ -57,39 +108,46 @@ impl ExactSum {
 
     /// add one term exactly
     pub fn add(&mut self, x: f64) {
-        self.empty = false;
-        if !x.is_finite() {
-            if x.is_nan() {
-                self.nan = true;
-            } else if x > 0.0 {
-                self.pos_inf = true;
-            } else {
-                self.neg_inf = true;
-            }
-            self.all_negative_zero = false;
+        let term = term_digits(x);
+        self.apply_flags(term.flags);
+        if term.slices == [0; 3] {
             return;
         }
-        let bits = x.to_bits();
-        if !(x == 0.0 && bits >> 63 == 1) {
-            self.all_negative_zero = false;
-        }
-        let exponent = ((bits >> 52) & 0x7ff) as i64;
-        let fraction = bits & ((1u64 << 52) - 1);
-        // the term is mantissa * 2^(position - 1074)
-        let (mantissa, position) = if exponent == 0 { (fraction, 0) } else { (fraction | (1u64 << 52), exponent - 1) };
-        if mantissa == 0 {
-            return;
-        }
-        let (k, r) = ((position / 32) as usize, (position % 32) as u32);
-        let wide = (mantissa as u128) << r;
-        let sign = if bits >> 63 == 1 { -1 } else { 1 };
-        for (j, digit) in self.digits[k..k + 3].iter_mut().enumerate() {
-            *digit += sign * ((wide >> (32 * j)) as u64 & 0xffff_ffff) as i64;
+        for (digit, slice) in self.digits[term.k..term.k + 3].iter_mut().zip(term.slices) {
+            *digit += slice;
         }
         self.pending += 1;
         if self.pending >= CARRY_INTERVAL {
             self.carry();
         }
+    }
+
+    /// fold a flag word into the sum's flags
+    fn apply_flags(&mut self, flags: u64) {
+        self.nan |= flags & FLAG_NAN != 0;
+        self.pos_inf |= flags & FLAG_POS_INF != 0;
+        self.neg_inf |= flags & FLAG_NEG_INF != 0;
+        if flags & FLAG_NOT_NEGATIVE_ZERO != 0 {
+            self.all_negative_zero = false;
+        }
+        if flags & FLAG_NONEMPTY != 0 {
+            self.empty = false;
+        }
+    }
+
+    /// the sum of terms whose slices were added into `digits` without carries (each digit the
+    /// plain integer sum of the slices `term_digits` gives at it) and whose flags were or-ed into
+    /// `flags`: the accumulation a device performs. every digit sum must stay inside an i64, which
+    /// holds for fewer than 2^31 terms
+    pub fn from_uncarried(digits: &[i64; DIGITS], flags: u64) -> Result<Self, String> {
+        if flags > 0x1f {
+            return Err(format!("an exact sum's flag word {flags:#x} names no flag set"));
+        }
+        let mut acc = Self::new();
+        acc.digits = *digits;
+        acc.apply_flags(flags);
+        acc.carry();
+        Ok(acc)
     }
 
     /// add every term of `other`, as if its terms were added here
@@ -425,6 +483,48 @@ mod tests {
         let mut flags = ExactSum::new().to_words();
         flags[ExactSum::WORDS - 1] = 0x20;
         assert!(ExactSum::from_words(&flags).is_err());
+    }
+
+    #[test]
+    fn uncarried_digit_sums_rebuild_the_sum_add_gives() {
+        // the device accumulation: every term's slices summed into plain digits, flags or-ed
+        let mut t = terms(17, 4000, 900);
+        t.extend([0.0, -0.0, f64::from_bits(1), -f64::MAX, f64::MAX, 1e300, -1e-300]);
+        let mut digits = [0i64; super::DIGITS];
+        let mut flags = 0;
+        for &x in &t {
+            let term = super::term_digits(x);
+            for (j, slice) in term.slices.iter().enumerate() {
+                digits[term.k + j] += slice;
+            }
+            flags |= term.flags;
+        }
+        let device = ExactSum::from_uncarried(&digits, flags).unwrap();
+        let mut host = ExactSum::new();
+        for &x in &t {
+            host.add(x);
+        }
+        assert_eq!(device.to_words(), host.to_words());
+        assert_eq!(device.value().to_bits(), host.value().to_bits());
+        // the flag cases: empty, all negative zero, non-finite
+        for case in [vec![], vec![-0.0], vec![-0.0, -0.0], vec![-0.0, 0.0], vec![f64::NAN], vec![f64::INFINITY, 1.0],
+                     vec![f64::NEG_INFINITY], vec![f64::INFINITY, f64::NEG_INFINITY]] {
+            let mut digits = [0i64; super::DIGITS];
+            let mut flags = 0;
+            let mut host = ExactSum::new();
+            for &x in &case {
+                let term = super::term_digits(x);
+                for (j, slice) in term.slices.iter().enumerate() {
+                    digits[term.k + j] += slice;
+                }
+                flags |= term.flags;
+                host.add(x);
+            }
+            let device = ExactSum::from_uncarried(&digits, flags).unwrap();
+            assert_eq!(device.value().to_bits(), host.value().to_bits(), "{case:?}");
+            assert_eq!(device.to_words(), host.to_words(), "{case:?}");
+        }
+        assert!(ExactSum::from_uncarried(&[0; super::DIGITS], 0x20).is_err());
     }
 
     #[test]

@@ -19,8 +19,7 @@ use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use crate::kernels::support::{FaceDomain, cfl_from_lambda};
-use crate::regimes::substrate_gpu::{field_max_reduce, field_reduce};
-use symbi_ir::emit::ReductionOp;
+use crate::regimes::substrate_gpu::field_max_reduce;
 use symbi_sim::state::FieldStore;
 
 use super::binding::{
@@ -832,10 +831,7 @@ where
         );
         // the emit writes the outward contribution; the exact sum telescopes to the net outward
         // flux through the shell, the same for every partition of the interior
-        let sum = symbi_exec::engine::field_sum_exact(
-            scratch.host().expect("the horizon shell's exact sum runs on host-dereferenceable storage"),
-            &geom.interior,
-        );
+        let sum = symbi_exec::engine::field_sum_exact(&scratch, &geom.interior);
         match quantity {
             "mass" => partial.mass = sum,
             _ => partial.nrg = sum,
@@ -1730,23 +1726,14 @@ pub fn dispatch_viscous_alpha<const D: usize, const DOF: usize, Mem, Sc>(
     );
 }
 
-/// the exact sum of a body-feedback field over `domain`: a long accumulator on host memory, so the
-/// partials of a split grid merge into the whole grid's sum; the device reduction's total otherwise
+/// the exact sum of a body-feedback field over `domain`: the long accumulator on either memory, so
+/// the partials of a split grid merge into the whole grid's sum and round once
 fn feedback_sum<const D: usize, Mem, Sc>(field: &Field<Sc, D, Mem>, domain: &Domain<D>) -> symbi_algebra::ExactSum
 where
     Mem: MemoryStorage,
     Sc: Scalar + OrderedNumeric,
 {
-    if Mem::IS_DEVICE_ACCESSIBLE {
-        let mut sum = symbi_algebra::ExactSum::new();
-        sum.add(field_reduce(field, domain, ReductionOp::Add));
-        sum
-    } else {
-        symbi_exec::engine::field_sum_exact(
-            field.host().expect("the body feedback's exact sum runs on host-dereferenceable storage"),
-            domain,
-        )
-    }
+    symbi_exec::engine::field_sum_exact(field, domain)
 }
 
 /// dispatch the backward body feedback (`body_feedback_2d`): run the per-cell per-body

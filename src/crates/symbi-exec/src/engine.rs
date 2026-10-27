@@ -274,20 +274,26 @@ fn resident_view<Sc: Scalar + OrderedNumeric, Mem: MemoryStorage, const D: usize
 }
 
 /// the exact sum of `field` over `domain`: every cell's value added into one long accumulator,
-/// the same integer for every slab split, tile partition and visit order. the caller merges
-/// partials of other tiles or workers and rounds once with `ExactSum::value`. host memory only:
-/// a device field has no exact reduction kernel, and its approximate block reduction is no
-/// substitute
-pub fn field_sum_exact<Sc: Scalar + OrderedNumeric, Mem: MemorySpace, const D: usize>(
+/// the same integer for every slab split, tile partition, visit order and memory. the caller
+/// merges partials of other tiles or workers and rounds once with `ExactSum::value`. device memory
+/// accumulates the same digits on the device (`field_sum_exact_device`) and returns the unrounded
+/// accumulator, so a device tile's partial merges exactly as a host tile's does
+pub fn field_sum_exact<Sc: Scalar + OrderedNumeric, Mem: MemoryStorage, const D: usize>(
     field: &symbi_grid::Field<Sc, D, Mem>,
     domain: &symbi_algebra::Domain<D>,
 ) -> crate::exact_sum::ExactSum {
     use crate::exact_sum::ExactSum;
-    assert!(
-        !Mem::IS_DEVICE_ACCESSIBLE,
-        "an exact sum of device memory awaits its device kernel; the block reduction reassociates \
-         its terms and is no exact sum"
-    );
+    if Mem::IS_DEVICE_ACCESSIBLE {
+        #[cfg(feature = "gpu")]
+        {
+            return field_sum_exact_device::<DefaultGpuBackend, _, _, D>(field, domain);
+        }
+        #[cfg(not(feature = "gpu"))]
+        {
+            unreachable!("device-accessible memory requires a gpu feature (cuda or hip)");
+        }
+    }
+    let view = resident_view(field);
     let split = symbi_algebra::nest_order(D)
         .next()
         .expect("Domain rank >= 1");
@@ -298,7 +304,7 @@ pub fn field_sum_exact<Sc: Scalar + OrderedNumeric, Mem: MemorySpace, const D: u
         slab.spaces[split].hi = ii + 1;
         let mut acc = ExactSum::new();
         for c in slab.iter() {
-            acc.add(field.view().at(c).to_f64());
+            acc.add(view.at(c).to_f64());
         }
         acc
     };
@@ -749,6 +755,112 @@ fn field_reduce_device<
         }
         acc
     })
+}
+
+/// the exact sum on the device: the block pass adds every cell's digit slices into its block's
+/// 70 digits with integer atomics and ors its flags (`symbi_ir::render_field_exact_sum`), the fold
+/// pass adds the blocks' digits in integers (`render_exact_sum_fold`), and the host reads the
+/// EXACT_SUM_WORDS words and carries them into the accumulator. every addition is an integer
+/// addition, so the result is the accumulator `ExactSum::add` builds from the same terms on the
+/// host, for every block schedule, partition and memory. a digit sum stays inside an i64 for
+/// fewer than 2^31 terms, which the window's cell count is held to
+#[cfg(feature = "gpu")]
+fn field_sum_exact_device<B: GpuBackend, Sc: Scalar + OrderedNumeric, Mem: MemoryStorage, const D: usize>(
+    field: &symbi_grid::Field<Sc, D, Mem>,
+    domain: &symbi_algebra::Domain<D>,
+) -> crate::exact_sum::ExactSum {
+    use crate::exact_sum::{DIGITS, ExactSum};
+    use symbi_ir::emit::Precision;
+    use symbi_ir::{EXACT_SUM_WORDS, REDUCTION_BLOCK_SIZE, render_exact_sum_fold, render_field_exact_sum};
+    use symbi_xpu::LaunchConfig;
+    use symbi_xpu::ctx_sync;
+    use symbi_xpu::runtime::GpuRuntime;
+
+    assert_eq!(EXACT_SUM_WORDS, DIGITS + 1, "the device words are the accumulator's digits and its flag word");
+    let volume = domain.volume();
+    if volume == 0 {
+        return ExactSum::new();
+    }
+    assert!(
+        volume < (1usize << 31),
+        "an exact device sum over {volume} cells: its digit sums hold fewer than 2^31 terms"
+    );
+    let is_f64 = std::mem::size_of::<Sc>() == std::mem::size_of::<f64>();
+    let precision = if is_f64 { Precision::F64 } else { Precision::F32 };
+    let name = format!("symbi_field_exact_sum_{D}d");
+    let fold_name = "symbi_exact_sum_fold";
+    let desc = render_field_exact_sum(&name, D, precision);
+    let fold = render_exact_sum_fold(fold_name);
+    let alloc = field.domain();
+    let total_cells = volume as u32;
+    let grid: Vec<u32> = (0..D).map(|a| domain.spaces[a].size() as u32).collect();
+    let dom_lo: Vec<i32> = (0..D).map(|a| domain.spaces[a].lo as i32).collect();
+    let buf_extent: Vec<u32> = (0..D).map(|a| alloc.spaces[a].size() as u32).collect();
+    let buf_lo: Vec<i32> = (0..D).map(|a| alloc.spaces[a].lo as i32).collect();
+    let num_blocks = total_cells.div_ceil(REDUCTION_BLOCK_SIZE);
+    // the folded total first, then the per-block words
+    let words = EXACT_SUM_WORDS * (1 + num_blocks as usize);
+    with_cached_exact_words(words, |base| {
+        let total_ptr = base;
+        let partials_ptr = unsafe { base.add(EXACT_SUM_WORDS) };
+        let kernel = B::dispatcher().jit_kernel_keyed(&desc.source, &format!("{name}#{}", if is_f64 { "f64" } else { "f32" }), &name);
+        let fold_kernel = B::dispatcher().jit_kernel_keyed(&fold.source, fold_name, fold_name);
+        let partials_arg = partials_ptr as *const u8;
+        let total_arg = total_ptr as *const u8;
+        symbi_xpu::with_pooled_args(|args| {
+            B::push_field(args, field.as_ptr() as *const u8, &buf_lo, &buf_extent);
+            args.push(&total_cells);
+            for g in &grid {
+                args.push(g);
+            }
+            for d in &dom_lo {
+                args.push(d);
+            }
+            args.push(&partials_arg);
+            unsafe {
+                B::dispatcher()
+                    .runtime()
+                    .launch(&kernel, LaunchConfig::for_1d(total_cells, REDUCTION_BLOCK_SIZE), args.as_mut_slice())
+                    .unwrap_or_else(|e| panic!("GPU exact sum launch '{name}' failed: {e:?}"));
+            }
+        });
+        symbi_xpu::with_pooled_args(|args| {
+            args.push(&partials_arg);
+            args.push(&num_blocks);
+            args.push(&total_arg);
+            unsafe {
+                B::dispatcher()
+                    .runtime()
+                    .launch(&fold_kernel, LaunchConfig::for_1d(EXACT_SUM_WORDS as u32, 128), args.as_mut_slice())
+                    .unwrap_or_else(|e| panic!("GPU exact sum fold launch failed: {e:?}"));
+            }
+        });
+        ctx_sync();
+        let mut digits = [0i64; DIGITS];
+        for (k, digit) in digits.iter_mut().enumerate() {
+            *digit = unsafe { *total_ptr.add(k) } as i64;
+        }
+        let flags = unsafe { *total_ptr.add(DIGITS) };
+        ExactSum::from_uncarried(&digits, flags).unwrap_or_else(|e| panic!("the device exact sum's words: {e}"))
+    })
+}
+
+/// the grow-only words of the exact device sum, cached across sums; the closure holds the slot
+/// through the launches, the synchronization and the host read, so two sums never share it
+#[cfg(feature = "gpu")]
+fn with_cached_exact_words<R>(words: usize, f: impl FnOnce(*mut u64) -> R) -> R {
+    use std::sync::{Mutex, OnceLock};
+    use symbi_xpu::DeviceMemory;
+    use symbi_xpu::MemoryBlock;
+
+    static WORDS: OnceLock<Mutex<Option<MemoryBlock<DeviceMemory>>>> = OnceLock::new();
+    let mut guard = WORDS.get_or_init(|| Mutex::new(None)).lock().unwrap();
+    let bytes = words * std::mem::size_of::<u64>();
+    if guard.as_ref().is_none_or(|blk| blk.bytes() < bytes) {
+        *guard = Some(MemoryBlock::<DeviceMemory>::new(bytes.next_power_of_two().max(1024)).expect("unified alloc for the exact sum words"));
+    }
+    let ptr = guard.as_mut().unwrap().as_mut_ptr::<u64>();
+    f(ptr)
 }
 
 /// GPU segmented reduction: render the privatized-bucket kernel for this
