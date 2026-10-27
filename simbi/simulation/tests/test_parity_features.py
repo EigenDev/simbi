@@ -32,6 +32,12 @@
 #   of the sums themselves rests on the direct reduction tests (the arithmetic
 #   reference and the partition tests of exact_device_sum and
 #   reduction_partitions)
+# - single-device settings without a parity gate elsewhere: the refined 3D
+#   blast under ppm, rk3, hllc, the van leer limiter and reflecting walls; the
+#   refined bondi sink with a porous surface, compact softening, two sinks, a
+#   torque-free surface, launched without two-way coupling, under hllc+ with
+#   its sponge, and with well-balanced reconstruction; the rotating sponge under
+#   a fine box; first-order kelvin-helmholtz; the orszag-tang vortex under hllc
 # entries outside the gpu admission run under SIMBI_LAUNCH_EXPERIMENTAL, the
 # explicit route for a combination whose gates are being established.
 # each table entry is a module of one problem class, written beside the test.
@@ -185,6 +191,91 @@ class {name}(SphericalBondiTest):
         (body,) = super().immersed_bodies
         return [replace(body, velocity=(0.3, 0.0, 0.0), two_way_coupling=True)]
 '''
+BLAST_VARIANT = '''
+from typing import Annotated
+
+from simbi import ProblemParam
+from simbi.types import BoundaryCondition, Reconstruction, Solver, TimeStepping
+from simbi.types.input import Limiter
+from simbi_configs.examples.newtonian.refined_blast_3d import RefinedBlast3D
+
+
+class {name}(RefinedBlast3D):
+    """the 3D blast under one fine box at 24^3 with one setting changed"""
+
+    resolution: Annotated[tuple[int, int, int], ProblemParam((24, 24, 24), cli=True, description="grid")]
+    {line}
+'''
+SINK_VARIANT = '''
+from dataclasses import replace
+from typing import Annotated
+
+from pydantic import computed_field
+
+from simbi import ProblemParam
+from simbi.types import Solver
+from simbi_configs.examples.newtonian.bondi import SphericalBondiTest
+
+
+class {name}(SphericalBondiTest):
+    """the bondi sink at the origin of a 24-cell root on [-5, 5]^3 under one fine box, one setting changed"""
+
+    base_resolution: Annotated[int, ProblemParam(24, description="base")]
+    use_sponge: Annotated[bool, ProblemParam({sponge}, description="the outer sponge")]
+    refinement_enabled: Annotated[bool, ProblemParam(True, description="refined")]
+    refinement_max_levels: Annotated[int, ProblemParam(2, description="levels")]
+    refinement_regions: Annotated[list[list[float]] | None, ProblemParam([[-2.5, 2.5, -2.5, 2.5, -2.5, 2.5]], description="box")]
+    refinement_ratios: Annotated[list[int] | None, ProblemParam([2], description="ratios")]
+{fields}
+    @computed_field
+    @property
+    def immersed_bodies(self) -> list:
+        (body,) = super().immersed_bodies
+        return {bodies}
+'''
+REFINED_ROTATING_SPONGE = '''
+from typing import Annotated
+
+from simbi import ProblemParam
+from simbi_configs.examples.newtonian.rotating_sponge import RotatingSponge
+
+
+class RefinedRotatingSponge(RotatingSponge):
+    """the rotating frame and the outer sponge on the 24-cell plane under a fine box over the center"""
+
+    refinement_enabled: Annotated[bool, ProblemParam(True, description="refined")]
+    refinement_max_levels: Annotated[int, ProblemParam(2, description="levels")]
+    refinement_regions: Annotated[list[list[float]], ProblemParam([[-0.5, 0.5, -0.5, 0.5]], description="box")]
+    refinement_ratios: Annotated[list[int], ProblemParam([2], description="ratios")]
+'''
+FIRST_ORDER_KH = '''
+from typing import Annotated
+
+from simbi import ProblemParam
+from simbi.types import TimeStepping
+from simbi_configs.examples.newtonian.kh import KelvinHelmholtz
+
+
+class FirstOrderKh(KelvinHelmholtz):
+    """the kelvin-helmholtz plane under first-order time stepping"""
+
+    resolution: Annotated[tuple[int, int], ProblemParam((32, 32), cli=True, description="grid")]
+    timestepping: Annotated[TimeStepping, ProblemParam(TimeStepping.RK1, description="rk1")]
+'''
+HLLC_ORSZAG_TANG = '''
+from typing import Annotated
+
+from simbi import ProblemParam
+from simbi.types import Solver
+from simbi_configs.examples.newtonian.nmhd_orszag_tang import NewtonianOrszagTang
+
+
+class HllcOrszagTang(NewtonianOrszagTang):
+    """the orszag-tang vortex on a 32 x 32 plane under the hllc flux"""
+
+    resolution: Annotated[tuple[int, int, int], ProblemParam((32, 32, 1), cli=True, description="grid")]
+    solver: Annotated[Solver, ProblemParam(Solver.HLLC, description="hllc")]
+'''
 BINARY_BOX = '''    refinement_enabled: Annotated[bool, ProblemParam(True, description="refined")]
     refinement_max_levels: Annotated[int, ProblemParam(2, description="levels")]
     refinement_regions: Annotated[list[list[float]], ProblemParam([[-1.0, 1.0, -1.0, 1.0]], description="box over the orbit")]
@@ -218,6 +309,36 @@ FEATURES = {
                                 f"reject:1:{REJECTED_STEP}:1"),
     "moving-binary-refined-2d": Feature(BINARY.format(name="MovingBinaryRefined", refinement=BINARY_BOX), "MovingBinaryRefined", (48, 48),
                                         [[24], []], [[14, 30], []], f"reject_level:1:{REJECTED_STEP}:1:1:1"),
+    **{f"refined-blast-{key}": Feature(BLAST_VARIANT.format(name=f"Blast{cls}", line=line), f"Blast{cls}", (24, 24, 24),
+                                       [[12], [], []], [[7, 15], [], []], f"reject_level:1:{REJECTED_STEP}:1:1:1")
+       for key, cls, line in [
+           ("ppm", "Ppm", "reconstruction: Annotated[Reconstruction, ProblemParam(Reconstruction.PPM, description='ppm')]"),
+           ("rk3", "Rk3", "timestepping: Annotated[TimeStepping, ProblemParam(TimeStepping.RK3, description='rk3')]"),
+           ("hllc", "Hllc", "solver: Annotated[Solver, ProblemParam(Solver.HLLC, description='hllc')]"),
+           ("van-leer", "VanLeer", "limiter: Annotated[Limiter, ProblemParam(Limiter.VAN_LEER, description='van leer')]"),
+           ("reflecting", "Reflecting", "boundary_conditions: Annotated[list, ProblemParam([BoundaryCondition.REFLECTING], description='walls')]"),
+       ]},
+    **{f"refined-sink-{key}": Feature(SINK_VARIANT.format(name=f"Sink{cls}", sponge=sponge, fields=fields, bodies=bodies), f"Sink{cls}", None,
+                                      [[12], [], []], [[7, 15], [], []], f"reject_level:1:{REJECTED_STEP}:1:1:1", opt_in=True)
+       for key, cls, sponge, fields, bodies in [
+           ("porous", "Porous", False, "", "[replace(body, accretion=replace(body.accretion, porosity=0.5))]"),
+           ("compact-softening", "CompactSoftening", False, "",
+            "[replace(body, gravitational=replace(body.gravitational, softening_kind='compact'))]"),
+           ("two-sinks", "TwoSinks", False, "", "[replace(body, mass=0.5, position=(-1.2, 0.0, 0.0)), replace(body, mass=0.5, position=(1.2, 0.0, 0.0))]"),
+           ("torque-free", "TorqueFree", False, "", "[replace(body, accretion=replace(body.accretion, torque_free_xi=0.5))]"),
+           ("moving-one-way", "MovingOneWay", False, "", "[replace(body, velocity=(0.3, 0.0, 0.0))]"),
+           ("hllc-plus-sponge", "HllcPlusSponge", True,
+            "    solver: Annotated[Solver, ProblemParam(Solver.HLLC_PLUS, description='hllc+')]\n", "[body]"),
+           ("well-balanced", "WellBalanced", False,
+            "    wb_reconstruction: Annotated[bool, ProblemParam(True, description='balanced')]\n", "[body]"),
+       ]},
+    "refined-rotating-sponge-2d": Feature(REFINED_ROTATING_SPONGE, "RefinedRotatingSponge", (24, 24), [[12], []], [[7, 15], []],
+                                          f"reject_level:1:{REJECTED_STEP}:1:1:1", opt_in=True),
+    # first-order time stepping has one stage, stage 0
+    "first-order-kh-2d": Feature(FIRST_ORDER_KH, "FirstOrderKh", (32, 32), [[16], []], [[10, 21], []], f"reject:1:{REJECTED_STEP}:0"),
+    # the 2.5D vortex partitions its two grid axes
+    "hllc-orszag-tang-2d": Feature(HLLC_ORSZAG_TANG, "HllcOrszagTang", (32, 32, 1), [[16], []], [[10, 21], []],
+                                   f"reject:1:{REJECTED_STEP}:1"),
     "two-way-sink-3d": Feature(TWO_WAY_SINK.format(name="TwoWaySink", refinement=""), "TwoWaySink", None,
                                [[12], [], []], [[7, 15], [], []], f"reject:1:{REJECTED_STEP}:1", opt_in=True),
     "two-way-sink-refined-3d": Feature(TWO_WAY_SINK.format(name="TwoWaySinkRefined", refinement=ONE_BOX), "TwoWaySinkRefined", None,
