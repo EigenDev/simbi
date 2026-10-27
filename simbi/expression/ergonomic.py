@@ -88,15 +88,18 @@ def source(
     combined = list(outputs) + ([region] if region is not None else [])
     g, lifted = _resolve(combined)
     region_expr = lifted.pop() if region is not None else None
+    # the mask compiles as a trailing output so its node is serialized; the wire carries the
+    # kind's outputs alone and names the mask by its node index
     compiled = g.compile(lifted + ([region_expr] if region_expr is not None else []))
-    region_index = len(lifted) if region_expr is not None else None
-    return compiled.serialize_source(
+    payload = compiled.serialize_source(
         kind,
         dim,
         params=list(params) if params is not None else None,
-        region=region_index,
         target=target,
     )
+    if region_expr is not None:
+        payload["region"] = payload["outputs"].pop()
+    return payload
 
 
 def force(outputs: Sequence[Outputish], *, dim: int, **kw) -> dict:

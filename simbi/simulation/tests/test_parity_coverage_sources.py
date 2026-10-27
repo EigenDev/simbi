@@ -15,6 +15,11 @@
 # the table:
 # - cooling, velocity relaxation and conserved-vector injection on a drifting
 #   pressure bump on a 24-cell plane
+# - cooling, force, velocity relaxation and injection restricted to a disc by a
+#   region mask chi(x) on the same plane; each masked run also equals, word for
+#   word on the single device, the source written with chi multiplied into the
+#   channels the kind masks (chi takes the values 0 and 1, so the products are
+#   exact)
 # - an outer sponge on the relativistic ram44 shock, relaxing through the
 #   relativistic state law
 # - an inverse-square radial force on the log-radial spherical (r, theta) shell
@@ -27,9 +32,13 @@
 # run: pytest -m simulation simbi/simulation/tests/test_parity_coverage_sources.py
 #      (SIMBI_PARITY_BACKEND / SIMBI_PARITY_PLACEMENT select the session, parity_harness.py)
 # =============================================================================
+import os
+from pathlib import Path
+
 import pytest
 
-from simbi.simulation.tests.parity_table import REJECTED_STEP, Feature, install
+from simbi.simulation.tests import parity_harness as ph
+from simbi.simulation.tests.parity_table import REJECTED_STEP, Feature, assert_same_levels_and_state, final_of, install, single
 from simbi.simulation.tests.test_launch import bounded_processes  # noqa: F401  the autouse process guard
 
 pytestmark = pytest.mark.simulation
@@ -211,6 +220,14 @@ FEATURES = {
     "rhd-hllc-2d": Feature(RHD_SOLVER.format(name="RhdHllc", label="hllc", solver="HLLC"), "RhdHllc", **RAM44, control=RHD_CONTROL),
     "rhd-hllc-plus-2d": Feature(RHD_SOLVER.format(name="RhdHllcPlus", label="hllc+", solver="HLLC_PLUS"), "RhdHllcPlus", **RAM44,
                                 control=RHD_CONTROL),
+    "masked-cooling-2d": Feature(_plane("MaskedCooling", "expr.cooling([0.3], dim=2, region=disc)"), "MaskedCooling", **FLAT_2D,
+                                 control=PLANE_CONTROL),
+    "masked-force-2d": Feature(_plane("MaskedForce", "expr.force([0.3, -0.2], dim=2, region=disc)"), "MaskedForce", **FLAT_2D,
+                               control=PLANE_CONTROL),
+    "masked-relaxation-2d": Feature(_plane("MaskedRelaxation", "expr.velocity_relaxation([2.0, 0.0, 0.0], dim=2, region=disc)"),
+                                    "MaskedRelaxation", **FLAT_2D, control=PLANE_CONTROL),
+    "masked-inject-2d": Feature(_plane("MaskedInject", "expr.inject([0.05, 0.02, 0.0, 0.1], dim=2, region=disc)"), "MaskedInject",
+                                **FLAT_2D, control=PLANE_CONTROL),
     # the 2.5D vortex partitions its two grid axes
     "rmhd-hllc-2d": Feature(RMHD_HLLC, "RmhdHllc", (32, 32, 1), [[16], []], [[10, 21], []], f"reject:1:{REJECTED_STEP}:1",
                             control=RMHD_CONTROL),
@@ -218,3 +235,26 @@ FEATURES = {
 
 
 install(globals(), FEATURES)
+
+
+# each masked source beside the same source with chi multiplied into the channels its kind masks:
+# force and injection every channel, cooling and velocity relaxation the rate alone
+HAND_MASKED = {
+    "masked-cooling-2d": "expr.cooling([0.3 * disc], dim=2)",
+    "masked-force-2d": "expr.force([0.3 * disc, -0.2 * disc], dim=2)",
+    "masked-relaxation-2d": "expr.velocity_relaxation([2.0 * disc, 0.0, 0.0], dim=2)",
+    "masked-inject-2d": "expr.inject([0.05 * disc, 0.02 * disc, 0.0 * disc, 0.1 * disc], dim=2)",
+}
+
+
+@pytest.mark.parametrize("key", list(HAND_MASKED))
+def test_a_region_mask_equals_the_mask_multiplied_into_the_masked_channels(key: str, tmp_path: Path,
+                                                                            monkeypatch: pytest.MonkeyPatch) -> None:
+    f = FEATURES[key]
+    (tmp_path / "masked.py").write_text(f.source)
+    (tmp_path / "hand.py").write_text(_plane("HandMasked", HAND_MASKED[key]))
+    monkeypatch.setenv("PYTHONPATH", os.pathsep.join([str(tmp_path), os.getcwd(), os.environ.get("PYTHONPATH", "")]))
+    masked = final_of(single(f, tmp_path / "masked.py", tmp_path / "masked"))
+    hand = final_of(single(f, tmp_path / "hand.py", tmp_path / "hand", problem="HandMasked"))
+    ph.disagreement(assert_same_levels_and_state, masked, hand, f"{key}: region mask against the hand-masked source")
+
