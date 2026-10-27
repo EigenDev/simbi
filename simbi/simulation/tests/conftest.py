@@ -50,6 +50,18 @@ def _write(record: dict) -> None:
         f.write(json.dumps(record) + "\n")
 
 
+def pytest_collection_modifyitems(config, items):
+    # an experimental discovery session runs every launch under the opt-in, so the gates that
+    # assert an admission refusal test nothing there
+    if not ph.EXPERIMENTAL:
+        return
+    skip = pytest.mark.skip(reason="an admission gate; the experimental discovery session runs every launch under the opt-in")
+    for item in items:
+        name = item.name
+        if "refused" in name or "without_the_opt_in" in name:
+            item.add_marker(skip)
+
+
 def pytest_sessionstart(session):
     if not RESULTS:
         return
@@ -112,5 +124,5 @@ def pytest_runtest_makereport(item, call):
         "runner": os.environ.get("SIMBI_PARITY_RUNNER", ""),
         "launch_hosts": launches,
         "max_hosts_per_launch": max((len(h) for h in launches), default=0),
-        **{k: _identity.get(k, "") for k in ("backend", "placement", "nodes", "built", "head")},
+        **{k: _identity.get(k, "") for k in ("backend", "placement", "nodes", "built", "head", "experimental")},
     })

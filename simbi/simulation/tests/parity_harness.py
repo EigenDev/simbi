@@ -15,6 +15,11 @@
 #   SIMBI_PARITY_CPUS_PER_TASK  srun -c for every task (default 7)
 #   SIMBI_PARITY_LOGS       a directory receiving every command's output, by
 #                           test id and call order
+#   SIMBI_PARITY_EXPERIMENTAL=1  every launch runs under SIMBI_LAUNCH_EXPERIMENTAL
+#                           unless the gate sets it: a discovery session that
+#                           records whether a combination outside the admission
+#                           executes and agrees (hard safety refusals still
+#                           stop it); refusal gates are skipped there
 # every failure the harness raises carries its category: an admission refusal,
 # a missing implementation, an execution failure, a harness failure, a timeout,
 # resource exhaustion, or an infrastructure failure (wrong device placement,
@@ -47,6 +52,7 @@ NODES = int(os.environ.get("SIMBI_PARITY_NODES", "1"))
 SRUN = os.environ.get("SIMBI_PARITY_SRUN") == "1"
 CPUS_PER_TASK = os.environ.get("SIMBI_PARITY_CPUS_PER_TASK", "7")
 LOGS = os.environ.get("SIMBI_PARITY_LOGS")
+EXPERIMENTAL = os.environ.get("SIMBI_PARITY_EXPERIMENTAL") == "1"
 assert BACKEND in ("cpu", "gpu"), f"SIMBI_PARITY_BACKEND={BACKEND!r}; give cpu or gpu"
 assert PLACEMENT in ("local", "scheduler"), f"SIMBI_PARITY_PLACEMENT={PLACEMENT!r}; give local or scheduler"
 
@@ -268,6 +274,8 @@ def launch(script: str | Path, out: Path, workers: int, cuts=None, shape=None, a
     if BACKEND == "gpu":
         cmd.append("--gpu")
     environ = dict(os.environ if env is None else env)
+    if EXPERIMENTAL and "SIMBI_LAUNCH_EXPERIMENTAL" not in environ:
+        environ["SIMBI_LAUNCH_EXPERIMENTAL"] = "1"
     start = time.monotonic()
     if PLACEMENT == "local":
         full = [sys.executable, *cmd]
@@ -383,7 +391,8 @@ def source_identity() -> dict[str, str]:
 
     built = str(getattr(_load_backend(BACKEND), "BUILD_SOURCE_ID", "unknown"))
     head = subprocess.run(["git", "rev-parse", "HEAD"], capture_output=True, text=True).stdout.strip()
-    return {"backend": BACKEND, "placement": PLACEMENT, "nodes": str(NODES), "srun": str(SRUN), "built": built, "head": head}
+    return {"backend": BACKEND, "placement": PLACEMENT, "nodes": str(NODES), "srun": str(SRUN), "built": built, "head": head,
+            "experimental": str(EXPERIMENTAL)}
 
 
 def stale_binary(identity: dict[str, str]) -> str | None:
