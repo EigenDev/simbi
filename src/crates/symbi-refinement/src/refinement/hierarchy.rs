@@ -6454,16 +6454,16 @@ fn seed_tiles_from_hierarchy<R, const NDIM: usize, const DOF: usize, M, E, S, Me
             assert!(!every_owner_held, "composite tracer seed has no decomposed owner");
             continue;
         };
-        let (level, coord) = tiles[destination]
+        let (level, _) = tiles[destination]
             .tracer_cell(owner)
             .expect("decomposed tracer owner must resolve");
-        let x = tiles[destination].levels[level].state.geom.centroid(coord);
         let tracers = tiles[destination].levels[level]
             .state
             .tracers
             .as_mut()
             .unwrap();
-        tracers.x.push(x);
+        // the stratified seed position, the same one the single-grid hierarchy keeps
+        tracers.x.push(seeded.x[ii]);
         tracers.id.push(seeded.id[ii]);
         tracers.cohort.push(seeded.cohort[ii]);
         tracers.flags.push(seeded.flags[ii]);
