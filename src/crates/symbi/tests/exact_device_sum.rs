@@ -14,7 +14,8 @@
 // - non-finite and signed-zero terms follow ieee addition as on the host: a NaN,
 //   opposite infinities, one infinity, all negative zeros, an empty window
 // - extreme, subnormal and widely spread terms, and a single-precision field
-//   whose terms widen exactly, equal the host accumulator word for word
+//   whose terms (non-finite and signed zero included) widen exactly, equal the
+//   host accumulator word for word
 // - a window of 2^21 halves carries through every digit and sums to 2^20
 // - cost: the exact sum and the rounded block reduction of a 128^3 window,
 //   timed and printed
@@ -175,6 +176,24 @@ fn a_single_precision_field_sums_its_widened_terms_exactly() {
     let got = field_sum_exact(&f, &domain([0, 0, 0], [1, 1, 1000]));
     let want = host_sum(terms.iter().take(1000).map(|&x| (x as f32) as f64));
     assert_eq!(got.to_words(), want.to_words());
+    // single-precision non-finite and signed-zero terms widen to their f64 values
+    let cases: [(&str, Vec<f32>); 4] = [
+        ("a nan", vec![1.0, f32::NAN, 2.0]),
+        ("opposite infinities", vec![f32::INFINITY, f32::NEG_INFINITY, 1.0]),
+        ("one infinity", vec![f32::NEG_INFINITY, 3.0, -2.0]),
+        ("all negative zero", vec![-0.0, -0.0, -0.0]),
+    ];
+    for (label, terms) in cases {
+        let n = terms.len() as isize;
+        let alloc = domain([0, 0, -1], [1, 1, n + 1]);
+        let f = Field::<f32, 3, DefaultMemory>::zeros(&alloc).expect("f32 field");
+        for c in alloc.iter() {
+            f.set(c, if (0..n).contains(&c[2]) { terms[c[2] as usize] } else { 5.0 });
+        }
+        let got = field_sum_exact(&f, &domain([0, 0, 0], [1, 1, n]));
+        let want = host_sum(terms.iter().map(|&x| x as f64));
+        assert_eq!(got.value().to_bits(), want.value().to_bits(), "{label}");
+    }
 }
 
 #[test]

@@ -29,7 +29,7 @@ use symbi_ir::ScalarRef;
 use symbi_ir::KernelId;
 use symbi_ir::emit::ReductionOp;
 use crate::regimes::substrate_gpu::field_reduce;
-use symbi_exec::engine::field_sum_exact;
+use symbi_exec::engine::field_sum_exact_on_host;
 use symbi_exec::exact_sum::ExactSum;
 use symbi_xpu::{MemorySpace, MemoryStorage};
 
@@ -2095,7 +2095,7 @@ where
         if let Some(h) = heat.as_ref() {
             slip_cell_pass(sim, "slip_dissipation_3d", h.dt, h.bface_source, h.bz_source, &ws.dissipation_body);
             field_lincomb_over(interior, 1.0, &ws.dissipation, 1.0, &ws.dissipation_body);
-            sums.push((b, field_sum_exact(&ws.dissipation_body, interior)));
+            sums.push((b, field_sum_exact_on_host(&ws.dissipation_body, interior, "magnetic-slip dissipation")));
         }
         for c in 0..3 {
             field_lincomb_over(interior, 1.0, &ws.quadrature.b[c], 1.0, &slip_q[c]);
@@ -2250,7 +2250,7 @@ where
         if let Some(h) = heat.as_ref() {
             slip_cell_pass(sim, "slip_dissipation_2d", h.dt, h.bface_source, h.bz_source, &ws.dissipation_body);
             field_lincomb_over(interior, 1.0, &ws.dissipation, 1.0, &ws.dissipation_body);
-            sums.push((b, field_sum_exact(&ws.dissipation_body, interior)));
+            sums.push((b, field_sum_exact_on_host(&ws.dissipation_body, interior, "magnetic-slip dissipation")));
         }
         for c in 0..3 {
             field_lincomb_over(interior, 1.0, &ws.quadrature.b[c], 1.0, &slip_q[c]);
@@ -2633,7 +2633,7 @@ where
             &[],
             &[],
         );
-        s.merge(&field_sum_exact(&product.b[d], interior));
+        s.merge(&field_sum_exact_on_host(&product.b[d], interior, "magnetic-slip solve"));
     }
     s
 }
@@ -2926,7 +2926,7 @@ where
                 &[],
                 &[],
             );
-            s.merge(&field_sum_exact(pz, &sim.geom.interior));
+            s.merge(&field_sum_exact_on_host(pz, &sim.geom.interior, "magnetic-slip solve"));
         }
     }
     halo.sum(s).value()

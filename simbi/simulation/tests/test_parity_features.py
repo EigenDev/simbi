@@ -26,8 +26,12 @@
 # - a moving body under its own feedback: the bondi sink launched across the
 #   grid with two-way coupling, flat and under one fine box; the gas reaction
 #   and the accretion receipts set its trajectory, so every step's body state
-#   carries the exact feedback sums (their transverse components cancel to
-#   roundoff by symmetry)
+#   carries the feedback sums into the evolution. the transverse components,
+#   zero by symmetry, hold roundoff-level values whose rounding depends on the
+#   order of summation, which makes these gates sensitive to it; the exactness
+#   of the sums themselves rests on the direct reduction tests (the arithmetic
+#   reference and the partition tests of exact_device_sum and
+#   reduction_partitions)
 # entries outside the gpu admission run under SIMBI_LAUNCH_EXPERIMENTAL, the
 # explicit route for a combination whose gates are being established.
 # each table entry is a module of one problem class, written beside the test.
@@ -368,8 +372,9 @@ def test_a_rejected_stage_replays_as_the_capped_clean_launch(tmp_path: Path, fea
 
 @pytest.mark.parametrize("feature", ["two-way-sink-3d", "two-way-sink-refined-3d"], indirect=True)
 def test_the_two_way_sink_moves_under_its_feedback(tmp_path: Path, feature) -> None:
-    """the trajectory entries' premise: the sink moves, and the feedback changes its velocity, in
-    the transverse components by a roundoff-level amount that only exact sums reproduce"""
+    """the trajectory entries' premise: the sink moves, the feedback changes its velocity, and its
+    transverse components, zero by symmetry, hold nonzero roundoff-level values, so the trajectory
+    gates compare sums whose rounding depends on the order of summation"""
     f, script = feature
     single = _final(_single(f, script, tmp_path / "single"))
     with h5py.File(single, "r") as h:

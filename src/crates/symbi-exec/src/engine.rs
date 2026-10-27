@@ -323,6 +323,21 @@ pub fn field_sum_exact<Sc: Scalar + OrderedNumeric, Mem: MemoryStorage, const D:
     total
 }
 
+/// the exact sum of a field held on host memory, for an operator whose device form awaits its
+/// gates (the magnetic-slip solve): on device memory it stops with `operator` named, the
+/// behavior the operator had before the exact device sum existed
+pub fn field_sum_exact_on_host<Sc: Scalar + OrderedNumeric, Mem: MemoryStorage, const D: usize>(
+    field: &symbi_grid::Field<Sc, D, Mem>,
+    domain: &symbi_algebra::Domain<D>,
+    operator: &str,
+) -> crate::exact_sum::ExactSum {
+    assert!(
+        !Mem::IS_DEVICE_ACCESSIBLE,
+        "the {operator} sums on host memory; its device path is outside the gated scope"
+    );
+    field_sum_exact(field, domain)
+}
+
 /// whether a reduction's combine order is pinned, and so whether its result is
 /// bit-reproducible from run to run.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -762,8 +777,18 @@ fn field_reduce_device<
 /// pass adds the blocks' digits in integers (`render_exact_sum_fold`), and the host reads the
 /// EXACT_SUM_WORDS words and carries them into the accumulator. every addition is an integer
 /// addition, so the result is the accumulator `ExactSum::add` builds from the same terms on the
-/// host, for every block schedule, partition and memory. a digit sum stays inside an i64 for
-/// fewer than 2^31 terms, which the window's cell count is held to
+/// host, for every block schedule, partition and memory.
+///
+/// bounds. a term adds one slice of magnitude at most 2^32 - 1 to each of three consecutive
+/// digits, so a digit receives at most one slice per term. the device adds in u64 modulo 2^64,
+/// which is associative and commutative: every order of the atomic adds and of the fold yields the
+/// true digit sum modulo 2^64, whatever its intermediate partial sums, and reading the result as
+/// two's complement recovers the true sum exactly while its magnitude stays below 2^63. a block of
+/// at most REDUCTION_BLOCK_SIZE = 256 terms holds |digit| <= 256 (2^32 - 1) < 2^40; the window of
+/// N cells holds |digit| <= N (2^32 - 1), below 2^63 for N < 2^31, the limit asserted here (it also
+/// keeps the u32 cell index and launch size in range). the host carry `from_uncarried` performs
+/// keeps every digit inside an i64: a carry is at most |digit| / 2^32 < 2^31, and the next digit's
+/// magnitude (2^31 - 1)(2^32 - 1) plus that carry stays below 2^63
 #[cfg(feature = "gpu")]
 fn field_sum_exact_device<B: GpuBackend, Sc: Scalar + OrderedNumeric, Mem: MemoryStorage, const D: usize>(
     field: &symbi_grid::Field<Sc, D, Mem>,

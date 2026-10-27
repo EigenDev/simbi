@@ -528,6 +528,30 @@ mod tests {
     }
 
     #[test]
+    fn the_largest_uncarried_digits_a_window_holds_carry_inside_an_i64() {
+        // fewer than 2^31 terms, one slice of magnitude at most 2^32 - 1 per digit each
+        let bound = ((1i64 << 31) - 1) * ((1i64 << 32) - 1);
+        for sign in [1i64, -1] {
+            // every digit at the bound: the chained carry (an overflow panics in a debug build)
+            let mut digits = [sign * bound; super::DIGITS];
+            digits[super::DIGITS - 1] = 0;
+            let chained = ExactSum::from_uncarried(&digits, super::FLAG_NONEMPTY | super::FLAG_NOT_NEGATIVE_ZERO).unwrap();
+            assert_eq!(chained.value().signum(), sign as f64);
+            // one digit at the bound equals its carried form
+            let mut one = [0i64; super::DIGITS];
+            one[10] = sign * bound;
+            let mut carried = [0i64; super::DIGITS];
+            carried[10] = (sign * bound).rem_euclid(1 << 32);
+            carried[11] = (sign * bound).div_euclid(1 << 32);
+            let flags = super::FLAG_NONEMPTY | super::FLAG_NOT_NEGATIVE_ZERO;
+            assert_eq!(
+                ExactSum::from_uncarried(&one, flags).unwrap().to_words(),
+                ExactSum::from_uncarried(&carried, flags).unwrap().to_words()
+            );
+        }
+    }
+
+    #[test]
     fn many_carries_stay_exact() {
         // past the carry interval the digits renormalize without loss
         let mut acc = ExactSum::new();

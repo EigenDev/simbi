@@ -831,7 +831,10 @@ where
         );
         // the emit writes the outward contribution; the exact sum telescopes to the net outward
         // flux through the shell, the same for every partition of the interior
-        let sum = symbi_exec::engine::field_sum_exact(&scratch, &geom.interior);
+        let sum = symbi_exec::engine::field_sum_exact(
+            scratch.host().expect("the horizon shell's exact sum runs on host-dereferenceable storage"),
+            &geom.interior,
+        );
         match quantity {
             "mass" => partial.mass = sum,
             _ => partial.nrg = sum,
