@@ -177,8 +177,9 @@ fn rotate_nd<S: Scalar, const D: usize>(v: Tensor<S, D>, theta: S) -> Tensor<S, 
 ///
 /// given total mass M, semi-major axis a, and mass ratio q = m2/m1:
 ///   m1 = M / (1 + q), m2 = M - m1
-///   a1 = a / (1 + q), a2 = a - a1  (center of mass)
-///   v1 = omega * a2,  v2 = -omega * a1
+///   a1 = a q / (1 + q), a2 = a - a1  (distances from the center of mass)
+///   v1 = omega * a1,  v2 = -omega * a2  (each body at omega times its own radius, so
+///   m1 v1 + m2 v2 = 0)
 ///
 /// returns (pos1, vel1, mass1, pos2, vel2, mass2).
 pub fn keplerian_binary<S: Scalar>(
@@ -199,8 +200,8 @@ pub fn keplerian_binary<S: Scalar>(
     let a3 = semi_major * semi_major * semi_major;
     let omega = (total_mass / a3).sqrt();
 
-    let v1 = omega * a2;
-    let v2 = -omega * a1;
+    let v1 = omega * a1;
+    let v2 = -omega * a2;
 
     (
         Tensor::new([a1, S::ZERO]),
@@ -456,5 +457,104 @@ mod tests {
         let r0 = advanced[0].position.norm();
         assert!(approx(r0, 0.5)); // radius preserved
         assert!(advanced[0].position[1] > 0.0); // rotated counterclockwise
+    }
+
+    /// the circular binary of total mass `m`, separation `a` and mass ratio `q` as a prescribed
+    /// inertial collection, built from `keplerian_binary`
+    fn inertial_binary(m: f64, a: f64, q: f64) -> BodyCollection<f64, 2> {
+        let (p1, v1, m1, p2, v2, m2) = keplerian_binary(m, a, q);
+        BodyCollection::new()
+            .add(Body::gravitational(0, p1, v1, m1, 0.1, 0.04))
+            .add(Body::gravitational(1, p2, v2, m2, 0.1, 0.04))
+            .as_binary()
+            .with_frame(ReferenceFrame::Inertial)
+            .with_binary_params(BinaryParams::new(m, a, 0.0, q))
+    }
+
+    const MASS_RATIOS: [f64; 4] = [0.25, 0.5, 1.0, 2.0];
+
+    #[test]
+    fn keplerian_binary_has_zero_center_of_mass_momentum_and_position() {
+        for q in MASS_RATIOS {
+            let (p1, v1, m1, p2, v2, m2) = keplerian_binary(1.0_f64, 1.0, q);
+            assert!(approx(m2 / m1, q), "q = {q}: mass ratio {}", m2 / m1);
+            for ax in 0..2 {
+                assert!(approx(m1 * v1[ax] + m2 * v2[ax], 0.0), "q = {q}: momentum {ax} = {}", m1 * v1[ax] + m2 * v2[ax]);
+                assert!(approx(m1 * p1[ax] + m2 * p2[ax], 0.0), "q = {q}: center of mass {ax} = {}", m1 * p1[ax] + m2 * p2[ax]);
+            }
+        }
+    }
+
+    #[test]
+    fn each_keplerian_velocity_is_omega_times_its_own_radius_counterclockwise() {
+        for q in MASS_RATIOS {
+            let (m, a) = (1.0_f64, 1.0);
+            let omega = (m / (a * a * a)).sqrt();
+            let (p1, v1, _, p2, v2, _) = keplerian_binary(m, a, q);
+            for (pos, vel, label) in [(p1, v1, "body 1"), (p2, v2, "body 2")] {
+                assert!(approx(vel.norm(), omega * pos.norm()), "q = {q}, {label}: |v| = {} against omega r = {}", vel.norm(), omega * pos.norm());
+                // tangential: v . r = 0; counterclockwise: (r x v)_z = omega r^2 > 0
+                assert!(approx(pos[0] * vel[0] + pos[1] * vel[1], 0.0), "q = {q}, {label}: velocity has a radial part");
+                let lz = pos[0] * vel[1] - pos[1] * vel[0];
+                assert!(approx(lz, omega * pos.norm() * pos.norm()), "q = {q}, {label}: (r x v)_z = {lz}");
+            }
+        }
+    }
+
+    #[test]
+    fn the_stored_velocity_is_the_rate_of_the_prescribed_trajectory() {
+        // central difference of the prescribed positions over steps of omega h = 1e-3: its error
+        // relative to |v| is (omega h)^2 / 6 = 1.7e-7, held here to 1e-6
+        for q in MASS_RATIOS {
+            let h = 1e-3_f64;
+            let mut coll = inertial_binary(1.0, 1.0, q);
+            let mut history = Vec::new();
+            for _ in 0..200 {
+                history.push(coll.bodies().iter().map(|b| (b.position, b.velocity)).collect::<Vec<_>>());
+                let advanced = advance_binary(&coll, h).expect("an inertial binary advances");
+                for (ii, body) in advanced.iter().enumerate() {
+                    coll.get_mut(ii).position = body.position;
+                    coll.get_mut(ii).velocity = body.velocity;
+                }
+            }
+            for step in [1, 50, 198] {
+                for body in 0..2 {
+                    let (before, after) = (history[step - 1][body].0, history[step + 1][body].0);
+                    let v = history[step][body].1;
+                    for ax in 0..2 {
+                        let rate = (after[ax] - before[ax]) / (2.0 * h);
+                        assert!((rate - v[ax]).abs() <= 1e-6 * v.norm(),
+                                "q = {q}, body {body}, step {step}, axis {ax}: trajectory rate {rate} against stored {}", v[ax]);
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn inertial_prescribed_positions_follow_the_circular_orbit() {
+        // the positions depend on the initial positions and omega alone: p_1 = a_1 (cos wt, sin wt),
+        // p_2 = -a_2 (cos wt, sin wt)
+        let (m, a, q, dt, steps) = (1.0_f64, 1.0, 0.5, 0.01, 300);
+        let omega = (m / (a * a * a)).sqrt();
+        let a1 = a * q / (1.0 + q);
+        let a2 = a - a1;
+        let mut coll = inertial_binary(m, a, q);
+        for _ in 0..steps {
+            let advanced = advance_binary(&coll, dt).unwrap();
+            for (ii, body) in advanced.iter().enumerate() {
+                coll.get_mut(ii).position = body.position;
+                coll.get_mut(ii).velocity = body.velocity;
+            }
+        }
+        let phase = omega * dt * steps as f64;
+        let (c, s) = (phase.cos(), phase.sin());
+        let want = [[a1 * c, a1 * s], [-a2 * c, -a2 * s]];
+        for body in 0..2 {
+            for ax in 0..2 {
+                let got = coll.get(body).position[ax];
+                assert!((got - want[body][ax]).abs() < 1e-12, "body {body} axis {ax}: {got} against {}", want[body][ax]);
+            }
+        }
     }
 }
