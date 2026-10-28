@@ -500,7 +500,8 @@ pub fn field_segmented_reduce<Sc: Scalar + OrderedNumeric, Mem: MemorySpace, con
 /// split of a grid (levels, tiles, workers) merge into the whole grid's integers and round once.
 /// returns `n_segments * values.len()` accumulators, indexed `segment * n_values + value`, and
 /// the cells whose segment is `n_segments` (outside the binning); a segment above that marks an
-/// excluded cell, counted in neither
+/// excluded cell, counted in neither. the host reads the fields: host memory, or managed device
+/// memory once the device has finished writing them
 pub fn field_segmented_sum_exact<Sc: Scalar + OrderedNumeric, Mem: MemorySpace, const D: usize>(
     values: &[&symbi_grid::Field<Sc, D, Mem>],
     segment: &symbi_grid::Field<Sc, D, Mem>,
@@ -509,11 +510,15 @@ pub fn field_segmented_sum_exact<Sc: Scalar + OrderedNumeric, Mem: MemorySpace, 
 ) -> (Vec<crate::exact_sum::ExactSum>, u64) {
     use crate::exact_sum::ExactSum;
     assert!(
-        !Mem::IS_DEVICE_ACCESSIBLE,
-        "an exact segmented sum of device memory awaits its device kernel; the block reduction \
-         reassociates its terms and is no exact sum"
+        Mem::IS_HOST_ACCESSIBLE,
+        "an exact segmented sum reads its fields on the host; device-local storage has no host view"
     );
     assert!(!values.is_empty() && n_segments >= 1, "field_segmented_sum_exact: needs a value field and a segment");
+    // managed memory: the kernels that wrote the fields finish before the host reads them
+    if Mem::IS_DEVICE_ACCESSIBLE {
+        #[cfg(feature = "gpu")]
+        symbi_xpu::ctx_sync();
+    }
     let n_values = values.len();
     let n_slots = n_segments * n_values;
     let visit = |acc: &mut [ExactSum], dropped: &mut u64, c: [isize; D]| {

@@ -392,3 +392,100 @@ fn the_exact_sum_counts_dropped_cells_and_skips_excluded_ones() {
     let total: f64 = sums.iter().map(|s| s.value()).sum();
     assert_eq!(total, kept as f64, "only the binned cells are summed");
 }
+
+/// a field that cancels along the outer axis: columns of 1e16, 1, 1, -1e16 repeating. summed in
+/// order, 1e16 + 1 rounds back to 1e16 (the spacing there is 2) and both units are lost; a tile
+/// that starts on a unit keeps them, since 1 + 1 - 1e16 is exactly representable. the bucket is the
+/// row mod 4, so every bucket sees the whole cancelling sequence
+const CANCEL: [f64; 4] = [1.0e16, 1.0, 1.0, -1.0e16];
+
+fn cancelling_fields() -> (Field<f64, 2, HostMemory>, Field<f64, 2, HostMemory>, Vec<i128>) {
+    let dom = domain();
+    let value = Field::<f64, 2, HostMemory>::zeros(&dom).expect("value field");
+    let segment = Field::<f64, 2, HostMemory>::zeros(&dom).expect("segment field");
+    let mut truth = vec![0i128; 4];
+    for c in dom.iter() {
+        let v = CANCEL[(c[0] % 4) as usize];
+        let b = (c[1] % 4) as usize;
+        value.view_mut().set(c, v);
+        segment.view_mut().set(c, b as f64);
+        truth[b] += v as i128;
+    }
+    (value, segment, truth)
+}
+
+/// the tile partitions a census sample is merged over: the whole grid, two tiles, three uneven
+/// tiles and a 2 x 2 cut, each cut starting a tile on a unit column
+fn partitions() -> Vec<Vec<Domain<2>>> {
+    let cut = |xs: &[isize], ys: &[isize]| -> Vec<Domain<2>> {
+        let edges = |cuts: &[isize], n: isize| [&[0][..], cuts, &[n][..]].concat();
+        let (ex, ey) = (edges(xs, NX), edges(ys, NY));
+        let mut tiles = Vec::new();
+        for x in ex.windows(2) {
+            for y in ey.windows(2) {
+                let mut d = domain();
+                (d.spaces[0].lo, d.spaces[0].hi, d.spaces[1].lo, d.spaces[1].hi) = (x[0], x[1], y[0], y[1]);
+                tiles.push(d);
+            }
+        }
+        tiles
+    };
+    vec![cut(&[], &[]), cut(&[257], &[]), cut(&[97, 301], &[]), cut(&[173], &[311])]
+}
+
+#[test]
+fn rounded_tile_partials_change_with_the_partition_and_exact_partials_do_not() {
+    // a census sample merges one partial per tile. rounded partials merged with + depend on where
+    // the tiles cut the grid on a cancelling field; exact partials merge into the same integers,
+    // and round to the true bucket sums, for every partition
+    let (value, segment, truth) = cancelling_fields();
+    let refs = [&value];
+    let n_segments = 4;
+
+    let rounded: Vec<Vec<f64>> = partitions()
+        .iter()
+        .map(|tiles| {
+            let mut total = vec![0.0f64; n_segments];
+            for tile in tiles {
+                let partial = field_segmented_reduce(&refs, &segment, tile, n_segments, ReductionOp::Add);
+                for (acc, v) in total.iter_mut().zip(&partial.values) {
+                    *acc += v;
+                }
+            }
+            total
+        })
+        .collect();
+    let moved = rounded[1..].iter().any(|r| r.iter().zip(&rounded[0]).any(|(a, b)| a.to_bits() != b.to_bits()));
+    assert!(moved, "every partition's rounded partials merge to the whole grid's bits ({rounded:?}); the field exerts no pressure on the merge");
+
+    for (p, tiles) in partitions().iter().enumerate() {
+        let mut merged = vec![symbi_algebra::ExactSum::new(); n_segments];
+        let mut dropped = 0;
+        for tile in tiles {
+            let (partial, d) = field_segmented_sum_exact(&refs, &segment, tile, n_segments);
+            for (acc, s) in merged.iter_mut().zip(&partial) {
+                acc.merge(s);
+            }
+            dropped += d;
+        }
+        assert_eq!(dropped, 0);
+        for (slot, (sum, want)) in merged.iter().zip(&truth).enumerate() {
+            assert_eq!(sum.value().to_bits(), (*want as f64).to_bits(), "partition {p} ({} tiles), bucket {slot}: {:e} vs {want}", tiles.len(), sum.value());
+        }
+    }
+}
+
+#[test]
+fn an_additive_census_over_host_readable_storage_travels_as_exact_sums() {
+    // host memory and managed device memory are host-readable; device-local storage is not, and
+    // registers no census. min, max and product combine as values on every storage
+    use symbi_sim::census::{CensusPartial, sums_exactly};
+    assert!(sums_exactly(ReductionOp::Add, true));
+    assert!(!sums_exactly(ReductionOp::Add, false));
+    for op in [ReductionOp::Min, ReductionOp::Max, ReductionOp::Mul] {
+        assert!(!sums_exactly(op, true) && !sums_exactly(op, false), "{op:?}");
+    }
+    assert!(matches!(CensusPartial::identity(ReductionOp::Add, 3, true), CensusPartial::Sums { .. }));
+    assert!(matches!(CensusPartial::identity(ReductionOp::Add, 3, false), CensusPartial::Values { .. }));
+    assert!(<HostMemory as symbi_xpu::MemoryStorage>::IS_HOST_ACCESSIBLE, "host memory sums exactly");
+}

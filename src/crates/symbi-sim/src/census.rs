@@ -823,12 +823,20 @@ pub enum CensusPartial {
     Values { values: Vec<f64>, dropped: u64 },
 }
 
+/// whether the partials of a census with reduce op `op`, sampled from storage the host can read,
+/// travel as exact sums: an additive census over host-readable storage (host memory and managed
+/// device memory) sums every cell exactly, so the partials of any split of the grid merge into the
+/// whole grid's sums and round once. the other ops combine exactly in any order and travel as values
+pub fn sums_exactly(op: ReductionOp, host_readable: bool) -> bool {
+    op == ReductionOp::Add && host_readable
+}
+
 impl CensusPartial {
     /// the partial of a part holding no cells of the reduction, in the form a holder's partial
-    /// takes: exact zero sums for an additive census on host memory, otherwise every accumulator
-    /// at the identity of the reduce op. merging it changes nothing
-    pub fn identity(op: ReductionOp, slots: usize, device: bool) -> CensusPartial {
-        if op == ReductionOp::Add && !device {
+    /// takes (`sums_exactly`): exact zero sums, or every accumulator at the identity of the reduce
+    /// op. merging it changes nothing
+    pub fn identity(op: ReductionOp, slots: usize, host_readable: bool) -> CensusPartial {
+        if sums_exactly(op, host_readable) {
             return CensusPartial::Sums { values: vec![symbi_algebra::ExactSum::new(); slots], dropped: 0 };
         }
         let value = match op {
@@ -1304,7 +1312,7 @@ mod tests {
     #[test]
     fn a_nan_partial_absorbs_every_merge_in_either_order() {
         for op in [ReductionOp::Add, ReductionOp::Mul, ReductionOp::Min, ReductionOp::Max] {
-            let identity = match CensusPartial::identity(op, 1, true) {
+            let identity = match CensusPartial::identity(op, 1, false) {
                 CensusPartial::Values { values, .. } => values[0],
                 _ => unreachable!("a device-form identity carries values"),
             };
@@ -1328,18 +1336,18 @@ mod tests {
     fn an_identity_partial_merges_as_nothing_in_the_holders_form() {
         let held = [0.5, -2.0, 3.25];
         for op in [ReductionOp::Add, ReductionOp::Mul, ReductionOp::Min, ReductionOp::Max] {
-            for device in [false, true] {
-                let holder = if op == ReductionOp::Add && !device {
+            for host_readable in [true, false] {
+                let holder = if sums_exactly(op, host_readable) {
                     let sums = held.iter().map(|&v| { let mut s = symbi_algebra::ExactSum::new(); s.add(v); s }).collect();
                     CensusPartial::Sums { values: sums, dropped: 4 }
                 } else {
                     CensusPartial::Values { values: held.to_vec(), dropped: 4 }
                 };
-                let identity = CensusPartial::identity(op, held.len(), device);
-                assert_eq!(identity.tag(), holder.tag(), "{op:?} device={device}: the identity travels under another tag");
+                let identity = CensusPartial::identity(op, held.len(), host_readable);
+                assert_eq!(identity.tag(), holder.tag(), "{op:?} host_readable={host_readable}: the identity travels under another tag");
                 let mut merged = holder.clone();
                 merged.merge(&identity, op);
-                assert_eq!(merged.round(), holder.round(), "{op:?} device={device}: the identity changed the merge");
+                assert_eq!(merged.round(), holder.round(), "{op:?} host_readable={host_readable}: the identity changed the merge");
             }
         }
     }

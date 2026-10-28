@@ -8672,7 +8672,7 @@ where
                 if per_level != Some(spec.cadence()) || !r.is_due_at_level(now, level) {
                     return symbi_sim::census::CensusPartial::None;
                 }
-                symbi_sim::census::CensusPartial::identity(spec.op(), spec.n_segments() * spec.n_values(), Mem::IS_DEVICE_ACCESSIBLE)
+                symbi_sim::census::CensusPartial::identity(spec.op(), spec.n_segments() * spec.n_values(), Mem::IS_HOST_ACCESSIBLE)
             })
             .collect();
     }

@@ -71,9 +71,10 @@ pub fn store_partials_exact<const D: usize, const DOF: usize, Mem: MemorySpace>(
                 )
             });
             let values: Vec<_> = fields.values.iter().collect();
-            // an additive census on host memory sums exactly, so its partials merge across levels,
-            // tiles and workers into the whole grid's sums; the device reduction combines by the op
-            if spec.op() == symbi_ir::emit::ReductionOp::Add && !Mem::IS_DEVICE_ACCESSIBLE {
+            // an additive census over host-readable storage sums exactly (`sums_exactly`), so its
+            // partials merge across levels, tiles and workers into the whole grid's sums whatever
+            // the split; the device reduction combines the other ops, exact in any order
+            if symbi_sim::census::sums_exactly(spec.op(), Mem::IS_HOST_ACCESSIBLE) {
                 let (sums, dropped) =
                     symbi_exec::engine::field_segmented_sum_exact(&values, &fields.segment, &sim.geom.interior, spec.n_segments());
                 return symbi_sim::census::CensusPartial::Sums { values: sums, dropped };
