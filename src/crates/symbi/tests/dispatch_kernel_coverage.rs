@@ -28,6 +28,7 @@
 // enumerated by the curved-family gates instead.
 // =============================================================================
 
+use symbi::regimes::mhd_substrate::predictor_emf_kernels;
 use symbi::regimes::substrate_kernels::{geom_suffix, kernel_exists, mhd_geom_suffix};
 use symbi_geometry::Geometry;
 
@@ -573,4 +574,47 @@ fn every_solver_the_matrix_accepts_has_its_face_flux_baked() {
         missing.len(),
         missing.join("\n  ")
     );
+}
+
+/// the RK2 predictor edge-EMF save and average kernels a flat mhd dispatch arm requests
+fn predictor_emf_kernels_of(d: usize, axes: &[usize]) -> Option<(String, String)> {
+    match d {
+        1 => predictor_emf_kernels::<1>(axes),
+        2 => predictor_emf_kernels::<2>(axes),
+        3 => predictor_emf_kernels::<3>(axes),
+        _ => unreachable!("mhd grids are 1-3D"),
+    }
+}
+
+// the constrained-transport time average of the RK2 predictor edge EMF. a 1.5D grid (cartesian,
+// spherical and cylindrical lines, every magnetized regime) has no CT edge, so its stage requests
+// no save or average kernel; a 2D or 3D arm requests both, and both are baked
+#[test]
+fn every_predictor_emf_kernel_an_mhd_arm_requests_is_emitted() {
+    let arms: &[(Geometry, usize, &[usize])] = &[
+        (Geometry::Cartesian, 1, &[0]),
+        (Geometry::Cartesian, 2, &[0, 1]),
+        (Geometry::Cartesian, 3, &[0, 1, 2]),
+        (Geometry::Spherical, 1, &[0]),
+        (Geometry::Spherical, 2, &[0, 1]),
+        (Geometry::Spherical, 3, &[0, 1, 2]),
+        (Geometry::Cylindrical, 1, &[0]),
+        (Geometry::Cylindrical, 2, &[0, 2]),
+        (Geometry::Cylindrical, 2, &[0, 1]),
+        (Geometry::Cylindrical, 3, &[0, 1, 2]),
+    ];
+    let mut missing = Vec::new();
+    for prefix in ["rmhd", "nmhd", "imhd"] {
+        for &(coords, d, axes) in arms {
+            match predictor_emf_kernels_of(d, axes) {
+                None => assert_eq!(d, 1, "{prefix} {coords:?} {d}D: a grid with CT edges requests no predictor EMF kernel"),
+                Some((save, average)) => {
+                    assert!(d > 1, "{prefix} {coords:?} 1D: a grid without CT edges requests {save} and {average}");
+                    assert_family(&mut missing, save);
+                    assert_family(&mut missing, average);
+                }
+            }
+        }
+    }
+    assert!(missing.is_empty(), "predictor EMF kernels the dispatch requests are NOT emitted:\n  {}", missing.join("\n  "));
 }

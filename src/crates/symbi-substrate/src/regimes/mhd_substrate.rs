@@ -1559,6 +1559,18 @@ pub(crate) fn efield<const D: usize, const DOF: usize, Mem, Sc>(
     }
 }
 
+/// the device kernels that save and time-average the RK2 predictor edge EMF on a grid with grid
+/// axes `axes`, as (save, average); none on a grid with no constrained-transport edge (1.5D, where
+/// the out-of-plane field rides the induction flux and the in-plane field holds its initial value).
+/// the save and the average act edge by edge, so on an empty edge set both are the identity, the
+/// same empty fold the host branch runs
+pub fn predictor_emf_kernels<const D: usize>(axes: &[usize]) -> Option<(String, String)> {
+    if ct_edges::<D>(axes).is_empty() {
+        return None;
+    }
+    Some((format!("rmhd_save_efield_{D}d"), format!("rmhd_average_efield_{D}d")))
+}
+
 /// the accepted predictor EMF: `efield_n <- efield`, the first term of the RK2 average
 /// `B^{n+1} = B^n - dt/2 curl(E_1 + E_2)`. it must be the EMF the predictor faces were curled
 /// from, so the predictor's redo saves again after it splices. device uses the pointwise copy
@@ -1571,8 +1583,10 @@ pub(crate) fn save_predictor_emf<const D: usize, const DOF: usize, Mem, Sc>(
 {
     let mhd = sim.fields.mhd.as_ref().expect("MHD requires mhd fields");
     let edges = ct_edges::<D>(&sim.geom.axes);
+    let Some((sname, _)) = predictor_emf_kernels::<D>(&sim.geom.axes) else {
+        return;
+    };
     if Mem::IS_DEVICE_ACCESSIBLE {
-        let sname = format!("rmhd_save_efield_{D}d");
         let (sf, sir) = expect_kernel::<Sc>(&sname);
         for e in &edges {
             let (l, ext, _) = field_layout(&mhd.efield[e.slot]);
@@ -1615,8 +1629,10 @@ pub(crate) fn average_with_predictor_emf<const D: usize, const DOF: usize, Mem, 
 {
     let mhd = sim.fields.mhd.as_ref().expect("MHD requires mhd fields");
     let edges = ct_edges::<D>(&sim.geom.axes);
+    let Some((_, aname)) = predictor_emf_kernels::<D>(&sim.geom.axes) else {
+        return;
+    };
     if Mem::IS_DEVICE_ACCESSIBLE {
-        let aname = format!("rmhd_average_efield_{D}d");
         let (af, air) = expect_kernel::<Sc>(&aname);
         for e in &edges {
             let (l, ext, _) = field_layout(&mhd.efield[e.slot]);
