@@ -40,7 +40,7 @@ pub use diagnostics::DiagnosticAccumulator;
 pub use drain::{drain_body_cell, drain_cell, drain_mask, drain_timescale, sound_speed_from_cons};
 pub use gravity::{MutualGravity, gravitational_potential_energy};
 pub use history::BodyHistory;
-pub use motion::{advance_binary, apply_body_deltas, keplerian_binary, rotate_2d, rotate_3d};
+pub use motion::{advance_binary, apply_body_deltas, circular_binary_state, keplerian_binary, rotate_2d, rotate_3d};
 pub use penalize::{BodyKin, PenalizationRelaxation, Property, moment, omega_cross, penalize_cell};
 pub use sdf::SdfExpr;
 pub use shell_flux::{FaceFlux, shell_accretion};

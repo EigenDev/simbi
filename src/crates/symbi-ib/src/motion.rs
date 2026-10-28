@@ -213,6 +213,23 @@ pub fn keplerian_binary<S: Scalar>(
     )
 }
 
+/// the circular binary's components as measured in `frame`: (position, velocity, mass) of each,
+/// body 1 the heavier for q < 1. the corotating frame turns with the orbit at omega, so both
+/// components rest in it at their keplerian positions; the inertial and the stationary frame carry
+/// the keplerian velocities of `keplerian_binary`.
+pub fn circular_binary_state<S: Scalar>(
+    total_mass: S,
+    semi_major: S,
+    mass_ratio: S,
+    frame: ReferenceFrame,
+) -> [(Tensor<S, 2>, Tensor<S, 2>, S); 2] {
+    let (p1, v1, m1, p2, v2, m2) = keplerian_binary(total_mass, semi_major, mass_ratio);
+    match frame {
+        ReferenceFrame::Corotating => [(p1, Tensor::zeros(), m1), (p2, Tensor::zeros(), m2)],
+        ReferenceFrame::Inertial | ReferenceFrame::Stationary => [(p1, v1, m1), (p2, v2, m2)],
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -555,6 +572,37 @@ mod tests {
                 let got = coll.get(body).position[ax];
                 assert!((got - want[body][ax]).abs() < 1e-12, "body {body} axis {ax}: {got} against {}", want[body][ax]);
             }
+        }
+    }
+
+    #[test]
+    fn a_corotating_binary_rests_at_its_keplerian_positions() {
+        let (p1, v1, m1, p2, v2, m2) = keplerian_binary(1.0_f64, 1.0, 0.5);
+        let corotating = circular_binary_state(1.0_f64, 1.0, 0.5, ReferenceFrame::Corotating);
+        assert_eq!([corotating[0].0, corotating[1].0], [p1, p2]);
+        assert_eq!([corotating[0].2, corotating[1].2], [m1, m2]);
+        assert_eq!([corotating[0].1, corotating[1].1], [Tensor::zeros(), Tensor::zeros()]);
+        for frame in [ReferenceFrame::Inertial, ReferenceFrame::Stationary] {
+            let state = circular_binary_state(1.0_f64, 1.0, 0.5, frame);
+            assert_eq!([state[0].1, state[1].1], [v1, v2], "{frame:?} carries the keplerian velocities");
+        }
+    }
+
+    #[test]
+    fn a_corotating_binary_stays_at_rest_under_the_body_update() {
+        let state = circular_binary_state(1.0_f64, 1.0, 0.5, ReferenceFrame::Corotating);
+        let mut coll = BodyCollection::new()
+            .add(Body::gravitational(0, state[0].0, state[0].1, state[0].2, 0.1, 0.04))
+            .add(Body::gravitational(1, state[1].0, state[1].1, state[1].2, 0.1, 0.04))
+            .as_binary()
+            .with_frame(ReferenceFrame::Corotating)
+            .with_binary_params(BinaryParams::new(1.0, 1.0, 0.0, 0.5));
+        for _ in 0..100 {
+            apply_body_deltas(&mut coll, &[], 0.01);
+        }
+        for (ii, (position, _, _)) in state.iter().enumerate() {
+            assert_eq!(coll.get(ii).position, *position, "body {ii} moved in its corotating frame");
+            assert_eq!(coll.get(ii).velocity, Tensor::zeros(), "body {ii} gained a frame-relative velocity");
         }
     }
 }

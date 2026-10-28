@@ -150,7 +150,7 @@ class {name}(SimbiProblem):
     @property
     def body_system(self) -> Optional[BodySystemConfig]:
         return GravitationalSystemConfig(
-            prescribed_motion=True, reference_frame="com", system_type="binary",
+            prescribed_motion=True, reference_frame="inertial", system_type="binary",
             binary_config=BinaryConfig(semi_major=0.8, eccentricity=0.0, mass_ratio=1.0, total_mass=1.0,
                                        components=[_component(), _component()]),
         )

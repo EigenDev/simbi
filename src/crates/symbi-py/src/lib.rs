@@ -1556,7 +1556,7 @@ fn parse_config(dict: &Bound<'_, PyDict>) -> PyResult<Config> {
             .unwrap_or_else(|| "discrete".to_string()),
         chi_ic: Vec::new(),
         cohort_ic: Vec::new(),
-        binary: parse_binary(dict),
+        binary: parse_binary(dict)?,
         diagnostic_interval: get_f64_or(dict, "diagnostic_interval", 0.0),
         n_gpus: dict
             .get_item("gpus")
@@ -1852,13 +1852,15 @@ fn parse_magnetic_slip(body: &Bound<'_, PyDict>) -> Option<MagneticSlipParams> {
 }
 
 /// the prescribed binary orbit params (`body_system.binary_config`): total mass, semi-major axis,
-/// eccentricity, mass ratio. `None` when there is no gravitational binary. threaded to
+/// eccentricity, mass ratio, and the reference frame the components are measured in. `None` when
+/// there is no gravitational binary. threaded to
 /// `BodyCollection::with_binary_params` so the two components follow the Keplerian orbit each step.
 struct BinaryCfg {
     total_mass: f64,
     semi_major: f64,
     eccentricity: f64,
     mass_ratio: f64,
+    frame: symbi_ib::ReferenceFrame,
 }
 
 /// the `body_system.binary_config` sub-dict, if the config carries a gravitational binary.
@@ -1869,14 +1871,105 @@ fn binary_config_dict<'py>(dict: &Bound<'py, PyDict>) -> Option<Bound<'py, PyDic
     bc.cast_into::<PyDict>().ok()
 }
 
-fn parse_binary(dict: &Bound<'_, PyDict>) -> Option<BinaryCfg> {
-    let bc = binary_config_dict(dict)?;
-    Some(BinaryCfg {
+/// the backend reference frame a body system names: inertial, corotating or stationary
+fn parse_reference_frame(name: &str) -> Result<symbi_ib::ReferenceFrame, String> {
+    match name {
+        "inertial" => Ok(symbi_ib::ReferenceFrame::Inertial),
+        "corotating" => Ok(symbi_ib::ReferenceFrame::Corotating),
+        "stationary" => Ok(symbi_ib::ReferenceFrame::Stationary),
+        other => Err(format!(
+            "body_system.reference_frame '{other}': the body frames are 'inertial', 'corotating' and 'stationary'"
+        )),
+    }
+}
+
+/// the binary orbits the bodies carry: a prescribed circular orbit in any frame. an eccentric orbit
+/// and a corotating binary that moves under its own dynamics (motion not prescribed, or a
+/// component two-way coupled, whose reaction drifts it through the rotating frame without the
+/// frame's fictitious forces) are refused by name
+fn binary_admission(
+    frame: symbi_ib::ReferenceFrame,
+    prescribed_motion: bool,
+    eccentricity: f64,
+    two_way: &[bool],
+) -> Result<(), String> {
+    if eccentricity != 0.0 {
+        return Err(format!(
+            "a binary eccentricity of {eccentricity}: the prescribed binary orbit is circular; set eccentricity = 0"
+        ));
+    }
+    if frame == symbi_ib::ReferenceFrame::Corotating {
+        if !prescribed_motion {
+            return Err(
+                "a corotating binary with prescribed_motion = false: the corotating frame holds the components \
+                 at rest on their prescribed circular orbit; a binary moving under its own dynamics in a \
+                 rotating frame is outside the body update"
+                    .to_string(),
+            );
+        }
+        if two_way.iter().any(|&on| on) {
+            return Err(
+                "a corotating binary with a two-way coupled component: the gas reaction would move the \
+                 component through the rotating frame without the frame's coriolis and centrifugal forces; \
+                 set two_way_coupling = false"
+                    .to_string(),
+            );
+        }
+    }
+    Ok(())
+}
+
+/// the reference frame `body_system.reference_frame` names (inertial when absent)
+fn body_system_frame(dict: &Bound<'_, PyDict>) -> Result<symbi_ib::ReferenceFrame, String> {
+    let name = dict
+        .get_item("body_system")
+        .ok()
+        .flatten()
+        .and_then(|bs| bs.cast_into::<PyDict>().ok())
+        .and_then(|bs| bs.get_item("reference_frame").ok().flatten())
+        .and_then(|v| v.extract::<String>().ok())
+        .unwrap_or_else(|| "inertial".to_string());
+    parse_reference_frame(&name)
+}
+
+fn parse_binary(dict: &Bound<'_, PyDict>) -> PyResult<Option<BinaryCfg>> {
+    let Some(bc) = binary_config_dict(dict) else {
+        return Ok(None);
+    };
+    let frame = body_system_frame(dict).map_err(PyValueError::new_err)?;
+    let prescribed_motion = dict
+        .get_item("body_system")
+        .ok()
+        .flatten()
+        .and_then(|bs| bs.cast_into::<PyDict>().ok())
+        .and_then(|bs| bs.get_item("prescribed_motion").ok().flatten())
+        .and_then(|v| v.extract::<bool>().ok())
+        .unwrap_or(true);
+    let two_way: Vec<bool> = bc
+        .get_item("components")
+        .ok()
+        .flatten()
+        .and_then(|c| c.extract::<Vec<Bound<'_, PyAny>>>().ok())
+        .unwrap_or_default()
+        .iter()
+        .filter_map(|c| c.cast::<PyDict>().ok())
+        .map(|c| {
+            c.get_item("two_way_coupling")
+                .ok()
+                .flatten()
+                .and_then(|v| v.extract::<bool>().ok())
+                .unwrap_or(false)
+        })
+        .collect();
+    let eccentricity = get_f64_or(&bc, "eccentricity", 0.0);
+    binary_admission(frame, prescribed_motion, eccentricity, &two_way).map_err(PyValueError::new_err)?;
+    Ok(Some(BinaryCfg {
         total_mass: get_f64_or(&bc, "total_mass", 1.0),
         semi_major: get_f64_or(&bc, "semi_major", 1.0),
-        eccentricity: get_f64_or(&bc, "eccentricity", 0.0),
+        eccentricity,
         mass_ratio: get_f64_or(&bc, "mass_ratio", 1.0),
-    })
+        frame,
+    }))
 }
 
 /// append the binary components as gravitating (and, if `is_an_accretor`, accreting) bodies, with
@@ -1890,8 +1983,9 @@ fn parse_binary_components(dict: &Bound<'_, PyDict>, out: &mut Vec<BodyParams>) 
     let total_mass = get_f64_or(&bc, "total_mass", 1.0);
     let semi_major = get_f64_or(&bc, "semi_major", 1.0);
     let mass_ratio = get_f64_or(&bc, "mass_ratio", 1.0);
-    let (p1, v1, _m1, p2, v2, _m2) =
-        symbi_ib::keplerian_binary::<f64>(total_mass, semi_major, mass_ratio);
+    // the frame-relative initial state; an unknown frame name is refused by `parse_binary`
+    let frame = body_system_frame(dict).unwrap_or(symbi_ib::ReferenceFrame::Inertial);
+    let [(p1, v1, _), (p2, v2, _)] = symbi_ib::circular_binary_state::<f64>(total_mass, semi_major, mass_ratio, frame);
     let ics = [(p1, v1), (p2, v2)];
     let Ok(Some(comps)) = bc.get_item("components") else {
         return;
@@ -4158,6 +4252,7 @@ fn build_bodies<const D: usize>(
         // supplies the orbit. both are required (the flag and the params are separate).
         coll = coll
             .as_binary()
+            .with_frame(bin.frame)
             .with_binary_params(symbi_ib::BinaryParams::new(
                 bin.total_mass,
                 bin.semi_major,
@@ -4706,6 +4801,7 @@ mod magnetic_slip_boundary_tests {
             semi_major: 1.0,
             eccentricity: 0.0,
             mass_ratio: 1.0,
+            frame: symbi_ib::ReferenceFrame::Inertial,
         };
         let bodies = build_bodies::<2>(&params, Some(&binary));
         assert!(bodies.is_binary());
@@ -5382,6 +5478,7 @@ mod diagnostics_tests {
             semi_major: 1.0,
             eccentricity: 0.0,
             mass_ratio: 1.0,
+            frame: symbi_ib::ReferenceFrame::Inertial,
         };
         let coll = build_bodies::<2>(&params, Some(&binary));
         assert_eq!(coll.len(), 2, "the binary must build two bodies");
@@ -5396,6 +5493,39 @@ mod diagnostics_tests {
         // guard: without the binary cfg the same bodies are not a prescribed binary (the orbit is the
         // thing the body_system payload adds).
         assert!(!build_bodies::<2>(&params, None).is_binary());
+        // the collection carries the frame the config names
+        for frame in [symbi_ib::ReferenceFrame::Inertial, symbi_ib::ReferenceFrame::Corotating, symbi_ib::ReferenceFrame::Stationary] {
+            let named = BinaryCfg { frame, ..binary };
+            assert_eq!(build_bodies::<2>(&params, Some(&named)).frame, frame);
+        }
+    }
+
+    #[test]
+    fn the_body_frames_parse_by_name_and_refuse_any_other() {
+        use symbi_ib::ReferenceFrame::*;
+        assert_eq!(parse_reference_frame("inertial"), Ok(Inertial));
+        assert_eq!(parse_reference_frame("corotating"), Ok(Corotating));
+        assert_eq!(parse_reference_frame("stationary"), Ok(Stationary));
+        for other in ["com", "rotating", "Inertial", ""] {
+            let err = parse_reference_frame(other).unwrap_err();
+            assert!(err.contains(&format!("'{other}'")) && err.contains("'corotating'"), "{err}");
+        }
+    }
+
+    #[test]
+    fn a_binary_outside_the_prescribed_circular_orbit_is_refused_by_name() {
+        use symbi_ib::ReferenceFrame::*;
+        for frame in [Inertial, Corotating, Stationary] {
+            assert_eq!(binary_admission(frame, true, 0.0, &[false, false]), Ok(()));
+            let eccentric = binary_admission(frame, true, 0.3, &[false, false]).unwrap_err();
+            assert!(eccentric.contains("eccentricity of 0.3") && eccentric.contains("circular"), "{eccentric}");
+        }
+        let dynamic = binary_admission(Corotating, false, 0.0, &[false, false]).unwrap_err();
+        assert!(dynamic.contains("prescribed_motion = false"), "{dynamic}");
+        let two_way = binary_admission(Corotating, true, 0.0, &[false, true]).unwrap_err();
+        assert!(two_way.contains("two-way coupled component"), "{two_way}");
+        // the inertial frame keeps its behavior for these settings
+        assert_eq!(binary_admission(Inertial, false, 0.0, &[true, true]), Ok(()));
     }
 
     // a rigid-capability body builds a non-accreting rigid sphere with the drain-off
