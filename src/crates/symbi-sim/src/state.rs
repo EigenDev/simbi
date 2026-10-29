@@ -4833,6 +4833,8 @@ pub fn extend_closure_into_ghosts<const D: usize, Mem: MemorySpace, Sc: Scalar +
     filled: &Domain<D>,
     boundaries: &Boundaries<D>,
 ) {
+    // `filled` may hold a device prolongation: it finishes before the host reads it
+    crate::hydro_ops::host_read_barrier::<Mem>();
     for c in allocated.iter() {
         if filled.contains(c) {
             continue;

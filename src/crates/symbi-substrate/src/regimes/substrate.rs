@@ -256,6 +256,8 @@ impl<Mem: MemorySpace, Sc: Scalar + OrderedNumeric, const D: usize>
         pre: &Field<Sc, D, Mem>,
         domain: &Domain<D>,
     ) {
+        // the host reads fields device kernels may have written: they finish first
+        symbi_exec::engine::device_sync::<Mem>();
         for coord in domain.iter() {
             self.cs2.set(coord, *pre.at(coord) / *rho.at(coord));
         }
@@ -286,6 +288,8 @@ impl<Mem: MemorySpace, Sc: Scalar + OrderedNumeric, const D: usize>
     /// temperature into every boundary flux — for a cold disk edge (`cs2 ~ 1e-3`) against
     /// the default `cs = 1`, a ~1000x spurious boundary pressure.
     pub fn extend_cs2_into_ghosts(&self, allocated: &Domain<D>, interior: &Domain<D>) {
+        // the interior may come from a device prolongation: it finishes before the host reads it
+        symbi_exec::engine::device_sync::<Mem>();
         for coord in allocated.iter() {
             if interior.contains(coord) {
                 continue;

@@ -16,7 +16,7 @@ use symbi_xpu::MemorySpace;
 /// drain the device queue before a host read of device-accessible fields.
 /// field storage is unified memory, so a synced host read returns the kernels'
 /// bytes; without the sync the read races in-flight launches. no-op on host.
-fn host_read_barrier<Mem: MemorySpace>() {
+pub(crate) fn host_read_barrier<Mem: MemorySpace>() {
     #[cfg(feature = "gpu")]
     if Mem::IS_DEVICE_ACCESSIBLE {
         symbi_xpu::ctx_sync();
