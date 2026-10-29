@@ -70,7 +70,11 @@ where
 
 /// host snapshot of the first primitive rejected by the post-c2p validity
 /// contract. values are converted only at the diagnostic boundary. on a device
-/// backend it drains the queue first (fatal-path use only).
+/// backend it drains the queue first (fatal-path use only). the recovery writes the primitives and
+/// the status alone, so the conserved fields, the cell and face fields and the closure printed here
+/// are the recovery's inputs. the snapshot carries the raw status code and the interior acceptance
+/// re-evaluated on the printed values, which separates a state the rule rejects from a status the
+/// printed state does not explain
 pub fn first_c2p_failure_state<
     const D: usize,
     const DOF: usize,
@@ -121,10 +125,31 @@ where
                 .map(|field| field.view().at(coord).to_f64())
                 .collect()
         });
+        // the two faces bounding the cell on each grid axis
+        let bface: Option<Vec<(f64, f64)>> = sim.fields.mhd.as_ref().map(|mhd| {
+            (0..D)
+                .map(|dd| {
+                    let mut hi = coord;
+                    hi[dd] += 1;
+                    (mhd.bface.b[dd].view().at(coord).to_f64(), mhd.bface.b[dd].view().at(hi).to_f64())
+                })
+                .collect()
+        });
+        let cs2 = sim.fields.cs2.as_ref().map(|field| field.view().at(coord).to_f64());
+        let accepted = symbi_hydro::traced_recovery::host_interior_accepts::<DOF>(
+            rho,
+            pre,
+            &symbi_algebra::Tensor::new(std::array::from_fn(|k| vel[k])),
+            mag.as_ref()
+                .map(|m| symbi_algebra::Tensor::new(std::array::from_fn(|k| m.get(k).copied().unwrap_or(0.0))))
+                .as_ref(),
+        );
         return Some(format!(
-            "coord={coord:?}, status={}, prim=(rho={rho:.17e}, vel={vel:?}, pre={pre:?}), \
-             cons=(den={den:.17e}, mom={mom:?}, nrg={nrg:?}), bcell={mag:?}",
+            "coord={coord:?}, status={} (code {status}), interior rule on these values: {}, \
+             prim=(rho={rho:.17e}, vel={vel:?}, pre={pre:?}), cons=(den={den:.17e}, mom={mom:?}, nrg={nrg:?}), \
+             bcell={mag:?}, bface={bface:?}, cs2={cs2:?}",
             symbi_hydro::c2p_result::ErrorCode(status),
+            if accepted { "accepted" } else { "rejected" },
         ));
     }
     None

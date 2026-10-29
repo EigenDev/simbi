@@ -110,6 +110,23 @@ where
     accepted
 }
 
+/// the interior acceptance applied to host values: positive finite density, positive finite
+/// pressure where the regime carries one, finite velocity and, on a magnetized regime, a finite cell
+/// field. it is the rule the newtonian, isothermal and magnetized certificates trace (the
+/// relativistic family adds its velocity bound), evaluated on a reported state
+pub fn host_interior_accepts<const D: usize>(
+    rho: f64,
+    pre: Option<f64>,
+    vel: &Tensor<f64, D>,
+    mag: Option<&Tensor<f64, D>>,
+) -> bool {
+    let gas = gas_accepted(rho, pre, vel);
+    match mag {
+        Some(field) => tensor_accepted::<f64, D>(gas, field),
+        None => gas,
+    }
+}
+
 /// the newtonian family: the gas interior with the energy-evolving pressure.
 pub fn newtonian<S, const D: usize>(prim: Prim<S, D>) -> TracedRecovery<Prim<S, D>, S::Mask>
 where
@@ -238,5 +255,21 @@ mod tests {
         assert!(!s.accepted(), "non-finite cell-B rejects");
         let (_, s) = relativistic_mhd(mhd, &flat).into_parts();
         assert!(!s.accepted());
+    }
+
+    #[test]
+    fn the_host_rule_accepts_and_rejects_as_the_certificates_do() {
+        let v = Tensor::new([0.1, -0.2, 0.0]);
+        let b = Tensor::new([1.0, 0.0, -0.5]);
+        assert!(host_interior_accepts(2.0, None, &v, Some(&b)), "a valid isothermal magnetized state");
+        assert!(host_interior_accepts(2.0, Some(1.0), &v, None), "a valid newtonian state");
+        assert!(!host_interior_accepts(0.0, None, &v, Some(&b)), "zero density rejects");
+        assert!(!host_interior_accepts(-1.0, None, &v, None), "negative density rejects");
+        assert!(!host_interior_accepts(2.0, Some(-1.0), &v, None), "negative pressure rejects");
+        assert!(!host_interior_accepts(2.0, None, &Tensor::new([f64::NAN, 0.0, 0.0]), None), "a NaN velocity rejects");
+        assert!(!host_interior_accepts(2.0, None, &v, Some(&Tensor::new([0.0, f64::INFINITY, 0.0]))), "an infinite cell field rejects");
+        // the hardware-reported state of the failing isothermal MHD cell passes the rule
+        let reported_vel = Tensor::new([-0.06526309611002577, 0.06526309611002577, 0.0]);
+        assert!(host_interior_accepts(2.77777777777777812, None, &reported_vel, Some(&Tensor::new([-0.0, 0.0, 0.0]))));
     }
 }
