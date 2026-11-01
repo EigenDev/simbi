@@ -117,8 +117,15 @@ _CLASSIFIERS = [
     (AdmissionRefusal, ("outside the distributed first release", "without a distributed gate", "run on one device or")),
     (MissingImplementation, ("not implemented", "no device path", "unimplemented", "does not support",
                              "device path is outside the gated scope", "runs on host-dereferenceable storage",
-                             "device storage reduces on the device")),
+                             "device storage reduces on the device", "awaits its device")),
 ]
+
+
+def admission_refusal_observed(text: str) -> bool:
+    """whether a failure's text carries an admission refusal: a gate whose own launch the admission
+    refused reports its unmet expectation as an assertion, and the record keeps both"""
+    flat = " ".join(text.split())
+    return any(n in flat for n in _CLASSIFIERS[1][1])
 
 
 def classify(text: str) -> type[ParityFailure]:

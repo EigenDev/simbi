@@ -59,6 +59,25 @@ def test_failures_classify_by_their_text() -> None:
         assert ph.classify(text) is kind, f"{text!r}: {ph.classify(text).__name__}, expected {kind.__name__}"
 
 
+def test_a_census_over_masked_cells_on_device_memory_is_a_missing_implementation() -> None:
+    # the census sampler's named refusal and the exact segmented sum's both say what awaits a device
+    # kernel; neither is an execution failure
+    for text in (
+        "thread '<unnamed>' panicked at crates/symbi-substrate/src/census_sample.rs:377:5:\n"
+        "a census over excised or masked cells on device memory awaits its device mask kernel",
+        "an exact segmented sum of device memory awaits its device kernel; the block reduction reassociates",
+    ):
+        assert ph.classify(text) is ph.MissingImplementation, f"{text!r}: {ph.classify(text).__name__}"
+
+
+def test_an_assertion_carrying_the_admissions_refusal_keeps_both() -> None:
+    # a gate that expects a specific refusal or a successful launch, refused first by the gpu admission
+    refused = ("RuntimeError: mesh refinement on gpu device memory with the nmhd regime is installed on the launched "
+               "path without a distributed gate; set SIMBI_LAUNCH_EXPERIMENTAL=1\nE assert 'lies on a cut' in ...")
+    assert ph.admission_refusal_observed(refused)
+    assert not ph.admission_refusal_observed("AssertionError: the sink accreted nothing at some step")
+
+
 INTERRUPTED = """
 import os, signal, subprocess, sys, threading
 from simbi.simulation.tests import conftest  # noqa: F401  installs the session's signal handlers

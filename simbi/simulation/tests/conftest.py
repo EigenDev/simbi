@@ -132,11 +132,15 @@ def pytest_runtest_makereport(item, call):
         message = str(report.longrepr)[-1500:]
     launches = ph.observed_launch_hosts.pop(item.nodeid, [])
     references = ph.observed_reference_devices.pop(item.nodeid, [])
+    # an assertion whose text carries the admission's refusal: the gate's own launch was refused, so
+    # the record keeps both the unmet expectation (the category) and the refusal it observed
+    observed = "admission refusal" if category == "assertion" and ph.admission_refusal_observed(message) else ""
     _write({
         "test": item.nodeid,
         "phase": report.when,
         "outcome": report.outcome,
         "category": category,
+        "observed": observed,
         "duration": round(report.duration, 2),
         "message": message,
         "runner": os.environ.get("SIMBI_PARITY_RUNNER", ""),
