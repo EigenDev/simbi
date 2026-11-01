@@ -114,7 +114,10 @@ def _assert_profile(path: Path) -> None:
     worst = np.abs(interior - want).max()
     assert worst <= LINEAR_ROUNDING, f"{path.name}: fine interior cs2 departs from the linear profile by {worst:e} (first row {interior[0]} against {want[0]})"
     np.testing.assert_array_equal(fine, _nearest_interior(fine, ng), err_msg=f"{path.name}: fine ghosts against their nearest interior cell")
-    assert interior.max() - interior.min() > 0.1, f"{path.name}: the fine level holds no varying profile; the check is vacuous"
+    # the declared profile changes by B times the span of the fine cell centers across the level; a
+    # level holding half of that or less holds no profile, and the checks above would compare nothing
+    declared = B * (x.max() - x.min())
+    assert interior.max() - interior.min() > 0.5 * declared, f"{path.name}: the fine level holds no varying profile; the check is vacuous"
 
 
 def test_every_level_holds_the_declared_profile_at_every_checkpoint(tmp_path: Path) -> None:
