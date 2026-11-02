@@ -13,7 +13,10 @@
 // global cell, to the single hierarchy's sample of the same operation. a
 // difference reports the first operation, level and cell after which a field
 // differs, the differing bits, and both drivers' bits of every probed field at
-// that cell in the sample before it (the operation's input).
+// that cell in the sample before it (the operation's input). a difference after a
+// restriction also reports the restriction's other operands: both drivers' last
+// sample of the finer level before it at the cell's 2^3 children, and the coarse
+// neighbors along the cut axis (x - 2 .. x + 2) in the input sample.
 //
 // run: cargo test -p symbi --test balanced_partition_phase_probe
 //      (with --features hip on a gpu node: the device operators)
@@ -161,6 +164,22 @@ fn values_at(sample: &PhaseSample, origin: [isize; 3], g: [isize; 3]) -> Vec<(&'
     }
 }
 
+/// both drivers' bits of every probed field at each listed global cell of two samples
+fn operands(label: &str, a: &PhaseSample, a_origin: [isize; 3], b: &PhaseSample, b_origin: [isize; 3], cells: &[[isize; 3]]) -> String {
+    let mut out = format!("\n  {label}, after {} (tiles) / {} (single):", a.phase, b.phase);
+    for g in cells {
+        let (x, y) = (values_at(a, a_origin, *g), values_at(b, b_origin, *g));
+        if x.is_empty() || y.is_empty() {
+            out += &format!("\n    cell {g:?}: held by {}", if x.is_empty() { "the single hierarchy alone" } else { "the tile alone" });
+            continue;
+        }
+        for ((n, va, ab), (_, vb, bb)) in x.into_iter().zip(y) {
+            out += &format!("\n    cell {g:?} {n}: {va:e} ({ab:#018x}) / {vb:e} ({bb:#018x}){}", if ab == bb { "" } else { "  differs" });
+        }
+    }
+    out
+}
+
 /// the first operation after which a tile's interior field differs from the single hierarchy's
 /// at a shared global cell, bit for bit, with the operation's input from the sample before it
 fn first_difference(mono: &[PhaseSample], dec: &[PhaseSample], frames: &[([isize; 3], Option<[isize; 3]>)]) -> Option<String> {
@@ -171,6 +190,9 @@ fn first_difference(mono: &[PhaseSample], dec: &[PhaseSample], frames: &[([isize
     let fine_origin = [PATCH[0].0 as isize * RATIO as isize; 3];
     let mut ordinal: HashMap<(usize, usize), usize> = HashMap::new();
     let mut previous: HashMap<(usize, usize), &PhaseSample> = HashMap::new();
+    // the latest sample of each (level, tile) so far, and of each level on the single hierarchy at
+    // the matching ordinal, for a restriction's finer operands
+    let mut latest: HashMap<(usize, usize), &PhaseSample> = HashMap::new();
     for d in dec {
         let k = ordinal.entry((d.level, d.tile)).or_insert(0);
         let m = mono_by_level.get(&d.level).and_then(|v| v.get(*k)).unwrap_or_else(|| panic!("level {} tile {}: more samples than the single hierarchy", d.level, d.tile));
@@ -200,11 +222,28 @@ fn first_difference(mono: &[PhaseSample], dec: &[PhaseSample], frames: &[([isize
                     for ((n, a, ab), (_, b, bb)) in values_at(dp, origin, g).into_iter().zip(values_at(mp, m_origin, g)) {
                         report += &format!("\n    {n}: {a:e} ({ab:#018x}) / {b:e} ({bb:#018x}){}", if ab == bb { "" } else { "  differs" });
                     }
+                    if d.phase == "restrict" {
+                        let line: Vec<[isize; 3]> = (-2..=2).map(|o| [g[0] + o, g[1], g[2]]).filter(|c| *c != g).collect();
+                        report += &operands("coarse neighbors along x", dp, origin, mp, m_origin, &line);
+                    }
+                }
+                if d.phase == "restrict" {
+                    let fine = d.level + 1;
+                    // the single hierarchy's sample of the finer level at the ordinal the tile's latest one holds
+                    let k_fine = ordinal.get(&(fine, d.tile)).copied().unwrap_or(0);
+                    let mono_fine = k_fine.checked_sub(1).and_then(|k| mono_by_level.get(&fine).and_then(|v| v.get(k).copied()));
+                    if let (Some(df), Some(mf), Some(f_origin)) = (latest.get(&(fine, d.tile)).copied(), mono_fine, frames[d.tile].1) {
+                        let children: Vec<[isize; 3]> = (0..8)
+                            .map(|k| std::array::from_fn(|a| g[a] * RATIO as isize + ((k >> a) & 1) as isize))
+                            .collect();
+                        report += &operands("finer level children", df, f_origin, mf, fine_origin, &children);
+                    }
                 }
                 return Some(report);
             }
         }
         previous.insert((d.level, d.tile), d);
+        latest.insert((d.level, d.tile), d);
     }
     None
 }
