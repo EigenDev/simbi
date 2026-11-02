@@ -4905,6 +4905,7 @@ where
         let coarse_reference = coarse.band_reference.get_or_init(|| {
             Field::zeros(&coarse.state.geom.allocated).expect("band reference scratch")
         });
+        self.probe_band("band input", level, seam);
         prof("refine_restrict_balanced", || {
             rewrite_band_seam(
                 seam,
@@ -4934,6 +4935,74 @@ where
                 &coarse.state.immersed.as_ref().unwrap().bodies,
             )
         });
+        self.probe_band("band output", level, seam);
+    }
+
+    /// the phase probe's record of one band rewrite's operands: the coarse band with its chain
+    /// row out to the reference and the uncovered cell, the fine band with its reference row, and
+    /// the seam, geometry, gamma and body scalars the kernels read. the coarse chain of a band
+    /// cell runs along the seam normal from the reference row to the cell, one step per cell, in
+    /// that order; the departure restriction averages the cell's 2^D children
+    fn probe_band(&self, stage: &'static str, level: usize, seam: &BandSeam<NDIM>) {
+        if !phase_probe::enabled() {
+            return;
+        }
+        symbi_substrate::regimes::substrate_gpu::device_sync::<Mem>();
+        let (coarse, fine) = (&self.levels[level], &self.levels[level + 1]);
+        let ax = seam.axis;
+        let (reference, fine_row) = match seam.side {
+            BandSide::Near => (seam.uncovered, None),
+            BandSide::Far { row, fine_row } => (row, Some(fine_row)),
+        };
+        let mut coarse_region = seam.band.clone();
+        for c in [reference, seam.uncovered] {
+            coarse_region.spaces[ax].lo = coarse_region.spaces[ax].lo.min(c);
+            coarse_region.spaces[ax].hi = coarse_region.spaces[ax].hi.max(c + 1);
+        }
+        let mut fine_region = seam.fine_band.clone();
+        if let Some(r) = fine_row {
+            fine_region.spaces[ax].lo = fine_region.spaces[ax].lo.min(r);
+            fine_region.spaces[ax].hi = fine_region.spaces[ax].hi.max(r + 1);
+        }
+        let lattice = |l: &LevelData<R, NDIM, DOF, M, E, S, Mem, K>, region: &Domain<NDIM>| {
+            let prim = &l.state.fields.prim;
+            let mut fields: Vec<(&'static str, &Field<f64, NDIM, Mem>)> = vec![("rho", &prim.rho)];
+            for (k, v) in prim.vel.iter().enumerate().take(3) {
+                fields.push((["v0", "v1", "v2"][k], v));
+            }
+            if let Some(p) = prim.pre_field() {
+                fields.push(("pre", p));
+            }
+            if let Some(e) = l.state.fields.cons.nrg_field() {
+                fields.push(("nrg", e));
+            }
+            for (name, f) in [("departure", &l.band_departure), ("anchor", &l.band_anchor), ("reference", &l.band_reference)] {
+                if let Some(f) = f.get() {
+                    fields.push((name, f));
+                }
+            }
+            phase_probe::operand_lattice(region, &l.state.geom.allocated, l.state.geom.index_offset, &fields)
+        };
+        let mut scalars = vec![("gamma".to_string(), coarse.kernels.gamma_law().unwrap_or(f64::NAN))];
+        for (name, l) in [("coarse", coarse), ("fine", fine)] {
+            let off = index_offsets(&l.state.geom);
+            for a in 0..NDIM {
+                scalars.push((format!("{name} x_lo_{a}"), l.state.geom.x_lo[a]));
+                scalars.push((format!("{name} dx_{a}"), l.state.geom.dx[a]));
+                scalars.push((format!("{name} idx_off_{a}"), off[a]));
+            }
+        }
+        let mut bodies = Vec::new();
+        crate::refinement::transfer::push_body_slot_scalars(&coarse.state.immersed.as_ref().unwrap().bodies, &mut bodies);
+        scalars.extend(bodies.into_iter().enumerate().map(|(k, v)| (format!("body scalar {k}"), v)));
+        scalars.push(("chain steps (WB_CF_CHAIN_MAX)".to_string(), symbi_discretize::WB_CF_CHAIN_MAX as f64));
+        let seam_text = format!(
+            "axis {ax} high {} side {:?} uncovered {} edge {} face_index {} reference row {reference} fine reference row {fine_row:?} band {:?} fine band {:?} (local indices)",
+            seam.high, seam.side, seam.uncovered, seam.edge, seam.face_index, seam.band.spaces, seam.fine_band.spaces
+        );
+        let off = coarse.state.geom.index_offset[ax];
+        let band = (seam.band.spaces[ax].lo + off, seam.band.spaces[ax].hi + off);
+        phase_probe::band(stage, level, (ax, seam.high, reference + off, band), seam_text, scalars, lattice(coarse, &coarse_region), lattice(fine, &fine_region));
     }
 
     /// advance this level's clock (fine levels only; the root clock is the driver's). pure extraction.
@@ -7473,6 +7542,7 @@ fn decomposed_bands<R, const NDIM: usize, const DOF: usize, M, E, S, Mem, K, T>(
                 continue;
             }
             for (i, d, seam) in seams.iter().filter(|(_, _, s)| s.side == BandSide::Near) {
+                phase_probe::set_tile(*i);
                 symbi_xpu::with_device(*d, || tiles[*i].rewrite_band_seam(level, seam));
             }
             // the far tiles rewrite hop by hop away from the uncovered cell: each resumes the chains
@@ -7483,7 +7553,8 @@ fn decomposed_bands<R, const NDIM: usize, const DOF: usize, M, E, S, Mem, K, T>(
                 exchange_level_band_anchor(tiles, level, coarse.0, coarse.1, coarse.2, transport);
                 exchange_level_band_anchor(tiles, level + 1, &fine.order, fine.counts, &fine.devices, transport);
                 for (i, d, seam) in seams.iter().filter(|(_, _, s)| s.side != BandSide::Near && band_distance(s) == hop) {
-                    symbi_xpu::with_device(*d, || tiles[*i].rewrite_band_seam(level, seam));
+                    phase_probe::set_tile(*i);
+                symbi_xpu::with_device(*d, || tiles[*i].rewrite_band_seam(level, seam));
                 }
             }
         }

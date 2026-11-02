@@ -9,11 +9,15 @@
 // both under the probe aligns the two logs level by level and ordinal by
 // ordinal and names the first operation after which a field differs.
 // sampling costs one branch while the log is off.
+// the log also keeps every balanced band rewrite's operands (band): the coarse
+// and fine cells of the band, its chain rows and its reference rows, with the
+// seam, the geometry, the gamma and the body scalars the kernels read.
 //
 // usage:
 //  phase_probe::start();
 //  hier.evolve(t);
 //  let log = phase_probe::take();
+//  let bands = phase_probe::take_bands();
 // =============================================================================
 use std::cell::{Cell, RefCell};
 
@@ -37,14 +41,49 @@ pub const STAGE: [&str; 4] = ["stage0", "stage1", "stage2", "stage3"];
 const VEL: [&str; 3] = ["v0", "v1", "v2"];
 const BCELL: [&str; 3] = ["b0", "b1", "b2"];
 
+/// the cells of one lattice a band rewrite reads or writes, by whole-lattice index (local index
+/// plus the level's index offset), with every operand field's value at each, in the same order
+pub struct OperandLattice {
+    pub cells: Vec<[isize; 3]>,
+    pub fields: Vec<(&'static str, Vec<f64>)>,
+}
+
+/// one balanced band rewrite of one tile, before ("band input") or after ("band output") it.
+/// the departures and the references of the output are the values the decode read: the encode
+/// and the copies write them ahead of the decode, which reads them only
+pub struct BandSample {
+    pub stage: &'static str,
+    pub level: usize,
+    pub tile: usize,
+    /// the count of phase samples logged ahead of this record
+    pub logged: usize,
+    /// the seam normal, the seam's side on it, the whole-lattice index along it of the coarse
+    /// chains' reference row, and the band's whole-lattice span along it (half-open)
+    pub axis: usize,
+    pub high: bool,
+    pub reference: isize,
+    pub band: (isize, isize),
+    pub seam: String,
+    pub scalars: Vec<(String, f64)>,
+    pub coarse: OperandLattice,
+    pub fine: OperandLattice,
+}
+
 thread_local! {
     static LOG: RefCell<Option<Vec<PhaseSample>>> = const { RefCell::new(None) };
+    static BANDS: RefCell<Vec<BandSample>> = const { RefCell::new(Vec::new()) };
     static TILE: Cell<usize> = const { Cell::new(0) };
 }
 
 /// open the log; every sample until `take` is kept
 pub fn start() {
     LOG.with(|l| *l.borrow_mut() = Some(Vec::new()));
+    BANDS.with(|b| b.borrow_mut().clear());
+}
+
+/// the band rewrites recorded since `start`, in order
+pub fn take_bands() -> Vec<BandSample> {
+    BANDS.with(|b| std::mem::take(&mut *b.borrow_mut()))
 }
 
 /// close the log and return its samples in order
@@ -103,4 +142,43 @@ pub(crate) fn sample<const D: usize, const DOF: usize, Mem: MemorySpace>(
             log.push(sample);
         }
     });
+}
+
+/// the operand fields of one lattice over `region` clipped to `allocated`, by whole-lattice index
+pub(crate) fn operand_lattice<const D: usize, Mem: MemorySpace>(
+    region: &symbi_algebra::Domain<D>,
+    allocated: &symbi_algebra::Domain<D>,
+    offset: [isize; D],
+    fields: &[(&'static str, &symbi_grid::Field<f64, D, Mem>)],
+) -> OperandLattice {
+    let mut clipped = region.clone();
+    for a in 0..D {
+        clipped.spaces[a].lo = clipped.spaces[a].lo.max(allocated.spaces[a].lo);
+        clipped.spaces[a].hi = clipped.spaces[a].hi.min(allocated.spaces[a].hi);
+    }
+    let cells: Vec<[isize; D]> = if (0..D).all(|a| clipped.spaces[a].lo < clipped.spaces[a].hi) { clipped.iter().collect() } else { Vec::new() };
+    let fields = fields
+        .iter()
+        .map(|(name, f)| {
+            let v = f.view();
+            (*name, cells.iter().map(|c| *v.at(*c)).collect())
+        })
+        .collect();
+    let whole = |c: &[isize; D]| -> [isize; 3] { std::array::from_fn(|a| if a < D { c[a] + offset[a] } else { 0 }) };
+    OperandLattice { cells: cells.iter().map(whole).collect(), fields }
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn band(
+    stage: &'static str,
+    level: usize,
+    (axis, high, reference, band): (usize, bool, isize, (isize, isize)),
+    seam: String,
+    scalars: Vec<(String, f64)>,
+    coarse: OperandLattice,
+    fine: OperandLattice,
+) {
+    let logged = LOG.with(|l| l.borrow().as_ref().map_or(0, |log| log.len()));
+    let tile = TILE.with(|t| t.get());
+    BANDS.with(|b| b.borrow_mut().push(BandSample { stage, level, tile, logged, axis, high, reference, band, seam, scalars, coarse, fine }));
 }

@@ -1230,7 +1230,7 @@ pub fn rewrite_band_seam<const D: usize, const DOF: usize, Mem: MemorySpace>(
 /// slots. an absent or non-gravitating slot carries mass = 0, which zeroes its
 /// potential identically (soft = 1 keeps the softened form regular at the slot's
 /// zero position).
-fn push_body_slot_scalars<const D: usize>(
+pub(crate) fn push_body_slot_scalars<const D: usize>(
     bodies: &symbi_ib::BodyCollection<f64, D>,
     scalars: &mut Vec<f64>,
 ) {

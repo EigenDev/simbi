@@ -16,7 +16,15 @@
 // that cell in the sample before it (the operation's input). a difference after a
 // restriction also reports the restriction's other operands: both drivers' last
 // sample of the finer level before it at the cell's 2^3 children, and the coarse
-// neighbors along the cut axis (x - 2 .. x + 2) in the input sample.
+// neighbors along the cut axis (x - 2 .. x + 2) in the input sample, and every
+// band rewrite either driver ran on that level between the input sample and the
+// restriction whose coarse cells share the cell's row along the seam normal: the
+// seam (side, uncovered cell, reference rows), the geometry, the gamma and the
+// body scalars the kernels read, the coarse chain order from the reference row to
+// the cell, and the bits of every coarse operand on the row (density, velocity,
+// pressure, energy, departure, anchor, reference) and every fine operand on the
+// cell's children rows (density, velocity, pressure, departure, anchor,
+// reference), before and after the rewrite.
 //
 // run: cargo test -p symbi --test balanced_partition_phase_probe
 //      (with --features hip on a gpu node: the device operators)
@@ -36,7 +44,7 @@ use symbi_hydro::eos::IdealGas;
 use symbi_hydro::newtonian::Newtonian;
 use symbi_hydro::quantity::{Density, Pressure};
 use symbi_hydro::state::Prim;
-use symbi_refinement::refinement::phase_probe::{self, PhaseSample};
+use symbi_refinement::refinement::phase_probe::{self, BandSample, PhaseSample};
 use symbi_sim::atlas::TileId;
 use symbi_xpu::{DefaultMemory, DefaultSpace};
 
@@ -180,9 +188,52 @@ fn operands(label: &str, a: &PhaseSample, a_origin: [isize; 3], b: &PhaseSample,
     out
 }
 
+/// every band rewrite of `level` logged in `window` (phase-log positions) on the seam whose band
+/// holds whole-lattice cell `w`, every tile's part of it, with the coarse operands on `w`'s row along
+/// the seam normal and the fine operands on the rows of `w`'s children (`fine_lo`: the whole fine
+/// index of the child at offset 0 on every axis)
+fn band_report(label: &str, bands: &[BandSample], level: usize, window: (usize, usize), w: [isize; 3], fine_lo: [isize; 3]) -> String {
+    let logged: Vec<&BandSample> = bands.iter().filter(|b| b.level == level && b.logged > window.0 && b.logged <= window.1).collect();
+    let row = |b: &BandSample, c: &[isize; 3]| (0..3).all(|a| a == b.axis || c[a] == w[a]);
+    let holds = |b: &BandSample| (b.band.0..b.band.1).contains(&w[b.axis]) && b.coarse.cells.iter().any(|c| row(b, c));
+    let Some(seam) = logged.iter().find(|b| holds(b)).map(|b| (b.axis, b.high)) else {
+        return format!("\n  {label}: no band rewrite of level {level} in the window holds {w:?}");
+    };
+    let mut out = String::new();
+    for b in logged.into_iter().filter(|b| (b.axis, b.high) == seam) {
+        let ax = b.axis;
+        let fine_row = |c: &[isize; 3]| (0..3).all(|a| a == ax || (c[a] - fine_lo[a] == 0 || c[a] - fine_lo[a] == 1));
+        out += &format!("\n  {label} {} tile {} level {}: {}", b.stage, b.tile, b.level, b.seam);
+        // the decode walks from the reference row through the band, away from it, one cell a step
+        let mut chain = vec![b.reference];
+        if b.reference < b.band.0 {
+            chain.extend(b.band.0..b.band.1);
+        } else {
+            chain.extend((b.band.0..b.band.1).rev());
+        }
+        out += &format!("\n    coarse chain order along axis {ax} (whole index, reference first): {chain:?}");
+        for (n, v) in &b.scalars {
+            out += &format!("\n    {n} = {v:e} ({:#018x})", v.to_bits());
+        }
+        for (k, c) in b.coarse.cells.iter().enumerate().filter(|(_, c)| row(b, c)) {
+            let values: Vec<String> = b.coarse.fields.iter().map(|(n, v)| format!("{n} {:e} ({:#018x})", v[k], v[k].to_bits())).collect();
+            out += &format!("\n    coarse {c:?}: {}", values.join(", "));
+        }
+        for (k, c) in b.fine.cells.iter().enumerate().filter(|(_, c)| fine_row(c)) {
+            let values: Vec<String> = b.fine.fields.iter().map(|(n, v)| format!("{n} {:e} ({:#018x})", v[k], v[k].to_bits())).collect();
+            out += &format!("\n    fine {c:?}: {}", values.join(", "));
+        }
+    }
+    out
+}
+
 /// the first operation after which a tile's interior field differs from the single hierarchy's
 /// at a shared global cell, bit for bit, with the operation's input from the sample before it
-fn first_difference(mono: &[PhaseSample], dec: &[PhaseSample], frames: &[([isize; 3], Option<[isize; 3]>)]) -> Option<String> {
+fn first_difference(
+    (mono, mono_bands): (&[PhaseSample], &[BandSample]),
+    (dec, dec_bands): (&[PhaseSample], &[BandSample]),
+    frames: &[([isize; 3], Option<[isize; 3]>)],
+) -> Option<String> {
     let mut mono_by_level: HashMap<usize, Vec<&PhaseSample>> = HashMap::new();
     for s in mono {
         mono_by_level.entry(s.level).or_default().push(s);
@@ -238,6 +289,17 @@ fn first_difference(mono: &[PhaseSample], dec: &[PhaseSample], frames: &[([isize
                             .collect();
                         report += &operands("finer level children", df, f_origin, mf, fine_origin, &children);
                     }
+                    // the bands rewritten between the input sample and this restriction, by phase-log
+                    // position; whole-lattice indices are local + index offset, the single hierarchy's
+                    // offsets are zero, so its interior lower corner turns a global cell into one
+                    let at = |log: &[PhaseSample], s: Option<&PhaseSample>| s.and_then(|s| log.iter().position(|x| std::ptr::eq(x, s))).unwrap_or(0);
+                    let d_window = (at(dec, d_prev), at(dec, Some(d)));
+                    let m_window = (at(mono, m_prev), at(mono, Some(m)));
+                    let whole: [isize; 3] = std::array::from_fn(|a| g[a] + m.interior_lo[a]);
+                    let fine_ng = mono.iter().find(|s| s.level == d.level + 1).map_or([0; 3], |s| s.interior_lo);
+                    let fine_lo: [isize; 3] = std::array::from_fn(|a| g[a] * RATIO as isize - fine_origin[a] + fine_ng[a]);
+                    report += &band_report("tiles", dec_bands, d.level, d_window, whole, fine_lo);
+                    report += &band_report("single", mono_bands, d.level, m_window, whole, fine_lo);
                 }
                 return Some(report);
             }
@@ -257,6 +319,7 @@ fn a_balanced_step_on_three_uneven_tiles_equals_the_single_hierarchy_after_every
     phase_probe::start();
     single.evolve_steps(STEPS).expect("single hierarchy evolve");
     let mono_log = phase_probe::take();
+    let mono_bands = phase_probe::take_bands();
     assert!(mono_log.iter().any(|s| s.level == 0 && s.phase == "restrict"), "the single hierarchy restricted nothing; the bands are never rewritten");
 
     let mut dec = tiles(&partition);
@@ -268,13 +331,16 @@ fn a_balanced_step_on_three_uneven_tiles_equals_the_single_hierarchy_after_every
         if it >= STEPS { std::ops::ControlFlow::Break(()) } else { std::ops::ControlFlow::Continue(()) }
     });
     let dec_log = phase_probe::take();
+    let dec_bands = phase_probe::take_bands();
     for (i, h) in dec.iter().enumerate() {
         assert!(h.crash.is_none(), "tile {i} crashed: {:?}", h.crash);
         assert_eq!(h.levels[0].state.iteration, single.levels[0].state.iteration, "tile {i} stopped short of the single hierarchy");
     }
     let moved = mono_log.iter().filter(|s| s.level == 0).any(|s| s.fields.iter().any(|(n, v)| *n == "pre" && v.iter().any(|p| p.to_bits() != 0.6f64.to_bits())));
     assert!(moved, "the pressure never left its initial value; the comparison is vacuous");
-    if let Some(report) = first_difference(&mono_log, &dec_log, &frames) {
+    assert!(mono_bands.iter().any(|b| b.level == 0), "the single hierarchy logged no band rewrite; the operand report would be empty");
+    assert!(dec_bands.iter().any(|b| b.level == 0), "the tiles logged no band rewrite; the operand report would be empty");
+    if let Some(report) = first_difference((&mono_log, &mono_bands), (&dec_log, &dec_bands), &frames) {
         panic!("three uneven tiles first differ from the single hierarchy {report}");
     }
 }
