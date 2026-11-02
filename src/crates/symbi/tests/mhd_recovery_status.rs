@@ -11,7 +11,11 @@
 // - the planted cell stores INVALID_PRIMITIVE, so the scan reaches it and rejects it
 // for the isothermal and the newtonian regime. a failure prints, for the first
 // mismatched cells, the stored status beside the conserved and cell-field values
-// the host reads at that cell.
+// the host reads at that cell. the isothermal case also runs with the cell field
+// zero, the velocity zero, and both zero: each switches off one of the
+// acceptance conditions (finite field, finite velocity), so the variants that
+// fail name the condition the stored status rejects. on a gpu build a failure
+// prints the kernel source the device renders from the registry's ir.
 //
 // run: cargo test -p symbi --test mhd_recovery_status
 //      (with --features hip on a gpu node: the device recovery)
@@ -86,10 +90,29 @@ where
     out
 }
 
-#[test]
-fn the_isothermal_recovery_accepts_every_valid_cell_and_rejects_the_planted_one() {
+/// the source the device compiles for `name`: the registry's ir rendered for the build's target
+#[cfg(feature = "gpu")]
+fn device_source(name: &str) -> String {
+    let (_, ir) = symbi::regimes::substrate_kernels::expect_kernel::<f64>(name);
+    #[cfg(feature = "hip")]
+    let target = symbi_ir::emit::Target::Hip;
+    #[cfg(not(feature = "hip"))]
+    let target = symbi_ir::emit::Target::Cuda;
+    symbi_ir::render_from_ir(ir, target, symbi_ir::emit::Precision::F64).source
+}
+
+/// a cpu build runs the kernel's host twin, which carries no device source
+#[cfg(not(feature = "gpu"))]
+fn device_source(name: &str) -> String {
+    format!("(a cpu build runs the {name} host twin)")
+}
+
+/// the isothermal recovery over the store with the velocity and the cell field each kept or zeroed
+fn isothermal_case(keep_velocity: bool, keep_field: bool) {
     type Sim = SimState<IsothermalMhd, 3, Cartesian, Isothermal<f64>, DefaultSpace, DefaultMemory>;
     let dx = 1.0 / N as f64;
+    let v = move |x: [f64; 3]| if keep_velocity { velocity(x) } else { [0.0; 3] };
+    let b = move |x: [f64; 3]| if keep_field { field(x) } else { [0.0; 3] };
     let sim: Sim = Sim::build(IsothermalMhd, Isothermal { cs: 1.0 }, Cartesian)
         .cells([N, N, N])
         .spacing([dx, dx, dx])
@@ -99,18 +122,43 @@ fn the_isothermal_recovery_accepts_every_valid_cell_and_rejects_the_planted_one(
         .expect("isothermal mhd store")
         .set_initial(|x| {
             MhdPrimG::<f64, 3, IsoModel>::new(
-                PrimG::isothermal(Density(1.0 + 0.5 * x[0]), Tensor::new(velocity(x))),
-                Tensor::new(field(x)),
+                PrimG::isothermal(Density(1.0 + 0.5 * x[0]), Tensor::new(v(x))),
+                Tensor::new(b(x)),
             )
         })
-        .seed_faces(|axis, x| field(x)[axis])
+        .seed_faces(|axis, x| b(x)[axis])
         .build();
     sim.fields.cons.den.view_mut().set(PLANTED, -1.0);
     assert!(sim.geom.interior.contains(PLANTED), "the planted cell lies outside the interior the recovery covers");
     let kernels = IsothermalMhdSubstrateKernelSet3D::<DefaultMemory, f64>::new(1.0, 0.3, 1.0, &sim.geom.allocated);
     kernels.c2p(&sim);
     let bad = mismatches(&sim);
-    assert!(bad.is_empty(), "isothermal mhd recovery status:\n  {}", bad.join("\n  "));
+    assert!(
+        bad.is_empty(),
+        "isothermal mhd recovery status (velocity kept {keep_velocity}, field kept {keep_field}):\n  {}\nthe device source:\n{}",
+        bad.join("\n  "),
+        device_source("imhd_c2p_3d")
+    );
+}
+
+#[test]
+fn the_isothermal_recovery_accepts_every_valid_cell_and_rejects_the_planted_one() {
+    isothermal_case(true, true);
+}
+
+#[test]
+fn the_isothermal_recovery_with_a_zero_cell_field_accepts_every_valid_cell() {
+    isothermal_case(true, false);
+}
+
+#[test]
+fn the_isothermal_recovery_at_rest_accepts_every_valid_cell() {
+    isothermal_case(false, true);
+}
+
+#[test]
+fn the_isothermal_recovery_at_rest_with_a_zero_cell_field_accepts_every_valid_cell() {
+    isothermal_case(false, false);
 }
 
 #[test]
