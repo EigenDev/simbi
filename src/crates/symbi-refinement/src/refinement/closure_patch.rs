@@ -136,14 +136,18 @@ pub fn build_whole_patch_closure<const D: usize, Mem: MemorySpace>(
             }
         }
         drop(zero);
+        // `visit` reads the level's closure on the host: every kernel that wrote it finishes first
+        symbi_substrate::regimes::substrate_gpu::device_sync::<Mem>();
         visit(l, &field)?;
         parent = field;
     }
     Ok(peak)
 }
 
-/// every ghost of `field` takes the interior cell its coordinates clamp to
+/// every ghost of `field` takes the interior cell its coordinates clamp to. the interior may come
+/// from a device prolongation, which finishes before the host reads it
 pub fn clamp_into_ghosts<const D: usize, Mem: MemorySpace>(field: &Field<f64, D, Mem>, allocated: &Domain<D>, interior: &Domain<D>) {
+    symbi_substrate::regimes::substrate_gpu::device_sync::<Mem>();
     for c in allocated.iter() {
         if interior.contains(c) {
             continue;
@@ -154,6 +158,7 @@ pub fn clamp_into_ghosts<const D: usize, Mem: MemorySpace>(field: &Field<f64, D,
 }
 
 fn uniform<const D: usize, Mem: MemorySpace>(field: &Field<f64, D, Mem>) -> bool {
+    symbi_substrate::regimes::substrate_gpu::device_sync::<Mem>();
     let mut cells = field.domain().iter();
     let Some(first) = cells.next().map(|c| *field.at(c)) else {
         return true;
