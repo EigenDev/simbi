@@ -554,6 +554,27 @@ pub fn nmhd_c2p_gv() -> KernelProgram {
 /// trace the isothermal-MHD c2p — trivial inversion (rho = den, v = mom/den), writing rho
 /// and vel. the single source the substrate c2p kernel renders.
 pub fn imhd_c2p_gv() -> KernelProgram {
+    imhd_c2p_traced(None)
+}
+
+/// the quantities the isothermal-MHD recovery probe carries on its status channel: the loaded
+/// operands, then the acceptance conditions of `traced_recovery::isothermal_mhd_conditions`
+pub const IMHD_C2P_PROBE_CHANNELS: [&str; 16] = [
+    "den", "mom_0", "mom_1", "mom_2", "mag_0", "mag_1", "mag_2", "rho_finite", "rho_positive", "vel_finite_0",
+    "vel_finite_1", "vel_finite_2", "mag_finite_0", "mag_finite_1", "mag_finite_2", "accepted",
+];
+
+/// the isothermal-MHD recovery with its status channel carrying one probed quantity in place of the
+/// status: a loaded operand (`den`, `mom_k`, `mag_k`) as loaded, an acceptance condition as 1
+/// where it holds and 0 where it fails, or `accepted`, the conjunction, as 1 or 0. the field
+/// registrations, the recovery and the primitive writes are the production kernel's, so the probe
+/// binds and indexes its buffers as the production recovery does
+pub fn imhd_c2p_probe_gv(channel: &str) -> KernelProgram {
+    assert!(IMHD_C2P_PROBE_CHANNELS.contains(&channel), "imhd_c2p_probe_gv: unknown channel {channel}");
+    imhd_c2p_traced(Some(channel))
+}
+
+fn imhd_c2p_traced(probe: Option<&str>) -> KernelProgram {
     trace_kernel(|cx| {
         let den = cx.field("cons_den", FieldRef::cons_den());
         let mom: [Gv; 3] = std::array::from_fn(|k| {
@@ -569,6 +590,26 @@ pub fn imhd_c2p_gv() -> KernelProgram {
         // imhd_recover is pure kinematics, so the EOS argument is inert; Gv::zero keeps `cs`
         // out of the manifest.
         let prim = imhd_recover(&Isothermal { cs: Gv::ZERO }, &cons);
+        let probed = probe.map(|channel| {
+            // a named-brand fn: a closure cannot name the trace brand
+            fn indicator<'t>(m: GvMask<'t>) -> Gv<'t> {
+                Gv::select(m, Gv::from_f64(1.0), Gv::ZERO)
+            }
+            let conditions = traced_recovery::isothermal_mhd_conditions(&prim);
+            match channel {
+                "den" => den,
+                "accepted" => {
+                    let mut all = conditions[0].1;
+                    for (_, m) in &conditions[1..] {
+                        all = all & *m;
+                    }
+                    indicator(all)
+                }
+                c if c.starts_with("mom_") => mom[c[4..].parse::<usize>().expect("component")],
+                c if c.starts_with("mag_") && !c.starts_with("mag_finite") => mag[c[4..].parse::<usize>().expect("component")],
+                c => indicator(conditions.iter().find(|(n, _)| n == c).expect("a named condition").1),
+            }
+        });
         let (prim, c2p_status) = traced_recovery::isothermal_mhd(prim).into_parts();
 
         let mut writes = vec![KernelWrite::new(
@@ -584,7 +625,10 @@ pub fn imhd_c2p_gv() -> KernelProgram {
             ));
         }
         // the writes stop at vel — the isothermal closure sets the pressure from rho.
-        writes.push(c2p_status_write(c2p_status));
+        writes.push(match probed {
+            None => c2p_status_write(c2p_status),
+            Some(value) => KernelWrite::new("c2p_status", FieldRef::Scratch, value.node()),
+        });
 
         writes
     })

@@ -16,6 +16,16 @@
 // acceptance conditions (finite field, finite velocity), so the variants that
 // fail name the condition the stored status rejects. on a gpu build a failure
 // prints the kernel source the device renders from the registry's ir.
+// the probe gate runs the isothermal recovery's probe kernels on the same store
+// through the production binding (dispatch_named, each probe's own field in the
+// status slot): each carries one loaded operand or one acceptance condition on
+// the status channel. at every interior cell the loaded operands equal the
+// host's conserved values bit for bit, each condition reads 0 or 1, `accepted`
+// is their conjunction, the stored status is 0 exactly where `accepted` is 1,
+// and every condition holds except rho_positive at the planted cell. a failure
+// prints every channel at the first mismatched cells; every run writes the
+// production and probe kernel sources with their buffer bindings and the device
+// compile options to stderr.
 //
 // run: cargo test -p symbi --test mhd_recovery_status
 //      (with --features hip on a gpu node: the device recovery)
@@ -98,7 +108,22 @@ fn device_source(name: &str) -> String {
     let target = symbi_ir::emit::Target::Hip;
     #[cfg(not(feature = "hip"))]
     let target = symbi_ir::emit::Target::Cuda;
-    symbi_ir::render_from_ir(ir, target, symbi_ir::emit::Precision::F64).source
+    let desc = symbi_ir::render_from_ir(ir, target, symbi_ir::emit::Precision::F64);
+    let mut bindings = desc.field_bindings.clone();
+    bindings.sort_by_key(|b| b.buffer_index);
+    let listed: Vec<String> = bindings.iter().map(|b| format!("  buffer {} {:?} output {}", b.buffer_index, b.field, b.is_output)).collect();
+    format!("{name} buffers (render order):\n{}\n{}", listed.join("\n"), desc.source)
+}
+
+/// the options the device compiler receives for every kernel
+#[cfg(feature = "hip")]
+fn compile_options() -> String {
+    format!("hiprtc options {:?} (hiprtc defaults otherwise)", symbi_xpu::hiprtc::compile_options())
+}
+
+#[cfg(not(feature = "hip"))]
+fn compile_options() -> String {
+    "(no hiprtc compile in this build)".to_string()
 }
 
 /// a cpu build runs the kernel's host twin, which carries no device source
@@ -107,9 +132,11 @@ fn device_source(name: &str) -> String {
     format!("(a cpu build runs the {name} host twin)")
 }
 
-/// the isothermal recovery over the store with the velocity and the cell field each kept or zeroed
-fn isothermal_case(keep_velocity: bool, keep_field: bool) {
-    type Sim = SimState<IsothermalMhd, 3, Cartesian, Isothermal<f64>, DefaultSpace, DefaultMemory>;
+type IsoSim = SimState<IsothermalMhd, 3, Cartesian, Isothermal<f64>, DefaultSpace, DefaultMemory>;
+
+/// the isothermal store with the velocity and the cell field each kept or zeroed, and the planted cell
+fn isothermal_store(keep_velocity: bool, keep_field: bool) -> IsoSim {
+    type Sim = IsoSim;
     let dx = 1.0 / N as f64;
     let v = move |x: [f64; 3]| if keep_velocity { velocity(x) } else { [0.0; 3] };
     let b = move |x: [f64; 3]| if keep_field { field(x) } else { [0.0; 3] };
@@ -130,6 +157,12 @@ fn isothermal_case(keep_velocity: bool, keep_field: bool) {
         .build();
     sim.fields.cons.den.view_mut().set(PLANTED, -1.0);
     assert!(sim.geom.interior.contains(PLANTED), "the planted cell lies outside the interior the recovery covers");
+    sim
+}
+
+/// the isothermal recovery over the store with the velocity and the cell field each kept or zeroed
+fn isothermal_case(keep_velocity: bool, keep_field: bool) {
+    let sim = isothermal_store(keep_velocity, keep_field);
     let kernels = IsothermalMhdSubstrateKernelSet3D::<DefaultMemory, f64>::new(1.0, 0.3, 1.0, &sim.geom.allocated);
     kernels.c2p(&sim);
     let bad = mismatches(&sim);
@@ -186,4 +219,74 @@ fn the_newtonian_recovery_accepts_every_valid_cell_and_rejects_the_planted_one()
     kernels.c2p(&sim);
     let bad = mismatches(&sim);
     assert!(bad.is_empty(), "newtonian mhd recovery status:\n  {}", bad.join("\n  "));
+}
+
+#[test]
+fn the_isothermal_recovery_probes_report_the_loaded_operands_and_each_condition() {
+    use symbi_discretize::gv::IMHD_C2P_PROBE_CHANNELS;
+    let sim = isothermal_store(true, true);
+    let kernels = IsothermalMhdSubstrateKernelSet3D::<DefaultMemory, f64>::new(1.0, 0.3, 1.0, &sim.geom.allocated);
+    kernels.c2p(&sim);
+    let store: &symbi::sim::state::FieldStore<3, 3, DefaultMemory, f64> = &sim;
+    let probes: Vec<(&str, symbi_grid::Field<f64, 3, DefaultMemory>)> = IMHD_C2P_PROBE_CHANNELS
+        .iter()
+        .map(|channel| {
+            let field = symbi_grid::Field::zeros(&sim.geom.allocated).expect("probe field");
+            symbi::regimes::substrate_kernels::dispatch_named(
+                store,
+                &sim.fields.cons.den,
+                Some(&field),
+                0,
+                &format!("imhd_c2p_probe_{channel}_3d"),
+                &sim.geom.interior,
+                &[],
+                &[],
+            );
+            (*channel, field)
+        })
+        .collect();
+    sync();
+    let mhd = sim.fields.mhd.as_ref().expect("a magnetized store");
+    let mut bad = Vec::new();
+    for c in sim.geom.interior.iter() {
+        let at = |name: &str| *probes.iter().find(|(n, _)| *n == name).expect("a channel").1.view().at(c);
+        let mut host = vec![("den", *sim.fields.cons.den.view().at(c))];
+        for k in 0..3 {
+            host.push((["mom_0", "mom_1", "mom_2"][k], *sim.fields.cons.mom[k].view().at(c)));
+        }
+        for k in 0..3 {
+            host.push((["mag_0", "mag_1", "mag_2"][k], *mhd.bcell.b[k].view().at(c)));
+        }
+        let conditions = &IMHD_C2P_PROBE_CHANNELS[7..15];
+        let status = *sim.fields.c2p_error.view().at(c);
+        let mut faults = Vec::new();
+        for (name, value) in &host {
+            if at(name).to_bits() != value.to_bits() {
+                faults.push(format!("{name} loaded {:#018x}, host {:#018x}", at(name).to_bits(), value.to_bits()));
+            }
+        }
+        for name in conditions {
+            let want = if c == PLANTED && *name == "rho_positive" { 0.0 } else { 1.0 };
+            if at(name) != want {
+                faults.push(format!("{name} = {} (want {want})", at(name)));
+            }
+        }
+        let all = conditions.iter().all(|n| at(n) == 1.0);
+        if at("accepted") != if all { 1.0 } else { 0.0 } {
+            faults.push(format!("accepted = {} against the conjunction {all}", at("accepted")));
+        }
+        if (status == 0.0) != (at("accepted") == 1.0) {
+            faults.push(format!("stored status {status} against accepted {}", at("accepted")));
+        }
+        if !faults.is_empty() {
+            let channels: Vec<String> = probes.iter().map(|(n, f)| format!("{n} {:e} ({:#018x})", f.view().at(c), f.view().at(c).to_bits())).collect();
+            bad.push(format!("cell {c:?}: {}\n    every channel: {}", faults.join("; "), channels.join(", ")));
+        }
+        if bad.len() >= 8 {
+            break;
+        }
+    }
+    // the record of what the device compiled, kept with every run's log
+    eprintln!("{}\n{}\n{}", compile_options(), device_source("imhd_c2p_3d"), device_source("imhd_c2p_probe_rho_positive_3d"));
+    assert!(bad.is_empty(), "isothermal mhd recovery probes (sources and compile options on stderr):\n  {}", bad.join("\n  "));
 }

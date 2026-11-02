@@ -175,6 +175,28 @@ where
     TracedRecovery::certify(prim, accepted)
 }
 
+/// the isothermal-MHD interior's conditions one by one, in the order `isothermal_mhd` folds them:
+/// the density finite, the density positive, each velocity component finite, each cell-field
+/// component finite. each is the carrier expression the fold applies, so their conjunction is the
+/// family's acceptance
+pub fn isothermal_mhd_conditions<S, const D: usize>(prim: &IsoMhdPrim<S, D>) -> Vec<(String, S::Mask)>
+where
+    S: Scalar,
+{
+    let finite = |v: S| (v - v).cmp_eq(S::ZERO);
+    let mut conditions = vec![
+        ("rho_finite".to_string(), finite(prim.rho())),
+        ("rho_positive".to_string(), prim.rho().cmp_gt(S::ZERO)),
+    ];
+    for k in 0..D {
+        conditions.push((format!("vel_finite_{k}"), finite(prim.vel()[k])));
+    }
+    for k in 0..D {
+        conditions.push((format!("mag_finite_{k}"), finite(prim.mag()[k])));
+    }
+    conditions
+}
+
 /// the relativistic family: the newtonian interior plus a subluminal metric
 /// velocity norm, `gamma_ij v^i v^j < 1` (identity gamma on a flat chart —
 /// the contraction constant-folds to the euclidean norm). a NaN norm rejects

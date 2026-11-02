@@ -46,14 +46,20 @@ unsafe extern "C" {
     fn hiprtcDestroyProgram(prog: *mut hiprtcProgram) -> hiprtcResult;
 }
 
+/// the options every kernel compiles with: `--offload-arch=<SYMBI_HIP_ARCH>` when the variable is
+/// set, and none otherwise, where hiprtc targets the attached device under its own defaults
+pub fn compile_options() -> Vec<String> {
+    std::env::var("SYMBI_HIP_ARCH").ok().map(|a| format!("--offload-arch={a}")).into_iter().collect()
+}
+
 /// compile a HIP/cuda-c++ source string to a code object via hipRTC. on a compile error, the
 /// hipRTC program log (the actual compiler diagnostics) is returned in the error detail. the
 /// returned bytes are a binary code object -- `HipSpace::load_module` loads them as-is.
 pub fn compile_code(source: &str, kernel_name: &str) -> error::Result<Vec<u8>> {
-    // optional `--offload-arch=<arch>`; unset -> hiprtc targets the attached device.
-    let arch_opt = std::env::var("SYMBI_HIP_ARCH").ok().map(|a| {
-        CString::new(format!("--offload-arch={a}")).expect("arch option has no interior NUL")
-    });
+    let arch_opt: Vec<CString> = compile_options()
+        .into_iter()
+        .map(|o| CString::new(o).expect("a compile option has no interior NUL"))
+        .collect();
 
     let src = CString::new(source).map_err(|_| XpuError {
         operation: "hiprtc source",

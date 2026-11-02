@@ -1945,6 +1945,14 @@ fn gen_imhd_c2p(out_dir: &str, ndim: u8) {
     let program = symbi_discretize::gv::imhd_c2p_gv();
     emit_gv(out_dir, &name, ndim, &program);
 }
+// the isothermal recovery probes: the production recovery with one operand or acceptance condition
+// on its status channel each
+fn gen_imhd_c2p_probes(out_dir: &str) {
+    for channel in symbi_discretize::gv::IMHD_C2P_PROBE_CHANNELS {
+        let program = symbi_discretize::gv::imhd_c2p_probe_gv(channel);
+        emit_gv(out_dir, &format!("imhd_c2p_probe_{channel}_3d"), 3, &program);
+    }
+}
 fn gen_imhd_face_flux_3d(out_dir: &str, dir: u8) {
     let program = symbi_discretize::gv::imhd_flux_gv(3, dir, dir as usize);
     emit_gv(out_dir, &format!("imhd_face_flux_3d_{dir}"), 3, &program);
@@ -3749,6 +3757,7 @@ fn main() {
     // flux (D, S_k, B_k) + CFL map mirror NMHD; the CT stack is shared (Faraday induction is
     // regime-agnostic). gas stage carries no energy (has_energy=false).
     gen_imhd_c2p(&out_dir, 3);
+    gen_imhd_c2p_probes(&out_dir);
     for dir in 0..3 {
         gen_imhd_face_flux_3d(&out_dir, dir);
         gen_imhd_hlld_face_flux(&out_dir, dir);
