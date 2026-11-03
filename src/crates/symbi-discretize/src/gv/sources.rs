@@ -185,11 +185,14 @@ pub(crate) fn gv_geometric_source<'t>(
             let ptot = cx.field("pre", FieldRef::PrimPre);
             // the velocity-quadratic inertial vanishes for 1D radial, so that arm leaves it and
             // its vel reads out of the graph.
+            // the spherical (r, theta) plane carries v_phi in its third slot, and the centrifugal
+            // and polar hoop terms read it; the cylindrical (r, z) plane holds (r, phi) in its first two
+            let components = if coords == Coords::Spherical { ncomp } else { ndim };
             let (gas_mom, vel): (Vec<Gv>, Vec<Gv>) = if inertial && ndim >= 2 {
-                let v = (0..ndim)
+                let v = (0..components)
                     .map(|d| cx.field(&format!("prim_v{d}"), FieldRef::PrimVel(d as u8)))
                     .collect();
-                (cons_mom[..ndim].to_vec(), v) // gas_mom = cons.mom (shared, read once)
+                (cons_mom[..components].to_vec(), v) // gas_mom = cons.mom (shared, read once)
             } else {
                 (Vec::new(), Vec::new())
             };

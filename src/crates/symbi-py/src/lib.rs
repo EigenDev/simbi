@@ -5943,7 +5943,7 @@ macro_rules! build_and_run_hydro {
                     "DOF-lifted (swirl) runs do not yet support mesh refinement".to_string(),
                 );
             }
-            if $dof != $d && !cfg.bodies.is_empty() {
+            if $dof != $d && !cfg.bodies.is_empty() && cfg.spacetime != "minkowski" {
                 return Err(
                     "DOF-lifted (swirl) runs do not yet support immersed bodies".to_string(),
                 );
@@ -5955,7 +5955,7 @@ macro_rules! build_and_run_hydro {
         if $dof != $d && cfg.refinement_enabled {
             return Err("DOF-lifted (swirl) runs do not yet support mesh refinement".to_string());
         }
-        if $dof != $d && !cfg.bodies.is_empty() {
+        if $dof != $d && !cfg.bodies.is_empty() && cfg.spacetime != "minkowski" {
             return Err("DOF-lifted (swirl) runs do not yet support immersed bodies".to_string());
         }
 
@@ -7893,7 +7893,11 @@ macro_rules! hydro_dispatch {
                 build_and_run_hydro!($cfg, $prims, $regime, $regime_ty, 1, 1, Spherical, Spherical)
             }
             (2, "spherical") => {
-                build_and_run_hydro!($cfg, $prims, $regime, $regime_ty, 2, 2, Spherical, Spherical)
+                if primitive_row_dof($cfg, $prims.first().map_or(0, |row| row.len()))? == 3 {
+                    build_and_run_hydro!($cfg, $prims, $regime, $regime_ty, 2, 3, Spherical, Spherical)
+                } else {
+                    build_and_run_hydro!($cfg, $prims, $regime, $regime_ty, 2, 2, Spherical, Spherical)
+                }
             }
             (3, "spherical") => {
                 build_and_run_hydro!($cfg, $prims, $regime, $regime_ty, 3, 3, Spherical, Spherical)
@@ -7927,16 +7931,13 @@ macro_rules! hydro_dispatch {
                     )
                 }
             },
-            (2, "cylindrical") => build_and_run_hydro!(
-                $cfg,
-                $prims,
-                $regime,
-                $regime_ty,
-                2,
-                2,
-                Cylindrical,
-                Cylindrical
-            ),
+            (2, "cylindrical") => {
+                if primitive_row_dof($cfg, $prims.first().map_or(0, |row| row.len()))? == 3 {
+                    build_and_run_hydro!($cfg, $prims, $regime, $regime_ty, 2, 3, Cylindrical, Cylindrical)
+                } else {
+                    build_and_run_hydro!($cfg, $prims, $regime, $regime_ty, 2, 2, Cylindrical, Cylindrical)
+                }
+            }
             // GR (kerr-schild) cylindrical full 3D (R, phi, z): DOF == NDIM = 3.
             (3, "cylindrical") if $cfg.spacetime == "schwarzschild_ks" => build_and_run_hydro!(
                 $cfg, $prims, $regime, $regime_ty, 3, 3,
@@ -9565,9 +9566,10 @@ fn dispatch_and_run(
 /// the momentum components a configuration's primitive rows carry, read from the row width: rho,
 /// the velocities, then the pressure on an energy regime. an isothermal row may end with one
 /// p/cs entry, required as the closure pressure when the closure is local. the velocity count is
-/// the grid dimension except on MHD (three everywhere) and on the kerr-schild 2D charts that lift
-/// the azimuthal velocity: the (r, theta) plane takes either form, spinning kerr and the (R, z)
-/// plane require the lift. any other width is refused by name
+/// the grid dimension except on MHD (three everywhere), on the kerr-schild 2D charts that lift the
+/// azimuthal velocity (the (r, theta) plane takes either form, spinning kerr and the (R, z) plane
+/// require the lift), and on the flat newtonian (r, theta) and (R, z) planes, which take either
+/// form. any other width is refused by name
 fn primitive_row_dof(cfg: &Config, width: usize) -> Result<usize, String> {
     let d = cfg.dims;
     let accepted: Vec<(usize, usize)> = match cfg.regime.as_str() {
@@ -9580,6 +9582,8 @@ fn primitive_row_dof(cfg: &Config, width: usize) -> Result<usize, String> {
             (2, "spherical", "schwarzschild_ks") => vec![(4, 2), (5, 3)],
             (2, "spherical", "kerr_ks") => vec![(5, 3)],
             (2, "cylindrical", "schwarzschild_ks") if cfg.cyl_plane == symbi_sim::state::CylPlane::Rz => vec![(5, 3)],
+            (2, "spherical", "minkowski") if cfg.regime == "newtonian" => vec![(4, 2), (5, 3)],
+            (2, "cylindrical", "minkowski") if cfg.regime == "newtonian" && cfg.cyl_plane == symbi_sim::state::CylPlane::Rz => vec![(4, 2), (5, 3)],
             _ => vec![(d + 2, d)],
         },
     };
@@ -9596,13 +9600,49 @@ fn primitive_row_dof(cfg: &Config, width: usize) -> Result<usize, String> {
     })
 }
 
-/// every primitive row has one width the configuration's layout accepts
+/// the first property of a flat newtonian axisymmetric rotating run outside the verified scope: the
+/// adiabatic gas on a 2D (r, theta) or (R, z) plane under plm and hlle, on host memory, at most one
+/// bare point mass at rest on the symmetry axis. a run carrying any other term is refused by name
+fn axisymmetric_rotation_refusal(cfg: &Config) -> Option<String> {
+    const GRAVITATIONAL: u64 = 1;
+    let bare_axial_mass = |b: &BodyParams| {
+        b.capability == GRAVITATIONAL
+            && !b.two_way_coupling
+            && b.position.iter().all(|x| *x == 0.0)
+            && b.velocity.iter().all(|v| *v == 0.0)
+    };
+    let checks: [(bool, &str); 13] = [
+        (cfg!(feature = "gpu"), "device execution, whose hardware gates have not run"),
+        (cfg.refinement_enabled, "mesh refinement"),
+        (cfg.solver != Solver::Hlle, "a solver other than hlle"),
+        (cfg.reconstruction_name != "plm", "a reconstruction other than plm"),
+        (cfg.wb_reconstruction, "the well-balanced reconstruction"),
+        (cfg.viscosity != 0.0 || cfg.alpha != 0.0, "viscous transport"),
+        (cfg.bodies.len() > 1 || cfg.binary.is_some() || cfg.bonded_assembly.is_some(), "more than one immersed body"),
+        (!cfg.bodies.iter().all(bare_axial_mass), "a body other than a bare point mass at rest on the symmetry axis"),
+        (!cfg.source_jsons.is_empty(), "a user source"),
+        (!cfg.census_jsons.is_empty(), "a census"),
+        (cfg.mesh_motion || cfg.motion_json.is_some(), "mesh motion"),
+        (cfg.n_tracers != 0 || !cfg.chi_ic.is_empty(), "a tracer or passive scalar"),
+        (!cfg.driven_exprs.is_empty() || !cfg.gradient_bcs.is_empty(), "a driven or gradient wall"),
+    ];
+    checks.into_iter().find(|(outside, _)| *outside).map(|(_, property)| property.to_string())
+}
+
+/// every primitive row has one width the configuration's layout accepts; a flat newtonian
+/// rotating plane also keeps to the verified scope
 fn validate_primitive_rows(cfg: &Config, prims: &[Vec<f64>]) -> Result<usize, String> {
     let width = prims.first().map_or(0, |row| row.len());
     if let Some((ii, row)) = prims.iter().enumerate().find(|(_, row)| row.len() != width) {
         return Err(format!("primitive row {ii} has {} entries where row 0 has {width}", row.len()));
     }
-    primitive_row_dof(cfg, width)
+    let dof = primitive_row_dof(cfg, width)?;
+    if dof > cfg.dims && cfg.regime == "newtonian" && cfg.spacetime == "minkowski" {
+        if let Some(property) = axisymmetric_rotation_refusal(cfg) {
+            return Err(format!("{property} on an axisymmetric rotating {} is outside the verified scope", grid_name(cfg)));
+        }
+    }
+    Ok(dof)
 }
 
 /// a declared stationary target supplies density, one velocity per grid axis and the pressure;
@@ -11446,6 +11486,7 @@ impl LaunchFault {
             ));
             return Ok(fault);
         }
+        fault.injection.rejection_armed = parts[0] == "reject";
         if number(1)? as usize != me {
             match parts[0] {
                 "reject" | "reject_level" | "bad_cfl" | "exit" | "face" | "nested_contribution" => return Ok(fault),
@@ -14197,6 +14238,19 @@ fn run_worker_process(
             Err(format!("the {} spacetime on the {}-dimensional cylindrical chart is outside the distributed first release", cfg.spacetime, $other))
         };
     }
+    // a flat curvilinear plane, built only on a two-dimensional grid: the rows choose one momentum
+    // per axis or the azimuthal momentum's three, as the single grid's dispatch chooses
+    macro_rules! flat_axisymmetric_plane {
+        (2, $arm:ident, $geom:expr, $geom_ty:ty, $regime:expr, $regime_ty:ty) => {{
+            match primitive_row_dof(cfg, prims.first().map_or(0, |row| row.len()))? {
+                3 => $arm!($geom, $geom_ty, $regime, $regime_ty, 3),
+                _ => $arm!($geom, $geom_ty, $regime, $regime_ty),
+            }
+        }};
+        ($other:tt, $arm:ident, $geom:expr, $geom_ty:ty, $regime:expr, $regime_ty:ty) => {
+            $arm!($geom, $geom_ty, $regime, $regime_ty)
+        };
+    }
     macro_rules! charted {
         ($arm:ident) => {
             match cfg.coord_system.as_str() {
@@ -14211,8 +14265,8 @@ fn run_worker_process(
         ($arm:ident, $regime:expr, $regime_ty:ty) => {
             match (cfg.coord_system.as_str(), cfg.spacetime.as_str(), $d) {
                 ("cartesian", "minkowski", _) => $arm!(Cartesian, Cartesian, $regime, $regime_ty),
-                ("spherical", "minkowski", _) => $arm!(Spherical, Spherical, $regime, $regime_ty),
-                ("cylindrical", "minkowski", _) => $arm!(Cylindrical, Cylindrical, $regime, $regime_ty),
+                ("spherical", "minkowski", _) => flat_axisymmetric_plane!($d, $arm, Spherical, Spherical, $regime, $regime_ty),
+                ("cylindrical", "minkowski", _) => flat_axisymmetric_plane!($d, $arm, Cylindrical, Cylindrical, $regime, $regime_ty),
                 ("cartesian", "schwarzschild_ks", 3) => $arm!(
                     SchwarzschildKSCartesian { mass: cfg.schwarzschild_mass },
                     SchwarzschildKSCartesian<f64>,
@@ -15526,6 +15580,16 @@ mod launch_fault_tests {
 
     /// unset, the variable activates nothing: every fault of the launch, the in-process tiled run
     /// and the refined workers is absent, so an ordinary run takes no injected act
+    #[test]
+    fn a_forced_rejection_arms_every_worker_and_rejects_on_the_named_one() {
+        for me in [0, 1, 2] {
+            let f = LaunchFault::from_spec(Some("reject:1:3:0"), me).expect("the spec parses");
+            assert!(f.injection.rejection_armed, "worker {me} is unarmed");
+            assert_eq!(f.injection.reject_at.is_empty(), me != 1, "worker {me}");
+        }
+        assert!(!LaunchFault::from_spec(None, 0).expect("an absent variable parses").injection.rejection_armed);
+    }
+
     #[test]
     fn an_unset_injection_variable_activates_no_fault() {
         for me in [0, 1, 7] {

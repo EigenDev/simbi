@@ -957,16 +957,16 @@ fn gen_adiabatic_face_flux(out_dir: &str, ndim: u8, dir: u8, geom: Geom, recon: 
         gv_dim!(ndim, symbi_discretize::gv::adiabatic_flux_gv, dir, recon, motion)
     } else {
         assert!(motion == FaceMotion::Moving, "the stationary flux twin is baked on the cartesian chart");
-        // cyl r-z (ncomp=3 swirl on the 2D (r,z) grid): the sweep coordinate is axes[dir].
+        // the axisymmetric planes (ncomp = 3 on two axes): the sweep coordinate is axes[dir].
         assert!(
             geom.ncomp == 3 && ndim == 2,
-            "non-cartesian adiabatic flux is only cyl r-z"
+            "non-cartesian adiabatic flux is only the axisymmetric planes"
         );
         assert!(
             recon == Recon::Plm,
             "ppm face flux is baked for the cartesian adiabatic family only"
         );
-        symbi_discretize::gv::adiabatic_flux_cyl_rz_gv(dir)
+        symbi_discretize::gv::adiabatic_flux_axisymmetric_gv(dir, &geom.axes)
     };
     emit_gv(out_dir, &name, ndim, &program);
 }
@@ -3589,6 +3589,26 @@ fn main() {
     gen_snapshot(&out_dir, 2, "adiabatic", true, cyl.clone());
     for dir in 0..2 {
         gen_adiabatic_face_flux(&out_dir, 2, dir, cyl.clone(), Recon::Plm, FaceMotion::Moving);
+    }
+    // the spherical axisymmetric adiabatic family: the same builders on a 2-axis (r, theta) grid
+    // carrying (v_r, v_theta, v_phi). the ghost fills are the swirl set's shared instances.
+    let meridian = Geom::sph_swirl();
+    gen_adiabatic_c2p(&out_dir, 2, meridian.clone());
+    gen_iso_wave_speed_map(&out_dir, 2, meridian.clone());
+    gen_godunov_stage(&out_dir, 2, "adiabatic", true, meridian.clone(), None);
+    gen_snapshot(&out_dir, 2, "adiabatic", true, meridian.clone());
+    for dir in 0..2 {
+        gen_adiabatic_face_flux(&out_dir, 2, dir, meridian.clone(), Recon::Plm, FaceMotion::Moving);
+    }
+    // a central point mass's gravity on both axisymmetric planes: the cartesian acceleration
+    // projected onto the three physical momenta, with its reaction reduced for the body ledger
+    for geom in [Geom::cyl_rz(), Geom::sph_swirl()] {
+        let name = format!("body_source{}_2d", geom.suffix());
+        let program = body_source_gv(MAX_SOURCE_BODIES, geom.coords, 2, geom.ncomp as usize, &geom.axes, false);
+        emit_gv(&out_dir, &name, 2, &program);
+        let name = format!("body_feedback{}_2d", geom.suffix());
+        let program = body_feedback_gv(MAX_SOURCE_BODIES, geom.coords, 2, geom.ncomp as usize, &geom.axes);
+        emit_gv(&out_dir, &name, 2, &program);
     }
     // the cylindrical natural (DOF == NDIM) hydro family for all three regimes (iso /
     // adiabatic / rhd), at 1D (radial), 2D (r-phi disk plane), and 3D (r,phi,z) — the

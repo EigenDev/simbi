@@ -582,12 +582,11 @@ pub fn adiabatic_flux_gv<const D: usize>(dir: u8, recon: Recon, motion: FaceMoti
     )
 }
 
-/// the cyl r-z (axisymmetric swirl) adiabatic face flux: ncomp = 3 (v_phi swirl folds
-/// into KE) on a 2D (r, z) grid; the sweep coordinate is `axes[dir]` ([0, 2][dir] — grid
-/// axis 1 is the z coordinate). replaces the cyl r-z `hlle_flux` Expr builder.
-pub fn adiabatic_flux_cyl_rz_gv(dir: u8) -> KernelProgram {
-    let coord_n = [0usize, 2][dir as usize]; // (r, z) grid axes -> coordinates 0, 2
-    euler_hlle_flux_gv::<3, _>(&Newtonian, 2, dir, coord_n, Recon::Plm, EosArm::IdealGamma, FaceMotion::Moving)
+/// the adiabatic face flux on a 2-axis axisymmetric grid carrying three velocity components, the
+/// azimuthal one folding into the kinetic energy. the sweep coordinate is `axes[dir]`: [0, 2] on the
+/// cylindrical (r, z) plane and [0, 1] on the spherical (r, theta) plane
+pub fn adiabatic_flux_axisymmetric_gv(dir: u8, axes: &[usize]) -> KernelProgram {
+    euler_hlle_flux_gv::<3, _>(&Newtonian, 2, dir, axes[dir as usize], Recon::Plm, EosArm::IdealGamma, FaceMotion::Moving)
 }
 
 /// the RHD (special-relativistic euler) face flux — `euler_hlle_flux_gv` at the `Rhd`

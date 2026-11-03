@@ -7,7 +7,8 @@
 # isothermal MHD row likewise. the momentum components equal the grid dimension
 # except on the kerr-schild 2D charts that lift the azimuthal velocity (the
 # (r, theta) plane takes either form, spinning kerr and the (R, z) plane require
-# the lift) and on MHD, which carries three everywhere. every supported layout
+# the lift), on the flat newtonian (r, theta) and (R, z) planes, which take either
+# form, and on MHD, which carries three everywhere. every supported layout
 # seeds distinct, exactly representable values and the initial checkpoint
 # returns each one in its own slot; a row of any other width is refused by name
 # before any output, so no entry is shifted into another slot.
@@ -105,6 +106,8 @@ SUPPORTED = {
     "newtonian-spherical-3d": (_case("newtonian", 3, 3, {"bounds": [[1.0, 2.0], [0.5, 1.5], [0.0, 1.0]]}, coord="spherical"), 3, True),
     "newtonian-cylindrical-rz": (_case("newtonian", 2, 2, FLAT, coord="cylindrical"), 2, True),
     "newtonian-cylindrical-rphi": (_case("newtonian", 2, 2, FLAT, coord="planar_cylindrical"), 2, True),
+    "newtonian-spherical-2d-lifted": (_case("newtonian", 2, 3, FLAT, coord="spherical"), 3, True),
+    "newtonian-cylindrical-rz-lifted": (_case("newtonian", 2, 3, FLAT, coord="cylindrical"), 3, True),
     "rhd-cartesian-2d": (_case("rhd", 2, 2, FLAT, gamma=4.0 / 3.0), 2, True),
     "rhd-ks-line": (_case("rhd", 1, 1, KS_SPH, coord="spherical", gamma=4.0 / 3.0), 1, True),
     "rhd-ks-plane": (_case("rhd", 2, 2, KS_SPH, coord="spherical", gamma=4.0 / 3.0), 2, True),
@@ -121,9 +124,7 @@ SUPPORTED = {
 }
 # name: (settings, row width the refusal names)
 UNSUPPORTED = {
-    "newtonian-spherical-2d-lifted": (_case("newtonian", 2, 3, FLAT, coord="spherical"), 5),
     "newtonian-cartesian-2d-lifted": (_case("newtonian", 2, 3, FLAT), 5),
-    "newtonian-cylindrical-rz-lifted": (_case("newtonian", 2, 3, FLAT, coord="cylindrical"), 5),
     "rhd-cartesian-2d-lifted": (_case("rhd", 2, 3, FLAT, gamma=4.0 / 3.0), 5),
     "rhd-kerr-plane": (_case("rhd", 2, 2, KERR_SPH, coord="spherical", gamma=4.0 / 3.0), 4),
     "isothermal-cartesian-2d-two-trailing": (_case("isothermal", 2, 2, FLAT, pressure=False, trailing=1.0) | {"row": [RHO, *VEL[:2], 1.0, 1.0]}, 5),

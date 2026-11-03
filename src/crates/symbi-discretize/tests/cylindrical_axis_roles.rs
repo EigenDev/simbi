@@ -17,7 +17,7 @@ mod harness;
 use harness::KernelRun;
 
 use symbi_discretize::{
-    Coords, GeoSource, Spacing, adiabatic_flux_cyl_rz_gv, geometric_momentum_source_probe_gv,
+    Coords, GeoSource, Spacing, adiabatic_flux_axisymmetric_gv, geometric_momentum_source_probe_gv,
 };
 
 const NR: usize = 4;
@@ -100,7 +100,7 @@ fn cylindrical_rz_swirl_flux_is_advective() {
     let (nr, nz) = (6usize, 3usize);
 
     // recon reads i-2..i+1, so compute only the interior (i in 2..5) of a full nr x nz buffer.
-    let out = KernelRun::new(adiabatic_flux_cyl_rz_gv(0)) // sweep r
+    let out = KernelRun::new(adiabatic_flux_axisymmetric_gv(0, &[0, 2])) // sweep r
         .grid([nr, nz])
         .compute_window([2, 0], [3, nz])
         .fields(&[
