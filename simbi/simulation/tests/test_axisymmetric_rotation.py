@@ -2,14 +2,13 @@
 # test_axisymmetric_rotation.py
 #
 # the newtonian gas with three velocity components on a two-dimensional axisymmetric
-# plane, spherical (r, theta) and cylindrical (R, z), through the frontend:
+# plane, spherical (r, theta) and cylindrical (R, z), through the frontend, under the
+# adiabatic and the isothermal closure:
 # - a point mass on the axis accelerates a uniform gas at rest by its closed-form
 #   newtonian gravity, the azimuthal momentum staying exactly zero. the compact
 #   softening is newtonian outside its length, which lies inside the inner radius
-# - a bound swirl stays finite with poles on the grid and the velocity odd across
-#   them, and the azimuthal velocity sets the radial acceleration's centrifugal part
 # - a run carrying anything outside the verified scope is refused by name before
-#   any output
+#   any output, a body on the cartesian plane included
 #
 # run: pytest -m simulation simbi/simulation/tests/test_axisymmetric_rotation.py
 # =============================================================================
@@ -45,8 +44,7 @@ class Plane(SimbiProblem):
     resolution: Annotated[tuple[int, int], ProblemParam((32, 32), description="grid")]
     bounds: list[tuple[float, float]] = {bounds}
     coord_system: CoordSystem = {coord}
-    regime: Regime = Regime.NEWTONIAN
-    adiabatic_index: float = 5.0 / 3.0
+{closure}    velocity_components: Annotated[int | None, ProblemParam(3, description="three velocity components")]
     end_time: float = 10.0
     boundary_conditions: Annotated[list[BoundaryCondition], ProblemParam([BoundaryCondition.OUTFLOW], description="walls")]
 {extra}
@@ -59,7 +57,7 @@ class Plane(SimbiProblem):
     def initial_primitive_state(self):
         def gas_state():
             for _ in range(math.prod(self.resolution)):
-                yield (1.0, 0.0, 0.0, 0.0, 100.0)
+                yield (1.0, 0.0, 0.0, 0.0{pressure})
 
         return gas_state
 
@@ -69,15 +67,31 @@ if __name__ == "__main__":
     p.checkpoint_interval = 1e-9
     runner.run(p, compute_mode="cpu", max_steps={steps})
 '''
+CLOSURES = {
+    "adiabatic": dict(closure="    regime: Regime = Regime.NEWTONIAN\n    adiabatic_index: float = 5.0 / 3.0\n", pressure=", 100.0"),
+    "isothermal": dict(
+        closure='    regime: Regime = Regime.ISOTHERMAL\n    adiabatic_index: float | None = None\n'
+                '    sound_speed: Annotated[float | None, ProblemParam(10.0, description="sound speed")]\n',
+        pressure="",
+    ),
+    "locally-isothermal": dict(
+        closure='    regime: Regime = Regime.ISOTHERMAL\n    adiabatic_index: float | None = None\n'
+                '    sound_speed: Annotated[float | None, ProblemParam(10.0, description="ambient sound speed")]\n'
+                '    @computed_field\n    @property\n    def locally_isothermal(self) -> bool:\n        return True\n\n'
+                '    @computed_field\n    @property\n    def ambient_sound_speed(self) -> float:\n        return 10.0\n\n',
+        pressure=", 100.0",
+    ),
+}
 PLANES = {
     "spherical": dict(bounds="[(1.0, 2.0), (math.pi / 4.0, 3.0 * math.pi / 4.0)]", coord="CoordSystem.SPHERICAL"),
     "cylindrical": dict(bounds="[(1.0, 2.0), (-0.5, 0.5)]", coord="CoordSystem.CYLINDRICAL"),
+    "cartesian": dict(bounds="[(1.0, 2.0), (-0.5, 0.5)]", coord="CoordSystem.CARTESIAN"),
 }
 
 
-def _script(tmp_path: Path, plane: str, extra: str = "", capability: str = "GRAVITATIONAL", position: str = "(0.0, 0.0)", accretion: str = "") -> str:
+def _script(tmp_path: Path, plane: str, closure: str = "adiabatic", extra: str = "", capability: str = "GRAVITATIONAL", position: str = "(0.0, 0.0)", accretion: str = "") -> str:
     path = tmp_path / "plane_case.py"
-    path.write_text(CASE.format(extra=extra, capability=capability, position=position, accretion=accretion, steps=STEPS, **PLANES[plane]))
+    path.write_text(CASE.format(extra=extra, capability=capability, position=position, accretion=accretion, steps=STEPS, **PLANES[plane], **CLOSURES[closure]))
     return str(path)
 
 
@@ -86,10 +100,11 @@ def _final(out: Path) -> tuple[h5py.File, int]:
     return f, int(f["level_0/mesh"].attrs["halo_width"])
 
 
-@pytest.mark.parametrize("plane", list(PLANES))
-def test_a_point_mass_on_the_axis_accelerates_the_gas_by_newtonian_gravity(tmp_path: Path, plane: str) -> None:
+@pytest.mark.parametrize("closure", list(CLOSURES))
+@pytest.mark.parametrize("plane", ["spherical", "cylindrical"])
+def test_a_point_mass_on_the_axis_accelerates_the_gas_by_newtonian_gravity(tmp_path: Path, plane: str, closure: str) -> None:
     out = tmp_path / "run"
-    ph.python([_script(tmp_path, plane), str(out)], f"a point mass on the {plane} plane")
+    ph.python([_script(tmp_path, plane, closure), str(out)], f"a point mass on the {plane} plane, {closure}")
     f, ng = _final(out)
     t = float(f["level_0"].attrs["time"])
     assert t > 0.0, "the run never advanced"
@@ -127,7 +142,7 @@ REFUSED = {
 }
 
 
-@pytest.mark.parametrize("plane", list(PLANES))
+@pytest.mark.parametrize("plane", ["spherical", "cylindrical"])
 @pytest.mark.parametrize("case", list(REFUSED))
 def test_a_run_outside_the_verified_scope_is_refused_by_name_before_any_output(tmp_path: Path, plane: str, case: str) -> None:
     settings, message = REFUSED[case]
@@ -137,3 +152,13 @@ def test_a_run_outside_the_verified_scope_is_refused_by_name_before_any_output(t
     assert done.returncode != 0, f"{case}: the run succeeded"
     assert message in flat, f"{case}: {flat[-1200:]}"
     assert not list(out.glob("*.h5")), f"{case}: output was written before the refusal"
+
+
+@pytest.mark.parametrize("closure", list(CLOSURES))
+def test_a_body_on_the_cartesian_plane_is_refused_by_name(tmp_path: Path, closure: str) -> None:
+    out = tmp_path / "run"
+    done = ph.python([_script(tmp_path, "cartesian", closure), str(out)], "a body on the cartesian plane, expecting a refusal", check=False)
+    flat = " ".join(done.stderr.split())
+    assert done.returncode != 0, "the run succeeded"
+    assert "a body on the cartesian plane" in flat, flat[-1200:]
+    assert not list(out.glob("*.h5")), "output was written before the refusal"

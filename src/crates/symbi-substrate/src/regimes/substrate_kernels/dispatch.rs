@@ -3280,7 +3280,14 @@ pub fn dispatch_godunov<const D: usize, const DOF: usize, Mem, Sc>(
     Sc: Scalar + OrderedNumeric,
 {
     let geom = &sim.geom;
-    let sfx = geom_suffix(geom.coords, DOF, D);
+    let sfx = if matches!(prefix, "adiabatic" | "iso") {
+        match symbi_discretize::kernel_slug::newtonian_lift_suffix(geom.coords, DOF, D) {
+            "" => geom_suffix(geom.coords, DOF, D),
+            lift => lift,
+        }
+    } else {
+        geom_suffix(geom.coords, DOF, D)
+    };
     // the spacetime tag: flat -> "", Schwarzschild -> "_schw" (the lapse-densitized GR kernel).
     // orthogonal to the spatial `sfx`.
     let st_sfx = spacetime_slug(geom.spacetime);

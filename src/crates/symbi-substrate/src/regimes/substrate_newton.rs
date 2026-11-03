@@ -37,7 +37,7 @@ use crate::regimes::substrate_kernels::{
     dispatch_body_source_wb, dispatch_driven_boundaries, dispatch_fields, dispatch_flux,
     dispatch_fused_runtime_cpu, dispatch_godunov_maybe_fused, dispatch_gradient_boundaries,
     dispatch_named, dispatch_penalize, dispatch_runtime_source, dispatch_source_apply,
-    dof_lift_suffix, fused_runtime_cpu_kernel, geom_scalar, motion_scalar, resolve_body_only_fused,
+    fused_runtime_cpu_kernel, geom_scalar, motion_scalar, resolve_body_only_fused,
     resolve_params, resolve_snapshot_into, scalars_for,
 };
 use symbi_discretize::gv::GeoSource;
@@ -420,7 +420,7 @@ impl<Mem: MemoryStorage + Sync, Sc: Scalar + OrderedNumeric, const D: usize, con
             .prim
             .pre_field()
             .expect("Newtonian requires prim.pre");
-        let sfx = dof_lift_suffix(sim.geom.coords, DOF, D);
+        let sfx = symbi_discretize::kernel_slug::newtonian_lift_suffix(sim.geom.coords, DOF, D);
         let name = format!("adiabatic_c2p{sfx}_{D}d");
         let scalars = scalars_for(&name, |bind| match bind {
             ScalarBind::Ref(ScalarRef::Gamma) => Sc::from_f64(self.gamma),
@@ -577,7 +577,7 @@ impl<Mem: MemoryStorage + Sync, Sc: Scalar + OrderedNumeric, const D: usize, con
             .prim
             .pre_field()
             .expect("Newtonian requires prim.pre");
-        let sfx = dof_lift_suffix(sim.geom.coords, DOF, D);
+        let sfx = symbi_discretize::kernel_slug::newtonian_lift_suffix(sim.geom.coords, DOF, D);
         // under a balanced reconstruction the ghosts must satisfy the same premise the
         // interior does: a mirrored copy of a stratified column is not its continuation, so
         // reflect/outflow ghosts extend (rho, p) along the local isentrope to the ghost's own
@@ -708,7 +708,7 @@ impl<Mem: MemoryStorage + Sync, Sc: Scalar + OrderedNumeric, const D: usize, con
             .prim
             .pre_field()
             .expect("Newtonian requires prim.pre");
-        let sfx = dof_lift_suffix(sim.geom.coords, DOF, D);
+        let sfx = symbi_discretize::kernel_slug::newtonian_lift_suffix(sim.geom.coords, DOF, D);
         let name = format!("adiabatic_snapshot{sfx}_{D}d");
         dispatch_named(sim, pre, None, 0, &name, &sim.geom.allocated, &[], &[]);
         // the dye snapshot rides alongside: u_n.chi = cons.chi, the rk combine's
@@ -893,7 +893,7 @@ impl<Mem: MemoryStorage + Sync, Sc: Scalar + OrderedNumeric, const D: usize, con
         // u_stage = cons (pure copy of den, mom_0.., nrg) over the interior the source pass
         // iterates. the snapshot kernel's manifest names `u_n` as its destination; the
         // resolver binds that slot onto u_stage.
-        let sfx = dof_lift_suffix(sim.geom.coords, DOF, D);
+        let sfx = symbi_discretize::kernel_slug::newtonian_lift_suffix(sim.geom.coords, DOF, D);
         let name = format!("adiabatic_snapshot{sfx}_{D}d");
         let (inputs, outputs) = bind_by_manifest(&name, |b| {
             resolve_snapshot_into(sim, &sim.workspace.u_stage, b)

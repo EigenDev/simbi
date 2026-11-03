@@ -384,6 +384,17 @@ class SimbiProblem(BaseModel):
             description="simulation end time",
         ),
     ]
+    velocity_components: Annotated[
+        int | None,
+        ProblemParam(
+            None,
+            description=(
+                "momentum components carried, independent of the grid dimension: 3 on a "
+                "2D newtonian or isothermal plane holds the out-of-plane velocity; a lifted "
+                "isothermal run must declare it because a 4-entry row reads two ways"
+            ),
+        ),
+    ]
     cfl_number: Annotated[
         float,
         ProblemParam(
@@ -780,6 +791,13 @@ class SimbiProblem(BaseModel):
             return None  # optional trailing p/cs entry
         if self.is_mhd:
             dof = 3  # v3 couples to B on every chart
+        elif (
+            self.regime != Regime.RHD
+            and self.coord_system == CoordSystem.CARTESIAN
+            and self.velocity_components == 3
+            and self.dimensionality == 2
+        ):
+            dof = 3  # the cartesian plane's declared out-of-plane velocity
         elif (
             self.regime != Regime.RHD
             and self.coord_system == CoordSystem.CARTESIAN

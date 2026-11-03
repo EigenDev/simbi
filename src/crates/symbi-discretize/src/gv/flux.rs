@@ -582,10 +582,10 @@ pub fn adiabatic_flux_gv<const D: usize>(dir: u8, recon: Recon, motion: FaceMoti
     )
 }
 
-/// the adiabatic face flux on a 2-axis axisymmetric grid carrying three velocity components, the
-/// azimuthal one folding into the kinetic energy. the sweep coordinate is `axes[dir]`: [0, 2] on the
-/// cylindrical (r, z) plane and [0, 1] on the spherical (r, theta) plane
-pub fn adiabatic_flux_axisymmetric_gv(dir: u8, axes: &[usize]) -> KernelProgram {
+/// the adiabatic face flux on a 2-axis grid carrying three velocity components, the one out of
+/// the plane folding into the kinetic energy. the sweep coordinate is `axes[dir]`: [0, 1] on a
+/// cartesian plane and the spherical (r, theta) plane, [0, 2] on the cylindrical (r, z) plane
+pub fn adiabatic_flux_lifted_gv(dir: u8, axes: &[usize]) -> KernelProgram {
     euler_hlle_flux_gv::<3, _>(&Newtonian, 2, dir, axes[dir as usize], Recon::Plm, EosArm::IdealGamma, FaceMotion::Moving)
 }
 
@@ -789,6 +789,13 @@ where
 /// coordinate == grid `dir` (cartesian).
 pub fn iso_flux_gv<const D: usize>(dir: u8) -> KernelProgram {
     iso_hlle_flux_gv::<D>(D as u8, dir, dir as usize)
+}
+
+/// the isothermal face flux on a 2-axis grid carrying three velocity components; `axes` as in
+/// [`adiabatic_flux_lifted_gv`]. the closure carries no energy, so the out-of-plane momentum is
+/// advected alone
+pub fn iso_flux_lifted_gv(dir: u8, axes: &[usize]) -> KernelProgram {
+    iso_hlle_flux_gv::<3>(2, dir, axes[dir as usize])
 }
 
 /// build the iso HLLE face flux directly using Gv ops, at the iso shape (the generic
