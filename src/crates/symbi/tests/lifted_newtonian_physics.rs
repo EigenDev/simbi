@@ -13,7 +13,9 @@
 //   converges
 // - (r, theta) isothermal: uniform swirl accelerates by the centrifugal and polar hoop terms
 // - sealed shells on both axisymmetric planes, both closures: the angular momentum
-//   about the axis holds to a truncation converging at second order
+//   about the axis, sum M_phi R_c V, holds to rounding; the torque form telescopes
+// - a radial drift carries a uniform specific angular momentum v_phi R, up to a truncation
+//   that converges
 // - the locally isothermal closure, cs^2(x) prescribed per cell: uniform density under
 //   cs^2 = 1 + (omega R)^2 / 2 is the rigid-rotation hydrostatic state on both planes, and the
 //   cartesian advection converges through a density and cs^2 varying across the flow at uniform
@@ -297,75 +299,147 @@ fn bump(a: f64, a0: f64, b: f64, b0: f64) -> f64 {
     (-((a - a0) / 0.15).powi(2)).exp() * (-((b - b0) / 0.25).powi(2)).exp()
 }
 
+/// the angular momentum about the axis, sum M_phi R_c V, with the centroid's distance from the axis
 fn sphere_l(s: &State) -> f64 {
     let [dr, dtheta] = s.dx;
     s.x.iter()
         .zip(&s.mom[2])
         .map(|([r, t], m)| {
-            let volume = ((r + 0.5 * dr).powi(3) - (r - 0.5 * dr).powi(3)) / 3.0 * ((t - 0.5 * dtheta).cos() - (t + 0.5 * dtheta).cos());
-            m * r * t.sin() * volume
+            let (r_lo, r_hi, t_lo, t_hi) = (r - 0.5 * dr, r + 0.5 * dr, t - 0.5 * dtheta, t + 0.5 * dtheta);
+            let i_r2 = (r_hi.powi(3) - r_lo.powi(3)) / 3.0;
+            let i_sin = t_lo.cos() - t_hi.cos();
+            let r_c = (r_hi.powi(4) - r_lo.powi(4)) / 4.0 / i_r2;
+            let t_c = ((t_hi.sin() - t_hi * t_hi.cos()) - (t_lo.sin() - t_lo * t_lo.cos())) / i_sin;
+            m * r_c * t_c.sin() * i_r2 * i_sin
         })
         .sum()
 }
 
 fn rz_l(s: &State) -> f64 {
     let [dr, dz] = s.dx;
-    s.x.iter().zip(&s.mom[1]).map(|([r, _z], m)| m * r * r * dr * dz).sum()
+    s.x.iter()
+        .zip(&s.mom[1])
+        .map(|([r, _z], m)| {
+            let (lo, hi) = (r - 0.5 * dr, r + 0.5 * dr);
+            let i_r = (hi * hi - lo * lo) / 2.0;
+            m * ((hi.powi(3) - lo.powi(3)) / 3.0 / i_r) * i_r * dz
+        })
+        .sum()
 }
 
-fn drift(label: &str, a: f64, b: f64, speed: f64) -> f64 {
+/// the relative change a sealed domain's torque form leaves: the rounding of the sum over the
+/// cells across the steps, measured at 2e-14 and below on these grids
+const SEALED_BOUND: f64 = 1e-12;
+
+fn exactly_held(label: &str, a: f64, b: f64, speed: f64) {
     assert!(a > 0.0 && speed > 1e-3, "{label}: the budget is vacuous (L = {a}, max meridional speed {speed})");
-    (b - a).abs() / a
-}
-
-fn second_order(label: &str, drifts: &[f64]) {
-    converges(label, drifts, 0.35);
-}
-
-#[test]
-fn a_sealed_spherical_shell_keeps_its_angular_momentum_isothermal() {
-    let measured: Vec<f64> = [32, 64, 128]
-        .into_iter()
-        .map(|n| {
-            let (a, b) = isothermal_run!(Spherical, Spherical, [n, n], [1.0, 0.0], [2.0, PI], [WALL, AXIS], T_SHELL, |[r, t]: [f64; 2]| {
-                (1.0 + bump(r, 1.5, t, 1.2), [0.0, 0.0, 0.5 * r * t.sin()], 0.0)
-            });
-            let speed = largest(b.vel[0].iter().map(|v| v.abs()));
-            drift("spherical isothermal", sphere_l(&a), sphere_l(&b), speed)
-        })
-        .collect();
-    second_order("spherical isothermal sealed-shell L drift", &measured);
+    let change = (b - a).abs() / a;
+    eprintln!("{label} relative L change: {change:e}");
+    assert!(change < SEALED_BOUND, "{label}: L changed by {change:e}");
 }
 
 #[test]
-fn a_sealed_rz_annulus_keeps_its_angular_momentum_adiabatic() {
-    let measured: Vec<f64> = [32, 64, 128]
-        .into_iter()
-        .map(|n| {
-            let (a, b) = adiabatic_run!(Cylindrical, Cylindrical, [n, n], [1.0, 0.0], [2.0, 1.0], [WALL, WALL], T_SHELL, |[r, z]: [f64; 2]| {
-                let extra = bump(r, 1.5, z, 0.5);
-                (1.0 + extra, [0.0, 0.5 * r, 0.0], 1.0 + extra)
-            });
-            let speed = largest(b.vel[0].iter().map(|v| v.abs()));
-            drift("rz adiabatic", rz_l(&a), rz_l(&b), speed)
-        })
-        .collect();
-    second_order("rz adiabatic sealed-annulus L drift", &measured);
+fn a_sealed_spherical_shell_holds_its_angular_momentum_adiabatic() {
+    for n in [32, 64, 128] {
+        let (a, b) = adiabatic_run!(Spherical, Spherical, [n, n], [1.0, 0.0], [2.0, PI], [WALL, AXIS], T_SHELL, |[r, t]: [f64; 2]| {
+            let extra = bump(r, 1.5, t, 1.2);
+            (1.0 + extra, [0.0, 0.0, 0.5 * r * t.sin()], 1.0 + extra)
+        });
+        exactly_held("spherical adiabatic", sphere_l(&a), sphere_l(&b), largest(b.vel[0].iter().map(|v| v.abs())));
+    }
 }
 
 #[test]
-fn a_sealed_rz_annulus_keeps_its_angular_momentum_isothermal() {
+fn a_sealed_spherical_shell_holds_its_angular_momentum_isothermal() {
+    for n in [32, 64, 128] {
+        let (a, b) = isothermal_run!(Spherical, Spherical, [n, n], [1.0, 0.0], [2.0, PI], [WALL, AXIS], T_SHELL, |[r, t]: [f64; 2]| {
+            (1.0 + bump(r, 1.5, t, 1.2), [0.0, 0.0, 0.5 * r * t.sin()], 0.0)
+        });
+        exactly_held("spherical isothermal", sphere_l(&a), sphere_l(&b), largest(b.vel[0].iter().map(|v| v.abs())));
+    }
+}
+
+#[test]
+fn a_sealed_rz_annulus_holds_its_angular_momentum_adiabatic() {
+    for n in [32, 64, 128] {
+        let (a, b) = adiabatic_run!(Cylindrical, Cylindrical, [n, n], [1.0, 0.0], [2.0, 1.0], [WALL, WALL], T_SHELL, |[r, z]: [f64; 2]| {
+            let extra = bump(r, 1.5, z, 0.5);
+            (1.0 + extra, [0.0, 0.5 * r, 0.0], 1.0 + extra)
+        });
+        exactly_held("rz adiabatic", rz_l(&a), rz_l(&b), largest(b.vel[0].iter().map(|v| v.abs())));
+    }
+}
+
+#[test]
+fn a_sealed_rz_annulus_holds_its_angular_momentum_isothermal() {
+    for n in [32, 64, 128] {
+        let (a, b) = isothermal_run!(Cylindrical, Cylindrical, [n, n], [1.0, 0.0], [2.0, 1.0], [WALL, WALL], T_SHELL, |[r, z]: [f64; 2]| {
+            (1.0 + bump(r, 1.5, z, 0.5), [0.0, 0.5 * r, 0.0], 0.0)
+        });
+        exactly_held("rz isothermal", rz_l(&a), rz_l(&b), largest(b.vel[0].iter().map(|v| v.abs())));
+    }
+}
+
+// --------------------- specific angular momentum carried by a radial flow ---------------------
+
+/// a uniform specific angular momentum ell = v_phi R in a radial drift stays uniform: the worst
+/// departure in the domain's middle, by t = 0.05. the azimuthal flux reconstructs v_phi, so the
+/// torque form holds it to a truncation
+const ELL: f64 = 0.5;
+const DRIFT: f64 = 0.1;
+
+fn ell_departure(end: &State, slot: usize, radius: impl Fn([f64; 2]) -> f64, inside: impl Fn([f64; 2]) -> bool) -> f64 {
+    assert!(end.time >= 0.05, "stopped at {}", end.time);
+    assert!(largest(end.vel[0].iter().map(|v| v.abs())) > 0.5 * DRIFT, "the radial drift vanished; nothing carries ell");
+    largest(end.x.iter().enumerate().filter(|(_, x)| inside(**x)).map(|(k, x)| (end.vel[slot][k] * radius(*x) / ELL - 1.0).abs()))
+}
+
+#[test]
+fn a_radial_flow_carries_uniform_specific_angular_momentum_rz_adiabatic() {
     let measured: Vec<f64> = [32, 64, 128]
         .into_iter()
         .map(|n| {
-            let (a, b) = isothermal_run!(Cylindrical, Cylindrical, [n, n], [1.0, 0.0], [2.0, 1.0], [WALL, WALL], T_SHELL, |[r, z]: [f64; 2]| {
-                (1.0 + bump(r, 1.5, z, 0.5), [0.0, 0.5 * r, 0.0], 0.0)
-            });
-            let speed = largest(b.vel[0].iter().map(|v| v.abs()));
-            drift("rz isothermal", rz_l(&a), rz_l(&b), speed)
+            let (_, end) = adiabatic_run!(Cylindrical, Cylindrical, [n, 8], [1.0, 0.0], [2.0, 0.5], [OPEN, RING], 0.05, |[r, _z]: [f64; 2]| (1.0, [DRIFT, ELL / r, 0.0], 1.0));
+            ell_departure(&end, 1, |[r, _z]| r, |[r, _z]| (1.25..1.75).contains(&r))
         })
         .collect();
-    second_order("rz isothermal sealed-annulus L drift", &measured);
+    converges("rz adiabatic ell departure", &measured, 0.6);
+}
+
+#[test]
+fn a_radial_flow_carries_uniform_specific_angular_momentum_rz_isothermal() {
+    let measured: Vec<f64> = [32, 64, 128]
+        .into_iter()
+        .map(|n| {
+            let (_, end) = isothermal_run!(Cylindrical, Cylindrical, [n, 8], [1.0, 0.0], [2.0, 0.5], [OPEN, RING], 0.05, |[r, _z]: [f64; 2]| (1.0, [DRIFT, ELL / r, 0.0], 0.0));
+            ell_departure(&end, 1, |[r, _z]| r, |[r, _z]| (1.25..1.75).contains(&r))
+        })
+        .collect();
+    converges("rz isothermal ell departure", &measured, 0.6);
+}
+
+#[test]
+fn a_radial_flow_carries_uniform_specific_angular_momentum_spherical_adiabatic() {
+    let measured: Vec<f64> = [32, 64, 128]
+        .into_iter()
+        .map(|n| {
+            let (_, end) = adiabatic_run!(Spherical, Spherical, [n, n], [1.0, FRAC_PI_4], [2.0, 3.0 * FRAC_PI_4], [OPEN, OPEN], 0.05, |[r, t]: [f64; 2]| (1.0, [DRIFT, 0.0, ELL / (r * t.sin())], 1.0));
+            ell_departure(&end, 2, |[r, t]| r * t.sin(), |[r, t]| (1.25..1.75).contains(&r) && (1.0..PI - 1.0).contains(&t))
+        })
+        .collect();
+    converges("spherical adiabatic ell departure", &measured, 0.6);
+}
+
+#[test]
+fn a_radial_flow_carries_uniform_specific_angular_momentum_spherical_isothermal() {
+    let measured: Vec<f64> = [32, 64, 128]
+        .into_iter()
+        .map(|n| {
+            let (_, end) = isothermal_run!(Spherical, Spherical, [n, n], [1.0, FRAC_PI_4], [2.0, 3.0 * FRAC_PI_4], [OPEN, OPEN], 0.05, |[r, t]: [f64; 2]| (1.0, [DRIFT, 0.0, ELL / (r * t.sin())], 0.0));
+            ell_departure(&end, 2, |[r, t]| r * t.sin(), |[r, t]| (1.25..1.75).contains(&r) && (1.0..PI - 1.0).contains(&t))
+        })
+        .collect();
+    converges("spherical isothermal ell departure", &measured, 0.6);
 }
 
 // --------------------- locally isothermal ---------------------

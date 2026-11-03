@@ -9,9 +9,8 @@
 //   v_phi^2 cot(theta) / r polar: the centrifugal and the polar hoop terms
 // - rigid rotation v_phi = omega r sin(theta) with p = p0 + (omega r sin(theta))^2 / 2
 //   is a steady state: the meridional velocity it develops converges to zero
-// - a sealed spherical shell keeps the angular momentum about the axis,
-//   sum rho v_phi r sin(theta) dV, with every wall and the poles closed, to a
-//   truncation that converges at second order
+// the sealed shell's angular momentum is checked with the other closures in
+// lifted_newtonian_physics.rs
 //
 // run: cargo test -p symbi --test spherical_axisymmetric_rotation
 // =============================================================================
@@ -112,44 +111,4 @@ fn rigid_rotation_is_steady_up_to_a_converging_truncation() {
     eprintln!("rigid rotation meridional speed by resolution: {residuals:?}");
     assert!(residuals[0] > 0.0, "the residual is exactly zero; the state never exercised the source");
     assert!(residuals[1] < 0.5 * residuals[0] && residuals[2] < 0.5 * residuals[1], "the residual does not converge: {residuals:?}");
-}
-
-fn angular_momentum(sim: &Sim) -> f64 {
-    let (dr, dtheta) = (sim.geom.dx[0], sim.geom.dx[1]);
-    sim.geom
-        .interior
-        .iter()
-        .map(|c| {
-            let [r, theta] = center(sim, c);
-            let (r_lo, r_hi) = (r - 0.5 * dr, r + 0.5 * dr);
-            let volume = (r_hi.powi(3) - r_lo.powi(3)) / 3.0 * ((theta - 0.5 * dtheta).cos() - (theta + 0.5 * dtheta).cos());
-            *sim.fields.cons.mom[2].view().at(c) * r * theta.sin() * volume
-        })
-        .sum()
-}
-
-/// the relative angular-momentum change of a sealed shell, poles on the grid, by t = 0.25
-fn sealed_shell_drift(n: usize) -> f64 {
-    let wall = [BoundaryType::Reflect, BoundaryType::Reflect];
-    let axis = [BoundaryType::Axis, BoundaryType::Axis];
-    let sim = grid([n, n], [1.0, 0.0], [2.0, PI], [wall, axis], |[r, theta]: [f64; 2]| {
-        let bump = (-((r - 1.5) / 0.15).powi(2)).exp() * (-((theta - 1.2) / 0.4).powi(2)).exp();
-        Prim::adiabatic(Density(1.0 + bump), Tensor::new([0.0, 0.0, 0.5 * r * theta.sin()]), Pressure(1.0 + bump))
-    });
-    let before = angular_momentum(&sim);
-    assert!(before > 0.0);
-    let sim = evolved(sim, 0.25);
-    let radial: f64 = sim.geom.interior.iter().map(|c| sim.fields.prim.vel[0].view().at(c).abs()).fold(0.0, f64::max);
-    assert!(radial > 1e-3, "the meridional flow never moved the swirl (max |v_r| = {radial}); the budget is vacuous");
-    (angular_momentum(&sim) - before).abs() / before
-}
-
-#[test]
-fn a_sealed_shell_keeps_its_angular_momentum() {
-    let drift: Vec<f64> = [32, 64, 128].into_iter().map(sealed_shell_drift).collect();
-    eprintln!("sealed shell relative angular-momentum change by resolution: {drift:?}");
-    // the godunov stage's azimuthal source form conserves the angular momentum to its truncation:
-    // measured 4.3e-4, 1.1e-4, 2.8e-5 at n = 32, 64, 128, second order
-    assert!(drift[0] > 0.0, "the shell holds its angular momentum exactly; the bound below tests nothing");
-    assert!(drift[1] < 0.3 * drift[0] && drift[2] < 0.3 * drift[1], "the drift does not converge at second order: {drift:?}");
 }
