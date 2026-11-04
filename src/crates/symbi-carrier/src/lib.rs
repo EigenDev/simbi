@@ -205,6 +205,17 @@ pub trait Scalar:
     /// `branch`.
     fn to_f64(self) -> f64;
 
+    /// the largest finite value of this precision, as this scalar
+    fn max_finite() -> Self;
+
+    /// true for every finite value, false for NaN and both infinities: `|x| <= max_finite`. a NaN
+    /// fails the comparison and an infinity exceeds the bound. the form holds under a compiler that
+    /// fuses `a * b - c` into one rounding, where `x - x` of a product `x` yields that product's
+    /// rounding error
+    fn is_finite_mask(self) -> Self::Mask {
+        self.abs().cmp_le(Self::max_finite())
+    }
+
     // ── comparisons — the return type is Mask ─────────────────────────────
     fn cmp_lt(self, other: Self) -> Self::Mask;
     fn cmp_le(self, other: Self) -> Self::Mask;
@@ -550,6 +561,10 @@ macro_rules! source_loc {
 impl Scalar for f64 {
     type Mask = bool;
 
+    fn max_finite() -> Self {
+        f64::MAX
+    }
+
     // zero / one inherited from `Numeric for f64`.
     const INFINITY: f64 = f64::INFINITY;
     const NEG_INFINITY: f64 = f64::NEG_INFINITY;
@@ -751,6 +766,10 @@ impl Scalar for f64 {
 // / sqrt / abs / min / max inherited from `Numeric for f32`.
 impl Scalar for f32 {
     type Mask = bool;
+
+    fn max_finite() -> Self {
+        f32::MAX
+    }
 
     const INFINITY: f32 = f32::INFINITY;
     const NEG_INFINITY: f32 = f32::NEG_INFINITY;

@@ -78,15 +78,15 @@ impl<T, M> TracedRecovery<T, M> {
 
 /// the shared gas interior on the carrier: finite positive density, finite
 /// positive pressure when the family evolves energy, finite velocity
-/// components. finiteness is `(v - v) == 0`, so NaN and both infinities
+/// components. finiteness is `is_finite_mask`, so NaN and both infinities
 /// reject.
 fn gas_accepted<S, const D: usize>(rho: S, pre: Option<S>, vel: &Tensor<S, D>) -> S::Mask
 where
     S: Scalar,
     S::Mask: BitAnd<Output = S::Mask>,
 {
-    let finite_pos = |v: S| (v - v).cmp_eq(S::ZERO) & v.cmp_gt(S::ZERO);
-    let finite = |v: S| (v - v).cmp_eq(S::ZERO);
+    let finite_pos = |v: S| v.is_finite_mask() & v.cmp_gt(S::ZERO);
+    let finite = |v: S| v.is_finite_mask();
     let mut accepted = match pre {
         Some(pre) => finite_pos(rho) & finite_pos(pre),
         None => finite_pos(rho),
@@ -105,7 +105,7 @@ where
 {
     let mut accepted = acc;
     for k in 0..D {
-        accepted = accepted & (x[k] - x[k]).cmp_eq(S::ZERO);
+        accepted = accepted & x[k].is_finite_mask();
     }
     accepted
 }
@@ -183,7 +183,7 @@ pub fn isothermal_mhd_conditions<S, const D: usize>(prim: &IsoMhdPrim<S, D>) -> 
 where
     S: Scalar,
 {
-    let finite = |v: S| (v - v).cmp_eq(S::ZERO);
+    let finite = |v: S| v.is_finite_mask();
     let mut conditions = vec![
         ("rho_finite".to_string(), finite(prim.rho())),
         ("rho_positive".to_string(), prim.rho().cmp_gt(S::ZERO)),
