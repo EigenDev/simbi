@@ -106,6 +106,26 @@ pub use gv_viscous::{
 pub use lattice::LatticeMap;
 pub use symbi_ir::{Gv, GvKernel};
 
+/// the balanced restriction's chain kernels. a band's chain runs whole in one kernel on an uncut
+/// band and resumes from an anchor in a shorter kernel past a cut, the same steps on the same
+/// operands. a compiler free to fuse chooses which product of `rho_a * da + rho_b * db` keeps its
+/// rounding from the surrounding code, which differs between the two kernels, so these kernels
+/// round each operation as written: the chain is one value on every partition
+pub fn kernel_keeps_chain_rounding(kernel_name: &str) -> bool {
+    kernel_name.starts_with("wb_band_encode") || kernel_name.starts_with("wb_band_decode")
+}
+
+/// the device compile directive of a kernel whose rounding must follow its source term by term.
+/// a pragma scopes the choice to the kernel's own compile unit; every other kernel keeps the
+/// compiler's default contraction
+pub fn kernel_device_preamble(kernel_name: &str) -> Vec<String> {
+    if kernel_keeps_chain_rounding(kernel_name) {
+        vec!["#pragma clang fp contract(off)".to_string()]
+    } else {
+        Vec::new()
+    }
+}
+
 /// whether a kernel's buffers all share one allocated layout, so the cell index
 /// can be computed once and shared across reads. true for the single-layout
 /// cell-centered kernels — c2p (cons<->prim), wave-speed maps (prim -> scalar
