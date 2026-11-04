@@ -14,12 +14,19 @@
 // - a stage output with a non-finite value or a non-positive density or internal energy ends
 //   the run as inadmissible at that stage, exit code 1, with its location
 //
+// - provenance: the method, the source revision and the binary's digest are written once to
+//   out/provenance.json and into every restart file. a resume whose method, revision, binary,
+//   sample interval or grid differ from the file's is refused by name, exit code 2, with no file
+//   touched. a seed under a directory marked outside the authorized execution scope is refused
+//
 // inputs: a frontend checkpoint holding the initial state (--seed), or --resume from out/restart.h5
-// outputs: out/rows.jsonl, out/status.json, out/restart.h5, out/snapshot_NNNNNN.h5
+// outputs: out/provenance.json, out/rows.jsonl, out/status.json, out/restart.h5,
+//   out/snapshot_NNNNNN.h5
 //
 // usage:
 //   torus_ledger --seed t0.h5 --out run --ni 84 --nj 44 --t-end 1 --sample-dt 0.001 \
-//     --snapshot-every 10 --max-steps 2000000 --max-wall-seconds 86400 --revision abc [--resume]
+//     --snapshot-every 10 --max-steps 2000000 --max-wall-seconds 86400 --revision abc \
+//     --binary-sha256 def [--resume]
 // =============================================================================
 
 use std::f64::consts::PI;
@@ -64,6 +71,9 @@ pub const COARSE_NI: usize = 84;
 pub const EXIT_COMPLETE: i32 = 0;
 pub const EXIT_FAILED: i32 = 1;
 pub const EXIT_BUDGET: i32 = 75;
+pub const EXIT_REFUSED: i32 = 2;
+/// a directory holding this file, or under one that does, is outside the authorized execution scope
+pub const OUTSIDE_SCOPE_MARKER: &str = "UNLEDGERED_OUTSIDE_AUTHORIZED_SCOPE";
 
 #[derive(Clone, Debug)]
 pub struct Bounds {
@@ -442,6 +452,8 @@ pub enum Ending {
     Budget(&'static str),
     /// a stage output left the admissible set, or the timestep was not positive
     Failed(String),
+    /// the launch's identity disagrees with what it would continue; no step ran and no file changed
+    Refused(String),
 }
 
 impl Ending {
@@ -450,6 +462,7 @@ impl Ending {
             Ending::Complete => EXIT_COMPLETE,
             Ending::Budget(_) => EXIT_BUDGET,
             Ending::Failed(_) => EXIT_FAILED,
+            Ending::Refused(_) => EXIT_REFUSED,
         }
     }
 }
@@ -457,13 +470,74 @@ impl Ending {
 pub struct Launch<'a> {
     pub out: &'a Path,
     pub bounds: &'a Bounds,
-    pub revision: &'a str,
+    pub identity: &'a Identity,
 }
 
-fn write_restart(sim: &Sim, out: &Path, ledger: &Ledger, name: &str) {
+/// what a restart file must agree with to be continued
+#[derive(Clone, Debug, PartialEq)]
+pub struct Identity {
+    pub method: String,
+    pub revision: String,
+    pub binary_sha256: String,
+    pub sample_dt: f64,
+}
+
+impl Identity {
+    fn into_metadata(&self, extras: symbi_io::Metadata) -> symbi_io::Metadata {
+        extras
+            .with("torus_method", self.method.as_str())
+            .with("torus_revision", self.revision.as_str())
+            .with("torus_binary_sha256", self.binary_sha256.as_str())
+            .with("torus_sample_dt", format!("{:016x}", self.sample_dt.to_bits()))
+    }
+
+    /// each field a restart file records differently from this launch, named with both values
+    fn disagreements(&self, restart: &Path) -> Vec<String> {
+        let recorded = |key: &str| read_text_attr(restart, key).unwrap_or_else(|| "absent".to_string());
+        let sample_dt = format!("{:016x}", self.sample_dt.to_bits());
+        [
+            ("torus_method", self.method.as_str()),
+            ("torus_revision", self.revision.as_str()),
+            ("torus_binary_sha256", self.binary_sha256.as_str()),
+            ("torus_sample_dt", sample_dt.as_str()),
+        ]
+        .into_iter()
+        .filter_map(|(key, launch)| {
+            let held = recorded(key);
+            (held != launch).then(|| format!("{key}: the restart file records {held:?}, this launch is {launch:?}"))
+        })
+        .collect()
+    }
+}
+
+/// the scheme this driver runs on this grid, read from the kernels' selection
+pub fn method_of(sim: &Sim, kernels: &Kern, ni: usize, nj: usize) -> String {
+    let bodies = sim.immersed.as_ref().expect("the point mass").bodies.bodies();
+    let face_work = !kernels.cell_momentum_gravity_work && !kernels.azimuthal_source_control && admits_face_gravity_work(sim.geom.coords, 3, bodies);
+    format!(
+        "regime=newtonian-adiabatic gamma={GAMMA:?} solver=hlle reconstruction=plm theta={THETA:?} timestepping=rk2 cfl={CFL:?} azimuthal={} gravity_energy_work={} body=point-mass mass={MASS:?} softening=compact softening_length={SOFTENING:?} grid={ni}x{nj} radial=log[{R_LO:?},{R_HI:?}] polar=uniform[0,pi] walls=outflow,outflow,axis,axis",
+        if kernels.azimuthal_source_control { "source-form" } else { "torque-form" },
+        if face_work { "face-mass-flux" } else { "cell-momentum" },
+    )
+}
+
+fn read_text_attr(path: &Path, key: &str) -> Option<String> {
+    symbi_io::read_attrs(path, "metadata").ok()?.into_iter().find(|(k, _)| k == key).and_then(|(_, v)| match v {
+        symbi_io::Attr::Str(text) => Some(text),
+        _ => None,
+    })
+}
+
+/// the nearest directory at or above `path` holding the outside-scope marker
+pub fn outside_scope_ancestor(path: &Path) -> Option<PathBuf> {
+    let absolute = std::fs::canonicalize(path).ok()?;
+    absolute.ancestors().find(|dir| dir.join(OUTSIDE_SCOPE_MARKER).exists()).map(Path::to_path_buf)
+}
+
+fn write_restart(sim: &Sim, out: &Path, ledger: &Ledger, identity: &Identity, name: &str) {
     let temporary = out.join(format!("{name}.partial"));
     let values: Vec<String> = ledger.to_values().iter().map(|v| format!("{:016x}", v.to_bits())).collect();
-    let extras = symbi_io::Metadata::new().with("torus_ledger", values.join(" "));
+    let extras = identity.into_metadata(symbi_io::Metadata::new().with("torus_ledger", values.join(" ")));
     write_checkpoint(sim, temporary.to_str().expect("a utf-8 path"), &extras).expect("the restart checkpoint");
     std::fs::rename(&temporary, out.join(name)).expect("publishing the restart checkpoint");
 }
@@ -504,10 +578,11 @@ fn write_status(launch: &Launch, sim: &Sim, ending: &Ending, wall: f64, detail: 
         Ending::Complete => "complete".to_string(),
         Ending::Budget(which) => format!("incomplete: {which} budget"),
         Ending::Failed(reason) => format!("failed: {reason}"),
+        Ending::Refused(reason) => format!("refused: {reason}"),
     };
     let text = format!(
-        "{{\"state\":{state:?},\"time\":{:?},\"step\":{},\"target_time\":{:?},\"max_steps\":{},\"max_wall_seconds\":{:?},\"launch_wall_seconds\":{wall:?},\"revision\":{:?},\"detail\":{detail:?}}}\n",
-        sim.time, sim.iteration, launch.bounds.t_end, launch.bounds.max_steps, launch.bounds.max_wall_seconds, launch.revision
+        "{{\"state\":{state:?},\"time\":{:?},\"step\":{},\"target_time\":{:?},\"max_steps\":{},\"max_wall_seconds\":{:?},\"launch_wall_seconds\":{wall:?},\"revision\":{:?},\"binary_sha256\":{:?},\"method\":{:?},\"detail\":{detail:?}}}\n",
+        sim.time, sim.iteration, launch.bounds.t_end, launch.bounds.max_steps, launch.bounds.max_wall_seconds, launch.identity.revision, launch.identity.binary_sha256, launch.identity.method
     );
     let temporary = launch.out.join("status.partial");
     std::fs::write(&temporary, text).expect("the status file");
@@ -642,23 +717,43 @@ pub fn march(sim: &mut Sim, kernels: &Kern, mesh: &Mesh, ledger: &mut Ledger, la
             rows.flush().expect("flushing the rows");
             ledger.window = Extremes::empty();
             if next_sample % bounds.snapshot_every == 0 {
-                write_restart(sim, launch.out, ledger, &format!("snapshot_{next_sample:06}.h5"));
-                write_restart(sim, launch.out, ledger, "restart.h5");
+                write_restart(sim, launch.out, ledger, launch.identity, &format!("snapshot_{next_sample:06}.h5"));
+                write_restart(sim, launch.out, ledger, launch.identity, "restart.h5");
             }
         }
     };
     let wall = started.elapsed().as_secs_f64();
     match &ending {
         Ending::Failed(reason) => {
-            write_restart(sim, launch.out, ledger, "failed_state.h5");
+            write_restart(sim, launch.out, ledger, launch.identity, "failed_state.h5");
             write_status(launch, sim, &ending, wall, reason);
         }
+        Ending::Refused(_) => unreachable!("a refusal ends a launch before its march"),
         Ending::Budget(_) | Ending::Complete => {
-            write_restart(sim, launch.out, ledger, "restart.h5");
+            write_restart(sim, launch.out, ledger, launch.identity, "restart.h5");
             write_status(launch, sim, &ending, wall, "");
         }
     }
     ending
+}
+
+/// the run's identity and its seed's own build record, written once at the first launch
+fn write_provenance(out: &Path, identity: &Identity, seed: &Path) {
+    let seed_attr = |key: &str| read_text_attr(seed, key).unwrap_or_else(|| "absent".to_string());
+    let text = format!(
+        "{{\"method\":{:?},\"revision\":{:?},\"binary_sha256\":{:?},\"sample_dt\":{:?},\"seed\":{:?},\"seed_build_git_sha\":{:?},\"seed_build_source_id\":{:?},\"seed_config_sha256\":{:?}}}\n",
+        identity.method,
+        identity.revision,
+        identity.binary_sha256,
+        identity.sample_dt,
+        seed.display().to_string(),
+        seed_attr("build_git_sha"),
+        seed_attr("build_source_id"),
+        seed_attr("config_sha256"),
+    );
+    let temporary = out.join("provenance.partial");
+    std::fs::write(&temporary, text).expect("the provenance file");
+    std::fs::rename(temporary, out.join("provenance.json")).expect("publishing the provenance file");
 }
 
 #[derive(Clone, Debug)]
@@ -669,6 +764,7 @@ pub struct Args {
     pub nj: usize,
     pub bounds: Bounds,
     pub revision: String,
+    pub binary_sha256: String,
     pub resume: bool,
     /// the cell momentum's gravity work; the gates set it to reproduce the failing update
     pub cell_work: bool,
@@ -681,8 +777,18 @@ pub fn run(args: &Args) -> Ending {
     kernels.cell_momentum_gravity_work = args.cell_work;
     let mesh = Mesh::new(args.ni, args.nj);
     let rows_path = args.out.join("rows.jsonl");
+    let identity = Identity {
+        method: method_of(&sim, &kernels, args.ni, args.nj),
+        revision: args.revision.clone(),
+        binary_sha256: args.binary_sha256.clone(),
+        sample_dt: args.bounds.sample_dt,
+    };
     let mut ledger = if args.resume {
         let restart = args.out.join("restart.h5");
+        let disagreements = identity.disagreements(&restart);
+        if !disagreements.is_empty() {
+            return Ending::Refused(format!("{restart:?} belongs to another run. {}", disagreements.join("; ")));
+        }
         load_checkpoint(&mut sim, restart.to_str().expect("a utf-8 path")).expect("the restart file");
         let ledger = read_ledger(&restart);
         truncated_rows(&rows_path, ledger.rows).expect("the rows file");
@@ -690,7 +796,11 @@ pub fn run(args: &Args) -> Ending {
     } else {
         assert!(!rows_path.exists(), "{rows_path:?} exists: resume the run with --resume or choose another directory");
         let seed = args.seed.as_ref().expect("a first launch reads --seed");
+        if let Some(marked) = outside_scope_ancestor(seed) {
+            return Ending::Refused(format!("the seed {seed:?} lies under {marked:?}, marked outside the authorized execution scope"));
+        }
         load_checkpoint(&mut sim, seed.to_str().expect("a utf-8 path")).expect("the seed checkpoint");
+        write_provenance(&args.out, &identity, seed);
         Ledger::default()
     };
     KernelSet::c2p(&kernels, &sim);
@@ -700,7 +810,7 @@ pub fn run(args: &Args) -> Ending {
         ledger.start = [totals[0], totals[1], totals[2]];
         ledger.sample = (sim.time / args.bounds.sample_dt).floor() as u64;
     }
-    let launch = Launch { out: &args.out, bounds: &args.bounds, revision: &args.revision };
+    let launch = Launch { out: &args.out, bounds: &args.bounds, identity: &identity };
     march(&mut sim, &kernels, &mesh, &mut ledger, &launch)
 }
 
@@ -723,6 +833,7 @@ fn parse_args() -> Args {
             max_wall_seconds: number("--max-wall-seconds"),
         },
         revision: need("--revision"),
+        binary_sha256: need("--binary-sha256"),
         resume: words.iter().any(|w| w == "--resume"),
         cell_work: false,
     }

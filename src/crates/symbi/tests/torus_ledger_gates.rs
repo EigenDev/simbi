@@ -10,6 +10,9 @@
 // - the failing update ends as a failure with the failing cell, separately from a budget
 // - rows land on exact multiples of the sample interval, and every-stage minima bound the samples
 // - the extremes scan locates planted values and rejects non-finite ones
+// - the method, revision and binary digest are recorded, and a resume disagreeing in any of them, in
+//   the sample interval or in the grid is refused by name with no file changed
+// - a seed under a directory marked outside the authorized execution scope is refused
 //
 // run: cargo test -p symbi --test torus_ledger_gates
 // =============================================================================
@@ -76,6 +79,7 @@ fn args(root: &Path, seed: &Path, run: &str, t_end: f64, sample_dt: f64, max_ste
         nj: NJ,
         bounds: Bounds { t_end, sample_dt, snapshot_every: 1, max_steps, max_wall_seconds },
         revision: "gate".to_string(),
+        binary_sha256: "gate-binary".to_string(),
         resume: false,
         cell_work: false,
     }
@@ -139,7 +143,8 @@ fn the_ledger_closes_against_its_boundary_transport() {
         let bounds = Bounds { t_end, sample_dt: 1e-4, snapshot_every: 1000, max_steps: u64::MAX, max_wall_seconds: 1e9 };
         let out = root.join("run");
         std::fs::create_dir_all(&out).unwrap();
-        let launch = Launch { out: &out, bounds: &bounds, revision: "gate" };
+        let identity = Identity { method: method_of(&sim, &kernels, NI, NJ), revision: "gate".to_string(), binary_sha256: "gate-binary".to_string(), sample_dt: 1e-4 };
+        let launch = Launch { out: &out, bounds: &bounds, identity: &identity };
         assert_eq!(march(&mut sim, &kernels, &mesh, &mut ledger, &launch), Ending::Complete);
         let closure = closure_of(&sim.fields, &mesh, &ledger);
         eprintln!("closure over {} steps: {closure:?}; shells at {:?}", sim.iteration - STEP0, mesh.shells);
@@ -260,5 +265,76 @@ fn the_scan_locates_planted_extremes_and_rejects_non_finite_values() {
         nrg.view_mut().set([75, 30], held);
         den.view_mut().set([40, 22], 0.0);
         assert_eq!(extremes_of(&sim.fields, &mesh).rejected, Some(inner), "zero density");
+    });
+}
+
+/// the bytes of every file in a directory, by name
+fn contents(dir: &Path) -> std::collections::BTreeMap<String, Vec<u8>> {
+    std::fs::read_dir(dir).unwrap().map(|entry| {
+        let entry = entry.unwrap();
+        (entry.file_name().to_string_lossy().into_owned(), std::fs::read(entry.path()).unwrap())
+    }).collect()
+}
+
+#[test]
+fn a_resume_disagreeing_with_its_restart_file_is_refused_by_name() {
+    on_a_big_stack(|| {
+        let (root, seed) = workspace("identity");
+        let t_end = fixture_time() + SPAN;
+        let mut first = args(&root, &seed, "run", t_end, 2e-5, STEP0 + 17, 1e9);
+        assert_eq!(run(&first), Ending::Budget("step"));
+        let provenance = std::fs::read_to_string(first.out.join("provenance.json")).unwrap();
+        let status = std::fs::read_to_string(first.out.join("status.json")).unwrap();
+        for text in [&provenance, &status] {
+            assert!(text.contains("gravity_energy_work=face-mass-flux"), "{text}");
+            assert!(text.contains("azimuthal=torque-form") && text.contains("solver=hlle") && text.contains("grid=84x44"), "{text}");
+            assert!(text.contains("\"revision\":\"gate\"") && text.contains("\"binary_sha256\":\"gate-binary\""), "{text}");
+        }
+        first.resume = true;
+        first.bounds.max_steps = u64::MAX;
+        let held = contents(&first.out);
+        let refused = |changed: Args, field: &str| {
+            let ending = run(&changed);
+            let Ending::Refused(reason) = &ending else { panic!("{field}: the mismatched resume ended as {ending:?}") };
+            assert_eq!(ending.exit_code(), EXIT_REFUSED);
+            assert!(reason.contains(field), "{field}: {reason}");
+            assert_eq!(contents(&changed.out), held, "{field}: the refused resume changed a file");
+        };
+        refused(Args { revision: "another".to_string(), ..first.clone() }, "torus_revision");
+        refused(Args { binary_sha256: "another".to_string(), ..first.clone() }, "torus_binary_sha256");
+        refused(Args { cell_work: true, ..first.clone() }, "torus_method");
+        let mut other_interval = first.clone();
+        other_interval.bounds.sample_dt = 1e-5;
+        refused(other_interval, "torus_sample_dt");
+        refused(Args { ni: 2 * NI, nj: 2 * NJ, ..first.clone() }, "torus_method");
+        // a frontend checkpoint carries no identity of this driver
+        let mut foreign = first.clone();
+        foreign.out = root.join("foreign");
+        std::fs::create_dir_all(&foreign.out).unwrap();
+        std::fs::copy(&seed, foreign.out.join("restart.h5")).unwrap();
+        let ending = run(&foreign);
+        let Ending::Refused(reason) = &ending else { panic!("the foreign restart ended as {ending:?}") };
+        assert!(reason.contains("absent"), "{reason}");
+        // the agreeing resume still continues, with new budgets and end time allowed
+        assert_eq!(run(&first), Ending::Complete);
+        std::fs::remove_dir_all(root).unwrap();
+    });
+}
+
+#[test]
+fn a_seed_marked_outside_the_authorized_scope_is_refused() {
+    on_a_big_stack(|| {
+        let (root, seed) = workspace("scope");
+        let marked = root.join("marked/nested");
+        std::fs::create_dir_all(&marked).unwrap();
+        std::fs::write(root.join("marked").join(OUTSIDE_SCOPE_MARKER), "outside").unwrap();
+        let inside = marked.join("seed.h5");
+        std::fs::copy(&seed, &inside).unwrap();
+        let launch = args(&root, &inside, "run", fixture_time() + SPAN, 1.0, u64::MAX, 1e9);
+        let ending = run(&launch);
+        let Ending::Refused(reason) = &ending else { panic!("the marked seed ended as {ending:?}") };
+        assert!(reason.contains("outside the authorized execution scope"), "{reason}");
+        assert!(!launch.out.join("rows.jsonl").exists() && !launch.out.join("provenance.json").exists(), "the refused launch wrote output");
+        std::fs::remove_dir_all(root).unwrap();
     });
 }
