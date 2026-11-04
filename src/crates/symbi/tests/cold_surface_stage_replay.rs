@@ -10,9 +10,12 @@
 // - the audit: at the first inadmissible stage, an independent recomputation of the update from the
 //   stage's stored fluxes and the closed-form geometry must reproduce the kernel's cells, and the
 //   accounting of density, momenta, angular momentum, total and kinetic energy prints per face and
-//   per source. the same operands then give the source-form update and the donor-work candidate
+//   per source. the same operands then give the source-form update and the donor-work candidate.
+//   the audit runs the cell momentum's gravity work, the update that fails on this state
 // - the sweeps: the failing step at first order and at smaller timesteps, then the whole window at
 //   smaller timesteps, first order and the source-form control
+// - the face work: the kernel's update against its evaluation from the stage's operands, and the
+//   flux form of E + rho Phi with its boundary fluxes, for Phi and for Phi plus a constant
 //
 // run: cargo test -p symbi --test cold_surface_stage_replay -- --nocapture
 // =============================================================================
@@ -29,7 +32,7 @@ use symbi_hydro::quantity::{Density, Pressure};
 use symbi_hydro::state::Prim;
 use symbi_ib::{Body, BodyCollection, SofteningKind};
 use symbi_sim::driver::{downstream_injection_weight, needs_step_snapshot, stage_exit_fraction, stage_schedule};
-use symbi_sim::stage::{HookPoint, StageArgs, fold_stage};
+use symbi_sim::stage::{HookPoint, StageArgs, StageOutcome, fold_stage};
 use symbi_sim::substrate_seam::KernelSet;
 use symbi_xpu::{CpuSpace, HostMemory};
 
@@ -152,6 +155,8 @@ struct Options {
     t_end: f64,
     /// an energy flux evaluated from the stage's operands and added before the recovery
     energy: EnergyTerm,
+    /// the cell momentum's gravity work in place of the admitted face mass flux's
+    cell_work: bool,
 }
 
 /// the energy updates the replay can evaluate on a stage's own operands, outside the kernels
@@ -164,52 +169,75 @@ enum EnergyTerm {
     PotentialFlux,
 }
 
+/// the update that fails on the captured state
 const PRODUCTION: Options =
-    Options { theta: THETA, dt_factor: 1.0, control: false, from_step: STEP0, t_end: T_END, energy: EnergyTerm::Kernel };
+    Options { theta: THETA, dt_factor: 1.0, control: false, from_step: STEP0, t_end: T_END, energy: EnergyTerm::Kernel, cell_work: true };
+/// the kernels the failing configuration selects
+const ADMITTED: Options = Options { cell_work: false, ..PRODUCTION };
 
 struct Outcome {
     /// the frame of the first inadmissible stage, with the cell holding the lowest internal energy
     first: Option<(Frame, [usize; 2], f64)>,
     time: f64,
     steps: u64,
-    /// (time, lowest specific internal energy over the interior) at each step
+    /// (time, lowest specific internal energy over the interior) after each completed step
     history: Vec<(f64, f64)>,
+    /// the lowest specific internal energy over the interior at every stage's output
+    lowest_stage: f64,
+    /// the frames of the last stages run, one per stage of the last step
+    last_frames: Vec<Frame>,
+    /// the conserved state at the replay's end
+    last_state: Cons,
     /// the accumulated departure of (angular momentum, E + rho Phi) from their boundary fluxes,
     /// each over the initial magnitude
     drift: [f64; 2],
 }
 
+/// the cell with the lowest specific internal energy. a cell with a non-finite conserved value, a
+/// non-finite internal energy or a density at or below zero is the answer at once, reported as
+/// NaN or negative infinity, so a caller's `specific > 0` rejects it
 fn lowest_internal(c: &Cons) -> ([usize; 2], f64) {
     let mut worst = ([0, 0], f64::INFINITY);
     for j in 0..NJ {
         for i in 0..NI {
             let den = c.den.at(i, j);
-            let ke = 0.5 * (0..3).map(|k| c.mom[k].at(i, j).powi(2)).sum::<f64>() / den;
-            let specific = (c.nrg.at(i, j) - ke) / den;
-            if !(den > 0.0) || specific < worst.1 {
-                worst = ([i, j], if den > 0.0 { specific } else { f64::NEG_INFINITY });
+            let mom: [f64; 3] = std::array::from_fn(|k| c.mom[k].at(i, j));
+            let nrg = c.nrg.at(i, j);
+            let ke = 0.5 * mom.iter().map(|m| m * m).sum::<f64>() / den;
+            let specific = (nrg - ke) / den;
+            if !den.is_finite() || !nrg.is_finite() || mom.iter().any(|m| !m.is_finite()) || !specific.is_finite() {
+                return ([i, j], f64::NAN);
+            }
+            if den <= 0.0 {
+                return ([i, j], f64::NEG_INFINITY);
+            }
+            if specific < worst.1 {
+                worst = ([i, j], specific);
             }
         }
     }
     worst
 }
 
-fn kernels_for(sim: &Sim, theta: f64, control: bool) -> Kern {
+fn kernels_for(sim: &Sim, theta: f64, control: bool, cell_work: bool) -> Kern {
     let mut k = Kern::new(GAMMA, CFL, &sim.geom.allocated).theta(theta);
     k.azimuthal_source_control = control;
+    k.cell_momentum_gravity_work = cell_work;
     k
 }
 
 fn replay(options: Options) -> Outcome {
     let mut sim = captured();
-    let production = kernels_for(&sim, THETA, false);
-    let chosen = kernels_for(&sim, options.theta, options.control);
+    let production = kernels_for(&sim, THETA, false, options.cell_work);
+    let chosen = kernels_for(&sim, options.theta, options.control, options.cell_work);
     KernelSet::c2p(&production, &sim);
     KernelSet::ghost_fill(&production, &sim);
     let mut history = Vec::new();
     let mut steps = 0;
     let start = totals(&cons_of(&sim.fields.cons, NI, NJ));
     let mut wall = [0.0, 0.0];
+    let mut lowest_stage = f64::INFINITY;
+    let mut last_frames = Vec::new();
     while sim.time < options.t_end {
         let active = sim.iteration >= options.from_step;
         let k: &Kern = if active { &chosen } else { &production };
@@ -221,6 +249,7 @@ fn replay(options: Options) -> Outcome {
         if needs_step_snapshot(stages) {
             KernelSet::snapshot(k, &sim);
         }
+        last_frames.clear();
         for spec in stage_schedule(stages) {
             assert_eq!(stages.len(), 2, "the boundary ledger weights each of the two stages by one half");
             let input = cons_of(&sim.fields.cons, NI, NJ);
@@ -283,30 +312,42 @@ fn replay(options: Options) -> Outcome {
                     _ => {}
                 },
             );
-            std::hint::black_box(&stage_outcome);
+            assert_eq!(stage_outcome, StageOutcome::Accepted, "this fixture has no retry path: step {}", sim.iteration);
             let output = output.expect("the stage reached its recovery");
             let (cell, specific) = lowest_internal(&output);
+            lowest_stage = lowest_stage.min(specific);
             let through_walls = boundary_rates(flux.as_ref().expect("the stage's fluxes"));
             wall[0] += 0.5 * dt * through_walls[0];
             wall[1] += 0.5 * dt * through_walls[1];
+            let frame = Frame {
+                step: sim.iteration,
+                stage: spec.index,
+                time: sim.time,
+                dt,
+                a0: spec.a0,
+                ac: spec.ac,
+                input,
+                u_n,
+                rho,
+                vel,
+                pre,
+                flux: flux.expect("the stage's fluxes"),
+                output,
+            };
             if !(specific > 0.0) {
-                let frame = Frame {
-                    step: sim.iteration,
-                    stage: spec.index,
+                let last_state = frame.output.clone();
+                return Outcome {
+                    first: Some((frame, cell, specific)),
                     time: sim.time,
-                    dt,
-                    a0: spec.a0,
-                    ac: spec.ac,
-                    input,
-                    u_n,
-                    rho,
-                    vel,
-                    pre,
-                    flux: flux.expect("the stage's fluxes"),
-                    output,
+                    steps,
+                    history,
+                    lowest_stage,
+                    last_frames,
+                    last_state,
+                    drift: [f64::NAN; 2],
                 };
-                return Outcome { first: Some((frame, cell, specific)), time: sim.time, steps, history, drift: [f64::NAN; 2] };
             }
+            last_frames.push(frame);
         }
         sim.time += dt;
         sim.iteration += 1;
@@ -314,9 +355,10 @@ fn replay(options: Options) -> Outcome {
         let (_, specific) = lowest_internal(&cons_of(&sim.fields.cons, NI, NJ));
         history.push((sim.time, specific));
     }
-    let end = totals(&cons_of(&sim.fields.cons, NI, NJ));
+    let last_state = cons_of(&sim.fields.cons, NI, NJ);
+    let end = totals(&last_state);
     let drift = std::array::from_fn(|k| (end[k] - start[k] + wall[k]) / start[k].abs());
-    Outcome { first: None, time: sim.time, steps, history, drift }
+    Outcome { first: None, time: sim.time, steps, history, lowest_stage, last_frames, last_state, drift }
 }
 
 // ------------------------------- closed-form geometry -------------------------------
@@ -476,6 +518,18 @@ fn potential_flux_rate(frame: &Frame, g: &Geometry, i: usize, j: usize) -> f64 {
         .sum()
 }
 
+/// the same rate with a constant added to the potential at the cell and at every face
+fn potential_flux_rate_shifted(frame: &Frame, g: &Geometry, i: usize, j: usize, constant: f64) -> f64 {
+    let phi_c = potential(g.r_c) + constant;
+    (0..2)
+        .map(|side| {
+            let sign = if side == 1 { -1.0 } else { 1.0 };
+            let phi_f = potential(g.r[side]) + constant;
+            sign * g.area[0][side] / g.volume * face_flux(frame, 0, 0, side, i, j) * (phi_f - phi_c)
+        })
+        .sum()
+}
+
 /// a stage's change of E when the face work replaces the kernel's work M_r g
 fn potential_flux_update(frame: &Frame, i: usize, j: usize) -> f64 {
     let g = geometry(i, j);
@@ -546,7 +600,7 @@ fn internal_rate(frame: &Frame, i: usize, j: usize, torque: bool, face_work: boo
 
 #[test]
 fn the_cold_torus_surface_stays_admissible_through_the_captured_window() {
-    let run = replay(PRODUCTION);
+    let run = replay(ADMITTED);
     if let Some((frame, cell, specific)) = &run.first {
         panic!(
             "step {} stage {} t = {}: cell {cell:?} holds specific internal energy {specific:e}",
@@ -732,7 +786,70 @@ fn print_grid_budget(frame: &Frame) {
         }
     }
     eprintln!("  interior face pairs ({faces}), the azimuthal pair heat: torque {neg_torque} negative, sum {sum_torque:+.6e}; source form {neg_source} negative, sum {sum_source:+.6e}; torque with face gravity {neg_gravity} negative, sum {sum_gravity:+.6e}");
-    eprintln!("  faces beside gas with rho > {dense}: face specific angular momentum inside the two cells' values {in_bracket}, outside {out_bracket}, furthest {worst:.3e}");
+    eprintln!("  faces beside gas with rho > {dense}: the flux ratio R_f F_phi / F_rho inside the two cells' l {in_bracket}, outside {out_bracket}, furthest {worst:.3e}");
+}
+
+/// one theta-limited slope's two face values of a primitive at cell `c`, from its neighbors
+fn limited_faces(lo: f64, c: f64, hi: f64) -> [f64; 2] {
+    let (a, b, d) = (THETA * (c - lo), 0.5 * (hi - lo), THETA * (hi - c));
+    let slope = if a > 0.0 && b > 0.0 && d > 0.0 {
+        a.min(b).min(d)
+    } else if a < 0.0 && b < 0.0 && d < 0.0 {
+        a.max(b).max(d)
+    } else {
+        0.0
+    };
+    [c - 0.5 * slope, c + 0.5 * slope]
+}
+
+/// the left and right reconstructed (rho, v_n, p, v_phi) at the interior radial face below cell `i`
+fn radial_face_states(frame: &Frame, i: usize, j: usize) -> [[f64; 4]; 2] {
+    let at = |field: &Store, ii: usize| field.at(ii, j);
+    let side = |field: &Store| -> [f64; 2] {
+        [limited_faces(at(field, i - 2), at(field, i - 1), at(field, i))[1], limited_faces(at(field, i - 1), at(field, i), at(field, i + 1))[0]]
+    };
+    let (rho, vn, p, vp) = (side(&frame.rho), side(&frame.vel[0]), side(&frame.pre), side(&frame.vel[2]));
+    [[rho[0], vn[0], p[0], vp[0]], [rho[1], vn[1], p[1], vp[1]]]
+}
+
+/// the kernel's radial fluxes against the HLLE of the reconstructed states, then the bracket of the
+/// reconstructed angular momentum beside the flux-derived ratio
+fn print_reconstructed_states(frame: &Frame) {
+    let (mut worst_mass, mut worst_phi) = (0.0f64, 0.0f64);
+    let (mut state_inside, mut state_outside, mut ratio_inside, mut ratio_outside, mut both_inside_ratio_outside) = (0, 0, 0, 0, 0);
+    for j in 0..NJ {
+        for i in 2..NI - 1 {
+            if frame.rho.at(i - 1, j).max(frame.rho.at(i, j)) <= 0.01 {
+                continue;
+            }
+            let [l, r] = radial_face_states(frame, i, j);
+            let sound = |s: &[f64; 4]| (GAMMA * s[2] / s[0]).sqrt();
+            let plus = (l[1] + sound(&l)).max(r[1] + sound(&r)).max(0.0);
+            let minus = (l[1] - sound(&l)).min(r[1] - sound(&r)).min(0.0);
+            let hlle = |f_l: f64, f_r: f64, u_l: f64, u_r: f64| (plus * f_l - minus * f_r + plus * minus * (u_r - u_l)) / (plus - minus);
+            let mass = hlle(l[0] * l[1], r[0] * r[1], l[0], r[0]);
+            let phi = hlle(l[0] * l[1] * l[3], r[0] * r[1] * r[3], l[0] * l[3], r[0] * r[3]);
+            let (kernel_mass, kernel_phi) = (frame.flux[0].den.at(i, j), frame.flux[0].mom[2].at(i, j));
+            worst_mass = worst_mass.max((mass - kernel_mass).abs() / kernel_mass.abs().max(1e-300));
+            worst_phi = worst_phi.max((phi - kernel_phi).abs() / kernel_phi.abs().max(1e-300));
+            let (ga, gb) = (geometry(i - 1, j), geometry(i, j));
+            let (la, lb) = (frame.vel[2].at(i - 1, j) * ga.lever_c, frame.vel[2].at(i, j) * gb.lever_c);
+            let inside = |l: f64| l >= la.min(lb) && l <= la.max(lb);
+            let r_f = ga.lever[0][1];
+            let states_in = inside(l[3] * r_f) && inside(r[3] * r_f);
+            let ratio_in = inside(r_f * kernel_phi / kernel_mass);
+            if states_in { state_inside += 1 } else { state_outside += 1 }
+            if ratio_in { ratio_inside += 1 } else { ratio_outside += 1 }
+            if states_in && !ratio_in {
+                both_inside_ratio_outside += 1;
+            }
+        }
+    }
+    eprintln!("\nreconstructed radial face states beside gas with rho > 0.01:");
+    eprintln!("  HLLE of the reconstructed states against the kernel, worst relative: mass {worst_mass:.3e}, azimuthal {worst_phi:.3e}");
+    eprintln!("  R_f v_phi of both states inside the two cells' l: {state_inside}, outside {state_outside}");
+    eprintln!("  flux ratio inside: {ratio_inside}, outside {ratio_outside}; states inside with the ratio outside: {both_inside_ratio_outside}");
+    assert!(worst_mass < 1e-9 && worst_phi < 1e-9, "the reconstruction model leaves the kernel's flux: mass {worst_mass:e}, azimuthal {worst_phi:e}");
 }
 
 /// the discrete lever source against its continuum coefficients on the failing cell
@@ -805,6 +922,7 @@ fn the_first_inadmissible_stage_accounts_for_every_term() {
     print_inflow_budget(frame, i, j);
     print_grid_budget(frame);
     print_lever_geometry(i, j);
+    print_reconstructed_states(frame);
     eprintln!("\nthe stage on identical operands, over the grid: lowest specific e, cells at or below zero");
     eprintln!("  torque form {torque:.6e}, {bad_t}; source form {source:.6e}, {bad_s}; donor-work candidate {cand:.6e}, {bad_c}; face gravity work {face:.6e}, {bad_f}");
 }
@@ -813,13 +931,14 @@ fn the_first_inadmissible_stage_accounts_for_every_term() {
 
 fn report(label: &str, run: &Outcome) {
     let low = run.history.iter().map(|h| h.1).fold(f64::INFINITY, f64::min);
+    let stage_low = run.lowest_stage;
     match &run.first {
         Some((frame, cell, specific)) => eprintln!(
-            "{label}: inadmissible at t = {:.8e} (step {}, stage {}, {} steps), cell {cell:?}, specific e {specific:.3e}; lowest before {low:.3e}",
+            "{label}: inadmissible at t = {:.8e} (step {}, stage {}, {} steps), cell {cell:?}, specific e {specific:.3e}; lowest after a completed step {low:.3e}",
             frame.time, frame.step, frame.stage, run.steps
         ),
         None => eprintln!(
-            "{label}: admissible to t = {:.8e} ({} steps), lowest specific e {low:.3e}, ledger drift [L, E + rho Phi] {}",
+            "{label}: admissible to t = {:.8e} ({} steps), lowest specific e over stages {stage_low:.3e}, after steps {low:.3e}, ledger drift [L, E + rho Phi] {}",
             run.time,
             run.steps,
             sci(&run.drift)
@@ -877,17 +996,159 @@ fn the_window_at_smaller_timesteps_first_order_and_the_control() {
     report("source form, window at dt x 0.25", &replay(Options { control: true, dt_factor: 0.25, ..whole }));
 }
 
-/// each energy update on the captured window and past the frontend's end time, the correction
-/// evaluated outside the kernels on the stage's operands
+/// the admitted kernels' run: the target reached, every stage admissible, and angular momentum
+/// and E + rho Phi closing against their wall fluxes at roundoff. a run of N steps accumulates at
+/// most about N * 2.2e-16 relative: 8090 steps at dt / 4 give 1.8e-12, the bound asserted
+fn assert_admissible(label: &str, run: &Outcome, t_end: f64) {
+    report(label, run);
+    assert!(run.first.is_none(), "{label}: left the admissible set");
+    assert!(run.time >= t_end, "{label}: stopped at t = {}", run.time);
+    assert!(run.lowest_stage > 0.0, "{label}: lowest stage value {}", run.lowest_stage);
+    assert!(run.drift.iter().all(|d| d.abs() < 2e-12), "{label}: ledger drift {:?}", run.drift);
+}
+
 #[test]
-fn the_candidate_energy_updates_over_the_window() {
+fn the_face_work_kernels_stay_admissible_past_the_frontend_end_time() {
+    let far = Options { t_end: 0.02, ..ADMITTED };
+    assert_admissible("kernel face work to t = 0.02", &replay(far), 0.02);
+    assert_admissible("kernel face work to t = 0.02, dt x 0.25", &replay(Options { dt_factor: 0.25, ..far }), 0.02);
+    assert_admissible("kernel face work to t = 0.02, first order", &replay(Options { theta: 0.0, ..far }), 0.02);
+    assert_admissible("kernel face work to t = 0.05", &replay(Options { t_end: 0.05, ..far }), 0.05);
+}
+
+/// the donor-work energy update and the source form, measured beside the kernels and asserted on
+/// nothing but the control's separation: these rows inform the choice of energy update
+#[test]
+fn the_energy_updates_beside_the_kernels_are_measured() {
     let far = Options { t_end: 0.02, ..PRODUCTION };
     report("source form to t = 0.02", &replay(Options { control: true, ..far }));
     report("donor work to t = 0.02", &replay(Options { energy: EnergyTerm::DonorWork, ..far }));
-    report("face gravity work to t = 0.02", &replay(Options { energy: EnergyTerm::PotentialFlux, ..far }));
-    report("face gravity work to t = 0.02, dt x 0.25", &replay(Options { energy: EnergyTerm::PotentialFlux, dt_factor: 0.25, ..far }));
-    report("face gravity work to t = 0.02, first order", &replay(Options { energy: EnergyTerm::PotentialFlux, theta: 0.0, ..far }));
-    report("face gravity work to t = 0.05", &replay(Options { energy: EnergyTerm::PotentialFlux, t_end: 0.05, ..far }));
+}
+
+/// the kernel's face work against its evaluation from the stage's operands: one step from the
+/// captured state, then the whole window. the two arms differ only in the order of roundoff per step
+#[test]
+fn the_face_work_kernel_matches_its_evaluation_from_the_operands() {
+    let offline = Options { energy: EnergyTerm::PotentialFlux, ..PRODUCTION };
+    let one_step = |o: Options| replay(Options { t_end: f64::from_le_bytes(FIXTURE[..8].try_into().unwrap()) + 1e-12, ..o });
+    let (kernel, evaluated) = (one_step(ADMITTED), one_step(offline));
+    assert_eq!(kernel.steps, 1, "the comparison window holds one step");
+    let closeness = |a: &Cons, b: &Cons| -> f64 {
+        let mut worst = 0.0f64;
+        for j in 0..NJ {
+            for i in 0..NI {
+                worst = worst.max((a.nrg.at(i, j) - b.nrg.at(i, j)).abs() / a.nrg.at(i, j).abs());
+                worst = worst.max((a.den.at(i, j) - b.den.at(i, j)).abs() / a.den.at(i, j).abs());
+                for k in 0..3 {
+                    let scale = a.mom[k].at(i, j).abs().max(a.den.at(i, j));
+                    worst = worst.max((a.mom[k].at(i, j) - b.mom[k].at(i, j)).abs() / scale);
+                }
+            }
+        }
+        worst
+    };
+    let step = closeness(&kernel.last_state, &evaluated.last_state);
+    let (kernel, evaluated) = (replay(ADMITTED), replay(offline));
+    assert!(kernel.first.is_none() && evaluated.first.is_none(), "an arm left the admissible set");
+    assert_eq!(kernel.steps, evaluated.steps, "the two arms took different step counts");
+    let window = closeness(&kernel.last_state, &evaluated.last_state);
+    eprintln!("kernel against its evaluation: one step {step:.3e}; {} steps {window:.3e}", kernel.steps);
+    // a stage's closed-form potential and the kernel's cartesian distance differ by ulps
+    assert!(step < 1e-13, "one step: {step:e}");
+    assert!(window < 1e-11, "the window: {window:e}");
+}
+
+/// the conserved flux form on every stage of the kernel's last step, cell by cell and over the grid
+/// with its wall fluxes, for the potential and for the potential plus a constant. a stage's residual
+/// is roundoff of the terms it sums: a cell at 1e-13 of its largest term, the grid at 1e-13 of the
+/// grid's summed magnitude
+#[test]
+fn e_plus_rho_phi_closes_in_flux_form_for_any_constant_in_the_potential() {
+    let run = replay(ADMITTED);
+    assert!(run.first.is_none(), "the kernels left the admissible set; the identity reads a failed state");
+    assert_eq!(run.last_frames.len(), 2, "the two stages of the last step");
+    for frame in &run.last_frames {
+        for constant in [0.0, 7.0, -1e3] {
+            let (mut grid, mut grid_scale, mut worst) = (0.0, 0.0, 0.0f64);
+            for j in 0..NJ {
+                for i in 0..NI {
+                    let g = geometry(i, j);
+                    let phi_c = potential(g.r_c) + constant;
+                    let tot = |c: &Cons| c.nrg.at(i, j) + c.den.at(i, j) * phi_c;
+                    let mut divergence = 0.0;
+                    let mut magnitude: f64 = [&frame.input, &frame.u_n, &frame.output]
+                        .iter()
+                        .map(|c| c.nrg.at(i, j).abs() + c.den.at(i, j).abs() * phi_c.abs())
+                        .sum();
+                    for d in 0..2 {
+                        for side in 0..2 {
+                            let sign = if side == 1 { 1.0 } else { -1.0 };
+                            let phi_f = constant + if d == 0 { potential(g.r[side]) } else { potential(g.r_c) };
+                            let (f_e, f_rho) = (face_flux(frame, 4, d, side, i, j), face_flux(frame, 0, d, side, i, j));
+                            let weight = g.area[d][side] / g.volume;
+                            divergence += sign * weight * (f_e + phi_f * f_rho);
+                            magnitude += frame.dt * weight * (f_e.abs() + (phi_f * f_rho).abs());
+                        }
+                    }
+                    let residual = tot(&frame.output) - (frame.a0 * tot(&frame.u_n) + frame.ac * (tot(&frame.input) - frame.dt * divergence));
+                    worst = worst.max(residual.abs() / magnitude);
+                    let swept = (tot(&frame.output) - frame.a0 * tot(&frame.u_n) - frame.ac * tot(&frame.input)) * g.volume;
+                    grid += swept;
+                    grid_scale += magnitude * g.volume;
+                }
+            }
+            let mut walls = 0.0;
+            for j in 0..NJ {
+                let (inner, outer) = (geometry(0, j), geometry(NI - 1, j));
+                let f = &frame.flux[0];
+                walls += outer.area[0][1] * (f.nrg.at(NI, j) + f.den.at(NI, j) * (potential(outer.r[1]) + constant));
+                walls -= inner.area[0][0] * (f.nrg.at(0, j) + f.den.at(0, j) * (potential(inner.r[0]) + constant));
+            }
+            let closure = (grid + frame.ac * frame.dt * walls).abs() / grid_scale;
+            eprintln!("stage {}, constant {constant}: cell residual {worst:.3e}, grid closure {closure:.3e}", frame.stage);
+            assert!(worst < 1e-13, "stage {} constant {constant}: cell residual {worst:e}", frame.stage);
+            assert!(closure < 1e-13, "stage {} constant {constant}: grid closure {closure:e}", frame.stage);
+        }
+        for j in 0..NJ {
+            for i in 0..NI {
+                let g = geometry(i, j);
+                let (a, b) = (potential_flux_rate(frame, &g, i, j), potential_flux_rate_shifted(frame, &g, i, j, 7.0));
+                assert!((a - b).abs() <= 1e-13 * a.abs().max(1e-30) + 1e-14 * frame.flux[0].den.at(i, j).abs(), "the constant moved the rate at [{i}, {j}]: {a:e} against {b:e}");
+            }
+        }
+    }
+}
+
+/// a planted non-finite or non-positive value is rejected wherever it sits, and a clean state is not
+#[test]
+fn the_admissibility_scan_rejects_planted_values() {
+    let clean = || {
+        let held = |v: f64, ni: usize, nj: usize| Store { ni, v: vec![v; ni * nj] };
+        Cons { den: held(1.0, NI, NJ), mom: std::array::from_fn(|_| held(0.0, NI, NJ)), nrg: held(1.0, NI, NJ) }
+    };
+    assert_eq!(lowest_internal(&clean()).1, 1.0, "a uniform state's specific internal energy");
+    let cell = 7 + NI * 11;
+    let mut c = clean();
+    c.nrg.v[cell] = f64::NAN;
+    assert!(lowest_internal(&c).1.is_nan(), "NaN energy");
+    let mut c = clean();
+    c.mom[2].v[cell] = f64::NAN;
+    assert!(lowest_internal(&c).1.is_nan(), "NaN momentum");
+    let mut c = clean();
+    c.nrg.v[cell] = f64::INFINITY;
+    assert!(lowest_internal(&c).1.is_nan(), "infinite energy");
+    let mut c = clean();
+    c.den.v[cell] = f64::NAN;
+    assert!(lowest_internal(&c).1.is_nan(), "NaN density");
+    let mut c = clean();
+    c.den.v[cell] = 0.0;
+    assert!(!(lowest_internal(&c).1 > 0.0), "zero density");
+    let mut c = clean();
+    c.den.v[cell] = -1.0;
+    assert!(!(lowest_internal(&c).1 > 0.0), "negative density");
+    let mut c = clean();
+    c.nrg.v[cell] = -1e-30;
+    assert!(!(lowest_internal(&c).1 > 0.0), "negative internal energy");
 }
 
 /// the first-order replay's face flux from the two cell states alone: the slope vanishes at zero theta

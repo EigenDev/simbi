@@ -1294,6 +1294,7 @@ pub fn godunov_stage_gv_with_fused_bodies_and_geo_weight(
                     ndim as usize,
                     ncomp,
                     axes,
+                    None,
                 );
                 (den_b, mom_b, Some(nrg_b))
             } else {

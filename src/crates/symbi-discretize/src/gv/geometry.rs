@@ -628,7 +628,7 @@ pub(crate) fn gv_powi<'t>(a: Gv<'t>, n: u32) -> Gv<'t> {
 }
 
 /// per axis: `(lo face, hi face, width)` from the index map.
-fn gv_faces<'t>(
+pub(crate) fn gv_faces<'t>(
     cx: TraceCx<'t>,
     spacing: &[Spacing],
     ndim: usize,

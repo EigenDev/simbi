@@ -34,7 +34,7 @@ use crate::kernels::support::{GhostFillDriver, to_bc_array};
 use crate::regimes::substrate_kernels::{
     FluxSpec, FusedCpuKernel, FusedSourceBinding, GradientBc, RuntimeSource, ScalarBind, Solver,
     bind_by_manifest, body_fused_in, cfl_wave_speed, dispatch_body_feedback, dispatch_body_source,
-    dispatch_body_source_wb, dispatch_driven_boundaries, dispatch_fields, dispatch_flux,
+    dispatch_body_source_face_work, dispatch_body_source_wb, dispatch_driven_boundaries, dispatch_fields, dispatch_flux,
     dispatch_fused_runtime_cpu, dispatch_godunov_maybe_fused, dispatch_gradient_boundaries,
     dispatch_named, dispatch_penalize, dispatch_runtime_source, dispatch_source_apply,
     fused_runtime_cpu_kernel, geom_scalar, motion_scalar, resolve_body_only_fused,
@@ -88,6 +88,9 @@ pub struct AdiabaticSubstrateKernelSet<
     /// a diagnostic control the replay tests alone set: the axisymmetric godunov stage with the
     /// azimuthal momentum in source form, against the torque form
     pub azimuthal_source_control: bool,
+    /// a diagnostic control the replay tests alone set: gravity's energy work from the cell momentum
+    /// on a plane that admits the face mass flux's work
+    pub cell_momentum_gravity_work: bool,
     /// the azimuthal shear model in place of the full stress, on an axisymmetric plane
     pub azimuthal_shear: Option<symbi_hydro::viscous::AzimuthalShear>,
     /// the torque and the stress work entered through the continued domain faces this session
@@ -183,6 +186,7 @@ impl<Mem: MemoryStorage, Sc: Scalar + OrderedNumeric, const D: usize>
             viscosity: 0.0,
             alpha: 0.0,
             azimuthal_source_control: false,
+            cell_momentum_gravity_work: false,
             azimuthal_shear: None,
             viscous_boundary_ledger: std::sync::Mutex::new((0.0, 0.0)),
         }
@@ -294,6 +298,19 @@ impl<Mem: MemoryStorage, Sc: Scalar + OrderedNumeric, const D: usize>
         }
         self.solver = solver;
         Ok(self)
+    }
+
+    /// the admitted plane and body, with the diagnostic controls clear
+    fn takes_face_gravity_work<const DOF: usize>(&self, sim: &FieldStore<D, DOF, Mem, Sc>) -> bool
+    where
+        Mem: MemoryStorage,
+        Sc: Scalar + OrderedNumeric,
+    {
+        !self.cell_momentum_gravity_work
+            && !self.azimuthal_source_control
+            && sim.immersed.as_ref().is_some_and(|im| {
+                admits_face_gravity_work(sim.geom.coords, DOF, im.bodies.bodies())
+            })
     }
 
     /// set the theta-MC limiter compression in [1,2] (1 = minmod, 2 = monotonized-central). fluent.
@@ -964,8 +981,16 @@ impl<Mem: MemoryStorage + Sync, Sc: Scalar + OrderedNumeric, const D: usize, con
                 None => resolve_body_only_fused(sim, &self.fused_rhs, true, geo).is_some(),
             };
             if absorbed {
+                assert!(
+                    !self.takes_face_gravity_work(sim),
+                    "a fused body pass carries the cell momentum's gravity work, on a plane that admits the face mass flux's"
+                );
                 return;
             }
+        }
+        if self.takes_face_gravity_work(sim) {
+            dispatch_body_source_face_work(sim, dt, self.gamma);
+            return;
         }
         // forward immersed-body source: cons += dt*S, in-place. under a balanced
         // reconstruction the momentum source must be the equilibrium-pressure difference at
@@ -990,4 +1015,21 @@ impl<Mem: MemoryStorage + Sync, Sc: Scalar + OrderedNumeric, const D: usize, con
         // backward feedback: reduce per-body force/torque/mass -> diagnostics.
         dispatch_body_feedback(sim, dt, self.gamma);
     }
+}
+
+/// the plane and body the face mass flux's gravity work is defined and verified on: a torque-form
+/// axisymmetric plane with three velocity components under a single bare point mass at rest at the
+/// origin, whose potential is static and whose body source carries no drain or reaction
+pub fn admits_face_gravity_work<const D: usize>(
+    coords: symbi_geometry::Geometry,
+    dof: usize,
+    bodies: &[symbi_ib::Body<f64, D>],
+) -> bool {
+    let plane = D == 2 && dof == 3 && coords != symbi_geometry::Geometry::Cartesian;
+    let bare_at_origin = |b: &symbi_ib::Body<f64, D>| {
+        matches!(b.kind, symbi_ib::BodyKind::Gravitational { .. })
+            && !b.two_way_coupling
+            && (0..D).all(|ax| b.position[ax] == 0.0 && b.velocity[ax] == 0.0)
+    };
+    plane && matches!(bodies, [only] if bare_at_origin(only))
 }

@@ -38,7 +38,8 @@ static REGISTRY: Mutex<Vec<(String, String)>> = Mutex::new(Vec::new());
 use symbi_discretize::coords::FaceMotion;
 use symbi_discretize::{
     Coords, EosArm, GeoSource, Recon, Spacetime, Spacing, body_feedback_drain_gv,
-    body_feedback_grav_gv, body_feedback_gv, body_feedback_iso_gv, body_source_gv,
+    body_feedback_grav_gv, body_feedback_gv, body_feedback_iso_gv, body_source_face_work_gv,
+    body_source_gv,
     body_source_iso_gv, chi_c2p_gv, chi_flux_gv, chi_godunov_gv, chi_snapshot_gv,
     fofc_bflux_splice_gv, fofc_copy_gv, fofc_emf_splice_gv, fofc_exterior_flag_gv,
     fofc_flag_from_status_gv, fofc_select_gv, fofc_select_with_body_gv, fofc_splice_gv,
@@ -3648,6 +3649,8 @@ fn main() {
         let sfx = geom.suffix();
         let source = body_source_gv(MAX_SOURCE_BODIES, coords, 2, ncomp, &geom.axes, false);
         emit_gv(&out_dir, &format!("body_source{sfx}_2d"), 2, &source);
+        let face_work = body_source_face_work_gv(coords, 2, ncomp, &geom.axes);
+        emit_gv(&out_dir, &format!("body_source_face_work{sfx}_2d"), 2, &face_work);
         let feedback = body_feedback_gv(MAX_SOURCE_BODIES, coords, 2, ncomp, &geom.axes);
         emit_gv(&out_dir, &format!("body_feedback{sfx}_2d"), 2, &feedback);
         let source = body_source_iso_gv(MAX_SOURCE_BODIES, coords, 2, ncomp, &geom.axes);

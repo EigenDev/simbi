@@ -1034,6 +1034,23 @@ pub fn dispatch_body_source<const D: usize, const DOF: usize, Mem, Sc>(
     );
 }
 
+/// the body pass of a single static potential on an adiabatic axisymmetric plane: the momentum
+/// source of [`dispatch_body_source`] with gravity's energy work taken from this stage's face mass
+/// fluxes. reads `flux[d].den` on the cell's own faces, so the flux pass of the same stage precedes
+/// it; the operator has no reduction and needs no synchronization of its own.
+pub fn dispatch_body_source_face_work<const D: usize, const DOF: usize, Mem, Sc>(
+    sim: &FieldStore<D, DOF, Mem, Sc>,
+    dt: f64,
+    gamma: f64,
+) where
+    Mem: MemoryStorage + Sync,
+    Sc: Scalar + OrderedNumeric,
+{
+    let name = format!("body_source_face_work{}_{D}d", geom_suffix(sim.geom.coords, DOF, D));
+    let scalars = resolve_body_scalars(sim, dt, gamma, &name);
+    dispatch_named(sim, &sim.fields.cons.den, None, 0, &name, &sim.geom.interior, &[], &scalars);
+}
+
 /// dispatch the constant-nu viscous operator (`viscous_iso_2d`):
 /// accumulate `dt div(tau)` into `cons.mom` over the interior. isothermal, 2D
 /// cartesian; the caller gates on `nu > 0`. reads `prim.rho` / `prim.vel` (current
