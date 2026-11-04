@@ -85,6 +85,9 @@ pub struct AdiabaticSubstrateKernelSet<
 > {
     pub gamma: f64,
     pub cfl_number: f64,
+    /// a diagnostic control the replay tests alone set: the axisymmetric godunov stage with the
+    /// azimuthal momentum in source form, against the torque form
+    pub azimuthal_source_control: bool,
     /// the azimuthal shear model in place of the full stress, on an axisymmetric plane
     pub azimuthal_shear: Option<symbi_hydro::viscous::AzimuthalShear>,
     /// the torque and the stress work entered through the continued domain faces this session
@@ -179,6 +182,7 @@ impl<Mem: MemoryStorage, Sc: Scalar + OrderedNumeric, const D: usize>
             freeze_streak: std::sync::atomic::AtomicU32::new(0),
             viscosity: 0.0,
             alpha: 0.0,
+            azimuthal_source_control: false,
             azimuthal_shear: None,
             viscous_boundary_ledger: std::sync::Mutex::new((0.0, 0.0)),
         }
@@ -491,7 +495,7 @@ impl<Mem: MemoryStorage + Sync, Sc: Scalar + OrderedNumeric, const D: usize, con
         dispatch_godunov_maybe_fused(
             sim,
             pre,
-            "adiabatic",
+            if self.azimuthal_source_control { "adiabatic_azimuthal_source_control" } else { "adiabatic" },
             dt,
             a0,
             ac,

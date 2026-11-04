@@ -821,6 +821,7 @@ fn geo_source(prefix: &str) -> GeoSource {
         "rmhd" => GeoSource::Rmhd,
         "nmhd" => GeoSource::NewtonianMhd,
         "imhd" => GeoSource::IsothermalMhd,
+        "adiabatic_azimuthal_source_control" => GeoSource::HydroAzimuthalSourceControl,
         _ => GeoSource::Hydro {
             inertial: matches!(prefix, "iso" | "adiabatic" | "rhd"),
         },
@@ -3635,6 +3636,10 @@ fn main() {
         ] {
             emit_gv(&out_dir, &format!("viscous_azimuthal_{name}{sfx}_2d"), 2, &viscous_azimuthal_gv(geom.coords, channel));
         }
+    }
+    // the azimuthal source-form control against the torque form, on the two axisymmetric planes
+    for geom in [cyl.clone(), Geom::sph_swirl()] {
+        gen_godunov_stage(&out_dir, 2, "adiabatic_azimuthal_source_control", true, geom, None);
     }
     // a central point mass's gravity on the axisymmetric planes: the cartesian acceleration
     // projected onto the three physical momenta, with its reaction reduced for the body ledger
