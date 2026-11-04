@@ -3621,6 +3621,21 @@ fn main() {
             emit_gv(&out_dir, &name, 2, &symbi_discretize::gv::iso_flux_lifted_gv(dir, &geom.axes));
         }
     }
+    // the azimuthal shear on the axisymmetric planes: the update per closure, the timestep rate
+    // and the boundary ledger's two channels
+    for geom in [cyl.clone(), Geom::sph_swirl()] {
+        use symbi_discretize::{AzimuthalChannel, viscous_azimuthal_gv};
+        let sfx = geom.suffix();
+        for (name, channel) in [
+            ("adiabatic", AzimuthalChannel::Update { energy: true }),
+            ("iso", AzimuthalChannel::Update { energy: false }),
+            ("rate", AzimuthalChannel::Rate),
+            ("boundary_torque", AzimuthalChannel::BoundaryTorque),
+            ("boundary_work", AzimuthalChannel::BoundaryWork),
+        ] {
+            emit_gv(&out_dir, &format!("viscous_azimuthal_{name}{sfx}_2d"), 2, &viscous_azimuthal_gv(geom.coords, channel));
+        }
+    }
     // a central point mass's gravity on the axisymmetric planes: the cartesian acceleration
     // projected onto the three physical momenta, with its reaction reduced for the body ledger
     for geom in [cyl.clone(), Geom::sph_swirl()] {

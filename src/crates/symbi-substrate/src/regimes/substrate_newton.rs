@@ -60,6 +60,10 @@ impl<Mem: MemoryStorage, Sc: Scalar + OrderedNumeric, const D: usize> WithViscos
         self.alpha = alpha;
         self
     }
+    fn with_azimuthal_shear(mut self, model: Option<symbi_hydro::viscous::AzimuthalShear>) -> Self {
+        self.azimuthal_shear = model;
+        self
+    }
 }
 
 // horizon excision is a GR-chart operation; the adiabatic (flat) set ignores it.
@@ -81,6 +85,10 @@ pub struct AdiabaticSubstrateKernelSet<
 > {
     pub gamma: f64,
     pub cfl_number: f64,
+    /// the azimuthal shear model in place of the full stress, on an axisymmetric plane
+    pub azimuthal_shear: Option<symbi_hydro::viscous::AzimuthalShear>,
+    /// the torque and the stress work entered through the continued domain faces this session
+    pub viscous_boundary_ledger: std::sync::Mutex<(f64, f64)>,
     /// the theta-MC reconstruction compression (regime-generic; 1 == plain minmod).
     pub theta: f64,
     pub cfl_scratch: Field<Sc, D, Mem>,
@@ -171,6 +179,8 @@ impl<Mem: MemoryStorage, Sc: Scalar + OrderedNumeric, const D: usize>
             freeze_streak: std::sync::atomic::AtomicU32::new(0),
             viscosity: 0.0,
             alpha: 0.0,
+            azimuthal_shear: None,
+            viscous_boundary_ledger: std::sync::Mutex::new((0.0, 0.0)),
         }
     }
 
@@ -514,7 +524,9 @@ impl<Mem: MemoryStorage + Sync, Sc: Scalar + OrderedNumeric, const D: usize, con
         // stress). cartesian 2D only, so the coordinate dx is the physical cell width. inert inviscid.
         // alpha: nu grows with radius and with the local cs^2, so the cap bounds it
         // by the largest sound speed at the slowest orbit (adiabatic_alpha_nu_max).
-        let nu_max = if self.alpha > 0.0 {
+        let nu_max = if self.azimuthal_shear.is_some() {
+            0.0
+        } else if self.alpha > 0.0 {
             crate::regimes::substrate_kernels::adiabatic_alpha_nu_max(
                 sim.host_only("the alpha-viscosity timestep cap"),
                 self.alpha,
@@ -530,6 +542,7 @@ impl<Mem: MemoryStorage + Sync, Sc: Scalar + OrderedNumeric, const D: usize, con
         } else {
             dt
         };
+        let dt = crate::regimes::substrate_kernels::azimuthal_shear_limited_dt(sim, self.azimuthal_shear.as_ref(), &self.cfl_scratch, dt);
         let min_physical_width = super::substrate_mhd::max_inv_physical_width(&sim.geom).recip();
         crate::regimes::substrate_kernels::body_gravity_limited_dt(
             sim,
@@ -540,6 +553,10 @@ impl<Mem: MemoryStorage + Sync, Sc: Scalar + OrderedNumeric, const D: usize, con
     }
 
     fn viscous(&self, sim: &FieldStore<D, DOF, Mem, Sc>, dt: f64) {
+        if let Some(model) = &self.azimuthal_shear {
+            crate::regimes::substrate_kernels::apply_azimuthal_shear(sim, model, &self.cfl_scratch, &self.viscous_boundary_ledger, dt);
+            return;
+        }
         // alpha (local-cs shakura-sunyaev) takes precedence over the constant nu.
         if self.alpha > 0.0 {
             crate::regimes::substrate_kernels::dispatch_viscous_alpha(

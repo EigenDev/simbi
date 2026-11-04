@@ -29,6 +29,7 @@ pub mod gv_immersed;
 pub mod gv_penalize;
 pub mod gv_refinement;
 pub mod gv_viscous;
+pub mod gv_viscous_azimuthal;
 pub mod ibm;
 pub mod kernel_slug;
 pub mod lattice;
@@ -122,3 +123,4 @@ pub fn kernel_coalesces_layout(kernel_name: &str) -> bool {
         || kernel_name.contains("adiabatic_face_flux")
         || kernel_name.contains("rhd_face_flux")
 }
+pub use gv_viscous_azimuthal::{AzimuthalChannel, viscous_azimuthal_gv};

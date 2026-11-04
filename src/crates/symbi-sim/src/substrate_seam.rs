@@ -696,6 +696,11 @@ pub trait WithViscosity: Sized {
     fn with_alpha(self, _alpha: f64) -> Self {
         self
     }
+    /// select the azimuthal shear model on an axisymmetric plane in place of the full stress.
+    /// default no-op; the admission refuses it on the regimes that carry none
+    fn with_azimuthal_shear(self, _model: Option<symbi_hydro::viscous::AzimuthalShear>) -> Self {
+        self
+    }
 }
 
 /// stash the config's Ohmic resistivity `eta` onto a kernel set. same non-const-generic shape as

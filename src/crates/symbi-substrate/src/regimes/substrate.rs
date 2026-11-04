@@ -56,6 +56,11 @@ pub struct IsoSubstrateKernelSet<Mem: MemorySpace, Sc: Scalar + OrderedNumeric, 
     /// constant kinematic viscosity nu. 0 = inviscid (the
     /// viscous pass and its CFL cap are inert). >0 selects the Navier-Stokes
     /// shear operator and caps dt at C_visc dx^2 / nu.
+    /// the azimuthal shear model in place of the full stress, on an axisymmetric plane
+    pub azimuthal_shear: Option<symbi_hydro::viscous::AzimuthalShear>,
+    /// the torque entered through the continued domain faces this session, and the stress work
+    /// they would pass, which an isothermal closure holds no energy to receive
+    pub viscous_boundary_ledger: std::sync::Mutex<(f64, f64)>,
     pub viscosity: f64,
     /// Shakura-Sunyaev alpha. >0 selects the alpha viscous
     /// operator nu(x) = alpha cs^2 / Omega_k(r) (takes precedence over the
@@ -127,6 +132,8 @@ impl<Mem: MemorySpace, Sc: Scalar + OrderedNumeric, const D: usize>
             c_drain: 1.0,
             viscosity: 0.0,
             alpha: 0.0,
+            azimuthal_shear: None,
+            viscous_boundary_ledger: std::sync::Mutex::new((0.0, 0.0)),
             cfl_number,
             theta: 1.0,
             cs2,
@@ -443,7 +450,9 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize, const
         // (0.25, the plain-Laplacian value, is unstable and blows the velocity
         // up). inert when inviscid. for alpha the viscosity grows with radius, so
         // nu_max is at the domain corner farthest from the body.
-        let nu_max = if self.alpha > 0.0 {
+        let nu_max = if self.azimuthal_shear.is_some() {
+            0.0
+        } else if self.alpha > 0.0 {
             self.alpha_nu_max(sim)
         } else {
             self.viscosity
@@ -828,6 +837,10 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize, const
     }
 
     fn viscous(&self, sim: &FieldStore<D, DOF, Mem, Sc>, dt: f64) {
+        if let Some(model) = &self.azimuthal_shear {
+            crate::regimes::substrate_kernels::apply_azimuthal_shear(sim, model, &self.cfl_scratch, &self.viscous_boundary_ledger, dt);
+            return;
+        }
         // the Navier-Stokes shear; inert when inviscid. baked
         // for 2D and 3D cartesian — fail loud otherwise (a silent drop would discard
         // the transport a viscous run declared). alpha (spatially varying nu)
@@ -861,6 +874,10 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize, const
 impl<Mem: MemorySpace, Sc: Scalar + OrderedNumeric, const D: usize> WithViscosity
     for IsoSubstrateKernelSet<Mem, Sc, D>
 {
+    fn with_azimuthal_shear(mut self, model: Option<symbi_hydro::viscous::AzimuthalShear>) -> Self {
+        self.azimuthal_shear = model;
+        self
+    }
     fn with_viscosity(mut self, nu: f64) -> Self {
         self.viscosity = nu;
         self

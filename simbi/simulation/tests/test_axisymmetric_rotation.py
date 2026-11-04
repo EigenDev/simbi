@@ -8,7 +8,9 @@
 #   newtonian gravity, the azimuthal momentum staying exactly zero. the compact
 #   softening is newtonian outside its length, which lies inside the inner radius
 # - a run carrying anything outside the verified scope is refused by name before
-#   any output, a body on the cartesian plane included
+#   any output: a body on the cartesian plane, the full stress on a plane with three
+#   velocity components, the azimuthal shear without its named face conditions or
+#   on the cartesian plane
 #
 # run: pytest -m simulation simbi/simulation/tests/test_axisymmetric_rotation.py
 # =============================================================================
@@ -134,9 +136,12 @@ def test_a_point_mass_on_the_axis_accelerates_the_gas_by_newtonian_gravity(tmp_p
     assert checked > 200, f"{checked} cells checked"
 
 
+VISCOSITY = "    @computed_field\n    @property\n    def viscosity(self) -> float:\n        return 1.0e-3\n"
+SHEAR = '    viscous_stress: Annotated[str | None, ProblemParam("azimuthal_shear", description="the azimuthal shear")]\n'
 REFUSED = {
     "off-axis": ({"position": "(0.5, 0.5)"}, "a bare point mass at rest on the symmetry axis"),
-    "viscous": ({"extra": "    @computed_field\n    @property\n    def viscosity(self) -> float:\n        return 1.0e-3\n"}, "viscous transport"),
+    "full-stress": ({"extra": VISCOSITY}, "viscous transport other than the azimuthal shear"),
+    "shear-without-faces": ({"extra": SHEAR + VISCOSITY}, "names one condition per domain face"),
     "hllc": ({"extra": '    solver: str = "hllc"\n'}, "a solver other than hlle"),
     "ppm": ({"extra": '    reconstruction: str = "ppm"\n'}, "ppm reconstruction requires a flat cartesian chart"),
 }
@@ -162,3 +167,15 @@ def test_a_body_on_the_cartesian_plane_is_refused_by_name(tmp_path: Path, closur
     assert done.returncode != 0, "the run succeeded"
     assert "a body on the cartesian plane" in flat, flat[-1200:]
     assert not list(out.glob("*.h5")), "output was written before the refusal"
+
+
+def test_the_shear_on_the_cartesian_plane_is_refused_by_name(tmp_path: Path) -> None:
+    out = tmp_path / "run"
+    faces = '    viscous_boundaries: Annotated[list[str] | None, ProblemParam(["zero_torque"] * 4, description="faces")]\n'
+    script = Path(_script(tmp_path, "cartesian", extra=SHEAR + faces + VISCOSITY))
+    # the plane alone: a body would be refused first, by its own name
+    script.write_text(script.read_text().replace("return [ImmersedBodyConfig(", "return [] and [ImmersedBodyConfig("))
+    done = ph.python([str(script), str(out)], "the shear on the cartesian plane, expecting a refusal", check=False)
+    flat = " ".join(done.stderr.split())
+    assert done.returncode != 0, "the run succeeded"
+    assert "the azimuthal shear on the cartesian plane" in flat, flat[-1200:]

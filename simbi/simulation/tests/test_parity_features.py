@@ -19,7 +19,9 @@
 # the table:
 # - three velocity components on a plane: the adiabatic, isothermal and locally
 #   isothermal gas on the (r, theta) plane (log radius, poles on the grid) and the
-#   (R, z) plane about a point mass on the axis, and on the cartesian plane
+#   (R, z) plane about a point mass on the axis, and on the cartesian plane; the
+#   azimuthal shear with nu ~ r^(1/2) on the two axisymmetric planes, one radial face
+#   continuing the stress
 # - sources and sponges: the rotating frame and full-state sponge on a plane;
 #   the bondi sink with its outer sponge, flat, under one fine box and under
 #   two nested boxes
@@ -368,6 +370,17 @@ CLOSURES = {
         pressure=", pressure",
     ),
 }
+AZIMUTHAL_SHEAR = (
+    '    viscous_stress: Annotated[str | None, ProblemParam("azimuthal_shear", description="the azimuthal shear")]\n'
+    '    viscous_boundaries: Annotated[list[str] | None, ProblemParam(["zero_torque", "continued_shear", "zero_torque", "zero_torque"], description="faces")]\n'
+    '    viscosity_radius_power: Annotated[float, ProblemParam(0.5, description="nu rises as r^(1/2)")]\n'
+    '\n    @computed_field\n    @property\n    def viscosity(self) -> float:\n        return 1.0e-3\n\n'
+)
+INVISCID = (
+    '    viscous_stress: Annotated[str | None, ProblemParam(None, description="inviscid")]\n'
+    '\n    @computed_field\n    @property\n    def viscosity(self) -> float:\n        return 0.0\n'
+)
+INVISCID_IMPORTS = "from typing import Annotated\n\nfrom pydantic import computed_field\n\nfrom simbi import ProblemParam\n"
 NO_SWIRL = '    swirl: Annotated[float, ProblemParam(0.0, description="no rotation")]\n'
 SWIRL_IMPORTS = "from typing import Annotated\n\nfrom simbi import ProblemParam\n"
 
@@ -439,6 +452,11 @@ FEATURES = {
                                             f"Lifted{plane.title()}{closure.title().replace('-', '')}", (48, 32), [[24], []], [[14, 30], []], f"reject:1:{REJECTED_STEP}:1",
                                             control=_control(f"lifted-{plane}-{closure}", f"Lifted{plane.title()}{closure.title().replace('-', '')}", NO_SWIRL, SWIRL_IMPORTS))
        for plane in PLANES for closure in CLOSURES},
+    **{f"lifted-shear-{plane}-{closure}": Feature(
+        LIFTED.format(name=f"Shear{plane.title()}{closure.title().replace('-', '')}", **PLANES[plane], **{**CLOSURES[closure], "closure": CLOSURES[closure]["closure"] + AZIMUTHAL_SHEAR}),
+        f"Shear{plane.title()}{closure.title().replace('-', '')}", (48, 32), [[24], []], [[14, 30], []], f"reject:1:{REJECTED_STEP}:1",
+        control=_control(f"lifted-shear-{plane}-{closure}", f"Shear{plane.title()}{closure.title().replace('-', '')}", INVISCID, INVISCID_IMPORTS))
+       for plane in ("sph", "rz") for closure in CLOSURES},
     **{f"refined-blast-{key}": Feature(BLAST_VARIANT.format(name=f"Blast{cls}", line=line), f"Blast{cls}", (24, 24, 24),
                                        [[12], [], []], [[7, 15], [], []], f"reject_level:1:{REJECTED_STEP}:1:1:1",
                                        control=BLAST_CONTROL)

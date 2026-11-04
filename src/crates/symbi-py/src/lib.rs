@@ -143,6 +143,8 @@ struct Config {
     // the momentum components the problem declares, independent of the grid dimension. a
     // 4-entry isothermal row on a plane reads two ways, so a lifted isothermal run names it
     velocity_components: Option<usize>,
+    // the azimuthal shear model in place of the full stress, parsed from `viscous_stress`
+    azimuthal_shear: Option<symbi_hydro::viscous::AzimuthalShear>,
     viscosity: f64,
     /// the shakura-sunyaev alpha-disk coefficient, read from the `viscosity_alpha` key,
     /// not the bare `alpha` key: `alpha` is a generic name a problem may use for its own
@@ -801,6 +803,7 @@ struct KernelSettings<'c> {
     eos: symbi::EosArm,
     solver: Solver,
     ct_method: CtMethod,
+    azimuthal_shear: Option<symbi_hydro::viscous::AzimuthalShear>,
     viscosity: f64,
     alpha: f64,
     resistivity: f64,
@@ -822,6 +825,7 @@ impl<'c> KernelSettings<'c> {
             eos: build_eos(cfg),
             solver: cfg.solver,
             ct_method: cfg.ct_method,
+            azimuthal_shear: cfg.azimuthal_shear,
             viscosity: cfg.viscosity,
             alpha: cfg.alpha,
             resistivity: cfg.resistivity,
@@ -906,6 +910,7 @@ fn gas_kernels<K: GasDoors>(sub: K, settings: &KernelSettings, role: LevelRole) 
         .map_err(|e| format!("substrate/solver: {e:?}"))?
         .with_viscosity(settings.viscosity)
         .with_alpha(settings.alpha)
+        .with_azimuthal_shear(settings.azimuthal_shear)
         .with_resistivity(settings.resistivity);
     let ks = excised(ks, settings, role);
     let ks = attach_configured_sources(ks, settings.sources, settings.spec, &settings.law)?;
@@ -920,7 +925,7 @@ fn iso_kernels<const D: usize>(
     sub: IsoSubstrateKernelSet<DefaultMemory, f64, D>,
     settings: &KernelSettings,
 ) -> Result<IsoSubstrateKernelSet<DefaultMemory, f64, D>, String> {
-    let ks = sub.theta(settings.theta).with_viscosity(settings.viscosity).with_alpha(settings.alpha);
+    let ks = sub.theta(settings.theta).with_viscosity(settings.viscosity).with_alpha(settings.alpha).with_azimuthal_shear(settings.azimuthal_shear);
     let ks = attach_configured_sources(ks, settings.sources, settings.spec, &settings.law)?;
     let ks = attach_driven_boundaries(ks, settings.driven, settings.spec, |ks, built, params| {
         ks.with_driven_boundary(built, params).0
@@ -1493,6 +1498,7 @@ fn parse_config(dict: &Bound<'_, PyDict>) -> PyResult<Config> {
             .flatten()
             .and_then(|v| v.extract::<Option<usize>>().ok())
             .flatten(),
+        azimuthal_shear: parse_azimuthal_shear(dict)?,
         viscosity: get_f64_or(dict, "viscosity", 0.0),
         alpha: get_f64_or(dict, "viscosity_alpha", 0.0),
         bare_alpha_key: dict.get_item("alpha").ok().flatten().is_some(),
@@ -1870,6 +1876,54 @@ struct BinaryCfg {
     eccentricity: f64,
     mass_ratio: f64,
     frame: symbi_ib::ReferenceFrame,
+}
+
+/// the azimuthal shear model a problem names: `viscous_stress = "azimuthal_shear"`, the law's
+/// `viscous_coefficient` ("kinematic" or "dynamic"), its normalization and powers, and one named
+/// condition per domain face in `viscous_boundaries` (r or R low and high, then theta or z low and
+/// high). `None` without the setting
+fn parse_azimuthal_shear(dict: &Bound<'_, PyDict>) -> PyResult<Option<symbi_hydro::viscous::AzimuthalShear>> {
+    use symbi_hydro::viscous::{AzimuthalShear, DynamicViscosityLaw, ViscousFace};
+    let text = |key: &str| dict.get_item(key).ok().flatten().and_then(|v| v.extract::<Option<String>>().ok()).flatten();
+    match text("viscous_stress").as_deref() {
+        None | Some("full") => return Ok(None),
+        Some("azimuthal_shear") => {}
+        Some(other) => return Err(PyValueError::new_err(format!("viscous_stress '{other}': expected 'full' or 'azimuthal_shear'"))),
+    }
+    let names: Vec<String> = dict
+        .get_item("viscous_boundaries")
+        .ok()
+        .flatten()
+        .and_then(|v| v.extract::<Option<Vec<String>>>().ok())
+        .flatten()
+        .unwrap_or_default();
+    if names.len() != 4 {
+        return Err(PyValueError::new_err(format!(
+            "the azimuthal shear names one condition per domain face in viscous_boundaries, 'zero_torque' or \
+             'continued_shear'; hydrodynamic outflow says nothing about the torque a face passes. got {names:?}"
+        )));
+    }
+    let face = |ii: usize| match names[ii].as_str() {
+        "zero_torque" => Ok(ViscousFace::ZeroTorque),
+        "continued_shear" => Ok(ViscousFace::ContinuedShear),
+        other => Err(PyValueError::new_err(format!("viscous_boundaries[{ii}] = '{other}': expected 'zero_torque' or 'continued_shear'"))),
+    };
+    let scale = get_f64_or(dict, "viscosity", 0.0);
+    let radius = get_f64_or(dict, "viscosity_radius", 1.0);
+    let radius_power = get_f64_or(dict, "viscosity_radius_power", 0.0);
+    let density = get_f64_or(dict, "viscosity_density", 1.0);
+    let density_power = get_f64_or(dict, "viscosity_density_power", 0.0);
+    if !(scale > 0.0 && radius > 0.0 && density > 0.0) {
+        return Err(PyValueError::new_err(format!(
+            "the azimuthal shear needs a positive viscosity ({scale}), viscosity_radius ({radius}) and viscosity_density ({density})"
+        )));
+    }
+    let law = match text("viscous_coefficient").as_deref() {
+        None | Some("kinematic") => DynamicViscosityLaw::kinematic(scale, radius, radius_power, density, density_power),
+        Some("dynamic") => DynamicViscosityLaw::dynamic(scale, radius, radius_power, density, density_power),
+        Some(other) => return Err(PyValueError::new_err(format!("viscous_coefficient '{other}': expected 'kinematic' or 'dynamic'"))),
+    };
+    Ok(Some(AzimuthalShear { law, faces: [[face(0)?, face(1)?], [face(2)?, face(3)?]] }))
 }
 
 /// the `body_system.binary_config` sub-dict, if the config carries a gravitational binary.
@@ -9664,14 +9718,15 @@ fn lifted_newtonian_refusal(cfg: &Config) -> Option<String> {
             && b.position.iter().all(|x| *x == 0.0)
             && b.velocity.iter().all(|v| *v == 0.0)
     };
-    let checks: [(bool, &str); 14] = [
+    let checks: [(bool, &str); 15] = [
         (cfg!(feature = "gpu"), "device execution, whose hardware gates have not run"),
         (cfg.coord_system == "cartesian" && !cfg.bodies.is_empty(), "a body on the cartesian plane, whose lifted source kernels are not baked"),
         (cfg.refinement_enabled, "mesh refinement"),
         (cfg.solver != Solver::Hlle, "a solver other than hlle"),
         (cfg.reconstruction_name != "plm", "a reconstruction other than plm"),
         (cfg.wb_reconstruction, "the well-balanced reconstruction"),
-        (cfg.viscosity != 0.0 || cfg.alpha != 0.0, "viscous transport"),
+        (cfg.alpha != 0.0 || (cfg.viscosity != 0.0 && cfg.azimuthal_shear.is_none()), "viscous transport other than the azimuthal shear"),
+        (cfg.azimuthal_shear.is_some() && cfg.coord_system == "cartesian", "the azimuthal shear on the cartesian plane, which has no symmetry axis"),
         (cfg.bodies.len() > 1 || cfg.binary.is_some() || cfg.bonded_assembly.is_some(), "more than one immersed body"),
         (!cfg.bodies.iter().all(bare_axial_mass), "a body other than a bare point mass at rest on the symmetry axis"),
         (!cfg.source_jsons.is_empty(), "a user source"),
@@ -9691,6 +9746,12 @@ fn validate_primitive_rows(cfg: &Config, prims: &[Vec<f64>]) -> Result<usize, St
         return Err(format!("primitive row {ii} has {} entries where row 0 has {width}", row.len()));
     }
     let dof = primitive_row_dof(cfg, width)?;
+    if cfg.azimuthal_shear.is_some() && dof <= cfg.dims {
+        return Err(format!(
+            "the azimuthal shear on the {} with {dof} velocity components: the model acts on an azimuthal velocity, carried with velocity_components = 3",
+            grid_name(cfg)
+        ));
+    }
     if dof > cfg.dims && matches!(cfg.regime.as_str(), "newtonian" | "isothermal") && cfg.spacetime == "minkowski" {
         if let Some(property) = lifted_newtonian_refusal(cfg) {
             return Err(format!("{property} with three velocity components on the {} is outside the verified scope", grid_name(cfg)));
@@ -15528,6 +15589,7 @@ mod kernel_construction_tests {
             eos: symbi::EosArm::IdealGamma,
             solver: Solver::Hllc,
             ct_method: CtMethod::Uct,
+            azimuthal_shear: None,
             viscosity: 2.0e-3,
             alpha: 1.0e-2,
             resistivity: 3.0e-3,

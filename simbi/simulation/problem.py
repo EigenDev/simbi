@@ -384,6 +384,36 @@ class SimbiProblem(BaseModel):
             description="simulation end time",
         ),
     ]
+    viscous_stress: Annotated[
+        str | None,
+        ProblemParam(None, description="the stress model: 'full' (the default) or 'azimuthal_shear'"),
+    ]
+    viscous_coefficient: Annotated[
+        str,
+        ProblemParam("kinematic", description="`viscosity` as kinematic nu or dynamic mu"),
+    ]
+    viscosity_radius: Annotated[
+        float, ProblemParam(1.0, description="the radius normalizing the viscosity's radial power")
+    ]
+    viscosity_radius_power: Annotated[
+        float, ProblemParam(0.0, description="the viscosity's power of the distance from the origin")
+    ]
+    viscosity_density: Annotated[
+        float, ProblemParam(1.0, description="the density normalizing the viscosity's density power")
+    ]
+    viscosity_density_power: Annotated[
+        float, ProblemParam(0.0, description="the viscosity's power of the density")
+    ]
+    viscous_boundaries: Annotated[
+        list[str] | None,
+        ProblemParam(
+            None,
+            description=(
+                "the azimuthal shear's condition on each domain face, axis 0 low and high then axis "
+                "1 low and high: 'zero_torque' or 'continued_shear'"
+            ),
+        ),
+    ]
     velocity_components: Annotated[
         int | None,
         ProblemParam(
