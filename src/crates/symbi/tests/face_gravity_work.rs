@@ -7,8 +7,13 @@
 //   cell and over the grid with its wall fluxes, for Phi and for Phi plus a constant
 // - density and momenta equal the cell-momentum arm's bits; energy differs by the two work rates,
 //   the cell momentum's written against g = -d Phi / dr in closed form
-// - the two work rates agree at second order on a smooth flow
-// - the admission holds only on these planes under one bare point mass at rest at the origin
+// - the two work rates agree at second order on a smooth flow, inside, outside and across the
+//   softening length of either kind
+// - the kernel's momentum source is rho g with g = -grad Phi of the production force and potential
+//   pair, which stay continuous through the softening length and reduce to the bare point mass
+//   at zero softening
+// - the admission holds only on these planes under one bare point mass at rest at the origin, and
+//   every refused body runs the cell momentum's work bit for bit
 //
 // run: cargo test -p symbi --test face_gravity_work -- --nocapture
 // =============================================================================
@@ -26,6 +31,7 @@ use symbi_hydro::state::Prim;
 use symbi_ib::{Body, BodyCollection, SofteningKind};
 use symbi_sim::driver::{downstream_injection_weight, needs_step_snapshot, stage_exit_fraction, stage_schedule};
 use symbi_sim::stage::{HookPoint, StageArgs, StageOutcome, fold_stage};
+use symbi_discretize::ibm::{body_gravity, body_potential};
 use symbi_sim::substrate_seam::KernelSet;
 use symbi_xpu::{CpuSpace, HostMemory};
 
@@ -80,7 +86,12 @@ struct Frame {
 
 /// runs `steps` steps of the production stage and keeps every stage's frame
 macro_rules! frames {
-    ($metric:expr, $metric_ty:ty, $n:expr, $lo:expr, $hi:expr, $kind:expr, $cell_work:expr, $steps:expr, $state:expr) => {{
+    ($metric:expr, $metric_ty:ty, $n:expr, $lo:expr, $hi:expr, $kind:expr, $cell_work:expr, $steps:expr, $state:expr) => {
+        frames!(@bodies $metric, $metric_ty, $n, $lo, $hi, $cell_work, $steps, $state, BodyCollection::new().add(
+            Body::gravitational(0, Tensor::zeros(), Tensor::zeros(), MASS, 0.0, SOFTENING).with_softening_kind($kind),
+        ))
+    };
+    (@bodies $metric:expr, $metric_ty:ty, $n:expr, $lo:expr, $hi:expr, $cell_work:expr, $steps:expr, $state:expr, $bodies:expr) => {{
         type Sim = SimStateGeneric<Newtonian, 2, 3, $metric_ty, IdealGas<f64>, CpuSpace, HostMemory>;
         let (n, lo, hi): ([usize; 2], [f64; 2], [f64; 2]) = ($n, $lo, $hi);
         let state = $state;
@@ -98,9 +109,7 @@ macro_rules! frames {
                 Prim::adiabatic(Density(rho), Tensor::new(v), Pressure(p))
             })
             .build()
-            .with_bodies(BodyCollection::new().add(
-                Body::gravitational(0, Tensor::zeros(), Tensor::zeros(), MASS, 0.0, SOFTENING).with_softening_kind($kind),
-            ));
+            .with_bodies($bodies);
         let mut kernels = AdiabaticSubstrateKernelSet::<HostMemory, f64, 2>::new(GAMMA, CFL, &sim.geom.allocated);
         kernels.cell_momentum_gravity_work = $cell_work;
         KernelSet::c2p(&kernels, &sim);
@@ -361,8 +370,7 @@ fn the_cylindrical_plane_holds_the_flux_form_under_either_softening() {
 }
 
 /// the mean difference of the two work rates on a smooth radial flow, away from the walls
-fn work_difference(n: [usize; 2], lo: [f64; 2], hi: [f64; 2]) -> f64 {
-    let kind = SofteningKind::Compact;
+fn work_difference(kind: SofteningKind, n: [usize; 2], lo: [f64; 2], hi: [f64; 2]) -> f64 {
     let smooth = |x: [f64; 2]| (1.0 + 0.2 * (3.0 * x[0]).sin(), [0.1, 0.0, 0.3], 1.0);
     let frames = frames!(Spherical, Spherical, n, lo, hi, kind, false, 1, smooth);
     let frame = &frames[0];
@@ -386,14 +394,165 @@ fn work_difference(n: [usize; 2], lo: [f64; 2], hi: [f64; 2]) -> f64 {
     sum / volume
 }
 
+/// the compact force has a curvature jump at the softening length, which a cell straddling it
+/// sees at first order on a vanishing fraction of the cells: the L1 mean stays near second order,
+/// 1.8 being the bound the interior and exterior measurements clear
 #[test]
-fn the_two_work_rates_agree_at_second_order_on_a_smooth_flow() {
-    let (lo, hi) = ([1.0, PI / 4.0], [2.0, 3.0 * PI / 4.0]);
-    let errors: Vec<f64> = [32, 64, 128].iter().map(|m| work_difference([*m, *m], lo, hi)).collect();
-    let orders = [(errors[0] / errors[1]).log2(), (errors[1] / errors[2]).log2()];
-    eprintln!("the work difference at 32, 64, 128: {errors:?}, orders {orders:.3?}");
-    assert!(errors[2] > 0.0, "the difference vanished; the order is undefined");
-    assert!(orders[1] > 1.8, "the order between 64 and 128 cells is {}", orders[1]);
+fn the_two_work_rates_agree_at_second_order_through_the_softening() {
+    let angles = (PI / 4.0, 3.0 * PI / 4.0);
+    // the measured band runs over the middle half of the radial range
+    let bands = [("outside", 1.0, 2.0), ("inside", 0.1, 0.45), ("across", 0.2, 0.8)];
+    for kind in [SofteningKind::Compact, SofteningKind::Plummer] {
+        for (label, r_lo, r_hi) in bands {
+            let (lo, hi) = ([r_lo, angles.0], [r_hi, angles.1]);
+            let errors: Vec<f64> = [32, 64, 128].iter().map(|m| work_difference(kind, [*m, *m], lo, hi)).collect();
+            let orders = [(errors[0] / errors[1]).log2(), (errors[1] / errors[2]).log2()];
+            eprintln!("{kind:?} {label}: the work difference at 32, 64, 128: {errors:?}, orders {orders:?}");
+            assert!(errors[2] > 0.0, "{kind:?} {label}: the difference vanished; the order is undefined");
+            assert!(orders[1] > 1.8, "{kind:?} {label}: the order between 64 and 128 cells is {}", orders[1]);
+        }
+    }
+}
+
+/// the production force is minus the gradient of the production potential, by centered difference
+/// at radii inside, at and outside the softening, in each kind
+#[test]
+fn the_production_force_is_the_gradient_of_the_production_potential() {
+    let kinds = [SofteningKind::Compact, SofteningKind::Plummer];
+    for kind in kinds {
+        let k = kind.as_scalar();
+        let phi = |x: [f64; 3]| body_potential(x, MASS, SOFTENING, k);
+        for r in [0.01, 0.1, 0.3, 0.49, 0.499, 0.501, 0.51, 0.7, 1.0, 3.0] {
+            let direction = [0.6, 0.0, 0.8];
+            let at = |rr: f64| std::array::from_fn(|ii| direction[ii] * rr);
+            let force = body_gravity(at(r), MASS, SOFTENING, k);
+            let h = 1e-5 * r;
+            let along = direction[0] * force[0] + direction[1] * force[1] + direction[2] * force[2];
+            let gradient = (phi(at(r + h)) - phi(at(r - h))) / (2.0 * h);
+            // a centered difference at h = 1e-5 r holds about 1e-9 of the force in roundoff and curvature
+            assert!((along + gradient).abs() < 1e-8 * along.abs().max(1.0), "{kind:?} r = {r}: force {along:e}, -grad Phi {:e}", -gradient);
+            assert!((along - acceleration(kind, r)).abs() < 1e-13 * along.abs().max(1.0), "{kind:?} r = {r}: force {along:e} against the closed form {:e}", acceleration(kind, r));
+            assert!((phi(at(r)) - potential(kind, r)).abs() < 1e-14 * phi(at(r)).abs(), "{kind:?} r = {r}: the potential left its closed form");
+        }
+    }
+    // the compact pair is continuous through the softening length
+    let k = SofteningKind::Compact.as_scalar();
+    let side = |r: f64| (body_potential([r, 0.0, 0.0], MASS, SOFTENING, k), body_gravity([r, 0.0, 0.0], MASS, SOFTENING, k)[0]);
+    let (inner, outer) = (side(SOFTENING * (1.0 - 1e-12)), side(SOFTENING * (1.0 + 1e-12)));
+    assert!((inner.0 - outer.0).abs() < 1e-11, "the potential jumps by {:e}", inner.0 - outer.0);
+    assert!((inner.1 - outer.1).abs() < 1e-10, "the force jumps by {:e}", inner.1 - outer.1);
+    // at zero softening both kinds are the bare point mass
+    for kind in kinds {
+        let k = kind.as_scalar();
+        for r in [0.05, 1.0, 3.0] {
+            let bare = -MASS / r;
+            assert!((body_potential([r, 0.0, 0.0], MASS, 0.0, k) - bare).abs() < 1e-14 * bare.abs(), "{kind:?} r = {r}: zero softening potential");
+            let force = body_gravity([r, 0.0, 0.0], MASS, 0.0, k)[0];
+            assert!((force + MASS / (r * r)).abs() < 1e-13 * force.abs(), "{kind:?} r = {r}: zero softening force {force:e}");
+        }
+    }
+}
+
+/// the body pass alone, on a uniform gas carrying momentum: the momenta gain dt rho g in the two
+/// meridional slots and none azimuthally, through the softened interior. the face work reads
+/// the stage's mass flux, here zero, so the same pass adds no energy under the admission, and the
+/// cell momentum's arm adds dt m . g
+macro_rules! assert_body_pass {
+    ($label:expr, $metric:expr, $metric_ty:ty, $lo:expr, $hi:expr, $kind:expr, $cell:expr) => {{
+        type Sim = SimStateGeneric<Newtonian, 2, 3, $metric_ty, IdealGas<f64>, CpuSpace, HostMemory>;
+        let (lo, hi): ([f64; 2], [f64; 2]) = ($lo, $hi);
+        for cell_work in [false, true] {
+            let mut sim: Sim = Sim::build(Newtonian, IdealGas { gamma: GAMMA }, $metric)
+                .cells(N)
+                .origin(lo)
+                .spacing([(hi[0] - lo[0]) / N[0] as f64, (hi[1] - lo[1]) / N[1] as f64])
+                .boundaries(Boundaries::per_axis([[BoundaryType::Outflow; 2]; 2]))
+                .cfl(CFL)
+                .timestepping(Timestepping::Rk2)
+                .allocate()
+                .expect("the plane with three velocity components")
+                .set_initial(|_| Prim::adiabatic(Density(2.0), Tensor::new([0.3, -0.2, 0.5]), Pressure(1.0)))
+                .build()
+                .with_bodies(BodyCollection::new().add(
+                    Body::gravitational(0, Tensor::zeros(), Tensor::zeros(), MASS, 0.0, SOFTENING).with_softening_kind($kind),
+                ));
+            let mut kernels = AdiabaticSubstrateKernelSet::<HostMemory, f64, 2>::new(GAMMA, CFL, &sim.geom.allocated);
+            kernels.cell_momentum_gravity_work = cell_work;
+            KernelSet::c2p(&kernels, &sim);
+            sim.mark_stage_input_captured();
+            KernelSet::snapshot_stage(&kernels, &sim);
+            sim.dt = 0.0;
+            let store_ref: &FieldStore<2, 3, HostMemory, f64> = &sim;
+            let before = cons_of(&store_ref.fields.cons, N[0], N[1]);
+            let dt = 1e-3;
+            KernelSet::body_source(&kernels, store_ref, dt);
+            let after = cons_of(&store_ref.fields.cons, N[0], N[1]);
+            let mut inside = 0usize;
+            for j in 0..N[1] {
+                for i in 0..N[0] {
+                    let g: Cell = $cell(N, lo, hi, i, j);
+                    inside += usize::from(g.r_c < SOFTENING);
+                    let accel = acceleration($kind, g.r_c);
+                    for (slot, along) in g.slots.iter().zip(g.radial) {
+                        let rate = (after.mom[*slot].at(i, j) - before.mom[*slot].at(i, j)) / dt;
+                        let expected = before.den.at(i, j) * accel * along;
+                        assert!((rate - expected).abs() < 1e-11 * accel.abs().max(1.0), "{} {:?} [{i}, {j}] slot {slot}: {rate:e} against {expected:e}", $label, $kind);
+                    }
+                    let azimuthal = 3 - g.slots[0] - g.slots[1];
+                    assert_eq!(after.mom[azimuthal].at(i, j), before.mom[azimuthal].at(i, j), "{}: the azimuthal momentum moved", $label);
+                    assert_eq!(after.den.at(i, j), before.den.at(i, j), "{}: the density moved", $label);
+                    let gained = after.nrg.at(i, j) - before.nrg.at(i, j);
+                    let m_along = g.radial[0] * before.mom[g.slots[0]].at(i, j) + g.radial[1] * before.mom[g.slots[1]].at(i, j);
+                    let expected = if cell_work { dt * m_along * accel } else { 0.0 };
+                    assert!((gained - expected).abs() < 1e-12 * before.nrg.at(i, j).abs(), "{} {:?} [{i}, {j}] cell work {cell_work}: energy gain {gained:e} against {expected:e}", $label, $kind);
+                }
+            }
+            assert!(inside > 0, "{}: no cell lies inside the softening", $label);
+        }
+    }};
+}
+
+#[test]
+fn the_body_pass_is_rho_g_through_the_softened_interior() {
+    for kind in [SofteningKind::Compact, SofteningKind::Plummer] {
+        assert_body_pass!("sphere", Spherical, Spherical, SPHERE.0, SPHERE.1, kind, sphere_cell);
+        assert_body_pass!("cylinder", Cylindrical, Cylindrical, PLANE.0, PLANE.1, kind, cylinder_cell);
+    }
+}
+
+/// every body the admission refuses runs the cell momentum's work bit for bit, and the admitted body
+/// differs from it, so a refused body's run is the one it was before the face work existed
+macro_rules! assert_refused_bodies {
+    ($label:expr, $metric:expr, $metric_ty:ty, $lo:expr, $hi:expr) => {{
+        let (lo, hi): ([f64; 2], [f64; 2]) = ($lo, $hi);
+        let run = |work: bool, bodies: BodyCollection<f64, 2>| frames!(@bodies $metric, $metric_ty, N, lo, hi, work, 2, ring(lo, hi), bodies);
+        let bare = Body::<f64, 2>::gravitational(0, Tensor::zeros(), Tensor::zeros(), MASS, 0.0, SOFTENING);
+        let (admitted, cell) = (run(false, BodyCollection::new().add(bare)), run(true, BodyCollection::new().add(bare)));
+        assert_ne!(admitted[0].output.nrg.v, cell[0].output.nrg.v, "{}: the admitted body runs the cell work; the comparison is vacuous", $label);
+        let mut moved = bare;
+        moved.position = Tensor::new([0.0, 0.05]);
+        let mut moving = bare;
+        moving.velocity = Tensor::new([0.0, 1e-9]);
+        let second = Body::<f64, 2>::gravitational(1, Tensor::zeros(), Tensor::zeros(), MASS, 0.0, SOFTENING);
+        let cases: [(&str, BodyCollection<f64, 2>); 4] = [
+            ("off the origin", BodyCollection::new().add(moved)),
+            ("in motion", BodyCollection::new().add(moving)),
+            ("with a reaction", BodyCollection::new().add(bare.with_two_way_coupling(true))),
+            ("beside a second body", BodyCollection::new().add(bare).add(second)),
+        ];
+        for (case, bodies) in cases {
+            let (default, control) = (run(false, bodies.clone()), run(true, bodies));
+            for (a, b) in default.iter().zip(&control) {
+                assert_eq!(a.output.nrg.v, b.output.nrg.v, "{} {case}: the refused body left the cell work", $label);
+            }
+        }
+    }};
+}
+
+#[test]
+fn every_refused_body_runs_the_cell_work_bit_for_bit() {
+    assert_refused_bodies!("sphere", Spherical, Spherical, SPHERE.0, SPHERE.1);
+    assert_refused_bodies!("cylinder", Cylindrical, Cylindrical, PLANE.0, PLANE.1);
 }
 
 #[test]
