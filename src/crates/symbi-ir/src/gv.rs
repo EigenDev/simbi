@@ -1506,10 +1506,6 @@ impl<'t> std::ops::Not for GvMask<'t> {
 impl<'t> symbi_carrier::Mask for GvMask<'t> {}
 
 impl<'t> symbi_carrier::Scalar for Gv<'t> {
-    fn max_finite() -> Self {
-        Gv::lit(f64::MAX)
-    }
-
     type Mask = GvMask<'t>;
 
     // zero / one inherited from `Numeric for Gv`.

@@ -24,7 +24,7 @@ fn every_finite_f64_is_finite_and_nothing_else_is() {
         assert!(!x.is_finite_mask(), "{x:e}");
         assert_eq!(x.is_finite_mask(), x - x == 0.0, "{x:e} left the cancellation form's answer on a non-fusing target");
     }
-    // the bound sits exactly at the largest finite value
+    // the largest finite value stays inside the bound
     assert!(f64::MAX.is_finite_mask());
     assert!(!(f64::MAX * 2.0).is_finite_mask());
 }

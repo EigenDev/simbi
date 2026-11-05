@@ -210,10 +210,6 @@ impl<S: Scalar> Numeric for Dual<S> {
 impl<S: Scalar> Scalar for Dual<S> {
     type Mask = S::Mask;
 
-    fn max_finite() -> Self {
-        Dual { value: S::max_finite(), tangent: S::ZERO }
-    }
-
     const INFINITY: Self = Dual {
         value: S::INFINITY,
         tangent: S::ZERO,
