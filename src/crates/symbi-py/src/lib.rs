@@ -9737,8 +9737,8 @@ fn primitive_row_dof(cfg: &Config, width: usize) -> Result<usize, String> {
 
 /// the first property of a flat newtonian run with three velocity components on a plane outside
 /// the verified scope: the adiabatic or isothermal gas on a 2D cartesian, (r, theta) or (R, z) plane
-/// under plm and hlle, on host memory; on the axisymmetric planes at most one bare point mass at
-/// rest on the symmetry axis. each refusal names the missing kernels or gates
+/// under plm and hlle; on the axisymmetric planes at most one bare point mass at rest on the
+/// symmetry axis. each refusal names the missing kernels or gates
 fn lifted_newtonian_refusal(cfg: &Config) -> Option<String> {
     const GRAVITATIONAL: u64 = 1;
     let bare_axial_mass = |b: &BodyParams| {
@@ -9747,8 +9747,7 @@ fn lifted_newtonian_refusal(cfg: &Config) -> Option<String> {
             && b.position.iter().all(|x| *x == 0.0)
             && b.velocity.iter().all(|v| *v == 0.0)
     };
-    let checks: [(bool, &str); 15] = [
-        (cfg!(feature = "gpu"), "device execution, whose hardware gates have not run"),
+    let checks: [(bool, &str); 14] = [
         (cfg.coord_system == "cartesian" && !cfg.bodies.is_empty(), "a body on the cartesian plane, whose lifted source kernels are not baked"),
         (cfg.refinement_enabled, "mesh refinement"),
         (cfg.solver != Solver::Hlle, "a solver other than hlle"),

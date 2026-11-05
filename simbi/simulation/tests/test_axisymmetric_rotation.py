@@ -67,7 +67,7 @@ class Plane(SimbiProblem):
 if __name__ == "__main__":
     p = Plane(data_directory=sys.argv[1])
     p.checkpoint_interval = 1e-9
-    runner.run(p, compute_mode="cpu", max_steps={steps})
+    runner.run(p, compute_mode="{backend}", max_steps={steps})
 '''
 CLOSURES = {
     "adiabatic": dict(closure="    regime: Regime = Regime.NEWTONIAN\n    adiabatic_index: float = 5.0 / 3.0\n", pressure=", 100.0"),
@@ -93,7 +93,7 @@ PLANES = {
 
 def _script(tmp_path: Path, plane: str, closure: str = "adiabatic", extra: str = "", capability: str = "GRAVITATIONAL", position: str = "(0.0, 0.0)", accretion: str = "") -> str:
     path = tmp_path / "plane_case.py"
-    path.write_text(CASE.format(extra=extra, capability=capability, position=position, accretion=accretion, steps=STEPS, **PLANES[plane], **CLOSURES[closure]))
+    path.write_text(CASE.format(backend=ph.BACKEND, extra=extra, capability=capability, position=position, accretion=accretion, steps=STEPS, **PLANES[plane], **CLOSURES[closure]))
     return str(path)
 
 

@@ -25,7 +25,7 @@ def test_the_cold_torus_surface_stays_admissible_to_the_end_time(tmp_path: Path)
         "import sys\n"
         "from simbi.simulation import runner\n"
         "from simbi.simulation.tests.fixtures.cold_surface_torus import ColdSurfaceTorus\n"
-        "runner.run(ColdSurfaceTorus(data_directory=sys.argv[1]), compute_mode='cpu')\n"
+        f"runner.run(ColdSurfaceTorus(data_directory=sys.argv[1]), compute_mode={ph.BACKEND!r})\n"
     )
     ph.python(ph.snippet_args(snippet, str(out)), "the cold surface torus")
     final = next(out.glob("*final*.h5"))

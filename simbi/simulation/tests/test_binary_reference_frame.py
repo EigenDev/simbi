@@ -90,12 +90,12 @@ class Binary(SimbiProblem):
 if __name__ == "__main__":
     p = Binary(data_directory=sys.argv[1])
     p.checkpoint_interval = 1e-9
-    runner.run(p, compute_mode="cpu", max_steps={steps})
+    runner.run(p, compute_mode="{backend}", max_steps={steps})
 '''
 
 
 def _script(frame: str, prescribed: bool = True, eccentricity: float = 0.0, two_way: bool = False) -> str:
-    return BINARY.format(frame=frame, prescribed=prescribed, eccentricity=eccentricity, two_way=two_way, separation=SEPARATION,
+    return BINARY.format(backend=ph.BACKEND, frame=frame, prescribed=prescribed, eccentricity=eccentricity, two_way=two_way, separation=SEPARATION,
                          mass_ratio=MASS_RATIO, total_mass=TOTAL_MASS, steps=STEPS)
 
 
