@@ -1883,38 +1883,51 @@ fn parse_reference_frame(name: &str) -> Result<symbi_ib::ReferenceFrame, String>
     }
 }
 
-/// the binary orbits the bodies carry: a prescribed circular orbit in any frame. an eccentric orbit
-/// and a corotating binary that moves under its own dynamics (motion not prescribed, or a
-/// component two-way coupled, whose reaction drifts it through the rotating frame without the
-/// frame's fictitious forces) are refused by name
+/// the binary orbits the bodies carry: a prescribed circular orbit in any frame and a prescribed
+/// eccentric orbit, 0 < e < 1, in the inertial frame. refused by name: an eccentricity outside a bound
+/// orbit; an eccentric orbit in a frame other than the inertial one or with a two-way coupled
+/// component, whose reaction the prescribed ellipse leaves out; a binary moving under its own
+/// dynamics; and a corotating binary with a two-way coupled component
 fn binary_admission(
     frame: symbi_ib::ReferenceFrame,
     prescribed_motion: bool,
     eccentricity: f64,
     two_way: &[bool],
 ) -> Result<(), String> {
-    if eccentricity != 0.0 {
+    if !(0.0..1.0).contains(&eccentricity) {
         return Err(format!(
-            "a binary eccentricity of {eccentricity}: the prescribed binary orbit is circular; set eccentricity = 0"
+            "a binary eccentricity of {eccentricity}: a bound keplerian orbit has 0 <= eccentricity < 1"
         ));
     }
-    if frame == symbi_ib::ReferenceFrame::Corotating {
-        if !prescribed_motion {
-            return Err(
-                "a corotating binary with prescribed_motion = false: the corotating frame holds the components \
-                 at rest on their prescribed circular orbit; a binary moving under its own dynamics in a \
-                 rotating frame is outside the body update"
-                    .to_string(),
-            );
+    if !prescribed_motion {
+        return Err(
+            "a binary with prescribed_motion = false: the components follow a prescribed keplerian orbit; \
+             a binary moving under its own dynamics is outside the body update"
+                .to_string(),
+        );
+    }
+    if eccentricity != 0.0 {
+        if frame != symbi_ib::ReferenceFrame::Inertial {
+            return Err(format!(
+                "an eccentric binary (eccentricity {eccentricity}) in the {frame:?} frame: the separation varies \
+                 along the ellipse, so a uniformly rotating or a stationary frame holds no prescribed eccentric \
+                 orbit; use the inertial frame"
+            ));
         }
         if two_way.iter().any(|&on| on) {
-            return Err(
-                "a corotating binary with a two-way coupled component: the gas reaction would move the \
-                 component through the rotating frame without the frame's coriolis and centrifugal forces; \
-                 set two_way_coupling = false"
-                    .to_string(),
-            );
+            return Err(format!(
+                "an eccentric binary (eccentricity {eccentricity}) with a two-way coupled component: the prescribed \
+                 ellipse sets the orbit and leaves out the gas reaction; set two_way_coupling = false"
+            ));
         }
+    }
+    if frame == symbi_ib::ReferenceFrame::Corotating && two_way.iter().any(|&on| on) {
+        return Err(
+            "a corotating binary with a two-way coupled component: the gas reaction would move the \
+             component through the rotating frame without the frame's coriolis and centrifugal forces; \
+             set two_way_coupling = false"
+                .to_string(),
+        );
     }
     Ok(())
 }
@@ -1985,7 +1998,14 @@ fn parse_binary_components(dict: &Bound<'_, PyDict>, out: &mut Vec<BodyParams>) 
     let mass_ratio = get_f64_or(&bc, "mass_ratio", 1.0);
     // the frame-relative initial state; an unknown frame name is refused by `parse_binary`
     let frame = body_system_frame(dict).unwrap_or(symbi_ib::ReferenceFrame::Inertial);
-    let [(p1, v1, _), (p2, v2, _)] = symbi_ib::circular_binary_state::<f64>(total_mass, semi_major, mass_ratio, frame);
+    let eccentricity = get_f64_or(&bc, "eccentricity", 0.0);
+    // `parse_binary` refuses an eccentricity outside a bound orbit and an eccentric orbit in any frame
+    // but the inertial one
+    let [(p1, v1, _), (p2, v2, _)] = if eccentricity != 0.0 && (0.0..1.0).contains(&eccentricity) {
+        symbi_ib::eccentric_binary_state::<f64>(total_mass, semi_major, eccentricity, mass_ratio)
+    } else {
+        symbi_ib::circular_binary_state::<f64>(total_mass, semi_major, mass_ratio, frame)
+    };
     let ics = [(p1, v1), (p2, v2)];
     let Ok(Some(comps)) = bc.get_item("components") else {
         return;
@@ -5513,19 +5533,28 @@ mod diagnostics_tests {
     }
 
     #[test]
-    fn a_binary_outside_the_prescribed_circular_orbit_is_refused_by_name() {
+    fn a_binary_outside_the_prescribed_keplerian_orbits_is_refused_by_name() {
         use symbi_ib::ReferenceFrame::*;
         for frame in [Inertial, Corotating, Stationary] {
             assert_eq!(binary_admission(frame, true, 0.0, &[false, false]), Ok(()));
-            let eccentric = binary_admission(frame, true, 0.3, &[false, false]).unwrap_err();
-            assert!(eccentric.contains("eccentricity of 0.3") && eccentric.contains("circular"), "{eccentric}");
+            let dynamic = binary_admission(frame, false, 0.0, &[false, false]).unwrap_err();
+            assert!(dynamic.contains("prescribed_motion = false"), "{dynamic}");
+            for unbound in [-0.1, 1.0, 1.5, f64::NAN] {
+                let err = binary_admission(frame, true, unbound, &[false, false]).unwrap_err();
+                assert!(err.contains("eccentricity of") && err.contains("bound"), "{err}");
+            }
         }
-        let dynamic = binary_admission(Corotating, false, 0.0, &[false, false]).unwrap_err();
-        assert!(dynamic.contains("prescribed_motion = false"), "{dynamic}");
+        assert_eq!(binary_admission(Inertial, true, 0.3, &[false, false]), Ok(()));
+        for frame in [Corotating, Stationary] {
+            let eccentric = binary_admission(frame, true, 0.3, &[false, false]).unwrap_err();
+            assert!(eccentric.contains("eccentric binary") && eccentric.contains("inertial frame"), "{eccentric}");
+        }
+        let reacting = binary_admission(Inertial, true, 0.3, &[false, true]).unwrap_err();
+        assert!(reacting.contains("eccentric binary") && reacting.contains("two-way coupled"), "{reacting}");
         let two_way = binary_admission(Corotating, true, 0.0, &[false, true]).unwrap_err();
         assert!(two_way.contains("two-way coupled component"), "{two_way}");
-        // the inertial frame keeps its behavior for these settings
-        assert_eq!(binary_admission(Inertial, false, 0.0, &[true, true]), Ok(()));
+        // a prescribed circular inertial orbit keeps its behavior for a two-way coupled component
+        assert_eq!(binary_admission(Inertial, true, 0.0, &[true, true]), Ok(()));
     }
 
     // a rigid-capability body builds a non-accreting rigid sphere with the drain-off

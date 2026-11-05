@@ -2,8 +2,10 @@
 // motion.rs
 //
 // keplerian orbital evolution for binary systems.
-// provides pure functions for rotating body positions and velocities
-// by the orbital angle omega * dt.
+// provides pure functions for advancing body positions and velocities: a
+// circular orbit rotates them by the orbital angle omega * dt; an eccentric
+// orbit solves kepler's equation from the separation the bodies hold, with
+// pericenter on the +x axis.
 //
 // usage:
 //   let advanced = advance_binary(&collection, dt);
@@ -12,8 +14,8 @@
 
 use crate::body::{Body, BodyKind};
 use crate::body_delta::BodyDelta;
-use crate::collection::{BodyCollection, ReferenceFrame};
-use symbi_algebra::Tensor;
+use crate::collection::{BinaryParams, BodyCollection, ReferenceFrame};
+use symbi_algebra::{OrderedNumeric, Tensor};
 use symbi_carrier::Scalar;
 
 /// rotate a 2D vector by angle theta (radians) in the xy-plane.
@@ -32,10 +34,11 @@ pub fn rotate_3d<S: Scalar>(v: Tensor<S, 3>, theta: S) -> Tensor<S, 3> {
 
 /// compute advanced body positions for an inertial binary system.
 ///
-/// rotates all bodies by omega * dt where omega = sqrt(M / a^3).
+/// a circular orbit rotates all bodies by omega * dt where omega = sqrt(M / a^3); an eccentric orbit
+/// advances the mean anomaly by the same omega * dt.
 /// returns Some only for a 2D or 3D binary in an inertial frame; a corotating or
 /// stationary frame, a 1D system, or any other body count yields None.
-pub fn advance_binary<S: Scalar, const D: usize>(
+pub fn advance_binary<S: Scalar + OrderedNumeric, const D: usize>(
     coll: &BodyCollection<S, D>,
     dt: S,
 ) -> Option<Vec<Body<S, D>>> {
@@ -53,6 +56,10 @@ pub fn advance_binary<S: Scalar, const D: usize>(
     let omega = (bp.total_mass / (bp.semi_major * bp.semi_major * bp.semi_major)).sqrt();
     let d_theta = omega * dt;
 
+    if !bp.is_circular {
+        return Some(advance_eccentric(coll, bp, d_theta));
+    }
+
     let mut advanced = Vec::with_capacity(coll.len());
     for body in coll.bodies() {
         let new_pos = rotate_nd(body.position, d_theta);
@@ -61,6 +68,76 @@ pub fn advance_binary<S: Scalar, const D: usize>(
     }
     Some(advanced)
 }
+
+/// the two components one mean-anomaly step `d_mean` along their ellipse. the eccentric anomaly comes
+/// from the separation the components hold, so the checkpointed positions carry the orbital phase
+/// and a resumed run continues it. the center of mass rests at the origin
+fn advance_eccentric<S: Scalar + OrderedNumeric, const D: usize>(
+    coll: &BodyCollection<S, D>,
+    bp: &BinaryParams<S>,
+    d_mean: S,
+) -> Vec<Body<S, D>> {
+    assert!(coll.len() >= 2, "an eccentric binary orbit advances two components; the collection holds {}", coll.len());
+    let e = bp.eccentricity;
+    let a = bp.semi_major;
+    let minor = (S::ONE - e * e).sqrt();
+    let (p1, p2) = (coll.get(0).position, coll.get(1).position);
+    let anomaly = ((p1[1] - p2[1]) / (a * minor)).atan2((p1[0] - p2[0]) / a + e);
+    let mean = anomaly - e * anomaly.sin() + d_mean;
+    let (separation, relative) = kepler_relative_state(bp, eccentric_anomaly(mean, e));
+    let (f1, f2) = component_fractions(bp.mass_ratio);
+    let mut advanced: Vec<Body<S, D>> = coll.bodies().to_vec();
+    for (body, share) in advanced.iter_mut().take(2).zip([f1, -f2]) {
+        for ax in 0..2 {
+            body.position[ax] = separation[ax] * share;
+            body.velocity[ax] = relative[ax] * share;
+        }
+    }
+    advanced
+}
+
+/// each component's share of the separation vector: its distance from the center of mass over the
+/// separation, body 1 the heavier for q < 1
+fn component_fractions<S: Scalar>(mass_ratio: S) -> (S, S) {
+    let one_plus_q = S::ONE + mass_ratio;
+    (mass_ratio / one_plus_q, S::ONE / one_plus_q)
+}
+
+/// the separation (body 1 minus body 2) and its rate at eccentric anomaly `anomaly`, pericenter on
+/// the +x axis, moving counterclockwise
+fn kepler_relative_state<S: Scalar>(bp: &BinaryParams<S>, anomaly: S) -> ([S; 2], [S; 2]) {
+    let (e, a) = (bp.eccentricity, bp.semi_major);
+    let minor = (S::ONE - e * e).sqrt();
+    let omega = (bp.total_mass / (a * a * a)).sqrt();
+    let (sin, cos) = (anomaly.sin(), anomaly.cos());
+    let rate = omega / (S::ONE - e * cos);
+    (
+        [a * (cos - e), a * minor * sin],
+        [S::ZERO - a * sin * rate, a * minor * cos * rate],
+    )
+}
+
+/// the solution E of kepler's equation E - e sin E = mean, 0 <= e < 1, in [-pi, pi]. newton's method
+/// from E = pi converges monotonically for every mean anomaly in [0, pi] and every e < 1
+/// (Charles & Tatum 1998)
+fn eccentric_anomaly<S: Scalar + OrderedNumeric>(mean: S, e: S) -> S {
+    let wrapped = mean.sin().atan2(mean.cos());
+    let negative = wrapped < S::ZERO;
+    let target = if negative { S::ZERO - wrapped } else { wrapped };
+    let tolerance = S::from_f64(4.0 * f64::EPSILON);
+    let mut anomaly = S::from_f64(std::f64::consts::PI);
+    for _ in 0..KEPLER_MAX_ITERATIONS {
+        let step = (anomaly - e * anomaly.sin() - target) / (S::ONE - e * anomaly.cos());
+        anomaly = anomaly - step;
+        if step <= tolerance && S::ZERO - step <= tolerance {
+            break;
+        }
+    }
+    if negative { S::ZERO - anomaly } else { anomaly }
+}
+
+/// more than the monotone newton iteration takes from E = pi at the highest eccentricity gated
+const KEPLER_MAX_ITERATIONS: usize = 200;
 
 /// apply per-body diagnostic deltas (force / torque / would-be accreted mass) to a body collection,
 /// then advance the prescribed binary orbit. shared by the single-grid `evolve_bodies` (which passes
@@ -230,10 +307,32 @@ pub fn circular_binary_state<S: Scalar>(
     }
 }
 
+/// the eccentric binary's components at pericenter in the inertial frame: (position, velocity,
+/// mass) of each, body 1 the heavier for q < 1, the center of mass at rest at the origin. the
+/// separation lies on the +x axis and the orbit runs counterclockwise
+pub fn eccentric_binary_state<S: Scalar + OrderedNumeric>(
+    total_mass: S,
+    semi_major: S,
+    eccentricity: S,
+    mass_ratio: S,
+) -> [(Tensor<S, 2>, Tensor<S, 2>, S); 2] {
+    let bp = BinaryParams::new(total_mass, semi_major, eccentricity, mass_ratio);
+    let (separation, relative) = kepler_relative_state(&bp, S::ZERO);
+    let (f1, f2) = component_fractions(mass_ratio);
+    let m1 = total_mass / (S::ONE + mass_ratio);
+    let component = |share: S, mass: S| {
+        (
+            Tensor::new([separation[0] * share, separation[1] * share]),
+            Tensor::new([relative[0] * share, relative[1] * share]),
+            mass,
+        )
+    };
+    [component(f1, m1), component(S::ZERO - f2, total_mass - m1)]
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::collection::BinaryParams;
 
     fn approx(a: f64, b: f64) -> bool {
         (a - b).abs() < 1e-10 * a.abs().max(b.abs()).max(1.0)
@@ -604,5 +703,123 @@ mod tests {
             assert_eq!(coll.get(ii).position, *position, "body {ii} moved in its corotating frame");
             assert_eq!(coll.get(ii).velocity, Tensor::zeros(), "body {ii} gained a frame-relative velocity");
         }
+    }
+
+    fn eccentric(q: f64, e: f64) -> BodyCollection<f64, 2> {
+        let [(p1, v1, m1), (p2, v2, m2)] = eccentric_binary_state(1.0, 0.8, e, q);
+        BodyCollection::new()
+            .add(crate::Body::gravitational(0, p1, v1, m1, 0.0, 0.1))
+            .add(crate::Body::gravitational(1, p2, v2, m2, 0.0, 0.1))
+            .as_binary()
+            .with_binary_params(BinaryParams::new(1.0, 0.8, e, q))
+    }
+
+    fn step(coll: &mut BodyCollection<f64, 2>, dt: f64) {
+        let advanced = advance_binary(coll, dt).expect("an inertial binary advances");
+        for ii in 0..2 {
+            coll.get_mut(ii).position = advanced[ii].position;
+            coll.get_mut(ii).velocity = advanced[ii].velocity;
+        }
+    }
+
+    /// the analytic ellipse at time t after pericenter: the separation vector and its rate
+    fn analytic(e: f64, t: f64) -> ([f64; 2], [f64; 2]) {
+        let bp = BinaryParams::new(1.0, 0.8, e, 0.5);
+        let omega = (1.0_f64 / 0.8_f64.powi(3)).sqrt();
+        kepler_relative_state(&bp, eccentric_anomaly(omega * t, e))
+    }
+
+    #[test]
+    fn keplers_equation_holds_at_every_mean_anomaly_and_eccentricity() {
+        for e in [1e-12, 0.01, 0.3, 0.5, 0.9, 0.99, 0.999] {
+            for kk in -400..=400 {
+                let mean = kk as f64 * 0.0157;
+                let anomaly = eccentric_anomaly(mean, e);
+                assert!(anomaly.abs() <= std::f64::consts::PI + 1e-15, "e {e}, mean {mean}: {anomaly}");
+                let got = anomaly - e * anomaly.sin();
+                let residual = (got - mean).sin().abs();
+                assert!(residual < 3e-15, "e {e}, mean {mean}: E {anomaly}, residual {residual:e}");
+            }
+        }
+    }
+
+    #[test]
+    fn an_eccentric_binary_starts_at_pericenter_with_zero_total_momentum() {
+        for q in [0.25, 0.5, 1.0, 2.0] {
+            for e in [0.1, 0.5, 0.9] {
+                let [(p1, v1, m1), (p2, v2, m2)] = eccentric_binary_state(1.0, 0.8, e, q);
+                assert!(approx(p1[0] - p2[0], 0.8 * (1.0 - e)), "q {q}, e {e}: pericenter separation");
+                assert!(approx(p1[1], 0.0) && approx(p2[1], 0.0) && approx(v1[0], 0.0) && approx(v2[0], 0.0));
+                // the vis-viva speed at pericenter, counterclockwise
+                let speed = ((1.0 + e) / (1.0 - e) / 0.8_f64).sqrt();
+                assert!(approx(v1[1] - v2[1], speed), "q {q}, e {e}: {} against {speed}", v1[1] - v2[1]);
+                assert!((m1 * p1[0] + m2 * p2[0]).abs() < 1e-15, "q {q}, e {e}: center of mass");
+                assert!((m1 * v1[1] + m2 * v2[1]).abs() < 1e-15, "q {q}, e {e}: total momentum");
+            }
+        }
+    }
+
+    #[test]
+    fn an_eccentric_binary_follows_the_ellipse_and_conserves_its_invariants() {
+        let omega = (1.0_f64 / 0.8_f64.powi(3)).sqrt();
+        let period = 2.0 * std::f64::consts::PI / omega;
+        for e in [0.1, 0.5, 0.9] {
+            let mut coll = eccentric(0.5, e);
+            let steps = 4000;
+            let dt = 3.0 * period / steps as f64;
+            let h = 0.8 * (1.0 - e * e) * (1.0 / (0.8 * (1.0 - e * e))).sqrt();
+            for kk in 1..=steps {
+                step(&mut coll, dt);
+                let (a, b) = (coll.get(0), coll.get(1));
+                let r = [a.position[0] - b.position[0], a.position[1] - b.position[1]];
+                let v = [a.velocity[0] - b.velocity[0], a.velocity[1] - b.velocity[1]];
+                let (want_r, want_v) = analytic(e, kk as f64 * dt);
+                for ax in 0..2 {
+                    assert!((r[ax] - want_r[ax]).abs() < 2e-11, "e {e}, step {kk}: r {r:?} against {want_r:?}");
+                    assert!((v[ax] - want_v[ax]).abs() < 2e-10, "e {e}, step {kk}: v {v:?} against {want_v:?}");
+                }
+                let dist = r[0].hypot(r[1]);
+                let energy = 0.5 * (v[0] * v[0] + v[1] * v[1]) - 1.0 / dist;
+                assert!((energy + 1.0 / 1.6).abs() < 1e-11, "e {e}, step {kk}: specific energy {energy}");
+                assert!((r[0] * v[1] - r[1] * v[0] - h).abs() < 1e-11, "e {e}, step {kk}: specific angular momentum");
+                let (m1, m2) = (a.mass, b.mass);
+                for ax in 0..2 {
+                    assert!((m1 * a.position[ax] + m2 * b.position[ax]).abs() < 1e-14, "center of mass moved");
+                    assert!((m1 * a.velocity[ax] + m2 * b.velocity[ax]).abs() < 1e-13, "total momentum");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn an_eccentric_step_depends_on_the_positions_alone() {
+        // the stored velocity plays no part in the phase, so a state restored from its positions
+        // takes the identical step
+        let mut coll = eccentric(0.5, 0.5);
+        step(&mut coll, 0.37);
+        let want = advance_binary(&coll, 0.11).unwrap();
+        coll.get_mut(0).velocity = Tensor::new([3.0, -7.0]);
+        coll.get_mut(1).velocity = Tensor::new([-2.0, 5.0]);
+        let got = advance_binary(&coll, 0.11).unwrap();
+        for ii in 0..2 {
+            for ax in 0..2 {
+                assert_eq!(got[ii].position[ax].to_bits(), want[ii].position[ax].to_bits());
+                assert_eq!(got[ii].velocity[ax].to_bits(), want[ii].velocity[ax].to_bits());
+            }
+        }
+    }
+
+    #[test]
+    fn a_zero_eccentricity_takes_the_rotation_bit_for_bit() {
+        let (p1, v1, m1, p2, v2, m2) = keplerian_binary(1.0_f64, 0.8, 0.5);
+        let coll = BodyCollection::new()
+            .add(crate::Body::gravitational(0, p1, v1, m1, 0.0, 0.1))
+            .add(crate::Body::gravitational(1, p2, v2, m2, 0.0, 0.1))
+            .as_binary()
+            .with_binary_params(BinaryParams::new(1.0, 0.8, 0.0, 0.5));
+        let advanced = advance_binary(&coll, 0.3).unwrap();
+        let theta = (1.0_f64 / 0.8_f64.powi(3)).sqrt() * 0.3;
+        assert_eq!(advanced[0].position[0].to_bits(), (p1[0] * theta.cos() - p1[1] * theta.sin()).to_bits());
+        assert_eq!(advanced[0].position[1].to_bits(), (p1[0] * theta.sin() + p1[1] * theta.cos()).to_bits());
     }
 }

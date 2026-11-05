@@ -1,7 +1,7 @@
 # =============================================================================
 # test_binary_reference_frame.py
 #
-# the reference frame of a prescribed circular binary, from the problem's body
+# the reference frame and the orbit of a prescribed binary, from the problem's body
 # system to the evolved bodies on the single device. q = m2/m1 = 0.5, separation
 # a = 0.8, total mass 1; body 1 (the heavier) starts at (a q/(1+q), 0), body 2 at
 # (-a/(1+q), 0), and omega = sqrt(M / a^3).
@@ -11,9 +11,15 @@
 # - corotating: the frame turns with the orbit, so the components rest at their
 #   initial positions with zero velocity at every checkpoint
 # - stationary: the backend holds the positions fixed
-# - refused by name before any output: an eccentric orbit, a frame name outside
-#   inertial / corotating / stationary, and a corotating binary moving under its
-#   own dynamics (prescribed_motion = false, or a two-way coupled component)
+# - eccentric, e = 0.5, inertial: the components start at pericenter on the x axis
+#   and follow the keplerian ellipse, solved here apart from the backend by
+#   bisection, with zero center-of-mass momentum; the separation leaves the circle
+#   a run at e = 0 holds, and a resumed run ends on the uninterrupted run's bits
+# - refused by name before any output: an eccentricity outside a bound orbit, an
+#   eccentric orbit outside the inertial frame or with a two-way coupled component,
+#   a frame name outside inertial / corotating / stationary, a binary moving under
+#   its own dynamics (prescribed_motion = false) in any frame, and a corotating
+#   binary with a two-way coupled component
 #
 # run: pytest -m simulation simbi/simulation/tests/test_binary_reference_frame.py
 # =============================================================================
@@ -95,6 +101,7 @@ def _script(frame: str, prescribed: bool = True, eccentricity: float = 0.0, two_
 
 def _module(tmp_path: Path, **settings) -> str:
     """the case as a module file: the runner records the problem class's source"""
+    tmp_path.mkdir(parents=True, exist_ok=True)
     path = tmp_path / "binary_case.py"
     path.write_text(_script(**settings))
     return str(path)
@@ -157,9 +164,64 @@ def test_a_stationary_binary_holds_its_positions(tmp_path: Path) -> None:
         np.testing.assert_array_equal(position, INITIAL, err_msg=f"t = {t}: a stationary component moved")
 
 
+ECCENTRICITY = 0.5
+
+
+def _kepler_separation(t: float, e: float) -> tuple[np.ndarray, np.ndarray]:
+    """the separation (body 1 minus body 2) and its rate t after pericenter, kepler's equation solved
+    by bisection"""
+    mean = math.remainder(OMEGA * t, 2.0 * math.pi)
+    low, high = -math.pi, math.pi
+    for _ in range(200):
+        anomaly = 0.5 * (low + high)
+        if anomaly - e * math.sin(anomaly) < mean:
+            low = anomaly
+        else:
+            high = anomaly
+    rate = OMEGA / (1.0 - e * math.cos(anomaly))
+    minor = math.sqrt(1.0 - e * e)
+    return (np.array([SEPARATION * (math.cos(anomaly) - e), SEPARATION * minor * math.sin(anomaly)]),
+            np.array([-SEPARATION * math.sin(anomaly) * rate, SEPARATION * minor * math.cos(anomaly) * rate]))
+
+
+def test_an_eccentric_binary_follows_its_ellipse_from_pericenter(tmp_path: Path) -> None:
+    files = _run(tmp_path, frame="inertial", eccentricity=ECCENTRICITY)
+    first, _, t0 = _bodies(files[0])
+    assert t0 == 0.0
+    np.testing.assert_allclose(first[0] - first[1], [SEPARATION * (1.0 - ECCENTRICITY), 0.0], rtol=0.0, atol=1e-15)
+    for path in files:
+        position, velocity, t = _bodies(path)
+        separation, rate = _kepler_separation(t, ECCENTRICITY)
+        np.testing.assert_allclose(position[0] - position[1], separation, rtol=0.0, atol=1e-12, err_msg=f"t = {t}: separation")
+        np.testing.assert_allclose(velocity[0] - velocity[1], rate, rtol=0.0, atol=1e-11, err_msg=f"t = {t}: relative velocity")
+        np.testing.assert_allclose(M1 * position[0] + M2 * position[1], [0.0, 0.0], rtol=0.0, atol=1e-14, err_msg=f"t = {t}: center of mass")
+        np.testing.assert_allclose(M1 * velocity[0] + M2 * velocity[1], [0.0, 0.0], rtol=0.0, atol=1e-13, err_msg=f"t = {t}: total momentum")
+    final = _bodies(files[-1])[2]
+    grown = np.linalg.norm(np.subtract(*_bodies(files[-1])[0])) - SEPARATION * (1.0 - ECCENTRICITY)
+    assert final > 0.0 and grown > 1e-6, f"t = {final}: the separation grew by {grown}; the run never left pericenter"
+
+
+def test_a_resumed_eccentric_binary_ends_on_the_uninterrupted_bits(tmp_path: Path) -> None:
+    whole = _run(tmp_path / "whole", frame="inertial", eccentricity=ECCENTRICITY)
+    halfway = next(p for p in whole if _time(p) > 0.0 and p.name != whole[-1].name)
+    resumed = tmp_path / "resumed"
+    script = _script(frame="inertial", eccentricity=ECCENTRICITY).replace("Binary(data_directory=sys.argv[1])", f"Binary(data_directory=sys.argv[1], checkpoint_file={str(halfway)!r})")
+    (tmp_path / "resumed_case.py").write_text(script)
+    ph.python([str(tmp_path / "resumed_case.py"), str(resumed)], "the eccentric binary resumed")
+    ended = max(resumed.glob("*.h5"), key=_time)
+    assert _time(ended) == _time(whole[-1]), f"resumed run ended at {_time(ended)}, the whole run at {_time(whole[-1])}"
+    for got, want, name in zip(_bodies(ended)[:2], _bodies(whole[-1])[:2], ("position", "velocity"), strict=True):
+        np.testing.assert_array_equal(got, want, err_msg=f"resumed {name}")
+
+
 REFUSED = {
-    "eccentric-inertial": ({"frame": "inertial", "eccentricity": 0.2}, "eccentricity of 0.2"),
-    "eccentric-corotating": ({"frame": "corotating", "eccentricity": 0.2}, "eccentricity of 0.2"),
+    "unbound": ({"frame": "inertial", "eccentricity": 1.0}, "eccentricity of 1:"),
+    "negative-eccentricity": ({"frame": "inertial", "eccentricity": -0.2}, "eccentricity of -0.2"),
+    "eccentric-corotating": ({"frame": "corotating", "eccentricity": 0.2}, "eccentric binary"),
+    "eccentric-stationary": ({"frame": "stationary", "eccentricity": 0.2}, "eccentric binary"),
+    "eccentric-two-way": ({"frame": "inertial", "eccentricity": 0.2, "two_way": True}, "eccentric binary"),
+    "dynamic-inertial": ({"frame": "inertial", "prescribed": False}, "prescribed_motion = false"),
+    "dynamic-stationary": ({"frame": "stationary", "prescribed": False}, "prescribed_motion = false"),
     "unknown-frame": ({"frame": "com"}, "reference_frame 'com'"),
     "dynamic-corotating": ({"frame": "corotating", "prescribed": False}, "prescribed_motion = false"),
     "two-way-corotating": ({"frame": "corotating", "two_way": True}, "two-way coupled component"),

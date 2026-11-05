@@ -22,7 +22,8 @@
 #   two nested boxes
 # - hllc+: the kelvin-helmholtz plane and the refined 3D blast
 # - moving binaries: a prescribed circular accreting binary on a plane, flat
-#   and under a fine box covering the orbit
+#   and under a fine box covering the orbit, and the eccentric orbit e = 0.5 on
+#   the same plane and box
 # - a moving body under its own feedback: the bondi sink launched across the
 #   grid with two-way coupling, flat and under one fine box; the gas reaction
 #   and the accretion receipts set its trajectory, so every step's body state
@@ -136,8 +137,8 @@ def _component() -> BinaryComponentConfig:
 
 
 class {name}(SimbiProblem):
-    """a prescribed circular binary of two accreting point masses orbiting the center of a uniform
-    gas at rest on [-2, 2]^2"""
+    """a prescribed binary of two accreting point masses, eccentricity {eccentricity}, orbiting the center
+    of a uniform gas at rest on [-2, 2]^2"""
 
     resolution: Annotated[tuple[int, int], ProblemParam((48, 48), cli=True, description="grid")]
     bounds: list[tuple[float, float]] = [(-2.0, 2.0), (-2.0, 2.0)]
@@ -151,7 +152,7 @@ class {name}(SimbiProblem):
     def body_system(self) -> Optional[BodySystemConfig]:
         return GravitationalSystemConfig(
             prescribed_motion=True, reference_frame="inertial", system_type="binary",
-            binary_config=BinaryConfig(semi_major=0.8, eccentricity=0.0, mass_ratio=1.0, total_mass=1.0,
+            binary_config=BinaryConfig(semi_major=0.8, eccentricity={eccentricity}, mass_ratio=1.0, total_mass=1.0,
                                        components=[_component(), _component()]),
         )
 
@@ -291,6 +292,12 @@ NO_SOURCES = (
 NO_BODY_SYSTEM = (
     "    @computed_field\n    @property\n    def body_system(self) -> Optional[BodySystemConfig]:\n        return None\n"
 )
+CIRCULAR_ORBIT = (
+    "    @computed_field\n    @property\n    def body_system(self) -> Optional[BodySystemConfig]:\n"
+    "        from dataclasses import replace\n\n"
+    "        system = super().body_system\n"
+    "        return replace(system, binary_config=replace(system.binary_config, eccentricity=0.0))\n"
+)
 BODY_SYSTEM_IMPORTS = "from typing import Optional\n\nfrom pydantic import computed_field\n\nfrom simbi.types.bodies import BodySystemConfig\n"
 BLAST_CONTROL = (BLAST_VARIANT.format(name="BlastControl", line=""), "BlastControl")
 SINK_CONTROL = (SINK_VARIANT.format(name="SinkControl", sponge=False, fields="", bodies="[body]"), "SinkControl")
@@ -333,13 +340,21 @@ FEATURES = {
                                control=KH_CONTROL),
     "hllc-plus-refined-3d": Feature(HLLC_PLUS_BLAST, "HllcPlusBlast", (24, 24, 24), [[12], [], []], [[7, 15], [], []],
                                     f"reject_level:1:{REJECTED_STEP}:1:1:1", control=BLAST_CONTROL),
-    "moving-binary-2d": Feature(BINARY.format(name="MovingBinary", refinement=""), "MovingBinary", (48, 48), [[24], []], [[14, 30], []],
+    "moving-binary-2d": Feature(BINARY.format(name="MovingBinary", refinement="", eccentricity=0.0), "MovingBinary", (48, 48), [[24], []], [[14, 30], []],
                                 f"reject:1:{REJECTED_STEP}:1",
                                 control=_control("moving-binary-2d", "MovingBinary", NO_BODY_SYSTEM, BODY_SYSTEM_IMPORTS)),
-    "moving-binary-refined-2d": Feature(BINARY.format(name="MovingBinaryRefined", refinement=BINARY_BOX), "MovingBinaryRefined", (48, 48),
+    "moving-binary-refined-2d": Feature(BINARY.format(name="MovingBinaryRefined", refinement=BINARY_BOX, eccentricity=0.0), "MovingBinaryRefined", (48, 48),
                                         [[24], []], [[14, 30], []], f"reject_level:1:{REJECTED_STEP}:1:1:1",
                                         control=_control("moving-binary-refined-2d", "MovingBinaryRefined", NO_BODY_SYSTEM,
                                                          BODY_SYSTEM_IMPORTS)),
+    "moving-eccentric-binary-2d": Feature(BINARY.format(name="EccentricBinary", refinement="", eccentricity=0.5), "EccentricBinary", (48, 48),
+                                          [[24], []], [[14, 30], []], f"reject:1:{REJECTED_STEP}:1",
+                                          control=_control("moving-eccentric-binary-2d", "EccentricBinary", CIRCULAR_ORBIT, BODY_SYSTEM_IMPORTS)),
+    "moving-eccentric-binary-refined-2d": Feature(BINARY.format(name="EccentricBinaryRefined", refinement=BINARY_BOX, eccentricity=0.5),
+                                                  "EccentricBinaryRefined", (48, 48), [[24], []], [[14, 30], []],
+                                                  f"reject_level:1:{REJECTED_STEP}:1:1:1",
+                                                  control=_control("moving-eccentric-binary-refined-2d", "EccentricBinaryRefined", CIRCULAR_ORBIT,
+                                                                   BODY_SYSTEM_IMPORTS)),
     **{f"refined-blast-{key}": Feature(BLAST_VARIANT.format(name=f"Blast{cls}", line=line), f"Blast{cls}", (24, 24, 24),
                                        [[12], [], []], [[7, 15], [], []], f"reject_level:1:{REJECTED_STEP}:1:1:1",
                                        control=BLAST_CONTROL)

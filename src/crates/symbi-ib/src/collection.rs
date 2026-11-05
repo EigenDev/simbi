@@ -44,7 +44,7 @@ impl<S: Scalar + OrderedNumeric> BinaryParams<S> {
         let two_pi = S::from_f64(2.0 * std::f64::consts::PI);
         let a3 = semi_major * semi_major * semi_major;
         let orbital_period = two_pi * (a3 / total_mass).sqrt();
-        let is_circular = eccentricity < S::from_f64(1e-10);
+        let is_circular = eccentricity == S::ZERO;
         Self {
             total_mass,
             semi_major,
