@@ -384,6 +384,8 @@ pub(crate) fn body_applied_gv<'t>(
     ndim: usize,
     ncomp: usize,
     axes: &[usize],
+    // the energy rate in place of the cell momentum's work `m . g`
+    energy_rate: Option<Gv<'t>>,
 ) -> (Gv<'t>, Vec<Gv<'t>>, Gv<'t>, Gv<'t>) {
     let inv_dt = Gv::ONE / dt;
     let cart_axes = body_cart_axes(coords, ndim, axes);
@@ -420,8 +422,97 @@ pub(crate) fn body_applied_gv<'t>(
     let mom_new: Vec<Gv> = (0..ncomp)
         .map(|comp| (dst_mom[comp] + dt * d_mom[comp]) * f)
         .collect();
-    let nrg_new = (dst_nrg + dt * gravity_work) * f;
+    let nrg_new = (dst_nrg + dt * energy_rate.unwrap_or(gravity_work)) * f;
     (den_new, mom_new, nrg_new, f)
+}
+
+/// the energy rate of slot 0's static potential from the stage's face mass fluxes,
+/// `-(1/V) \sum_f s_f A_f F_rho,f (Phi_f - Phi_c)`, with `s_f = +1` on a cell's high faces and
+/// `-1` on its low faces. with `d rho_c / dt = -(1/V) \sum_f s_f A_f F_rho,f` the sum gives
+/// `d(E_c + rho_c Phi_c)/dt = -(1/V) \sum_f s_f A_f (F_E,f + Phi_f F_rho,f)`, a flux form whose
+/// interior faces cancel because a face's center and potential are common to its two cells.
+/// a constant added to `Phi` leaves the rate unchanged. Stone & Gardiner 2010 sections 3.2-3.3.
+///
+/// stencil: the cell's own two faces per axis in `mass_flux[d]`. fields: this stage's mass flux and
+/// the geometry; the body contributes its potential. no synchronization beyond the flux pass
+/// that precedes it, and no reduction.
+fn static_potential_face_work_gv<'t>(
+    cx: TraceCx<'t>,
+    coords: Coords,
+    ndim: usize,
+    axes: &[usize],
+) -> Gv<'t> {
+    let spacing = vec![Spacing::Uniform; ndim];
+    let geo = cell_geometry_gv(cx, coords, &spacing, axes, ndim);
+    let (lo, hi, _) = crate::gv::geometry::gv_faces(cx, &spacing, ndim);
+    let cart_axes = body_cart_axes(coords, ndim, axes);
+    let (mass, soft, soft_kind) =
+        (cx.scalar("body_0_mass"), cx.scalar("body_0_soft"), cx.scalar("body_0_softkind"));
+    let bpos = body_vec3(cx, 0, ndim, &cart_axes, "pos");
+    let mut centroid = [Gv::ZERO; 3];
+    for (g, &coord_idx) in axes.iter().enumerate() {
+        centroid[coord_idx] = geo.centroid[g];
+    }
+    let potential = |coord: &[Gv<'t>; 3]| {
+        let cart = to_cartesian_gv(coords, coord);
+        let rvec: [Gv; 3] = std::array::from_fn(|ii| cart[ii] - bpos[ii]);
+        crate::ibm::body_potential(rvec, mass, soft, soft_kind)
+    };
+    let phi_c = potential(&centroid);
+    let mut acc = Gv::ZERO;
+    for d in 0..ndim {
+        let key = format!("mass_flux_{d}");
+        let path = format!("mass_flux[{d}]");
+        let f_lo = cx.field_shifted(&key, &path, ndim as u8, d as u8, 0);
+        let f_hi = cx.field_shifted(&key, &path, ndim as u8, d as u8, 1);
+        let mut face = centroid;
+        face[axes[d]] = lo[d];
+        let phi_lo = potential(&face);
+        face[axes[d]] = hi[d];
+        let phi_hi = potential(&face);
+        acc = acc + f_lo * geo.area_lo[d] * (phi_lo - phi_c) - f_hi * geo.area_hi[d] * (phi_hi - phi_c);
+    }
+    acc * geo.inv_volume
+}
+
+/// the body pass of a single static potential on an adiabatic axisymmetric plane: the momentum
+/// source of [`body_source_gv`] with the energy rate of [`static_potential_face_work_gv`]. the body
+/// scalars are slot 0's; the dispatch admits exactly one body.
+pub fn body_source_face_work_gv(
+    coords: Coords,
+    ndim: usize,
+    ncomp: usize,
+    axes: &[usize],
+) -> KernelProgram {
+    trace_kernel(|cx| {
+        let dt = cx.scalar("dt");
+        let gamma = cx.scalar("gamma");
+        let den = cx.field("den", FieldRef::cons_den());
+        let mom: Vec<Gv> = (0..ncomp)
+            .map(|comp| cx.field(&format!("mom_{comp}"), FieldRef::cons_mom(comp as u8)))
+            .collect();
+        let nrg = cx.field("nrg", FieldRef::cons_nrg());
+        let us_den = cx.field("us_den", FieldRef::ustage_den());
+        let us_mom: Vec<Gv> = (0..ncomp)
+            .map(|comp| cx.field(&format!("us_mom_{comp}"), FieldRef::ustage_mom(comp as u8)))
+            .collect();
+        let us_nrg = cx.field("us_nrg", FieldRef::ustage_nrg());
+        let rate = static_potential_face_work_gv(cx, coords, ndim, axes);
+        let (den_new, mom_new, nrg_new, _drain) = body_applied_gv(
+            cx, den, &mom, nrg, us_den, &us_mom, us_nrg, dt, gamma, 1, coords, ndim, ncomp, axes,
+            Some(rate),
+        );
+        let mut writes = vec![KernelWrite::new("den_new", FieldRef::cons_den(), den_new.node())];
+        for (comp, m) in mom_new.iter().enumerate() {
+            writes.push(KernelWrite::new(
+                format!("mom_{comp}_new"),
+                FieldRef::cons_mom(comp as u8),
+                m.node(),
+            ));
+        }
+        writes.push(KernelWrite::new("nrg_new", FieldRef::cons_nrg(), nrg_new.node()));
+        writes
+    })
 }
 
 pub fn body_source_gv(
@@ -450,7 +541,7 @@ pub fn body_source_gv(
         let us_nrg = cx.field("us_nrg", FieldRef::ustage_nrg());
         let (den_new, mom_new, nrg_new, drain) = body_applied_gv(
             cx, den, &mom, nrg, us_den, &us_mom, us_nrg, dt, gamma, n_bodies, coords, ndim, ncomp,
-            axes,
+            axes, None,
         );
 
         let mut writes = vec![KernelWrite::new(

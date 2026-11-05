@@ -1187,10 +1187,28 @@ pub fn godunov_stage_gv_with_fused_bodies_and_geo_weight(
             &contribs.den,
         );
         let mut mom_g: Vec<Gv> = Vec::with_capacity(ncomp);
+        // the azimuthal momentum of a flat newtonian axisymmetric plane: the torque form, whose
+        // telescoping carries the azimuthal geometric source, so that source is dropped
+        let azimuthal_slot = (spacetime == Spacetime::Minkowski
+            && matches!(source, GeoSource::Hydro { inertial: true })
+            && ndim == 2
+            && ncomp == 3)
+            .then(|| match coords {
+                Coords::Spherical => Some(2),
+                Coords::Cylindrical if axes == [0, 2] => Some(1),
+                _ => None,
+            })
+            .flatten();
         for k in 0..ncomp {
             let u_n_mom = cx.field(&format!("u_n_mom_{k}"), FieldRef::un_mom(k as u8));
-            let div = divergence(&format!("mom_flux_{k}"));
-            let geo_src = src.as_ref().map(|s| s[k]);
+            let azimuthal = azimuthal_slot == Some(k);
+            let div = if azimuthal {
+                let g = geo.as_ref().expect("an axisymmetric plane carries its cell geometry");
+                gv_divergence_axisymmetric_torque(cx, &format!("mom_flux_{k}"), coords, spacing, g)
+            } else {
+                divergence(&format!("mom_flux_{k}"))
+            };
+            let geo_src = if azimuthal { None } else { src.as_ref().map(|s| s[k]) };
             // every momentum slot carries its covariant geodesic block (gravity + covariant
             // centrifugal, coordinate k of the contraction) on top of the discrete pressure form in
             // geo_src; a suppressed axisymmetric slot's block is identically zero (the metric is
@@ -1276,6 +1294,7 @@ pub fn godunov_stage_gv_with_fused_bodies_and_geo_weight(
                     ndim as usize,
                     ncomp,
                     axes,
+                    None,
                 );
                 (den_b, mom_b, Some(nrg_b))
             } else {

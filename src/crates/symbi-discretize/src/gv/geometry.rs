@@ -68,6 +68,40 @@ fn gv_divergence_weighted<'t>(
     acc.expect("godunov divergence needs ndim >= 1") * geo.inv_volume
 }
 
+/// the azimuthal momentum's divergence on an axisymmetric plane, in torque form:
+/// `(1 / (V R_c)) sum_i (F_i[+e_i] A_hi_i R_hi_i - F_i A_lo_i R_lo_i)`, `R` the distance from the
+/// symmetry axis at the cell centroid and at each face center. the two cells sharing a face take
+/// one torque, so `sum V R_c M_phi` telescopes to the boundary faces and carries no geometric
+/// source. `axes` selects the plane: [0, 1] spherical (r, theta), [0, 2] cylindrical (R, z)
+pub(crate) fn gv_divergence_axisymmetric_torque<'t>(
+    cx: TraceCx<'t>,
+    base: &str,
+    coords: Coords,
+    spacing: &[Spacing],
+    geo: &CellGeometryGv<'t>,
+) -> Gv<'t> {
+    let (lo, hi, _) = gv_faces(cx, spacing, 2);
+    let (r_c, x_c) = (geo.centroid[0], geo.centroid[1]);
+    let (lever_c, lever_lo, lever_hi): (Gv, [Gv; 2], [Gv; 2]) = match coords {
+        Coords::Spherical => {
+            let sin_c = x_c.sin();
+            (r_c * sin_c, [lo[0] * sin_c, r_c * lo[1].sin()], [hi[0] * sin_c, r_c * hi[1].sin()])
+        }
+        Coords::Cylindrical => (r_c, [lo[0], r_c], [hi[0], r_c]),
+        Coords::Cartesian => panic!("the azimuthal torque divergence is an axisymmetric plane's"),
+    };
+    let mut acc = Gv::ZERO;
+    for ii in 0..2u8 {
+        let key = format!("{base}_{ii}");
+        let rt = format!("{base}[{ii}]");
+        let f_lo = cx.field_shifted(&key, &rt, 2, ii, 0);
+        let f_hi = cx.field_shifted(&key, &rt, 2, ii, 1);
+        let d = ii as usize;
+        acc = acc + f_hi * geo.area_hi[d] * lever_hi[d] - f_lo * geo.area_lo[d] * lever_lo[d];
+    }
+    acc * geo.inv_volume / lever_c
+}
+
 /// the plain coordinate divergence `sum_i (F_i[+e_i] - F_i) / width_i` — the raw face
 /// difference over the cell width on every chart. this is the divergence of a fully densitized
 /// conservation law `d_t U + d_j F^j = S`, where the measure `sqrt(-g)` rides inside both `U`
@@ -594,7 +628,7 @@ pub(crate) fn gv_powi<'t>(a: Gv<'t>, n: u32) -> Gv<'t> {
 }
 
 /// per axis: `(lo face, hi face, width)` from the index map.
-fn gv_faces<'t>(
+pub(crate) fn gv_faces<'t>(
     cx: TraceCx<'t>,
     spacing: &[Spacing],
     ndim: usize,

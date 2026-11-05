@@ -56,6 +56,11 @@ pub struct IsoSubstrateKernelSet<Mem: MemorySpace, Sc: Scalar + OrderedNumeric, 
     /// constant kinematic viscosity nu. 0 = inviscid (the
     /// viscous pass and its CFL cap are inert). >0 selects the Navier-Stokes
     /// shear operator and caps dt at C_visc dx^2 / nu.
+    /// the azimuthal shear model in place of the full stress, on an axisymmetric plane
+    pub azimuthal_shear: Option<symbi_hydro::viscous::AzimuthalShear>,
+    /// the torque entered through the continued domain faces this session, and the stress work
+    /// they would pass, which an isothermal closure holds no energy to receive
+    pub viscous_boundary_ledger: std::sync::Mutex<(f64, f64)>,
     pub viscosity: f64,
     /// Shakura-Sunyaev alpha. >0 selects the alpha viscous
     /// operator nu(x) = alpha cs^2 / Omega_k(r) (takes precedence over the
@@ -127,6 +132,8 @@ impl<Mem: MemorySpace, Sc: Scalar + OrderedNumeric, const D: usize>
             c_drain: 1.0,
             viscosity: 0.0,
             alpha: 0.0,
+            azimuthal_shear: None,
+            viscous_boundary_ledger: std::sync::Mutex::new((0.0, 0.0)),
             cfl_number,
             theta: 1.0,
             cs2,
@@ -146,7 +153,7 @@ impl<Mem: MemorySpace, Sc: Scalar + OrderedNumeric, const D: usize>
     /// grows with r (Omega_k = sqrt(GM/r^3)), so the maximum over the whole grid is
     /// at its corner farthest from the central body, on every tile alike. returns 0 (cap inert) with
     /// no body — the alpha dispatch then fails loud.
-    fn alpha_nu_max(&self, sim: &FieldStore<D, D, Mem, Sc>) -> f64 {
+    fn alpha_nu_max<const DOF: usize>(&self, sim: &FieldStore<D, DOF, Mem, Sc>) -> f64 {
         let geom = &sim.geom;
         let Some(im) = sim.immersed.as_ref() else {
             return 0.0;
@@ -320,22 +327,22 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize>
     }
 }
 
-impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize> KernelSet<D, D, Mem, Sc>
+impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize, const DOF: usize> KernelSet<D, DOF, Mem, Sc>
     for IsoSubstrateKernelSet<Mem, Sc, D>
 {
     fn census_partials(
         &self,
-        store: &FieldStore<D, D, Mem, f64>,
+        store: &FieldStore<D, DOF, Mem, f64>,
         censuses: &[symbi_sim::census::RegisteredCensus],
         level: usize,
         cadence: Option<symbi_sim::census::Cadence>,
         covered: Option<&symbi_algebra::Domain<D>>,
         now: f64,
     ) -> Option<Vec<symbi_sim::census::CensusPartial>> {
-        Some(crate::census_sample::tile_partials_exact(store, censuses, level, cadence, covered, <Self as KernelSet<D, D, Mem, Sc>>::excision_radius(self), now))
+        Some(crate::census_sample::tile_partials_exact(store, censuses, level, cadence, covered, <Self as KernelSet<D, DOF, Mem, Sc>>::excision_radius(self), now))
     }
 
-    fn flux(&self, sim: &FieldStore<D, D, Mem, Sc>, dir: usize) {
+    fn flux(&self, sim: &FieldStore<D, DOF, Mem, Sc>, dir: usize) {
         // the gv iso flux is the Newtonian flux at gamma->1: it reconstructs prim.pre
         // (= cs^2(x)*rho) and takes cs = sqrt(gamma*p/rho) = sqrt(p/rho) = the local sound
         // speed, so a locally isothermal cs2(x) flows through naturally. gamma = ISO_GAMMA = 1;
@@ -345,7 +352,7 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize> Kerne
         dispatch_flux(sim, &self.pre, "iso", dir, ISO_GAMMA, self.flux_spec());
     }
 
-    fn c2p(&self, sim: &FieldStore<D, D, Mem, Sc>) {
+    fn c2p(&self, sim: &FieldStore<D, DOF, Mem, Sc>) {
         // the primitives now hold a state recovered from the conserved fields; anything
         // reading prim.* outside the evolve loop checks this before trusting it.
         sim.mark_primitives_recovered();
@@ -353,7 +360,7 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize> Kerne
         // the run can be locally isothermal) -> prim rho, vel_0.., self.pre (= cs2*rho),
         // and the c2p status channel the recovery kernel writes alongside the candidate.
         // the cs2 slot is the free scratch spelling `cs2`; the rest is the typed `Ref` vocabulary.
-        let name = format!("iso_c2p_{D}d");
+        let name = format!("iso_c2p{}_{D}d", symbi_discretize::kernel_slug::newtonian_lift_suffix(sim.geom.coords, DOF, D));
         let (inputs, outputs) = bind_by_manifest(&name, |b| match b {
             FieldBind::Ref(fref) => {
                 resolve_path(sim, Some(&self.pre), Some(&sim.fields.c2p_error), 0, *fref)
@@ -378,7 +385,7 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize> Kerne
         }
     }
 
-    fn godunov_stage(&self, sim: &FieldStore<D, D, Mem, Sc>, dt: f64, a0: f64, ac: f64) {
+    fn godunov_stage(&self, sim: &FieldStore<D, DOF, Mem, Sc>, dt: f64, a0: f64, ac: f64) {
         // immersed bodies: gravity + accretion are fused into the godunov update
         // (one launch, additive convention), so `body_source` is a no-op. cs feeds
         // the accretion rate cap (iso passes the constant self.cs). the fused kernel
@@ -421,7 +428,7 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize> Kerne
         );
     }
 
-    fn cfl(&self, sim: &FieldStore<D, D, Mem, Sc>) -> f64 {
+    fn cfl(&self, sim: &FieldStore<D, DOF, Mem, Sc>) -> f64 {
         // iso wave-speed map (cs = sqrt(gamma*p/rho) from the substrate-owned self.pre);
         // the shared cfl dispatch binds the field buffers by manifest + owns the reduction.
         let dt_hydro = cfl_wave_speed(
@@ -443,7 +450,9 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize> Kerne
         // (0.25, the plain-Laplacian value, is unstable and blows the velocity
         // up). inert when inviscid. for alpha the viscosity grows with radius, so
         // nu_max is at the domain corner farthest from the body.
-        let nu_max = if self.alpha > 0.0 {
+        let nu_max = if self.azimuthal_shear.is_some() {
+            0.0
+        } else if self.alpha > 0.0 {
             self.alpha_nu_max(sim)
         } else {
             self.viscosity
@@ -482,7 +491,7 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize> Kerne
 
     fn flip_polar_band(
         &self,
-        sim: &FieldStore<D, D, Mem, Sc>,
+        sim: &FieldStore<D, DOF, Mem, Sc>,
         mirror: usize,
         side: symbi_algebra::Side,
         reach: usize,
@@ -490,11 +499,11 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize> Kerne
         crate::regimes::substrate_kernels::flip_polar_band(sim, mirror, side, reach);
     }
 
-    fn ghost_fill(&self, sim: &FieldStore<D, D, Mem, Sc>) {
+    fn ghost_fill(&self, sim: &FieldStore<D, DOF, Mem, Sc>) {
         // the lattice-map pullback (iso_ghost_fill_{D}d): rho/vel/pre, in-place. the
         // pressure is pulled back too (a grade-0 scalar, like density).
         let bc = to_bc_array::<D>(&sim.boundaries);
-        let name = format!("iso_ghost_fill_{D}d");
+        let name = format!("iso_ghost_fill{}_{D}d", symbi_discretize::kernel_slug::newtonian_lift_suffix(sim.geom.coords, DOF, D));
         let basis = sim.geom.spacetime.component_basis();
         GhostFillDriver::<D>::new(&sim.geom.allocated, &sim.geom.interior, bc)
             .with_polar_turn(crate::kernels::support::polar_turn_for(sim.geom.coords, &sim.geom.interior))
@@ -587,7 +596,7 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize> Kerne
     /// the interface dye flux, written during the flux phase so the coarse-fine registers sample it
     /// alongside the gas fluxes. the dye kernels read only the mass flux and `prim.chi`, so the same
     /// baked instances serve every regime.
-    fn chi_flux(&self, sim: &FieldStore<D, D, Mem, Sc>) {
+    fn chi_flux(&self, sim: &FieldStore<D, DOF, Mem, Sc>) {
         if !sim.has_passive_scalar() {
             return;
         }
@@ -599,7 +608,7 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize> Kerne
         }
     }
 
-    fn chi_update(&self, sim: &FieldStore<D, D, Mem, Sc>, dt: f64, a0: f64, ac: f64) {
+    fn chi_update(&self, sim: &FieldStore<D, DOF, Mem, Sc>, dt: f64, a0: f64, ac: f64) {
         if !sim.has_passive_scalar() {
             return;
         }
@@ -651,9 +660,9 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize> Kerne
         );
     }
 
-    fn snapshot(&self, sim: &FieldStore<D, D, Mem, Sc>) {
+    fn snapshot(&self, sim: &FieldStore<D, DOF, Mem, Sc>) {
         // u_n = cons (pure copy), no energy law, over the full allocated domain.
-        let name = format!("iso_snapshot_{D}d");
+        let name = format!("iso_snapshot{}_{D}d", symbi_discretize::kernel_slug::newtonian_lift_suffix(sim.geom.coords, DOF, D));
         let (inputs, outputs) =
             bind_by_manifest(&name, |b| resolve_snapshot_into(sim, &sim.workspace.u_n, b));
         dispatch_fields::<Sc, Mem, D>(
@@ -672,7 +681,9 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize> Kerne
     }
 
     fn fofc_active(&self) -> bool {
-        true
+        // the first-order flux correction covers the DOF == D charts (the fofc select's momentum
+        // count is baked to ncomp = D).
+        DOF == D
     }
 
     fn freeze_streak(&self) -> u32 {
@@ -683,59 +694,65 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize> Kerne
         self.freeze_streak.store(streak, std::sync::atomic::Ordering::Relaxed);
     }
 
-    fn isothermal_closure_varies(&self, sim: &FieldStore<D, D, Mem, Sc>) -> bool {
+    fn isothermal_closure_varies(&self, sim: &FieldStore<D, DOF, Mem, Sc>) -> bool {
         let cs2 = self.cs2.view();
         let mut cells = sim.geom.allocated.iter();
         let first = cells.next().map(|c| *cs2.at(c));
         first.is_some_and(|value| cells.any(|c| *cs2.at(c) != value))
     }
 
-    fn rollback_snapshot_is_complete(&self, sim: &FieldStore<D, D, Mem, Sc>) -> bool {
+    fn rollback_snapshot_is_complete(&self, sim: &FieldStore<D, DOF, Mem, Sc>) -> bool {
         crate::regimes::fofc::gas_rollback_snapshot_is_complete(sim)
     }
 
-    fn field_rollback_is_complete(&self, _sim: &FieldStore<D, D, Mem, Sc>) -> bool {
+    fn field_rollback_is_complete(&self, _sim: &FieldStore<D, DOF, Mem, Sc>) -> bool {
         // the step-entry conserved state, ghosts included, restored with its primitives
         true
     }
 
-    fn snapshot_retry(&self, sim: &FieldStore<D, D, Mem, Sc>) {
+    fn snapshot_retry(&self, sim: &FieldStore<D, DOF, Mem, Sc>) {
         crate::regimes::fofc::gas_snapshot_retry(sim);
     }
 
-    fn restore_step(&self, sim: &FieldStore<D, D, Mem, Sc>) {
+    fn restore_step(&self, sim: &FieldStore<D, DOF, Mem, Sc>) {
         crate::regimes::fofc::gas_restore_step(sim);
         self.c2p(sim);
         self.ghost_fill(sim);
     }
 
-    fn fofc_mark(&self, sim: &FieldStore<D, D, Mem, Sc>) -> u64 {
+    fn fofc_mark(&self, sim: &FieldStore<D, DOF, Mem, Sc>) -> u64 {
+        if DOF != D {
+            return 0;
+        }
         crate::regimes::fofc::fofc_mark(sim, 0.0)
     }
 
-    fn fofc_flags_in(&self, sim: &FieldStore<D, D, Mem, Sc>, region: &symbi_algebra::Domain<D>) -> u64 {
+    fn fofc_flags_in(&self, sim: &FieldStore<D, DOF, Mem, Sc>, region: &symbi_algebra::Domain<D>) -> u64 {
         crate::regimes::fofc::fofc_flags_in(sim, region)
     }
 
     fn fofc(
         &self,
-        sim: &FieldStore<D, D, Mem, Sc>,
+        sim: &FieldStore<D, DOF, Mem, Sc>,
         dt: f64,
         a0: f64,
         ac: f64,
         stage: u8,
         redo_update: &mut dyn FnMut(),
     ) -> symbi_sim::substrate_seam::FofcReport {
+        if DOF != D {
+            return symbi_sim::substrate_seam::FofcReport::inactive();
+        }
         // isothermal is HLLE-only by physics; the first-order redo is the same fan at theta = 0
         // (PCM) — the positivity-preserving Einfeldt fan. the substrate-owned pressure (cs^2*rho)
         // feeds the flux as in the production sweep.
         crate::regimes::fofc::fofc_orchestrate(
             sim,
             "iso",
-            "", // iso is DOF == D (no swirl lift)
+            "", // the early return above leaves DOF == D
             0.0, // no excision on an isothermal background
             stage,
-            self.has_additive_source(),
+            <Self as KernelSet<D, DOF, Mem, Sc>>::has_additive_source(self),
             &self.freeze_streak,
             |dir| {
                 dispatch_flux(
@@ -765,11 +782,11 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize> Kerne
         )
     }
 
-    fn snapshot_stage(&self, sim: &FieldStore<D, D, Mem, Sc>) {
+    fn snapshot_stage(&self, sim: &FieldStore<D, DOF, Mem, Sc>) {
         // u_stage = cons (pure copy via the snapshot kernel, no nrg): the stage-input state
         // the additive source pass reads, over the interior (where source_apply iterates).
         // the manifest's `u_n` destination slot is resolved onto u_stage.
-        let name = format!("iso_snapshot_{D}d");
+        let name = format!("iso_snapshot{}_{D}d", symbi_discretize::kernel_slug::newtonian_lift_suffix(sim.geom.coords, DOF, D));
         let (inputs, outputs) = bind_by_manifest(&name, |b| {
             resolve_snapshot_into(sim, &sim.workspace.u_stage, b)
         });
@@ -784,7 +801,7 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize> Kerne
         );
     }
 
-    fn source_apply(&self, sim: &FieldStore<D, D, Mem, Sc>, weight: f64) {
+    fn source_apply(&self, sim: &FieldStore<D, DOF, Mem, Sc>, weight: f64) {
         if let Some(b) = &self.additive_source {
             dispatch_source_apply(sim, "iso", b, weight);
         }
@@ -799,7 +816,7 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize> Kerne
         }
     }
 
-    fn body_source(&self, sim: &FieldStore<D, D, Mem, Sc>, dt: f64) {
+    fn body_source(&self, sim: &FieldStore<D, DOF, Mem, Sc>, dt: f64) {
         // Cartesian: fused into the godunov stage (no-op here). curvilinear: the
         // fused kernel isn't baked yet, so run the separate frame-correct pass.
         if sim.geom.coords != Geometry::Cartesian {
@@ -807,7 +824,7 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize> Kerne
         }
     }
 
-    fn penalize(&self, sim: &FieldStore<D, D, Mem, Sc>, dt: f64) {
+    fn penalize(&self, sim: &FieldStore<D, DOF, Mem, Sc>, dt: f64) {
         // the [Drain] stack: the sole accretion mechanism on
         // cartesian grids; the iso kernel reads `cs` through the eos-param slot.
         crate::regimes::substrate_kernels::dispatch_penalize(sim, dt, self.cs, self.c_drain);
@@ -819,7 +836,11 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize> Kerne
         self.viscosity > 0.0 || self.alpha > 0.0
     }
 
-    fn viscous(&self, sim: &FieldStore<D, D, Mem, Sc>, dt: f64) {
+    fn viscous(&self, sim: &FieldStore<D, DOF, Mem, Sc>, dt: f64) {
+        if let Some(model) = &self.azimuthal_shear {
+            crate::regimes::substrate_kernels::apply_azimuthal_shear(sim, model, &self.cfl_scratch, &self.viscous_boundary_ledger, dt);
+            return;
+        }
         // the Navier-Stokes shear; inert when inviscid. baked
         // for 2D and 3D cartesian — fail loud otherwise (a silent drop would discard
         // the transport a viscous run declared). alpha (spatially varying nu)
@@ -844,7 +865,7 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize> Kerne
         }
     }
 
-    fn body_feedback(&self, sim: &FieldStore<D, D, Mem, Sc>, dt: f64) {
+    fn body_feedback(&self, sim: &FieldStore<D, DOF, Mem, Sc>, dt: f64) {
         // backward feedback (force/torque/accreted-mass -> diagnostics), isothermal.
         dispatch_body_feedback_iso(sim, &self.pre, dt);
     }
@@ -853,6 +874,10 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize> Kerne
 impl<Mem: MemorySpace, Sc: Scalar + OrderedNumeric, const D: usize> WithViscosity
     for IsoSubstrateKernelSet<Mem, Sc, D>
 {
+    fn with_azimuthal_shear(mut self, model: Option<symbi_hydro::viscous::AzimuthalShear>) -> Self {
+        self.azimuthal_shear = model;
+        self
+    }
     fn with_viscosity(mut self, nu: f64) -> Self {
         self.viscosity = nu;
         self

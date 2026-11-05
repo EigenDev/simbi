@@ -38,7 +38,8 @@ static REGISTRY: Mutex<Vec<(String, String)>> = Mutex::new(Vec::new());
 use symbi_discretize::coords::FaceMotion;
 use symbi_discretize::{
     Coords, EosArm, GeoSource, Recon, Spacetime, Spacing, body_feedback_drain_gv,
-    body_feedback_grav_gv, body_feedback_gv, body_feedback_iso_gv, body_source_gv,
+    body_feedback_grav_gv, body_feedback_gv, body_feedback_iso_gv, body_source_face_work_gv,
+    body_source_gv,
     body_source_iso_gv, chi_c2p_gv, chi_flux_gv, chi_godunov_gv, chi_snapshot_gv,
     fofc_bflux_splice_gv, fofc_copy_gv, fofc_emf_splice_gv, fofc_exterior_flag_gv,
     fofc_flag_from_status_gv, fofc_select_gv, fofc_select_with_body_gv, fofc_splice_gv,
@@ -626,6 +627,9 @@ struct Geom {
     // the spacetime background. defaults to Minkowski (flat); `.schwarzschild()` selects the curved
     // variant -> the densitization/lapse kernel branch + a `_schw` slug tag.
     spacetime: Spacetime,
+    // a cartesian plane carrying a third velocity component in the lifted newtonian families; the
+    // MHD families on the same layout keep their own names
+    newtonian_lift: bool,
 }
 
 impl Geom {
@@ -638,6 +642,7 @@ impl Geom {
             axes,
             spacing,
             spacetime: Spacetime::Minkowski,
+            newtonian_lift: false,
         }
     }
 
@@ -669,6 +674,12 @@ impl Geom {
     }
     fn sph(ndim: u8) -> Self {
         Self::make(Coords::Spherical, ndim, (0..ndim as usize).collect())
+    }
+    // a cartesian plane with an out-of-plane velocity, the lifted newtonian layout
+    fn cart_lift() -> Self {
+        let mut geom = Self::make(Coords::Cartesian, 3, vec![0, 1]);
+        geom.newtonian_lift = true;
+        geom
     }
     // spherical axisymmetric swirl: 2-axis grid (r, theta) -> coords [0, 1], 3-component
     // momentum (the azimuthal v_phi is the out-of-plane DOF — rotating GR flows: tori,
@@ -718,6 +729,13 @@ impl Geom {
     // and 1D/3D stay "_cyl" (DOF==ndim, matching the hydro geom_suffix). both 2D MHD planes are
     // DOF=3, so it is the axes — not ncomp-vs-naxes alone — that tell them apart.
     fn suffix(&self) -> &'static str {
+        if self.newtonian_lift {
+            return symbi_discretize::kernel_slug::newtonian_lift_suffix(
+                self.coords.to_geometry(),
+                self.ncomp as usize,
+                self.axes.len(),
+            );
+        }
         symbi_discretize::kernel_slug::geom_suffix(
             self.coords.to_geometry(),
             self.ncomp as usize,
@@ -804,6 +822,7 @@ fn geo_source(prefix: &str) -> GeoSource {
         "rmhd" => GeoSource::Rmhd,
         "nmhd" => GeoSource::NewtonianMhd,
         "imhd" => GeoSource::IsothermalMhd,
+        "adiabatic_azimuthal_source_control" => GeoSource::HydroAzimuthalSourceControl,
         _ => GeoSource::Hydro {
             inertial: matches!(prefix, "iso" | "adiabatic" | "rhd"),
         },
@@ -953,20 +972,14 @@ fn gen_adiabatic_face_flux(out_dir: &str, ndim: u8, dir: u8, geom: Geom, recon: 
     // per-component U/F. ncomp == ndim == D, sweep coordinate == grid axis `dir`. cyl r-z
     // (ncomp != ndim, non-identity axes) stays on the Expr builder below until the gv flux
     // generalizes over ncomp + the axes mapping (the c2p pattern). numerically equiv (ULP).
-    let program = if geom.coords == Coords::Cartesian {
+    let program = if geom.ncomp == ndim {
+        assert!(geom.coords == Coords::Cartesian, "the DOF == D adiabatic face flux is baked on the cartesian chart");
         gv_dim!(ndim, symbi_discretize::gv::adiabatic_flux_gv, dir, recon, motion)
     } else {
-        assert!(motion == FaceMotion::Moving, "the stationary flux twin is baked on the cartesian chart");
-        // cyl r-z (ncomp=3 swirl on the 2D (r,z) grid): the sweep coordinate is axes[dir].
-        assert!(
-            geom.ncomp == 3 && ndim == 2,
-            "non-cartesian adiabatic flux is only cyl r-z"
-        );
-        assert!(
-            recon == Recon::Plm,
-            "ppm face flux is baked for the cartesian adiabatic family only"
-        );
-        symbi_discretize::gv::adiabatic_flux_cyl_rz_gv(dir)
+        assert!(motion == FaceMotion::Moving, "the stationary flux twin is baked for DOF == D");
+        assert!(geom.ncomp == 3 && ndim == 2, "the lifted adiabatic flux is baked on 2-axis grids");
+        assert!(recon == Recon::Plm, "ppm face flux is baked for DOF == D");
+        symbi_discretize::gv::adiabatic_flux_lifted_gv(dir, &geom.axes)
     };
     emit_gv(out_dir, &name, ndim, &program);
 }
@@ -3578,17 +3591,72 @@ fn main() {
     // `_cyl_rz` suffix (ncomp>naxes) matches the runtime geom_suffix; full kernel family
     // because DOF=3 != ndim=2 (the c2p/flux/snapshot/ghost each need their own DOF=3 instance).
     let cyl = Geom::cyl_rz();
-    gen_adiabatic_c2p(&out_dir, 2, cyl.clone());
     // the swirl chart runs no first-order flux correction (the fofc kernels are baked at
     // ncomp = ndim), but c2p still annotates its recovery, so the status kernel is needed here.
     gen_iso_wave_speed_map(&out_dir, 2, cyl.clone());
     gen_iso_ghost_fill(&out_dir, 2, cyl.clone());
     gen_neumann_ghost_fill(&out_dir, 2, cyl.clone());
     gen_robin_ghost_fill(&out_dir, 2, cyl.clone());
-    gen_godunov_stage(&out_dir, 2, "adiabatic", true, cyl.clone(), None);
-    gen_snapshot(&out_dir, 2, "adiabatic", true, cyl.clone());
-    for dir in 0..2 {
-        gen_adiabatic_face_flux(&out_dir, 2, dir, cyl.clone(), Recon::Plm, FaceMotion::Moving);
+    gen_iso_wave_speed_map(&out_dir, 2, Geom::sph_swirl());
+    // the cartesian plane's wave speeds read the two in-plane velocities, as its DOF == D map does
+    gen_iso_ghost_fill(&out_dir, 2, Geom::cart_lift());
+    // the newtonian closures with three velocity components on a 2-axis grid: the same builders on
+    // each layout, the adiabatic and the isothermal family sharing their geometry and ghost fills
+    for geom in [Geom::cart_lift(), cyl.clone(), Geom::sph_swirl()] {
+        gen_adiabatic_c2p(&out_dir, 2, geom.clone());
+        let program = symbi_discretize::gv::iso_c2p_gv::<3>();
+        emit_gv(&out_dir, &format!("iso_c2p{}_2d", geom.suffix()), 2, &program);
+        for (prefix, has_energy) in [("adiabatic", true), ("iso", false)] {
+            gen_godunov_stage(&out_dir, 2, prefix, has_energy, geom.clone(), None);
+            gen_snapshot(&out_dir, 2, prefix, has_energy, geom.clone());
+        }
+        for dir in 0..2 {
+            gen_adiabatic_face_flux(&out_dir, 2, dir, geom.clone(), Recon::Plm, FaceMotion::Moving);
+            let name = symbi_discretize::kernel_slug::FaceFluxName {
+                prefix: "iso",
+                geom: geom.suffix(),
+                ndim: 2,
+                dir: dir as usize,
+                ..Default::default()
+            }
+            .build();
+            emit_gv(&out_dir, &name, 2, &symbi_discretize::gv::iso_flux_lifted_gv(dir, &geom.axes));
+        }
+    }
+    // the azimuthal shear on the axisymmetric planes: the update per closure, the timestep rate
+    // and the boundary ledger's two channels
+    for geom in [cyl.clone(), Geom::sph_swirl()] {
+        use symbi_discretize::{AzimuthalChannel, viscous_azimuthal_gv};
+        let sfx = geom.suffix();
+        for (name, channel) in [
+            ("adiabatic", AzimuthalChannel::Update { energy: true }),
+            ("iso", AzimuthalChannel::Update { energy: false }),
+            ("rate", AzimuthalChannel::Rate),
+            ("boundary_torque", AzimuthalChannel::BoundaryTorque),
+            ("boundary_work", AzimuthalChannel::BoundaryWork),
+        ] {
+            emit_gv(&out_dir, &format!("viscous_azimuthal_{name}{sfx}_2d"), 2, &viscous_azimuthal_gv(geom.coords, channel));
+        }
+    }
+    // the azimuthal source-form control against the torque form, on the two axisymmetric planes
+    for geom in [cyl.clone(), Geom::sph_swirl()] {
+        gen_godunov_stage(&out_dir, 2, "adiabatic_azimuthal_source_control", true, geom, None);
+    }
+    // a central point mass's gravity on the axisymmetric planes: the cartesian acceleration
+    // projected onto the three physical momenta, with its reaction reduced for the body ledger
+    for geom in [cyl.clone(), Geom::sph_swirl()] {
+        let (coords, ncomp) = (geom.coords, geom.ncomp as usize);
+        let sfx = geom.suffix();
+        let source = body_source_gv(MAX_SOURCE_BODIES, coords, 2, ncomp, &geom.axes, false);
+        emit_gv(&out_dir, &format!("body_source{sfx}_2d"), 2, &source);
+        let face_work = body_source_face_work_gv(coords, 2, ncomp, &geom.axes);
+        emit_gv(&out_dir, &format!("body_source_face_work{sfx}_2d"), 2, &face_work);
+        let feedback = body_feedback_gv(MAX_SOURCE_BODIES, coords, 2, ncomp, &geom.axes);
+        emit_gv(&out_dir, &format!("body_feedback{sfx}_2d"), 2, &feedback);
+        let source = body_source_iso_gv(MAX_SOURCE_BODIES, coords, 2, ncomp, &geom.axes);
+        emit_gv(&out_dir, &format!("body_source_iso{sfx}_2d"), 2, &source);
+        let feedback = body_feedback_iso_gv(MAX_SOURCE_BODIES, coords, 2, ncomp, &geom.axes);
+        emit_gv(&out_dir, &format!("body_feedback_iso{sfx}_2d"), 2, &feedback);
     }
     // the cylindrical natural (DOF == NDIM) hydro family for all three regimes (iso /
     // adiabatic / rhd), at 1D (radial), 2D (r-phi disk plane), and 3D (r,phi,z) — the

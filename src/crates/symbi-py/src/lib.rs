@@ -140,6 +140,11 @@ struct Config {
     plm_theta: f64,
     wb_reconstruction: bool,
     dlogt: f64,
+    // the momentum components the problem declares, independent of the grid dimension. a
+    // 4-entry isothermal row on a plane reads two ways, so a lifted isothermal run names it
+    velocity_components: Option<usize>,
+    // the azimuthal shear model in place of the full stress, parsed from `viscous_stress`
+    azimuthal_shear: Option<symbi_hydro::viscous::AzimuthalShear>,
     viscosity: f64,
     /// the shakura-sunyaev alpha-disk coefficient, read from the `viscosity_alpha` key,
     /// not the bare `alpha` key: `alpha` is a generic name a problem may use for its own
@@ -798,6 +803,7 @@ struct KernelSettings<'c> {
     eos: symbi::EosArm,
     solver: Solver,
     ct_method: CtMethod,
+    azimuthal_shear: Option<symbi_hydro::viscous::AzimuthalShear>,
     viscosity: f64,
     alpha: f64,
     resistivity: f64,
@@ -819,6 +825,7 @@ impl<'c> KernelSettings<'c> {
             eos: build_eos(cfg),
             solver: cfg.solver,
             ct_method: cfg.ct_method,
+            azimuthal_shear: cfg.azimuthal_shear,
             viscosity: cfg.viscosity,
             alpha: cfg.alpha,
             resistivity: cfg.resistivity,
@@ -903,6 +910,7 @@ fn gas_kernels<K: GasDoors>(sub: K, settings: &KernelSettings, role: LevelRole) 
         .map_err(|e| format!("substrate/solver: {e:?}"))?
         .with_viscosity(settings.viscosity)
         .with_alpha(settings.alpha)
+        .with_azimuthal_shear(settings.azimuthal_shear)
         .with_resistivity(settings.resistivity);
     let ks = excised(ks, settings, role);
     let ks = attach_configured_sources(ks, settings.sources, settings.spec, &settings.law)?;
@@ -917,7 +925,7 @@ fn iso_kernels<const D: usize>(
     sub: IsoSubstrateKernelSet<DefaultMemory, f64, D>,
     settings: &KernelSettings,
 ) -> Result<IsoSubstrateKernelSet<DefaultMemory, f64, D>, String> {
-    let ks = sub.theta(settings.theta).with_viscosity(settings.viscosity).with_alpha(settings.alpha);
+    let ks = sub.theta(settings.theta).with_viscosity(settings.viscosity).with_alpha(settings.alpha).with_azimuthal_shear(settings.azimuthal_shear);
     let ks = attach_configured_sources(ks, settings.sources, settings.spec, &settings.law)?;
     let ks = attach_driven_boundaries(ks, settings.driven, settings.spec, |ks, built, params| {
         ks.with_driven_boundary(built, params).0
@@ -1484,6 +1492,13 @@ fn parse_config(dict: &Bound<'_, PyDict>) -> PyResult<Config> {
             .and_then(|v| v.extract::<bool>().ok())
             .unwrap_or(false),
         dlogt: get_f64_or(dict, "dlogt", 0.0),
+        velocity_components: dict
+            .get_item("velocity_components")
+            .ok()
+            .flatten()
+            .and_then(|v| v.extract::<Option<usize>>().ok())
+            .flatten(),
+        azimuthal_shear: parse_azimuthal_shear(dict)?,
         viscosity: get_f64_or(dict, "viscosity", 0.0),
         alpha: get_f64_or(dict, "viscosity_alpha", 0.0),
         bare_alpha_key: dict.get_item("alpha").ok().flatten().is_some(),
@@ -1861,6 +1876,54 @@ struct BinaryCfg {
     eccentricity: f64,
     mass_ratio: f64,
     frame: symbi_ib::ReferenceFrame,
+}
+
+/// the azimuthal shear model a problem names: `viscous_stress = "azimuthal_shear"`, the law's
+/// `viscous_coefficient` ("kinematic" or "dynamic"), its normalization and powers, and one named
+/// condition per domain face in `viscous_boundaries` (r or R low and high, then theta or z low and
+/// high). `None` without the setting
+fn parse_azimuthal_shear(dict: &Bound<'_, PyDict>) -> PyResult<Option<symbi_hydro::viscous::AzimuthalShear>> {
+    use symbi_hydro::viscous::{AzimuthalShear, DynamicViscosityLaw, ViscousFace};
+    let text = |key: &str| dict.get_item(key).ok().flatten().and_then(|v| v.extract::<Option<String>>().ok()).flatten();
+    match text("viscous_stress").as_deref() {
+        None | Some("full") => return Ok(None),
+        Some("azimuthal_shear") => {}
+        Some(other) => return Err(PyValueError::new_err(format!("viscous_stress '{other}': expected 'full' or 'azimuthal_shear'"))),
+    }
+    let names: Vec<String> = dict
+        .get_item("viscous_boundaries")
+        .ok()
+        .flatten()
+        .and_then(|v| v.extract::<Option<Vec<String>>>().ok())
+        .flatten()
+        .unwrap_or_default();
+    if names.len() != 4 {
+        return Err(PyValueError::new_err(format!(
+            "the azimuthal shear names one condition per domain face in viscous_boundaries, 'zero_torque' or \
+             'continued_shear'; hydrodynamic outflow says nothing about the torque a face passes. got {names:?}"
+        )));
+    }
+    let face = |ii: usize| match names[ii].as_str() {
+        "zero_torque" => Ok(ViscousFace::ZeroTorque),
+        "continued_shear" => Ok(ViscousFace::ContinuedShear),
+        other => Err(PyValueError::new_err(format!("viscous_boundaries[{ii}] = '{other}': expected 'zero_torque' or 'continued_shear'"))),
+    };
+    let scale = get_f64_or(dict, "viscosity", 0.0);
+    let radius = get_f64_or(dict, "viscosity_radius", 1.0);
+    let radius_power = get_f64_or(dict, "viscosity_radius_power", 0.0);
+    let density = get_f64_or(dict, "viscosity_density", 1.0);
+    let density_power = get_f64_or(dict, "viscosity_density_power", 0.0);
+    if !(scale > 0.0 && radius > 0.0 && density > 0.0) {
+        return Err(PyValueError::new_err(format!(
+            "the azimuthal shear needs a positive viscosity ({scale}), viscosity_radius ({radius}) and viscosity_density ({density})"
+        )));
+    }
+    let law = match text("viscous_coefficient").as_deref() {
+        None | Some("kinematic") => DynamicViscosityLaw::kinematic(scale, radius, radius_power, density, density_power),
+        Some("dynamic") => DynamicViscosityLaw::dynamic(scale, radius, radius_power, density, density_power),
+        Some(other) => return Err(PyValueError::new_err(format!("viscous_coefficient '{other}': expected 'kinematic' or 'dynamic'"))),
+    };
+    Ok(Some(AzimuthalShear { law, faces: [[face(0)?, face(1)?], [face(2)?, face(3)?]] }))
 }
 
 /// the `body_system.binary_config` sub-dict, if the config carries a gravitational binary.
@@ -2486,7 +2549,8 @@ macro_rules! seed_local_cs2 {
                     (c[ax] - ilo[ax] + $tile_lo[ax] as isize).clamp(0, $n[ax] as isize - 1)
                 });
                 let row = &$prims[global_lin::<$d>(&[0; $d], &g, &$n)];
-                let cs2 = row[1 + $d] / row[0];
+                // the closure pressure is the row's last entry, after every velocity component
+                let cs2 = row[row.len() - 1] / row[0];
                 $sub.cs2.set(c, cs2);
                 if let Some(dst) = $sim.fields.cs2.as_ref() {
                     dst.set(c, cs2);
@@ -5972,7 +6036,7 @@ macro_rules! build_and_run_hydro {
                     "DOF-lifted (swirl) runs do not yet support mesh refinement".to_string(),
                 );
             }
-            if $dof != $d && !cfg.bodies.is_empty() {
+            if $dof != $d && !cfg.bodies.is_empty() && cfg.spacetime != "minkowski" {
                 return Err(
                     "DOF-lifted (swirl) runs do not yet support immersed bodies".to_string(),
                 );
@@ -5984,7 +6048,7 @@ macro_rules! build_and_run_hydro {
         if $dof != $d && cfg.refinement_enabled {
             return Err("DOF-lifted (swirl) runs do not yet support mesh refinement".to_string());
         }
-        if $dof != $d && !cfg.bodies.is_empty() {
+        if $dof != $d && !cfg.bodies.is_empty() && cfg.spacetime != "minkowski" {
             return Err("DOF-lifted (swirl) runs do not yet support immersed bodies".to_string());
         }
 
@@ -7878,7 +7942,11 @@ macro_rules! hydro_dispatch {
                 KerrKSCartesian<f64>
             ),
             (2, "cartesian") => {
-                build_and_run_hydro!($cfg, $prims, $regime, $regime_ty, 2, 2, Cartesian, Cartesian)
+                if primitive_row_dof($cfg, $prims.first().map_or(0, |row| row.len()))? == 3 {
+                    build_and_run_hydro!($cfg, $prims, $regime, $regime_ty, 2, 3, Cartesian, Cartesian)
+                } else {
+                    build_and_run_hydro!($cfg, $prims, $regime, $regime_ty, 2, 2, Cartesian, Cartesian)
+                }
             }
             (3, "cartesian") => {
                 build_and_run_hydro!($cfg, $prims, $regime, $regime_ty, 3, 3, Cartesian, Cartesian)
@@ -7922,7 +7990,11 @@ macro_rules! hydro_dispatch {
                 build_and_run_hydro!($cfg, $prims, $regime, $regime_ty, 1, 1, Spherical, Spherical)
             }
             (2, "spherical") => {
-                build_and_run_hydro!($cfg, $prims, $regime, $regime_ty, 2, 2, Spherical, Spherical)
+                if primitive_row_dof($cfg, $prims.first().map_or(0, |row| row.len()))? == 3 {
+                    build_and_run_hydro!($cfg, $prims, $regime, $regime_ty, 2, 3, Spherical, Spherical)
+                } else {
+                    build_and_run_hydro!($cfg, $prims, $regime, $regime_ty, 2, 2, Spherical, Spherical)
+                }
             }
             (3, "spherical") => {
                 build_and_run_hydro!($cfg, $prims, $regime, $regime_ty, 3, 3, Spherical, Spherical)
@@ -7956,16 +8028,13 @@ macro_rules! hydro_dispatch {
                     )
                 }
             },
-            (2, "cylindrical") => build_and_run_hydro!(
-                $cfg,
-                $prims,
-                $regime,
-                $regime_ty,
-                2,
-                2,
-                Cylindrical,
-                Cylindrical
-            ),
+            (2, "cylindrical") => {
+                if primitive_row_dof($cfg, $prims.first().map_or(0, |row| row.len()))? == 3 {
+                    build_and_run_hydro!($cfg, $prims, $regime, $regime_ty, 2, 3, Cylindrical, Cylindrical)
+                } else {
+                    build_and_run_hydro!($cfg, $prims, $regime, $regime_ty, 2, 2, Cylindrical, Cylindrical)
+                }
+            }
             // GR (kerr-schild) cylindrical full 3D (R, phi, z): DOF == NDIM = 3.
             (3, "cylindrical") if $cfg.spacetime == "schwarzschild_ks" => build_and_run_hydro!(
                 $cfg, $prims, $regime, $regime_ty, 3, 3,
@@ -8802,11 +8871,11 @@ macro_rules! imhd_dispatch {
 /// (universal transport). the scope is globally isothermal (uniform cs); locally-isothermal cs(x)
 /// needs per-tile cs^2 setup and is refused. same non-AMR / no-bodies / no-source scope.
 macro_rules! build_and_run_iso_decomposed {
-    ($cfg:expr, $prims:expr, $d:literal, $geom:expr, $geom_ty:ty) => {{
+    ($cfg:expr, $prims:expr, $d:literal, $dof:literal, $geom:expr, $geom_ty:ty) => {{
         use symbi::sim::decomp::unflatten;
         let cfg: &Config = $cfg;
         let prims: &[Vec<f64>] = $prims;
-        type Sim = SimDefault<IsoNewtonian, $d, $geom_ty, Isothermal<f64>>;
+        type Sim = SimDefaultGeneric<IsoNewtonian, $d, $dof, $geom_ty, Isothermal<f64>>;
 
         if cfg.refinement_enabled {
             let settings = KernelSettings::of(cfg, <IsoNewtonian as Regime<f64, $d>>::SPEC);
@@ -8871,7 +8940,7 @@ macro_rules! build_and_run_iso_decomposed {
                             stride *= n[ax];
                         }
                         let row = &prims[lin];
-                        PrimG::<f64, $d, IsoModel>::isothermal(Density(row[0]), Tensor::new(std::array::from_fn(|k| row[1 + k])))
+                        PrimG::<f64, $dof, IsoModel>::isothermal(Density(row[0]), Tensor::new(std::array::from_fn(|k| row[1 + k])))
                     })
                     .build();
                 // attach the immersed bodies per tile (gravity + accretion sink). all tiles share the
@@ -8922,7 +8991,7 @@ macro_rules! build_and_run_iso_decomposed {
                 .map_err(|e| format!("global seeding sim allocate: {e:?}"))?
                 .set_initial_indexed(|idx, _x| {
                     let row = &prims[global_lin::<$d>(&[0; $d], &idx, &n)];
-                    PrimG::<f64, $d, IsoModel>::isothermal(Density(row[0]), Tensor::new(std::array::from_fn(|k| row[1 + k])))
+                    PrimG::<f64, $dof, IsoModel>::isothermal(Density(row[0]), Tensor::new(std::array::from_fn(|k| row[1 + k])))
                 })
                 .build();
             let per_tile = partition_configured_tracers(&global, cfg, &partition);
@@ -8965,14 +9034,14 @@ macro_rules! build_and_run_iso_decomposed {
 /// and held fixed — the position-dependent "temperature" the substrate flows
 /// through c2p / flux / cfl.
 macro_rules! build_and_run_iso {
-    ($cfg:expr, $prims:expr, $d:literal, $geom:expr, $geom_ty:ty) => {{
+    ($cfg:expr, $prims:expr, $d:literal, $dof:literal, $geom:expr, $geom_ty:ty) => {{
         let cfg: &Config = $cfg;
         let prims: &[Vec<f64>] = $prims;
-        type Sim = SimDefault<IsoNewtonian, $d, $geom_ty, Isothermal<f64>>;
+        type Sim = SimDefaultGeneric<IsoNewtonian, $d, $dof, $geom_ty, Isothermal<f64>>;
 
         // gpus>1 -> the decomposed iso path; gpus<=1 -> the single-device path below.
         if cfg.n_gpus > 1 {
-            return build_and_run_iso_decomposed!($cfg, $prims, $d, $geom, $geom_ty);
+            return build_and_run_iso_decomposed!($cfg, $prims, $d, $dof, $geom, $geom_ty);
         }
 
         let n: [usize; $d] = std::array::from_fn(|ax| cfg.n_cells[ax]);
@@ -8985,16 +9054,16 @@ macro_rules! build_and_run_iso {
         }
         // locally isothermal carries an extra per-cell pressure component.
         let want = if cfg.locally_isothermal {
-            $d + 2
+            $dof + 2
         } else {
-            $d + 1
+            $dof + 1
         };
         if let Some(row) = prims.first() {
             if row.len() < want {
                 return Err(format!(
                     "isothermal prim row has {} components, expected {want} (rho, v1..v{}{})",
                     row.len(),
-                    $d,
+                    $dof,
                     if cfg.locally_isothermal {
                         ", p_local"
                     } else {
@@ -9020,7 +9089,7 @@ macro_rules! build_and_run_iso {
             .set_initial_indexed(|idx, _x| {
                 let lin = lin_index!(idx, n, $d);
                 let row = &prims[lin];
-                PrimG::<f64, $d, IsoModel>::isothermal(Density(row[0]), Tensor::new(std::array::from_fn(|k| row[1 + k])))
+                PrimG::<f64, $dof, IsoModel>::isothermal(Density(row[0]), Tensor::new(std::array::from_fn(|k| row[1 + k])))
             })
             .build();
 
@@ -9073,7 +9142,7 @@ macro_rules! build_and_run_iso {
             let interior = sim.geom.interior.clone();
             let mut coord: [isize; $d] = std::array::from_fn(|ax| interior.spaces[ax].lo);
             for lin in 0..total {
-                pre_ic.view_mut().set(coord, prims[lin][1 + $d]);
+                pre_ic.view_mut().set(coord, prims[lin][1 + $dof]);
                 for ax in 0..$d {
                     coord[ax] += 1;
                     if coord[ax] < interior.spaces[ax].hi {
@@ -9184,15 +9253,33 @@ macro_rules! iso_dispatch {
                  — refusing to run silently on a flat Minkowski metric. use spacetime=minkowski.",
                 $cfg.spacetime
             )),
-            (1, "cartesian") => build_and_run_iso!($cfg, $prims, 1, Cartesian, Cartesian),
-            (2, "cartesian") => build_and_run_iso!($cfg, $prims, 2, Cartesian, Cartesian),
-            (3, "cartesian") => build_and_run_iso!($cfg, $prims, 3, Cartesian, Cartesian),
-            (1, "spherical") => build_and_run_iso!($cfg, $prims, 1, Spherical, Spherical),
-            (2, "spherical") => build_and_run_iso!($cfg, $prims, 2, Spherical, Spherical),
-            (3, "spherical") => build_and_run_iso!($cfg, $prims, 3, Spherical, Spherical),
-            (1, "cylindrical") => build_and_run_iso!($cfg, $prims, 1, Cylindrical, Cylindrical),
-            (2, "cylindrical") => build_and_run_iso!($cfg, $prims, 2, Cylindrical, Cylindrical),
-            (3, "cylindrical") => build_and_run_iso!($cfg, $prims, 3, Cylindrical, Cylindrical),
+            (1, "cartesian") => build_and_run_iso!($cfg, $prims, 1, 1, Cartesian, Cartesian),
+            (2, "cartesian") => {
+                if primitive_row_dof($cfg, $prims.first().map_or(0, |row| row.len()))? == 3 {
+                    build_and_run_iso!($cfg, $prims, 2, 3, Cartesian, Cartesian)
+                } else {
+                    build_and_run_iso!($cfg, $prims, 2, 2, Cartesian, Cartesian)
+                }
+            }
+            (3, "cartesian") => build_and_run_iso!($cfg, $prims, 3, 3, Cartesian, Cartesian),
+            (1, "spherical") => build_and_run_iso!($cfg, $prims, 1, 1, Spherical, Spherical),
+            (2, "spherical") => {
+                if primitive_row_dof($cfg, $prims.first().map_or(0, |row| row.len()))? == 3 {
+                    build_and_run_iso!($cfg, $prims, 2, 3, Spherical, Spherical)
+                } else {
+                    build_and_run_iso!($cfg, $prims, 2, 2, Spherical, Spherical)
+                }
+            }
+            (3, "spherical") => build_and_run_iso!($cfg, $prims, 3, 3, Spherical, Spherical),
+            (1, "cylindrical") => build_and_run_iso!($cfg, $prims, 1, 1, Cylindrical, Cylindrical),
+            (2, "cylindrical") => {
+                if primitive_row_dof($cfg, $prims.first().map_or(0, |row| row.len()))? == 3 {
+                    build_and_run_iso!($cfg, $prims, 2, 3, Cylindrical, Cylindrical)
+                } else {
+                    build_and_run_iso!($cfg, $prims, 2, 2, Cylindrical, Cylindrical)
+                }
+            }
+            (3, "cylindrical") => build_and_run_iso!($cfg, $prims, 3, 3, Cylindrical, Cylindrical),
             (d, g) => Err(format!(
                 "no isothermal dispatch arm for (dims={d}, coord={g}) yet"
             )),
@@ -9594,17 +9681,30 @@ fn dispatch_and_run(
 /// the momentum components a configuration's primitive rows carry, read from the row width: rho,
 /// the velocities, then the pressure on an energy regime. an isothermal row may end with one
 /// p/cs entry, required as the closure pressure when the closure is local. the velocity count is
-/// the grid dimension except on MHD (three everywhere) and on the kerr-schild 2D charts that lift
-/// the azimuthal velocity: the (r, theta) plane takes either form, spinning kerr and the (R, z)
-/// plane require the lift. any other width is refused by name
+/// the grid dimension except on MHD (three everywhere), on the kerr-schild 2D charts that lift the
+/// azimuthal velocity (the (r, theta) plane takes either form, spinning kerr and the (R, z) plane
+/// require the lift), and on the flat newtonian (r, theta) and (R, z) planes, which take either
+/// form. any other width is refused by name
 fn primitive_row_dof(cfg: &Config, width: usize) -> Result<usize, String> {
     let d = cfg.dims;
-    let accepted: Vec<(usize, usize)> = match cfg.regime.as_str() {
+    let flat = cfg.spacetime == "minkowski";
+    let lifted_plane = d == 2
+        && flat
+        && match cfg.coord_system.as_str() {
+            "cartesian" | "spherical" => true,
+            "cylindrical" => cfg.cyl_plane == symbi_sim::state::CylPlane::Rz,
+            _ => false,
+        };
+    let declared_lift = lifted_plane && cfg.velocity_components == Some(3);
+    let mut accepted: Vec<(usize, usize)> = match cfg.regime.as_str() {
         "nmhd" | "rmhd" => vec![(5, 3)],
         "imhd" if cfg.locally_isothermal => vec![(5, 3)],
         "imhd" => vec![(4, 3), (5, 3)],
+        "isothermal" if declared_lift && cfg.locally_isothermal => vec![(5, 3)],
+        "isothermal" if declared_lift => vec![(4, 3), (5, 3)],
         "isothermal" if cfg.locally_isothermal => vec![(d + 2, d)],
         "isothermal" => vec![(d + 1, d), (d + 2, d)],
+        "newtonian" if lifted_plane => vec![(4, 2), (5, 3)],
         _ => match (d, cfg.coord_system.as_str(), cfg.spacetime.as_str()) {
             (2, "spherical", "schwarzschild_ks") => vec![(4, 2), (5, 3)],
             (2, "spherical", "kerr_ks") => vec![(5, 3)],
@@ -9612,6 +9712,16 @@ fn primitive_row_dof(cfg: &Config, width: usize) -> Result<usize, String> {
             _ => vec![(d + 2, d)],
         },
     };
+    if let Some(declared) = cfg.velocity_components {
+        accepted.retain(|&(_, dof)| dof == declared);
+        if accepted.is_empty() {
+            return Err(format!(
+                "velocity_components = {declared} on the {} regime on the {}: the dispatched kernels carry another count",
+                cfg.regime,
+                grid_name(cfg)
+            ));
+        }
+    }
     accepted.iter().find(|(w, _)| *w == width).map(|&(_, dof)| dof).ok_or_else(|| {
         let widths: Vec<String> = accepted.iter().map(|(w, _)| w.to_string()).collect();
         format!(
@@ -9625,13 +9735,58 @@ fn primitive_row_dof(cfg: &Config, width: usize) -> Result<usize, String> {
     })
 }
 
-/// every primitive row has one width the configuration's layout accepts
+/// the first property of a flat newtonian run with three velocity components on a plane outside
+/// the verified scope: the adiabatic or isothermal gas on a 2D cartesian, (r, theta) or (R, z) plane
+/// under plm and hlle, on host memory; on the axisymmetric planes at most one bare point mass at
+/// rest on the symmetry axis. each refusal names the missing kernels or gates
+fn lifted_newtonian_refusal(cfg: &Config) -> Option<String> {
+    const GRAVITATIONAL: u64 = 1;
+    let bare_axial_mass = |b: &BodyParams| {
+        b.capability == GRAVITATIONAL
+            && !b.two_way_coupling
+            && b.position.iter().all(|x| *x == 0.0)
+            && b.velocity.iter().all(|v| *v == 0.0)
+    };
+    let checks: [(bool, &str); 15] = [
+        (cfg!(feature = "gpu"), "device execution, whose hardware gates have not run"),
+        (cfg.coord_system == "cartesian" && !cfg.bodies.is_empty(), "a body on the cartesian plane, whose lifted source kernels are not baked"),
+        (cfg.refinement_enabled, "mesh refinement"),
+        (cfg.solver != Solver::Hlle, "a solver other than hlle"),
+        (cfg.reconstruction_name != "plm", "a reconstruction other than plm"),
+        (cfg.wb_reconstruction, "the well-balanced reconstruction"),
+        (cfg.alpha != 0.0 || (cfg.viscosity != 0.0 && cfg.azimuthal_shear.is_none()), "viscous transport other than the azimuthal shear"),
+        (cfg.azimuthal_shear.is_some() && cfg.coord_system == "cartesian", "the azimuthal shear on the cartesian plane, which has no symmetry axis"),
+        (cfg.bodies.len() > 1 || cfg.binary.is_some() || cfg.bonded_assembly.is_some(), "more than one immersed body"),
+        (!cfg.bodies.iter().all(bare_axial_mass), "a body other than a bare point mass at rest on the symmetry axis"),
+        (!cfg.source_jsons.is_empty(), "a user source"),
+        (!cfg.census_jsons.is_empty(), "a census"),
+        (cfg.mesh_motion || cfg.motion_json.is_some(), "mesh motion"),
+        (cfg.n_tracers != 0 || !cfg.chi_ic.is_empty(), "a tracer or passive scalar"),
+        (!cfg.driven_exprs.is_empty() || !cfg.gradient_bcs.is_empty(), "a driven or gradient wall"),
+    ];
+    checks.into_iter().find(|(outside, _)| *outside).map(|(_, property)| property.to_string())
+}
+
+/// every primitive row has one width the configuration's layout accepts; a flat newtonian
+/// rotating plane also keeps to the verified scope
 fn validate_primitive_rows(cfg: &Config, prims: &[Vec<f64>]) -> Result<usize, String> {
     let width = prims.first().map_or(0, |row| row.len());
     if let Some((ii, row)) = prims.iter().enumerate().find(|(_, row)| row.len() != width) {
         return Err(format!("primitive row {ii} has {} entries where row 0 has {width}", row.len()));
     }
-    primitive_row_dof(cfg, width)
+    let dof = primitive_row_dof(cfg, width)?;
+    if cfg.azimuthal_shear.is_some() && dof <= cfg.dims {
+        return Err(format!(
+            "the azimuthal shear on the {} with {dof} velocity components: the model acts on an azimuthal velocity, carried with velocity_components = 3",
+            grid_name(cfg)
+        ));
+    }
+    if dof > cfg.dims && matches!(cfg.regime.as_str(), "newtonian" | "isothermal") && cfg.spacetime == "minkowski" {
+        if let Some(property) = lifted_newtonian_refusal(cfg) {
+            return Err(format!("{property} with three velocity components on the {} is outside the verified scope", grid_name(cfg)));
+        }
+    }
+    Ok(dof)
 }
 
 /// a declared stationary target supplies density, one velocity per grid axis and the pressure;
@@ -11475,6 +11630,7 @@ impl LaunchFault {
             ));
             return Ok(fault);
         }
+        fault.injection.rejection_armed = parts[0] == "reject";
         if number(1)? as usize != me {
             match parts[0] {
                 "reject" | "reject_level" | "bad_cfl" | "exit" | "face" | "nested_contribution" => return Ok(fault),
@@ -13966,8 +14122,12 @@ fn run_worker_process(
         }};
     }
     macro_rules! iso_tiles {
-        ($geom:expr, $geom_ty:ty) => {{
-            type Sim = SimDefault<IsoNewtonian, $d, $geom_ty, Isothermal<f64>>;
+        ($geom:expr, $geom_ty:ty) => {
+            iso_tiles!($geom, $geom_ty, $d)
+        };
+        // `$dof` momentum components on the `$d`-dimensional grid
+        ($geom:expr, $geom_ty:ty, $dof:tt) => {{
+            type Sim = SimDefaultGeneric<IsoNewtonian, $d, $dof, $geom_ty, Isothermal<f64>>;
             let mut tiles = Vec::with_capacity(mine.len());
             for &flat in &mine {
                 let tc = unflatten(flat, counts);
@@ -13985,7 +14145,7 @@ fn run_worker_process(
                     .set_initial_indexed(|idx, _x| {
                         let lin = global_lin::<$d>(&tile_lo, &idx, &n);
                         let row = &prims[lin];
-                        PrimG::<f64, $d, IsoModel>::isothermal(Density(row[0]), Tensor::new(std::array::from_fn(|k| row[1 + k])))
+                        PrimG::<f64, $dof, IsoModel>::isothermal(Density(row[0]), Tensor::new(std::array::from_fn(|k| row[1 + k])))
                     })
                     .build();
                 // the dye on this tile, indexed from the global dye by the tile's global cells;
@@ -14027,7 +14187,7 @@ fn run_worker_process(
                     .map_err(|e| format!("global seeding sim allocate: {e:?}"))?
                     .set_initial_indexed(|idx, _x| {
                         let row = &prims[global_lin::<$d>(&[0; $d], &idx, &n)];
-                        PrimG::<f64, $d, IsoModel>::isothermal(Density(row[0]), Tensor::new(std::array::from_fn(|k| row[1 + k])))
+                        PrimG::<f64, $dof, IsoModel>::isothermal(Density(row[0]), Tensor::new(std::array::from_fn(|k| row[1 + k])))
                     })
                     .build();
                 let mut per_tile = partition_configured_tracers(&global, cfg, &partition);
@@ -14061,7 +14221,7 @@ fn run_worker_process(
                 lay_perturbation!(sim, cfg, $d, false);
                 Ok(())
             };
-            session_over!(IsoNewtonian, $d, tiles, seed.as_ref().map(|f| f as &dyn Fn(&Sim)), expression.as_ref().map(|_| &perturb as &dyn Fn(&mut Sim) -> Result<(), String>))
+            session_over!(IsoNewtonian, $dof, tiles, seed.as_ref().map(|f| f as &dyn Fn(&Sim)), expression.as_ref().map(|_| &perturb as &dyn Fn(&mut Sim) -> Result<(), String>))
         }};
     }
     macro_rules! imhd_tiles {
@@ -14226,6 +14386,32 @@ fn run_worker_process(
             Err(format!("the {} spacetime on the {}-dimensional cylindrical chart is outside the distributed first release", cfg.spacetime, $other))
         };
     }
+    // a flat curvilinear plane, built only on a two-dimensional grid: the rows choose one momentum
+    // per axis or the azimuthal momentum's three, as the single grid's dispatch chooses
+    macro_rules! flat_axisymmetric_plane {
+        (2, $arm:ident, $geom:expr, $geom_ty:ty, $regime:expr, $regime_ty:ty) => {{
+            match primitive_row_dof(cfg, prims.first().map_or(0, |row| row.len()))? {
+                3 => $arm!($geom, $geom_ty, $regime, $regime_ty, 3),
+                _ => $arm!($geom, $geom_ty, $regime, $regime_ty),
+            }
+        }};
+        ($other:tt, $arm:ident, $geom:expr, $geom_ty:ty, $regime:expr, $regime_ty:ty) => {
+            $arm!($geom, $geom_ty, $regime, $regime_ty)
+        };
+    }
+    // the isothermal tiles on a chart, built only as a plane on a two-dimensional grid: the
+    // declared rows choose one momentum per axis or three
+    macro_rules! iso_plane {
+        (2, $geom:expr, $geom_ty:ty) => {{
+            match primitive_row_dof(cfg, prims.first().map_or(0, |row| row.len()))? {
+                3 => iso_tiles!($geom, $geom_ty, 3),
+                _ => iso_tiles!($geom, $geom_ty),
+            }
+        }};
+        ($other:tt, $geom:expr, $geom_ty:ty) => {
+            iso_tiles!($geom, $geom_ty)
+        };
+    }
     macro_rules! charted {
         ($arm:ident) => {
             match cfg.coord_system.as_str() {
@@ -14239,9 +14425,9 @@ fn run_worker_process(
         // kerr-schild box and the radial line, charts the single grid bakes with one momentum per axis
         ($arm:ident, $regime:expr, $regime_ty:ty) => {
             match (cfg.coord_system.as_str(), cfg.spacetime.as_str(), $d) {
-                ("cartesian", "minkowski", _) => $arm!(Cartesian, Cartesian, $regime, $regime_ty),
-                ("spherical", "minkowski", _) => $arm!(Spherical, Spherical, $regime, $regime_ty),
-                ("cylindrical", "minkowski", _) => $arm!(Cylindrical, Cylindrical, $regime, $regime_ty),
+                ("cartesian", "minkowski", _) => flat_axisymmetric_plane!($d, $arm, Cartesian, Cartesian, $regime, $regime_ty),
+                ("spherical", "minkowski", _) => flat_axisymmetric_plane!($d, $arm, Spherical, Spherical, $regime, $regime_ty),
+                ("cylindrical", "minkowski", _) => flat_axisymmetric_plane!($d, $arm, Cylindrical, Cylindrical, $regime, $regime_ty),
                 ("cartesian", "schwarzschild_ks", 3) => $arm!(
                     SchwarzschildKSCartesian { mass: cfg.schwarzschild_mass },
                     SchwarzschildKSCartesian<f64>,
@@ -14276,7 +14462,12 @@ fn run_worker_process(
         "nmhd" => charted!(nmhd_tiles),
         "rmhd" if cfg.spacetime != "minkowski" => kerr_schild_mhd!($d),
         "rmhd" => charted!(rmhd_tiles),
-        "isothermal" => charted!(iso_tiles),
+        "isothermal" => match cfg.coord_system.as_str() {
+            "cartesian" => iso_plane!($d, Cartesian, Cartesian),
+            "spherical" => iso_plane!($d, Spherical, Spherical),
+            "cylindrical" => iso_plane!($d, Cylindrical, Cylindrical),
+            other => Err(format!("the {other} chart is outside the distributed first release")),
+        },
         "imhd" => charted!(imhd_tiles),
         other => Err(format!("the {other} regime is outside the distributed first release")),
     }
@@ -15427,6 +15618,7 @@ mod kernel_construction_tests {
             eos: symbi::EosArm::IdealGamma,
             solver: Solver::Hllc,
             ct_method: CtMethod::Uct,
+            azimuthal_shear: None,
             viscosity: 2.0e-3,
             alpha: 1.0e-2,
             resistivity: 3.0e-3,
@@ -15555,6 +15747,16 @@ mod launch_fault_tests {
 
     /// unset, the variable activates nothing: every fault of the launch, the in-process tiled run
     /// and the refined workers is absent, so an ordinary run takes no injected act
+    #[test]
+    fn a_forced_rejection_arms_every_worker_and_rejects_on_the_named_one() {
+        for me in [0, 1, 2] {
+            let f = LaunchFault::from_spec(Some("reject:1:3:0"), me).expect("the spec parses");
+            assert!(f.injection.rejection_armed, "worker {me} is unarmed");
+            assert_eq!(f.injection.reject_at.is_empty(), me != 1, "worker {me}");
+        }
+        assert!(!LaunchFault::from_spec(None, 0).expect("an absent variable parses").injection.rejection_armed);
+    }
+
     #[test]
     fn an_unset_injection_variable_activates_no_fault() {
         for me in [0, 1, 7] {

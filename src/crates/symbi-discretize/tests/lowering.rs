@@ -21,7 +21,7 @@ use harness::KernelRun;
 use symbi_ir::SweepAxis;
 
 use symbi_discretize::gv::{
-    adiabatic_flux_cyl_rz_gv, adiabatic_flux_gv, iso_flux_gv, rhd_flux_gv, rmhd_flux_gv,
+    adiabatic_flux_lifted_gv, adiabatic_flux_gv, iso_flux_gv, rhd_flux_gv, rmhd_flux_gv,
 };
 use symbi_discretize::{
     Coords, EosArm, GeoSource, Recon, Spacetime, Spacing, adiabatic_c2p_gv, body_feedback_gv,
@@ -99,10 +99,10 @@ fn flux_kernels_lower() {
         .grid([8, 8])
         .assert_lowers();
     // cyl r-z adiabatic flux: 3-component swirl on a 2-axis (r,z) grid, both sweep dirs.
-    KernelRun::new(adiabatic_flux_cyl_rz_gv(0))
+    KernelRun::new(adiabatic_flux_lifted_gv(0, &[0, 2]))
         .grid([8, 8])
         .assert_lowers();
-    KernelRun::new(adiabatic_flux_cyl_rz_gv(1))
+    KernelRun::new(adiabatic_flux_lifted_gv(1, &[0, 2]))
         .grid([8, 8])
         .assert_lowers();
     // rmhd flux: 8 conserved fluxes (D,S,tau,B). 1D dir-0 + the per-dir 3D instances.

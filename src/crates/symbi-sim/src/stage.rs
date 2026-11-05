@@ -225,8 +225,9 @@ pub const STAGE_PIPELINE: &[Phase] = &[
         // stage's flux divergence was also evaluated at, and applied to the advanced cons. an
         // explicit scheme sums the flux and every source over one state; evaluating a complete
         // source operator on an already-advanced state composes them sequentially instead, which
-        // is first order in dt at any Runge-Kutta order.
-        reads: FieldSet::CONS.or(FieldSet::PRIM).or(FieldSet::USTAGE),
+        // is first order in dt at any Runge-Kutta order. flux because a static potential's energy
+        // work on an axisymmetric plane reads this stage's face mass flux.
+        reads: FieldSet::CONS.or(FieldSet::PRIM).or(FieldSet::USTAGE).or(FieldSet::FLUX),
         writes: FieldSet::CONS,
         gate: Gate::Bodies,
     },

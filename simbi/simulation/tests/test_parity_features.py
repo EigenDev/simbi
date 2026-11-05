@@ -17,6 +17,11 @@
 #   stage of the last substep of the deepest level), stopped after that step,
 #   equals the clean launch capped at the accepted timestep
 # the table:
+# - three velocity components on a plane: the adiabatic, isothermal and locally
+#   isothermal gas on the (r, theta) plane (log radius, poles on the grid) and the
+#   (R, z) plane about a point mass on the axis, and on the cartesian plane; the
+#   azimuthal shear with nu ~ r^(1/2) on the two axisymmetric planes, one radial face
+#   continuing the stress
 # - sources and sponges: the rotating frame and full-state sponge on a plane;
 #   the bondi sink with its outer sponge, flat, under one fine box and under
 #   two nested boxes
@@ -278,6 +283,109 @@ BINARY_BOX = '''    refinement_enabled: Annotated[bool, ProblemParam(True, descr
 '''
 
 
+LIFTED = '''
+import math
+from typing import Annotated
+
+from pydantic import computed_field
+
+from simbi import ProblemParam, SimbiProblem
+from simbi.types import BoundaryCondition, CellSpacing, CoordSystem, Regime
+from simbi.types.bodies import BodyCapability, GravitationalProperties, ImmersedBodyConfig
+
+
+class {name}(SimbiProblem):
+    """a rotating ring with three velocity components on a plane{about}"""
+
+    resolution: Annotated[tuple[int, int], ProblemParam((48, 32), cli=True, description="grid")]
+    bounds: list[tuple[float, float]] = {bounds}
+    coord_system: CoordSystem = {coord}
+    velocity_components: Annotated[int | None, ProblemParam(3, description="three velocity components")]
+    end_time: float = 10.0
+    swirl: Annotated[float, ProblemParam(1.0, description="the out-of-plane velocity's scale")]
+    boundary_conditions: Annotated[list[BoundaryCondition], ProblemParam({walls}, description="walls")]
+{closure}{spacing}
+    @computed_field
+    @property
+    def immersed_bodies(self) -> list[ImmersedBodyConfig]:
+        return {bodies}
+
+    def initial_primitive_state(self):
+        (n0, n1), ((lo0, hi0), (lo1, hi1)) = self.resolution, self.bounds
+
+        def gas_state():
+            for jj in range(n1):
+                x1 = lo1 + (jj + 0.5) * (hi1 - lo1) / n1
+                for ii in range(n0):
+                    x0 = {center}
+                    radius, axial = {polar}
+                    rho = 0.01 + math.exp(-(((axial - {ring}) ** 2) / 0.09))
+                    pressure = 0.1 * rho / max(radius, 0.05)
+                    yield (rho, {velocity}{pressure})
+
+        return gas_state
+'''
+POINT_MASS = (
+    '[ImmersedBodyConfig(capability=BodyCapability.GRAVITATIONAL, mass=1.0, velocity=(0.0, 0.0), position=(0.0, 0.0), radius=0.0,\n'
+    '                                   gravitational=GravitationalProperties(softening_length=0.05, softening_kind="compact"))]'
+)
+PLANES = {
+    "sph": dict(
+        about=" about a point mass on the axis", ring="1.0", bodies=POINT_MASS,
+        bounds="[(0.1, 4.0), (0.0, math.pi)]", coord="CoordSystem.SPHERICAL",
+        walls="[BoundaryCondition.OUTFLOW, BoundaryCondition.OUTFLOW, BoundaryCondition.AXIS, BoundaryCondition.AXIS]",
+        spacing='    x1_spacing: Annotated[CellSpacing, ProblemParam(CellSpacing.LOG, description="log radius")]\n',
+        center="lo0 * (hi0 / lo0) ** ((ii + 0.5) / n0)", polar="x0, x0 * math.sin(x1)",
+        velocity="0.0, 0.0, self.swirl / math.sqrt(x0 * math.sin(x1) + 0.1)",
+    ),
+    "rz": dict(
+        about=" about a point mass on the axis", ring="1.0", bodies=POINT_MASS,
+        bounds="[(0.25, 2.25), (-1.0, 1.0)]", coord="CoordSystem.CYLINDRICAL",
+        walls="[BoundaryCondition.OUTFLOW]", spacing="",
+        center="lo0 + (ii + 0.5) * (hi0 - lo0) / n0", polar="math.hypot(x0, x1), x0",
+        velocity="0.0, self.swirl / math.sqrt(x0), 0.0",
+    ),
+    "cart": dict(
+        about="", ring="0.5", bodies="[]",
+        bounds="[(0.0, 1.0), (0.0, 1.0)]", coord="CoordSystem.CARTESIAN",
+        walls="[BoundaryCondition.OUTFLOW]", spacing="",
+        center="lo0 + (ii + 0.5) * (hi0 - lo0) / n0", polar="1.0, x0",
+        velocity="0.1, 0.05 * math.sin(2.0 * math.pi * x0), self.swirl * math.sin(2.0 * math.pi * x0)",
+    ),
+}
+CLOSURES = {
+    "adiabatic": dict(
+        closure='    regime: Regime = Regime.NEWTONIAN\n    adiabatic_index: float = 5.0 / 3.0\n',
+        pressure=", pressure",
+    ),
+    "iso": dict(
+        closure='    regime: Regime = Regime.ISOTHERMAL\n    adiabatic_index: float | None = None\n'
+                '    sound_speed: Annotated[float | None, ProblemParam(0.5, description="sound speed")]\n',
+        pressure="",
+    ),
+    "local-iso": dict(
+        closure='    regime: Regime = Regime.ISOTHERMAL\n    adiabatic_index: float | None = None\n'
+                '    sound_speed: Annotated[float | None, ProblemParam(0.5, description="ambient sound speed")]\n'
+                '    @computed_field\n    @property\n    def locally_isothermal(self) -> bool:\n        return True\n\n'
+                '    @computed_field\n    @property\n    def ambient_sound_speed(self) -> float:\n        return 0.5\n',
+        pressure=", pressure",
+    ),
+}
+AZIMUTHAL_SHEAR = (
+    '    viscous_stress: Annotated[str | None, ProblemParam("azimuthal_shear", description="the azimuthal shear")]\n'
+    '    viscous_boundaries: Annotated[list[str] | None, ProblemParam(["zero_torque", "continued_shear", "zero_torque", "zero_torque"], description="faces")]\n'
+    '    viscosity_radius_power: Annotated[float, ProblemParam(0.5, description="nu rises as r^(1/2)")]\n'
+    '\n    @computed_field\n    @property\n    def viscosity(self) -> float:\n        return 1.0e-3\n\n'
+)
+INVISCID = (
+    '    viscous_stress: Annotated[str | None, ProblemParam(None, description="inviscid")]\n'
+    '\n    @computed_field\n    @property\n    def viscosity(self) -> float:\n        return 0.0\n'
+)
+INVISCID_IMPORTS = "from typing import Annotated\n\nfrom pydantic import computed_field\n\nfrom simbi import ProblemParam\n"
+NO_SWIRL = '    swirl: Annotated[float, ProblemParam(0.0, description="no rotation")]\n'
+SWIRL_IMPORTS = "from typing import Annotated\n\nfrom simbi import ProblemParam\n"
+
+
 def _control(key: str, base: str, body: str, imports: str = "") -> tuple[str, str]:
     """the entry's fixture with its setting reverted: a subclass of the feature's own class, from the
     feature module written beside the test"""
@@ -355,6 +463,15 @@ FEATURES = {
                                                   f"reject_level:1:{REJECTED_STEP}:1:1:1",
                                                   control=_control("moving-eccentric-binary-refined-2d", "EccentricBinaryRefined", CIRCULAR_ORBIT,
                                                                    BODY_SYSTEM_IMPORTS)),
+    **{f"lifted-{plane}-{closure}": Feature(LIFTED.format(name=f"Lifted{plane.title()}{closure.title().replace('-', '')}", **PLANES[plane], **CLOSURES[closure]),
+                                            f"Lifted{plane.title()}{closure.title().replace('-', '')}", (48, 32), [[24], []], [[14, 30], []], f"reject:1:{REJECTED_STEP}:1",
+                                            control=_control(f"lifted-{plane}-{closure}", f"Lifted{plane.title()}{closure.title().replace('-', '')}", NO_SWIRL, SWIRL_IMPORTS))
+       for plane in PLANES for closure in CLOSURES},
+    **{f"lifted-shear-{plane}-{closure}": Feature(
+        LIFTED.format(name=f"Shear{plane.title()}{closure.title().replace('-', '')}", **PLANES[plane], **{**CLOSURES[closure], "closure": CLOSURES[closure]["closure"] + AZIMUTHAL_SHEAR}),
+        f"Shear{plane.title()}{closure.title().replace('-', '')}", (48, 32), [[24], []], [[14, 30], []], f"reject:1:{REJECTED_STEP}:1",
+        control=_control(f"lifted-shear-{plane}-{closure}", f"Shear{plane.title()}{closure.title().replace('-', '')}", INVISCID, INVISCID_IMPORTS))
+       for plane in ("sph", "rz") for closure in CLOSURES},
     **{f"refined-blast-{key}": Feature(BLAST_VARIANT.format(name=f"Blast{cls}", line=line), f"Blast{cls}", (24, 24, 24),
                                        [[12], [], []], [[7, 15], [], []], f"reject_level:1:{REJECTED_STEP}:1:1:1",
                                        control=BLAST_CONTROL)

@@ -34,10 +34,10 @@ use crate::kernels::support::{GhostFillDriver, to_bc_array};
 use crate::regimes::substrate_kernels::{
     FluxSpec, FusedCpuKernel, FusedSourceBinding, GradientBc, RuntimeSource, ScalarBind, Solver,
     bind_by_manifest, body_fused_in, cfl_wave_speed, dispatch_body_feedback, dispatch_body_source,
-    dispatch_body_source_wb, dispatch_driven_boundaries, dispatch_fields, dispatch_flux,
+    dispatch_body_source_face_work, dispatch_body_source_wb, dispatch_driven_boundaries, dispatch_fields, dispatch_flux,
     dispatch_fused_runtime_cpu, dispatch_godunov_maybe_fused, dispatch_gradient_boundaries,
     dispatch_named, dispatch_penalize, dispatch_runtime_source, dispatch_source_apply,
-    dof_lift_suffix, fused_runtime_cpu_kernel, geom_scalar, motion_scalar, resolve_body_only_fused,
+    fused_runtime_cpu_kernel, geom_scalar, motion_scalar, resolve_body_only_fused,
     resolve_params, resolve_snapshot_into, scalars_for,
 };
 use symbi_discretize::gv::GeoSource;
@@ -58,6 +58,10 @@ impl<Mem: MemoryStorage, Sc: Scalar + OrderedNumeric, const D: usize> WithViscos
         // nu = alpha (gamma p/rho) / Omega_K with the local sound speed — the
         // shakura-sunyaev prescription on a varying-cs gas.
         self.alpha = alpha;
+        self
+    }
+    fn with_azimuthal_shear(mut self, model: Option<symbi_hydro::viscous::AzimuthalShear>) -> Self {
+        self.azimuthal_shear = model;
         self
     }
 }
@@ -81,6 +85,16 @@ pub struct AdiabaticSubstrateKernelSet<
 > {
     pub gamma: f64,
     pub cfl_number: f64,
+    /// a diagnostic control the replay tests alone set: the axisymmetric godunov stage with the
+    /// azimuthal momentum in source form, against the torque form
+    pub azimuthal_source_control: bool,
+    /// a diagnostic control the replay tests alone set: gravity's energy work from the cell momentum
+    /// on a plane that admits the face mass flux's work
+    pub cell_momentum_gravity_work: bool,
+    /// the azimuthal shear model in place of the full stress, on an axisymmetric plane
+    pub azimuthal_shear: Option<symbi_hydro::viscous::AzimuthalShear>,
+    /// the torque and the stress work entered through the continued domain faces this session
+    pub viscous_boundary_ledger: std::sync::Mutex<(f64, f64)>,
     /// the theta-MC reconstruction compression (regime-generic; 1 == plain minmod).
     pub theta: f64,
     pub cfl_scratch: Field<Sc, D, Mem>,
@@ -171,6 +185,10 @@ impl<Mem: MemoryStorage, Sc: Scalar + OrderedNumeric, const D: usize>
             freeze_streak: std::sync::atomic::AtomicU32::new(0),
             viscosity: 0.0,
             alpha: 0.0,
+            azimuthal_source_control: false,
+            cell_momentum_gravity_work: false,
+            azimuthal_shear: None,
+            viscous_boundary_ledger: std::sync::Mutex::new((0.0, 0.0)),
         }
     }
 
@@ -280,6 +298,19 @@ impl<Mem: MemoryStorage, Sc: Scalar + OrderedNumeric, const D: usize>
         }
         self.solver = solver;
         Ok(self)
+    }
+
+    /// the admitted plane and body, with the diagnostic controls clear
+    fn takes_face_gravity_work<const DOF: usize>(&self, sim: &FieldStore<D, DOF, Mem, Sc>) -> bool
+    where
+        Mem: MemoryStorage,
+        Sc: Scalar + OrderedNumeric,
+    {
+        !self.cell_momentum_gravity_work
+            && !self.azimuthal_source_control
+            && sim.immersed.as_ref().is_some_and(|im| {
+                admits_face_gravity_work(sim.geom.coords, DOF, im.bodies.bodies())
+            })
     }
 
     /// set the theta-MC limiter compression in [1,2] (1 = minmod, 2 = monotonized-central). fluent.
@@ -420,7 +451,7 @@ impl<Mem: MemoryStorage + Sync, Sc: Scalar + OrderedNumeric, const D: usize, con
             .prim
             .pre_field()
             .expect("Newtonian requires prim.pre");
-        let sfx = dof_lift_suffix(sim.geom.coords, DOF, D);
+        let sfx = symbi_discretize::kernel_slug::newtonian_lift_suffix(sim.geom.coords, DOF, D);
         let name = format!("adiabatic_c2p{sfx}_{D}d");
         let scalars = scalars_for(&name, |bind| match bind {
             ScalarBind::Ref(ScalarRef::Gamma) => Sc::from_f64(self.gamma),
@@ -481,7 +512,7 @@ impl<Mem: MemoryStorage + Sync, Sc: Scalar + OrderedNumeric, const D: usize, con
         dispatch_godunov_maybe_fused(
             sim,
             pre,
-            "adiabatic",
+            if self.azimuthal_source_control { "adiabatic_azimuthal_source_control" } else { "adiabatic" },
             dt,
             a0,
             ac,
@@ -514,7 +545,9 @@ impl<Mem: MemoryStorage + Sync, Sc: Scalar + OrderedNumeric, const D: usize, con
         // stress). cartesian 2D only, so the coordinate dx is the physical cell width. inert inviscid.
         // alpha: nu grows with radius and with the local cs^2, so the cap bounds it
         // by the largest sound speed at the slowest orbit (adiabatic_alpha_nu_max).
-        let nu_max = if self.alpha > 0.0 {
+        let nu_max = if self.azimuthal_shear.is_some() {
+            0.0
+        } else if self.alpha > 0.0 {
             crate::regimes::substrate_kernels::adiabatic_alpha_nu_max(
                 sim.host_only("the alpha-viscosity timestep cap"),
                 self.alpha,
@@ -530,6 +563,7 @@ impl<Mem: MemoryStorage + Sync, Sc: Scalar + OrderedNumeric, const D: usize, con
         } else {
             dt
         };
+        let dt = crate::regimes::substrate_kernels::azimuthal_shear_limited_dt(sim, self.azimuthal_shear.as_ref(), &self.cfl_scratch, dt);
         let min_physical_width = super::substrate_mhd::max_inv_physical_width(&sim.geom).recip();
         crate::regimes::substrate_kernels::body_gravity_limited_dt(
             sim,
@@ -540,6 +574,10 @@ impl<Mem: MemoryStorage + Sync, Sc: Scalar + OrderedNumeric, const D: usize, con
     }
 
     fn viscous(&self, sim: &FieldStore<D, DOF, Mem, Sc>, dt: f64) {
+        if let Some(model) = &self.azimuthal_shear {
+            crate::regimes::substrate_kernels::apply_azimuthal_shear(sim, model, &self.cfl_scratch, &self.viscous_boundary_ledger, dt);
+            return;
+        }
         // alpha (local-cs shakura-sunyaev) takes precedence over the constant nu.
         if self.alpha > 0.0 {
             crate::regimes::substrate_kernels::dispatch_viscous_alpha(
@@ -577,7 +615,7 @@ impl<Mem: MemoryStorage + Sync, Sc: Scalar + OrderedNumeric, const D: usize, con
             .prim
             .pre_field()
             .expect("Newtonian requires prim.pre");
-        let sfx = dof_lift_suffix(sim.geom.coords, DOF, D);
+        let sfx = symbi_discretize::kernel_slug::newtonian_lift_suffix(sim.geom.coords, DOF, D);
         // under a balanced reconstruction the ghosts must satisfy the same premise the
         // interior does: a mirrored copy of a stratified column is not its continuation, so
         // reflect/outflow ghosts extend (rho, p) along the local isentrope to the ghost's own
@@ -708,7 +746,7 @@ impl<Mem: MemoryStorage + Sync, Sc: Scalar + OrderedNumeric, const D: usize, con
             .prim
             .pre_field()
             .expect("Newtonian requires prim.pre");
-        let sfx = dof_lift_suffix(sim.geom.coords, DOF, D);
+        let sfx = symbi_discretize::kernel_slug::newtonian_lift_suffix(sim.geom.coords, DOF, D);
         let name = format!("adiabatic_snapshot{sfx}_{D}d");
         dispatch_named(sim, pre, None, 0, &name, &sim.geom.allocated, &[], &[]);
         // the dye snapshot rides alongside: u_n.chi = cons.chi, the rk combine's
@@ -893,7 +931,7 @@ impl<Mem: MemoryStorage + Sync, Sc: Scalar + OrderedNumeric, const D: usize, con
         // u_stage = cons (pure copy of den, mom_0.., nrg) over the interior the source pass
         // iterates. the snapshot kernel's manifest names `u_n` as its destination; the
         // resolver binds that slot onto u_stage.
-        let sfx = dof_lift_suffix(sim.geom.coords, DOF, D);
+        let sfx = symbi_discretize::kernel_slug::newtonian_lift_suffix(sim.geom.coords, DOF, D);
         let name = format!("adiabatic_snapshot{sfx}_{D}d");
         let (inputs, outputs) = bind_by_manifest(&name, |b| {
             resolve_snapshot_into(sim, &sim.workspace.u_stage, b)
@@ -943,8 +981,16 @@ impl<Mem: MemoryStorage + Sync, Sc: Scalar + OrderedNumeric, const D: usize, con
                 None => resolve_body_only_fused(sim, &self.fused_rhs, true, geo).is_some(),
             };
             if absorbed {
+                assert!(
+                    !self.takes_face_gravity_work(sim),
+                    "a fused body pass carries the cell momentum's gravity work, on a plane that admits the face mass flux's"
+                );
                 return;
             }
+        }
+        if self.takes_face_gravity_work(sim) {
+            dispatch_body_source_face_work(sim, dt, self.gamma);
+            return;
         }
         // forward immersed-body source: cons += dt*S, in-place. under a balanced
         // reconstruction the momentum source must be the equilibrium-pressure difference at
@@ -969,4 +1015,21 @@ impl<Mem: MemoryStorage + Sync, Sc: Scalar + OrderedNumeric, const D: usize, con
         // backward feedback: reduce per-body force/torque/mass -> diagnostics.
         dispatch_body_feedback(sim, dt, self.gamma);
     }
+}
+
+/// the plane and body the face mass flux's gravity work is defined and verified on: a torque-form
+/// axisymmetric plane with three velocity components under a single bare point mass at rest at the
+/// origin, whose potential is static and whose body source carries no drain or reaction
+pub fn admits_face_gravity_work<const D: usize>(
+    coords: symbi_geometry::Geometry,
+    dof: usize,
+    bodies: &[symbi_ib::Body<f64, D>],
+) -> bool {
+    let plane = D == 2 && dof == 3 && coords != symbi_geometry::Geometry::Cartesian;
+    let bare_at_origin = |b: &symbi_ib::Body<f64, D>| {
+        matches!(b.kind, symbi_ib::BodyKind::Gravitational { .. })
+            && !b.two_way_coupling
+            && (0..D).all(|ax| b.position[ax] == 0.0 && b.velocity[ax] == 0.0)
+    };
+    plane && matches!(bodies, [only] if bare_at_origin(only))
 }

@@ -1034,6 +1034,23 @@ pub fn dispatch_body_source<const D: usize, const DOF: usize, Mem, Sc>(
     );
 }
 
+/// the body pass of a single static potential on an adiabatic axisymmetric plane: the momentum
+/// source of [`dispatch_body_source`] with gravity's energy work taken from this stage's face mass
+/// fluxes. reads `flux[d].den` on the cell's own faces, so the flux pass of the same stage precedes
+/// it; the operator has no reduction and needs no synchronization of its own.
+pub fn dispatch_body_source_face_work<const D: usize, const DOF: usize, Mem, Sc>(
+    sim: &FieldStore<D, DOF, Mem, Sc>,
+    dt: f64,
+    gamma: f64,
+) where
+    Mem: MemoryStorage + Sync,
+    Sc: Scalar + OrderedNumeric,
+{
+    let name = format!("body_source_face_work{}_{D}d", geom_suffix(sim.geom.coords, DOF, D));
+    let scalars = resolve_body_scalars(sim, dt, gamma, &name);
+    dispatch_named(sim, &sim.fields.cons.den, None, 0, &name, &sim.geom.interior, &[], &scalars);
+}
+
 /// dispatch the constant-nu viscous operator (`viscous_iso_2d`):
 /// accumulate `dt div(tau)` into `cons.mom` over the interior. isothermal, 2D
 /// cartesian; the caller gates on `nu > 0`. reads `prim.rho` / `prim.vel` (current
@@ -1551,6 +1568,190 @@ pub fn dispatch_viscous<const D: usize, const DOF: usize, Mem, Sc>(
         &[],
         &scalars,
     );
+}
+
+/// the integer arguments of the azimuthal shear kernels: the local index of each domain face
+/// closed with zero torque (`want = ZeroTorque`, an axis included) or passing a continued stress
+/// (`want = ContinuedShear`), and an index no cell holds elsewhere. a cut or a periodic seam
+/// is an interior face
+fn azimuthal_face_ints<const D: usize, const DOF: usize, Mem, Sc>(
+    sim: &FieldStore<D, DOF, Mem, Sc>,
+    model: &symbi_hydro::viscous::AzimuthalShear,
+    want: symbi_hydro::viscous::ViscousFace,
+) -> [i32; 4]
+where
+    Mem: MemoryStorage,
+    Sc: Scalar + OrderedNumeric,
+{
+    use symbi_hydro::viscous::ViscousFace;
+    use symbi_sim::state::BoundaryType;
+    const NOWHERE: i32 = i32::MIN;
+    let edge = |axis: usize, high: bool| -> i32 {
+        let span = &sim.geom.interior.spaces[axis];
+        let kind = if high { sim.boundaries.hi(axis) } else { sim.boundaries.lo(axis) };
+        let local = if high { span.hi - 1 } else { span.lo } as i32;
+        match kind {
+            BoundaryType::CoarseFine | BoundaryType::Periodic => NOWHERE,
+            BoundaryType::Axis if want == ViscousFace::ZeroTorque => local,
+            BoundaryType::Axis => NOWHERE,
+            _ if model.faces[axis][usize::from(high)] == want => local,
+            _ => NOWHERE,
+        }
+    };
+    [edge(0, false), edge(0, true), edge(1, false), edge(1, true)]
+}
+
+/// the integer and float arguments of one azimuthal shear kernel, each named by its manifest
+fn azimuthal_params<const D: usize, const DOF: usize, Mem, Sc>(
+    sim: &FieldStore<D, DOF, Mem, Sc>,
+    name: &str,
+    model: &symbi_hydro::viscous::AzimuthalShear,
+    dt: f64,
+) -> (Vec<i32>, Vec<Sc>)
+where
+    Mem: MemoryStorage,
+    Sc: Scalar + OrderedNumeric,
+{
+    use symbi_hydro::viscous::ViscousFace;
+    let geom = &sim.geom;
+    let law = &model.law;
+    // a graded axis binds the map's face-0 start and its decade slope or first width
+    let (x_lo, dx) = kernel_geom(&geom.x_lo, &geom.dx, &geom.maps, geom.coords, sim.motion.a);
+    let zero = azimuthal_face_ints(sim, model, ViscousFace::ZeroTorque);
+    let open = azimuthal_face_ints(sim, model, ViscousFace::ContinuedShear);
+    super::params::resolve_params(
+        name,
+        |bind| match bind {
+            ScalarBind::Spec(s) => match &**s {
+                "zero_lo_0" => zero[0],
+                "zero_hi_0" => zero[1],
+                "zero_lo_1" => zero[2],
+                "zero_hi_1" => zero[3],
+                "open_lo_0" => open[0],
+                "open_hi_0" => open[1],
+                "open_lo_1" => open[2],
+                "open_hi_1" => open[3],
+                other => panic!("azimuthal shear: unexpected int param {other}"),
+            },
+            other => panic!("azimuthal shear: unexpected int param {other:?}"),
+        },
+        |bind| match bind {
+            ScalarBind::Ref(ScalarRef::Dt) => Sc::from_f64(dt),
+            ScalarBind::Spec(s) => Sc::from_f64(match &**s {
+                "mu_scale" => law.scale,
+                "mu_radius" => law.radius,
+                "mu_radius_power" => law.radius_power,
+                "mu_density" => law.density,
+                "mu_density_power" => law.density_power,
+                other => panic!("azimuthal shear: unexpected scalar {other}"),
+            }),
+            ScalarBind::Ref(sref) => Sc::from_f64(
+                super::params::geom_scalar(&x_lo, &dx, &geom.maps, &geom.index_offset, *sref)
+                    .unwrap_or_else(|| panic!("azimuthal shear: unexpected scalar {sref:?}")),
+            ),
+        },
+    )
+}
+
+/// the azimuthal shear's post-step update: momentum and, on an energy closure, total energy
+pub fn dispatch_viscous_azimuthal<const D: usize, const DOF: usize, Mem, Sc>(
+    sim: &FieldStore<D, DOF, Mem, Sc>,
+    model: &symbi_hydro::viscous::AzimuthalShear,
+    dt: f64,
+) where
+    Mem: MemoryStorage,
+    Sc: Scalar + OrderedNumeric,
+{
+    let sfx = geom_suffix(sim.geom.coords, DOF, D);
+    let closure = if sim.fields.cons.nrg_field().is_some() { "adiabatic" } else { "iso" };
+    let name = format!("viscous_azimuthal_{closure}{sfx}_{D}d");
+    let (ints, scalars) = azimuthal_params(sim, &name, model, dt);
+    dispatch_named(sim, &sim.fields.cons.den, None, 0, &name, &sim.geom.interior, &ints, &scalars);
+}
+
+/// the largest inverse timestep bound of the azimuthal shear over this tile, `max sum K / (rho
+/// R_c^2 V)`. an exact maximum reduction, independent of the partition
+pub fn azimuthal_viscous_rate<const D: usize, const DOF: usize, Mem, Sc>(
+    sim: &FieldStore<D, DOF, Mem, Sc>,
+    model: &symbi_hydro::viscous::AzimuthalShear,
+    scratch: &Field<Sc, D, Mem>,
+) -> f64
+where
+    Mem: MemoryStorage,
+    Sc: Scalar + OrderedNumeric,
+{
+    let name = format!("viscous_azimuthal_rate{}_{D}d", geom_suffix(sim.geom.coords, DOF, D));
+    let (ints, scalars) = azimuthal_params(sim, &name, model, 0.0);
+    dispatch_named(sim, &sim.fields.cons.den, Some(scratch), 0, &name, &sim.geom.interior, &ints, &scalars);
+    composite_max_reduce(sim, scratch)
+}
+
+/// the torque and the stress work rate entering this tile through its continued domain faces,
+/// read from the same stresses the update applies. run ahead of the update, whose primitives
+/// they share. each sum is the exact reduction of the tile's cells
+pub fn azimuthal_boundary_rates<const D: usize, const DOF: usize, Mem, Sc>(
+    sim: &FieldStore<D, DOF, Mem, Sc>,
+    model: &symbi_hydro::viscous::AzimuthalShear,
+    scratch: &Field<Sc, D, Mem>,
+) -> (f64, f64)
+where
+    Mem: MemoryStorage,
+    Sc: Scalar + OrderedNumeric,
+{
+    let sfx = geom_suffix(sim.geom.coords, DOF, D);
+    let channel = |which: &str| {
+        let name = format!("viscous_azimuthal_{which}{sfx}_{D}d");
+        let (ints, scalars) = azimuthal_params(sim, &name, model, 0.0);
+        dispatch_named(sim, &sim.fields.cons.den, Some(scratch), 0, &name, &sim.geom.interior, &ints, &scalars);
+        symbi_exec::engine::device_sync::<Mem>();
+        symbi_exec::engine::field_sum_exact(scratch, &sim.geom.interior).value()
+    };
+    (channel("boundary_torque"), channel("boundary_work"))
+}
+
+/// the fraction of the forward euler maximum-principle bound the azimuthal shear steps at. the
+/// gate measures the operator stable at the bound itself; the margin leaves room for the frozen
+/// density the bound assumes
+pub const AZIMUTHAL_SHEAR_SAFETY: f64 = 0.5;
+
+/// `dt` capped by the azimuthal shear's maximum-principle bound; without the model, `dt`
+pub fn azimuthal_shear_limited_dt<const D: usize, const DOF: usize, Mem, Sc>(
+    sim: &FieldStore<D, DOF, Mem, Sc>,
+    model: Option<&symbi_hydro::viscous::AzimuthalShear>,
+    scratch: &Field<Sc, D, Mem>,
+    dt: f64,
+) -> f64
+where
+    Mem: MemoryStorage,
+    Sc: Scalar + OrderedNumeric,
+{
+    let Some(model) = model else {
+        return dt;
+    };
+    let rate = azimuthal_viscous_rate(sim, model, scratch);
+    if rate > 0.0 { dt.min(AZIMUTHAL_SHEAR_SAFETY / rate) } else { dt }
+}
+
+/// the azimuthal shear's post-step operator: the boundary ledger's rates from the stresses
+/// about to act, then the update
+pub fn apply_azimuthal_shear<const D: usize, const DOF: usize, Mem, Sc>(
+    sim: &FieldStore<D, DOF, Mem, Sc>,
+    model: &symbi_hydro::viscous::AzimuthalShear,
+    scratch: &Field<Sc, D, Mem>,
+    ledger: &std::sync::Mutex<(f64, f64)>,
+    dt: f64,
+) where
+    Mem: MemoryStorage,
+    Sc: Scalar + OrderedNumeric,
+{
+    use symbi_hydro::viscous::ViscousFace;
+    if model.faces.iter().flatten().any(|f| *f == ViscousFace::ContinuedShear) {
+        let (torque, work) = azimuthal_boundary_rates(sim, model, scratch);
+        let mut held = ledger.lock().expect("viscous ledger");
+        held.0 += torque * dt;
+        held.1 += work * dt;
+    }
+    dispatch_viscous_azimuthal(sim, model, dt);
 }
 
 /// dispatch the alpha viscous operator (`viscous_iso_alpha_2d`):
@@ -3280,7 +3481,14 @@ pub fn dispatch_godunov<const D: usize, const DOF: usize, Mem, Sc>(
     Sc: Scalar + OrderedNumeric,
 {
     let geom = &sim.geom;
-    let sfx = geom_suffix(geom.coords, DOF, D);
+    let sfx = if matches!(prefix, "adiabatic" | "iso") {
+        match symbi_discretize::kernel_slug::newtonian_lift_suffix(geom.coords, DOF, D) {
+            "" => geom_suffix(geom.coords, DOF, D),
+            lift => lift,
+        }
+    } else {
+        geom_suffix(geom.coords, DOF, D)
+    };
     // the spacetime tag: flat -> "", Schwarzschild -> "_schw" (the lapse-densitized GR kernel).
     // orthogonal to the spatial `sfx`.
     let st_sfx = spacetime_slug(geom.spacetime);

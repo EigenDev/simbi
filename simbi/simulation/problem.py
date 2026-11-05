@@ -384,6 +384,47 @@ class SimbiProblem(BaseModel):
             description="simulation end time",
         ),
     ]
+    viscous_stress: Annotated[
+        str | None,
+        ProblemParam(None, description="the stress model: 'full' (the default) or 'azimuthal_shear'"),
+    ]
+    viscous_coefficient: Annotated[
+        str,
+        ProblemParam("kinematic", description="`viscosity` as kinematic nu or dynamic mu"),
+    ]
+    viscosity_radius: Annotated[
+        float, ProblemParam(1.0, description="the radius normalizing the viscosity's radial power")
+    ]
+    viscosity_radius_power: Annotated[
+        float, ProblemParam(0.0, description="the viscosity's power of the distance from the origin")
+    ]
+    viscosity_density: Annotated[
+        float, ProblemParam(1.0, description="the density normalizing the viscosity's density power")
+    ]
+    viscosity_density_power: Annotated[
+        float, ProblemParam(0.0, description="the viscosity's power of the density")
+    ]
+    viscous_boundaries: Annotated[
+        list[str] | None,
+        ProblemParam(
+            None,
+            description=(
+                "the azimuthal shear's condition on each domain face, axis 0 low and high then axis "
+                "1 low and high: 'zero_torque' or 'continued_shear'"
+            ),
+        ),
+    ]
+    velocity_components: Annotated[
+        int | None,
+        ProblemParam(
+            None,
+            description=(
+                "momentum components carried, independent of the grid dimension: 3 on a "
+                "2D newtonian or isothermal plane holds the out-of-plane velocity; a lifted "
+                "isothermal run must declare it because a 4-entry row reads two ways"
+            ),
+        ),
+    ]
     cfl_number: Annotated[
         float,
         ProblemParam(
@@ -780,6 +821,13 @@ class SimbiProblem(BaseModel):
             return None  # optional trailing p/cs entry
         if self.is_mhd:
             dof = 3  # v3 couples to B on every chart
+        elif (
+            self.regime != Regime.RHD
+            and self.coord_system == CoordSystem.CARTESIAN
+            and self.velocity_components == 3
+            and self.dimensionality == 2
+        ):
+            dof = 3  # the cartesian plane's declared out-of-plane velocity
         elif (
             self.regime != Regime.RHD
             and self.coord_system == CoordSystem.CARTESIAN

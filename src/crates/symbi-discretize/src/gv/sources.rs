@@ -27,6 +27,10 @@ use symbi_ir::{KernelProgram, KernelWrite, KernelWrites, trace_kernel};
 /// cartesian the connection vanishes and the source is zero.
 #[derive(Clone, Copy)]
 pub enum GeoSource {
+    /// the flat newtonian hydro source with the azimuthal momentum kept in source form,
+    /// -M_phi (v_r + v_theta cot(theta)) / r, against the torque form: a diagnostic control the
+    /// replay tests alone select
+    HydroAzimuthalSourceControl,
     /// hydro / RHD: well-balanced pressure + (ndim>=2) velocity-quadratic centrifugal/coriolis,
     /// regime-agnostic via the conserved momentum (newtonian `mom=rho v`, RHD `mom=rho h W^2 v`).
     Hydro { inertial: bool },
@@ -181,15 +185,29 @@ pub(crate) fn gv_geometric_source<'t>(
         }
     };
     match source {
+        GeoSource::HydroAzimuthalSourceControl => gv_geometric_source(
+            cx,
+            coords,
+            axes,
+            ndim,
+            ncomp,
+            geo,
+            GeoSource::Hydro { inertial: true },
+            cons_mom,
+            mag_from_bcell,
+        ),
         GeoSource::Hydro { inertial } => {
             let ptot = cx.field("pre", FieldRef::PrimPre);
             // the velocity-quadratic inertial vanishes for 1D radial, so that arm leaves it and
             // its vel reads out of the graph.
+            // the spherical (r, theta) plane carries v_phi in its third slot, and the centrifugal
+            // and polar hoop terms read it; the cylindrical (r, z) plane holds (r, phi) in its first two
+            let components = if coords == Coords::Spherical { ncomp } else { ndim };
             let (gas_mom, vel): (Vec<Gv>, Vec<Gv>) = if inertial && ndim >= 2 {
-                let v = (0..ndim)
+                let v = (0..components)
                     .map(|d| cx.field(&format!("prim_v{d}"), FieldRef::PrimVel(d as u8)))
                     .collect();
-                (cons_mom[..ndim].to_vec(), v) // gas_mom = cons.mom (shared, read once)
+                (cons_mom[..components].to_vec(), v) // gas_mom = cons.mom (shared, read once)
             } else {
                 (Vec::new(), Vec::new())
             };
@@ -415,7 +433,7 @@ pub fn geometric_momentum_source_probe_gv(
             // read every `ncomp` (DOF) component: a 2.5D spherical (r,theta) MHD grid
             // has DOF=3 and the geometric S_theta/S_phi need the out-of-plane phi momentum (mom[2]).
             // hydro has ncomp==ndim so this is unchanged there.
-            GeoSource::Hydro { .. } | GeoSource::NewtonianMhd | GeoSource::IsothermalMhd => (0
+            GeoSource::Hydro { .. } | GeoSource::HydroAzimuthalSourceControl | GeoSource::NewtonianMhd | GeoSource::IsothermalMhd => (0
                 ..ncomp)
                 .map(|k| cx.field(&format!("mom_{k}"), FieldRef::cons_mom(k as u8)))
                 .collect(),

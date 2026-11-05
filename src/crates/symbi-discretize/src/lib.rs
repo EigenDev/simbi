@@ -29,6 +29,7 @@ pub mod gv_immersed;
 pub mod gv_penalize;
 pub mod gv_refinement;
 pub mod gv_viscous;
+pub mod gv_viscous_azimuthal;
 pub mod ibm;
 pub mod kernel_slug;
 pub mod lattice;
@@ -38,7 +39,7 @@ pub use coords::{Coords, EosArm, Recon, Spacetime, Spacing};
 // facade: the carrier types live in symbi-ir alongside Op + Graph. re-export them so the
 // builder return types (GvKernel) stay nameable by downstream callers (symbi-aot/build.rs).
 pub use gv::{
-    GeoSource, adiabatic_c2p_gv, adiabatic_flux_cyl_rz_gv, adiabatic_flux_gv,
+    GeoSource, adiabatic_c2p_gv, adiabatic_flux_lifted_gv, adiabatic_flux_gv,
     adiabatic_hllc_flux_gv, boundary_fill_from_prescription_gv, chi_c2p_gv, chi_flux_gv, chi_godunov_gv,
     chi_snapshot_gv, constraint_projection_gv, fofc_bflux_splice_gv, fofc_copy_gv,
     fofc_emf_splice_gv, fofc_evidence_outside_sphere_gv, fofc_exterior_flag_gv, fofc_flag_from_status_gv, fofc_select_gv,
@@ -76,7 +77,7 @@ pub use gv_excise::{
 };
 pub use gv_immersed::{
     body_evolved_probe_gv, body_feedback_drain_gv, body_feedback_grav_gv, body_feedback_gv,
-    body_feedback_iso_gv, body_source_gv, body_source_iso_closure_gv, body_source_iso_gv, body_source_wb_gv,
+    body_feedback_iso_gv, body_source_face_work_gv, body_source_gv, body_source_iso_closure_gv, body_source_iso_gv, body_source_wb_gv,
 };
 pub use gv_penalize::{
     body_resistive_emf_2d_gv, body_resistive_emf_3d_dir_gv, body_slip_emf_3d_dir_gv,
@@ -122,3 +123,4 @@ pub fn kernel_coalesces_layout(kernel_name: &str) -> bool {
         || kernel_name.contains("adiabatic_face_flux")
         || kernel_name.contains("rhd_face_flux")
 }
+pub use gv_viscous_azimuthal::{AzimuthalChannel, viscous_azimuthal_gv};

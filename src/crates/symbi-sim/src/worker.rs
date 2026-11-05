@@ -49,6 +49,9 @@ use symbi_xpu::{MemorySpace, with_device};
 pub struct Injection {
     /// report a rejection from this worker at each (step, stage) on that step's first attempt
     pub reject_at: Vec<(u64, usize)>,
+    /// some worker reports a forced rejection: every worker captures a restorable step entry,
+    /// since the rejection is agreed collectively
+    pub rejection_armed: bool,
     /// take at most this timestep (as f64 bits) at this step: how a clean run follows the
     /// accepted timestep sequence of a run that rejected and halved
     pub cap_dt_at: Option<(u64, u64)>,
@@ -1703,7 +1706,10 @@ where
     type Error = WorkerError;
 
     fn rejectable(&mut self) -> bool {
-        self.kernels.iter().any(|k| k.fofc_active()) || !self.cfg.injection.reject_at.is_empty() || self.slip.is_some()
+        self.kernels.iter().any(|k| k.fofc_active())
+            || self.cfg.injection.rejection_armed
+            || !self.cfg.injection.reject_at.is_empty()
+            || self.slip.is_some()
     }
 
     fn capture(&mut self, dt: f64, restorable: bool) -> Result<(), WorkerError> {

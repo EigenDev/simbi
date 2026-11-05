@@ -77,6 +77,16 @@ pub fn dof_lift_suffix(coords: Geometry, dof: usize, ndim: usize) -> &'static st
     }
 }
 
+/// the suffix of a lifted newtonian kernel family: the chart's lift on a curvilinear plane and
+/// `_cart_lift` on a cartesian grid, whose unsuffixed names hold the DOF == D kernels and the MHD
+/// families. empty without a lift.
+pub fn newtonian_lift_suffix(coords: Geometry, dof: usize, ndim: usize) -> &'static str {
+    match coords {
+        Geometry::Cartesian if dof > ndim => "_cart_lift",
+        _ => dof_lift_suffix(coords, dof, ndim),
+    }
+}
+
 /// the immersed-boundary penalize kernel name for a chart: `{base}{chart}_{ndim}d`
 /// (e.g. `penalize_drain_iso_cyl_2d`). the drain touches only the gridded momenta
 /// (dof == ndim, no swirl slot), so the suffix is "" / "_sph" / "_cyl". cartesian
@@ -301,7 +311,7 @@ pub fn gr_chart_dof_tag(
     ndim: usize,
 ) -> &'static str {
     if dof > ndim {
-        geom_suffix(coords, dof, ndim)
+        newtonian_lift_suffix(coords, dof, ndim)
     } else if spacetime != Spacetime::Minkowski {
         match coords {
             Geometry::Cartesian => "_cart",

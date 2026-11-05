@@ -2272,3 +2272,81 @@ mod ortho_general_tests {
         );
     }
 }
+
+// =============================================================================
+// the azimuthal shear model: the constitutive half of the anomalous azimuthal
+// stress of Stone, Pringle & Begelman 1999 eqs. 4-5. the stresses exist in a
+// named physical basis; the discretization and the conservative update live
+// with the kernel builder.
+// =============================================================================
+
+/// how a domain face of an axisymmetric plane closes the azimuthal stress. a hydrodynamic
+/// outflow fill says nothing about the torque the face passes, so every face names one
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ViscousFace {
+    /// the face passes no torque and no stress work
+    ZeroTorque,
+    /// the stress forms from the ghost values the hydrodynamic fill wrote; the torque and
+    /// work it passes accumulate in the boundary ledger
+    ContinuedShear,
+}
+
+/// the dynamic viscosity `mu = scale (r / radius)^radius_power (rho / density)^density_power`,
+/// `r` the distance from the coordinate origin. a kinematic law `nu` holds `mu = rho nu`, so its
+/// density power carries one more
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct DynamicViscosityLaw {
+    pub scale: f64,
+    pub radius: f64,
+    pub radius_power: f64,
+    pub density: f64,
+    pub density_power: f64,
+}
+
+impl DynamicViscosityLaw {
+    /// `nu = nu_0 (r / radius)^radius_power (rho / density)^density_power`, `mu = rho nu`
+    pub fn kinematic(nu_0: f64, radius: f64, radius_power: f64, density: f64, density_power: f64) -> Self {
+        Self { scale: nu_0 * density, radius, radius_power, density, density_power: density_power + 1.0 }
+    }
+
+    /// `mu = mu_0 (r / radius)^radius_power (rho / density)^density_power`
+    pub fn dynamic(mu_0: f64, radius: f64, radius_power: f64, density: f64, density_power: f64) -> Self {
+        Self { scale: mu_0, radius, radius_power, density, density_power }
+    }
+}
+
+/// the law's value on any carrier. a zero power takes an exact unit factor
+pub fn dynamic_viscosity<S: Scalar>(scale: S, radius: S, radius_power: S, density: S, density_power: S, r: S, rho: S) -> S {
+    scale * (radius_power * (r / radius).ln()).exp() * (density_power * (rho / density).ln()).exp()
+}
+
+/// the azimuthal shear model on an axisymmetric plane: `T_{r,phi}` and `T_{theta,phi}` on the
+/// sphere, `T_{R,phi}` and `T_{z,phi}` on (R, z). `faces[axis][side]` closes each domain face
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct AzimuthalShear {
+    pub law: DynamicViscosityLaw,
+    pub faces: [[ViscousFace; 2]; 2],
+}
+
+#[cfg(test)]
+mod azimuthal_law_tests {
+    use super::*;
+
+    #[test]
+    fn a_kinematic_law_is_the_dynamic_law_with_one_more_density_power() {
+        let (nu_0, r_0, a, rho_0, b) = (0.01, 2.0, 0.5, 4.0, 1.0);
+        let k = DynamicViscosityLaw::kinematic(nu_0, r_0, a, rho_0, b);
+        for (r, rho) in [(1.0_f64, 1.0_f64), (3.0, 0.25), (0.5, 8.0)] {
+            let mu = dynamic_viscosity(k.scale, k.radius, k.radius_power, k.density, k.density_power, r, rho);
+            let want = rho * nu_0 * (r / r_0).powf(a) * (rho / rho_0).powf(b);
+            assert!((mu - want).abs() <= 1e-14 * want, "({r}, {rho}): {mu} against {want}");
+        }
+    }
+
+    #[test]
+    fn zero_powers_give_the_bare_scale_exactly() {
+        for (r, rho) in [(1.0_f64, 1.0_f64), (3.7, 0.2)] {
+            assert_eq!(dynamic_viscosity(0.125, 2.0, 0.0, 3.0, 0.0, r, rho), 0.125);
+        }
+    }
+}

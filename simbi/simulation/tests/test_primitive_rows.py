@@ -7,7 +7,10 @@
 # isothermal MHD row likewise. the momentum components equal the grid dimension
 # except on the kerr-schild 2D charts that lift the azimuthal velocity (the
 # (r, theta) plane takes either form, spinning kerr and the (R, z) plane require
-# the lift) and on MHD, which carries three everywhere. every supported layout
+# the lift), on the flat newtonian (r, theta) and (R, z) planes, which take either
+# form, on the isothermal planes declaring velocity_components = 3, whose 4-entry
+# row otherwise reads as an in-plane velocity and a trailing p/cs, and on MHD, which
+# carries three everywhere. every supported layout
 # seeds distinct, exactly representable values and the initial checkpoint
 # returns each one in its own slot; a row of any other width is refused by name
 # before any output, so no entry is shifted into another slot.
@@ -50,6 +53,7 @@ class RowProbe(SimbiProblem):
     schwarzschild_mass: Annotated[float, ProblemParam(OV.get("mass", 0.0), description="mass")]
     kerr_spin: Annotated[float, ProblemParam(OV.get("spin", 0.0), description="spin")]
     regime: Annotated[Regime, ProblemParam(Regime(OV["regime"]), description="regime")]
+    velocity_components: Annotated[int | None, ProblemParam(OV.get("velocity_components"), description="velocity components")]
     adiabatic_index: Annotated[float | None, ProblemParam(OV.get("gamma", 5.0 / 3.0), description="gamma")]
     sound_speed: Annotated[float | None, ProblemParam(OV.get("cs"), description="cs")]
     boundary_conditions: Annotated[list[Any], ProblemParam([BoundaryCondition.OUTFLOW], description="walls")]
@@ -105,6 +109,9 @@ SUPPORTED = {
     "newtonian-spherical-3d": (_case("newtonian", 3, 3, {"bounds": [[1.0, 2.0], [0.5, 1.5], [0.0, 1.0]]}, coord="spherical"), 3, True),
     "newtonian-cylindrical-rz": (_case("newtonian", 2, 2, FLAT, coord="cylindrical"), 2, True),
     "newtonian-cylindrical-rphi": (_case("newtonian", 2, 2, FLAT, coord="planar_cylindrical"), 2, True),
+    "newtonian-cartesian-2d-lifted": (_case("newtonian", 2, 3, FLAT, velocity_components=3), 3, True),
+    "newtonian-spherical-2d-lifted": (_case("newtonian", 2, 3, FLAT, coord="spherical"), 3, True),
+    "newtonian-cylindrical-rz-lifted": (_case("newtonian", 2, 3, FLAT, coord="cylindrical"), 3, True),
     "rhd-cartesian-2d": (_case("rhd", 2, 2, FLAT, gamma=4.0 / 3.0), 2, True),
     "rhd-ks-line": (_case("rhd", 1, 1, KS_SPH, coord="spherical", gamma=4.0 / 3.0), 1, True),
     "rhd-ks-plane": (_case("rhd", 2, 2, KS_SPH, coord="spherical", gamma=4.0 / 3.0), 2, True),
@@ -115,16 +122,18 @@ SUPPORTED = {
     "isothermal-cartesian-2d": (_case("isothermal", 2, 2, FLAT, pressure=False), 2, False),
     "isothermal-cartesian-2d-trailing": (_case("isothermal", 2, 2, FLAT, pressure=False, trailing=1.0), 2, False),
     "isothermal-spherical-2d": (_case("isothermal", 2, 2, FLAT, pressure=False, coord="spherical"), 2, False),
+    "isothermal-cartesian-2d-lifted": (_case("isothermal", 2, 3, FLAT, pressure=False, velocity_components=3), 3, False),
+    "isothermal-spherical-2d-lifted": (_case("isothermal", 2, 3, FLAT, pressure=False, coord="spherical", velocity_components=3), 3, False),
+    "isothermal-rz-lifted": (_case("isothermal", 2, 3, FLAT, pressure=False, coord="cylindrical", velocity_components=3), 3, False),
     "nmhd-cartesian-2.5d": (_case("nmhd", 2, 3, FLAT), 3, True),
     "imhd-cartesian-2.5d": (_case("imhd", 2, 3, FLAT, pressure=False), 3, False),
     "imhd-cartesian-2.5d-trailing": (_case("imhd", 2, 3, FLAT, pressure=False, trailing=1.0), 3, False),
 }
 # name: (settings, row width the refusal names)
 UNSUPPORTED = {
-    "newtonian-spherical-2d-lifted": (_case("newtonian", 2, 3, FLAT, coord="spherical"), 5),
-    "newtonian-cartesian-2d-lifted": (_case("newtonian", 2, 3, FLAT), 5),
-    "newtonian-cylindrical-rz-lifted": (_case("newtonian", 2, 3, FLAT, coord="cylindrical"), 5),
     "rhd-cartesian-2d-lifted": (_case("rhd", 2, 3, FLAT, gamma=4.0 / 3.0), 5),
+    "isothermal-cartesian-2d-undeclared-lift": (_case("isothermal", 2, 3, FLAT, pressure=False, velocity_components=2) | {"row": [RHO, *VEL[:3], 1.0, 1.0]}, 6),
+    "newtonian-cartesian-2d-undeclared-lift": (_case("newtonian", 2, 3, FLAT), 5),
     "rhd-kerr-plane": (_case("rhd", 2, 2, KERR_SPH, coord="spherical", gamma=4.0 / 3.0), 4),
     "isothermal-cartesian-2d-two-trailing": (_case("isothermal", 2, 2, FLAT, pressure=False, trailing=1.0) | {"row": [RHO, *VEL[:2], 1.0, 1.0]}, 5),
     "nmhd-cartesian-2.5d-trailing": (_case("nmhd", 2, 3, FLAT, trailing=1.0), 6),
