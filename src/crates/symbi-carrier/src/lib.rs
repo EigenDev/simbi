@@ -205,6 +205,14 @@ pub trait Scalar:
     /// `branch`.
     fn to_f64(self) -> f64;
 
+    /// true for every finite value, false for NaN and both infinities: `|x| < infinity`. a NaN
+    /// fails the comparison and an infinity equals the bound. the form holds under a compiler that
+    /// fuses `a * b - c` into one rounding, where `x - x` of a product `x` yields that product's
+    /// rounding error
+    fn is_finite_mask(self) -> Self::Mask {
+        self.abs().cmp_lt(Self::INFINITY)
+    }
+
     // ── comparisons — the return type is Mask ─────────────────────────────
     fn cmp_lt(self, other: Self) -> Self::Mask;
     fn cmp_le(self, other: Self) -> Self::Mask;

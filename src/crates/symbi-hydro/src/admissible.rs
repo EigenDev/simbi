@@ -161,7 +161,7 @@ pub fn admissible_theta<S: Scalar>(
 
     // for a non-finite candidate (NaN / inf momentum or energy) the whole segment is unusable, so
     // fall fully back to the anchor (theta = 0), the degenerate case the freeze once held.
-    let finite = |v: S| (v - v).cmp_eq(S::ZERO);
+    let finite = |v: S| v.is_finite_mask();
     let mut ok = finite(d_c) & finite(e_c);
     for k in 0..3 {
         ok = ok & finite(s_c[k]);
@@ -307,7 +307,7 @@ pub fn rmhd_admissible_theta<S: Scalar>(
     eps_psi: S,
     iters: usize,
 ) -> S {
-    let finite = |v: S| (v - v).cmp_eq(S::ZERO);
+    let finite = |v: S| v.is_finite_mask();
     let mut cand_finite = finite(d_c) & finite(e_c);
     for k in 0..3 {
         cand_finite = cand_finite & finite(s_c[k]);

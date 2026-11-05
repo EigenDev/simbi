@@ -155,7 +155,7 @@ pub fn fofc_evidence_outside_sphere_gv(ndim: usize) -> KernelProgram {
 pub fn state_finite_probe_gv() -> KernelProgram {
     trace_kernel(|cx| {
         let rho = cx.field("prim_rho", FieldRef::PrimRho);
-        let flag = Gv::select((rho - rho).cmp_eq(Gv::ZERO), Gv::ZERO, Gv::ONE);
+        let flag = Gv::select(rho.is_finite_mask(), Gv::ZERO, Gv::ONE);
         vec![KernelWrite::new("flag", FieldRef::Scratch, flag.node())]
     })
 }
@@ -170,13 +170,13 @@ pub fn state_finite_probe_gv() -> KernelProgram {
 /// fail-loud. only the conserved is chosen; the primitive is re-derived by the c2p that follows.
 pub fn fofc_select_gv(ncomp: usize, has_energy: bool) -> KernelProgram {
     trace_kernel(|cx| {
-        // finite and positive: (v - v) is 0 for a finite value and NaN for NaN or +-inf (inf - inf =
-        // NaN), so cmp_eq(0) rejects every non-finite value; the > 0 rejects a vacuum/negative one. a
-        // "physical" cell is one whose density (and pressure, when modeled) passes both.
+        // finite and positive: is_finite_mask rejects NaN and +-inf; the > 0 rejects a vacuum or
+        // negative value. a "physical" cell is one whose density (and pressure, when modeled)
+        // passes both.
         // finiteness probes as named-brand fns: a local closure cannot name the trace
         // brand, and annotating the elided lifetime mints regions invariance rejects.
         fn finite<'t>(v: Gv<'t>) -> symbi_ir::GvMask<'t> {
-            (v - v).cmp_eq(Gv::ZERO)
+            v.is_finite_mask()
         }
         fn finite_pos<'t>(v: Gv<'t>) -> symbi_ir::GvMask<'t> {
             finite(v) & v.cmp_gt(Gv::ZERO)
@@ -250,7 +250,7 @@ pub fn fofc_select_with_body_gv(
         // finiteness probes as named-brand fns: a local closure cannot name the trace
         // brand, and annotating the elided lifetime mints regions invariance rejects.
         fn finite<'t>(v: Gv<'t>) -> symbi_ir::GvMask<'t> {
-            (v - v).cmp_eq(Gv::ZERO)
+            v.is_finite_mask()
         }
         fn finite_pos<'t>(v: Gv<'t>) -> symbi_ir::GvMask<'t> {
             finite(v) & v.cmp_gt(Gv::ZERO)

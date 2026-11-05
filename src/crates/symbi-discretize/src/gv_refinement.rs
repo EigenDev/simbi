@@ -1248,7 +1248,7 @@ pub fn wb_target_decode_gv(ndim: usize, ncomp: usize) -> KernelProgram {
         // finiteness probes as named-brand fns: a local closure cannot name the trace
         // brand, and annotating the elided lifetime mints regions invariance rejects.
         fn finite<'t>(value: Gv<'t>) -> symbi_ir::GvMask<'t> {
-            (value - value).cmp_eq(Gv::ZERO)
+            value.is_finite_mask()
         }
         fn finite_pos<'t>(value: Gv<'t>) -> symbi_ir::GvMask<'t> {
             finite(value) & value.cmp_gt(Gv::ZERO)
