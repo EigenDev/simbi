@@ -9758,7 +9758,10 @@ fn lifted_newtonian_refusal(cfg: &Config) -> Option<String> {
             && b.velocity.iter().all(|v| *v == 0.0)
     };
     let checks: [(bool, &str); 15] = [
-        (cfg!(feature = "gpu"), "device execution, whose hardware gates have not run"),
+        (
+            cfg!(feature = "gpu") && !std::env::var("SIMBI_LIFTED_DEVICE").is_ok_and(|v| v == "1"),
+            "device execution, whose hardware gates have not run (SIMBI_LIFTED_DEVICE=1 admits it for those gates)",
+        ),
         (cfg.coord_system == "cartesian" && !cfg.bodies.is_empty(), "a body on the cartesian plane, whose lifted source kernels are not baked"),
         (cfg.refinement_enabled, "mesh refinement"),
         (cfg.solver != Solver::Hlle, "a solver other than hlle"),
