@@ -594,10 +594,16 @@ impl<Mem: MemoryStorage + Sync, Sc: Scalar + OrderedNumeric, const D: usize, con
         if KernelSet::<D, DOF, Mem, Sc>::fofc_active(self) {
             return None;
         }
+        if crate::regimes::wall_ledger::kernels_baked(sim) {
+            return crate::regimes::wall_ledger::wall_transport_kernels(sim, &self.cfl_scratch);
+        }
         crate::regimes::wall_ledger::wall_transport(sim)
     }
 
     fn energy_partition(&self, sim: &FieldStore<D, DOF, Mem, Sc>) -> Option<symbi_sim::substrate_seam::EnergyPartition> {
+        if crate::regimes::wall_ledger::kernels_baked(sim) {
+            return Some(crate::regimes::wall_ledger::energy_partition_kernels(sim, &self.cfl_scratch));
+        }
         crate::regimes::wall_ledger::energy_partition(sim)
     }
 
@@ -609,6 +615,9 @@ impl<Mem: MemoryStorage + Sync, Sc: Scalar + OrderedNumeric, const D: usize, con
         &self,
         sim: &FieldStore<D, DOF, Mem, Sc>,
     ) -> Option<(symbi_sim::conservation_ledger::Extreme, symbi_sim::conservation_ledger::Extreme)> {
+        if crate::regimes::wall_ledger::kernels_baked(sim) {
+            return Some(crate::regimes::wall_ledger::stage_extremes_kernels(sim, &self.cfl_scratch));
+        }
         crate::regimes::wall_ledger::stage_extremes(sim)
     }
 

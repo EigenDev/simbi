@@ -12,8 +12,12 @@
 // cartesian plane. the potential is a single static point mass at the origin, the one the face
 // gravity work admits; a store with any other body gives no wall energy.
 //
-// the sums read host memory after the device queue drains, so a run on host-inaccessible device
-// memory books no receipts; these are diagnostics, run only while a ledger scope is open.
+// two implementations share these definitions. on the axisymmetric planes with the azimuthal
+// velocity the production path evaluates each integrand in a kernel (`ledger_gv`) and reduces it
+// where the data lives, an exact sum or a minimum, so device memory needs no host access. the host
+// sums (`*_host`) read host memory after the device queue drains; they serve the other planes and
+// stand as the independent reference the kernel path is gated against. both run only while a
+// ledger scope is open.
 // =============================================================================
 use std::f64::consts::PI;
 
@@ -133,7 +137,7 @@ pub fn wall_transport<const D: usize, const DOF: usize, Mem: MemoryStorage, Sc: 
     wall_transport_host(store.host()?)
 }
 
-fn wall_transport_host<const D: usize, const DOF: usize, Mem: MemorySpace, Sc: Scalar + OrderedNumeric>(
+pub fn wall_transport_host<const D: usize, const DOF: usize, Mem: MemorySpace, Sc: Scalar + OrderedNumeric>(
     store: &FieldStore<D, DOF, Mem, Sc>,
 ) -> Option<[[Transport; 2]; 3]> {
     let plane = Plane::of(store)?;
@@ -183,7 +187,7 @@ pub fn energy_partition<const D: usize, const DOF: usize, Mem: MemoryStorage, Sc
     energy_partition_host(store.host()?)
 }
 
-fn energy_partition_host<const D: usize, const DOF: usize, Mem: MemorySpace, Sc: Scalar + OrderedNumeric>(
+pub fn energy_partition_host<const D: usize, const DOF: usize, Mem: MemorySpace, Sc: Scalar + OrderedNumeric>(
     store: &FieldStore<D, DOF, Mem, Sc>,
 ) -> Option<EnergyPartition> {
     let plane = Plane::of(store)?;
@@ -220,7 +224,7 @@ pub fn stage_extremes<const D: usize, const DOF: usize, Mem: MemoryStorage, Sc: 
     stage_extremes_host(store.host()?)
 }
 
-fn stage_extremes_host<const D: usize, const DOF: usize, Mem: MemorySpace, Sc: Scalar + OrderedNumeric>(
+pub fn stage_extremes_host<const D: usize, const DOF: usize, Mem: MemorySpace, Sc: Scalar + OrderedNumeric>(
     store: &FieldStore<D, DOF, Mem, Sc>,
 ) -> Option<(Extreme, Extreme)> {
     let plane = Plane::of(store)?;
@@ -252,4 +256,96 @@ fn stage_extremes_host<const D: usize, const DOF: usize, Mem: MemorySpace, Sc: S
         }
     }
     Some((density, specific))
+}
+
+// ------------------------------- the kernel path -------------------------------
+
+use crate::regimes::substrate_kernels::{LedgerReduce, ledger_reduce};
+use symbi_discretize::LedgerChannel;
+use symbi_grid::Field;
+
+/// whether the receipts take the kernel path for this store: the two-axis spherical and
+/// cylindrical planes carrying the azimuthal velocity, whose ledger kernels are baked, unless the
+/// process selects the host reference with `SIMBI_LEDGER_REFERENCE=host`. the selection reads the
+/// receipts alone; the evolved state is the same under either
+pub fn kernels_baked<const D: usize, const DOF: usize, Mem: MemoryStorage, Sc: Scalar + OrderedNumeric>(store: &FieldStore<D, DOF, Mem, Sc>) -> bool {
+    static HOST_REFERENCE: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    let host = *HOST_REFERENCE.get_or_init(|| std::env::var("SIMBI_LEDGER_REFERENCE").is_ok_and(|v| v == "host"));
+    !host && D == 2 && DOF == 3 && matches!(store.geom.coords, Geometry::Spherical | Geometry::Cylindrical)
+}
+
+/// the outward wall rates from the stage's stored fluxes, each integrand reduced by the kernels
+pub fn wall_transport_kernels<const D: usize, const DOF: usize, Mem: MemoryStorage + Sync, Sc: Scalar + OrderedNumeric>(
+    store: &FieldStore<D, DOF, Mem, Sc>,
+    scratch: &Field<Sc, D, Mem>,
+) -> Option<[[Transport; 2]; 3]> {
+    let body = match store.immersed.as_ref() {
+        None => false,
+        Some(im) if crate::regimes::substrate_newton::admits_face_gravity_work(store.geom.coords, DOF, im.bodies.bodies()) => true,
+        Some(_) => return None,
+    };
+    let g = &store.geom;
+    let mut out = [[Transport::default(); 2]; 3];
+    for ax in 0..2 {
+        let (lo, hi) = (g.interior.spaces[ax].lo, g.interior.spaces[ax].hi);
+        let whole = g.whole_interior(ax);
+        for side in 0..2 {
+            let face = if side == 0 { lo } else { hi };
+            let on_wall = if side == 0 { lo + g.index_offset[ax] == whole.0 } else { hi + g.index_offset[ax] == whole.1 };
+            if !on_wall {
+                continue;
+            }
+            let mut plane = g.interior.clone();
+            plane.spaces[ax].lo = face;
+            plane.spaces[ax].hi = face + 1;
+            let sign = if side == 0 { -1.0 } else { 1.0 };
+            let sum = |channel| ledger_reduce(store, scratch, channel, &plane, 0.0, sign, LedgerReduce::Sum);
+            let potential = if body { sum(LedgerChannel::WallPotential { axis: ax }) } else { 0.0 };
+            out[ax][side] = Transport {
+                mass: sign * sum(LedgerChannel::WallMass { axis: ax }),
+                angular_momentum: sign * sum(LedgerChannel::WallAngular { axis: ax }),
+                energy: sign * (sum(LedgerChannel::WallEnergy { axis: ax }) + potential),
+                mass_in: sum(LedgerChannel::WallMassIn { axis: ax }),
+            };
+        }
+    }
+    Some(out)
+}
+
+/// the volume integrals of total energy, kinetic energy and angular momentum, reduced by the kernels
+pub fn energy_partition_kernels<const D: usize, const DOF: usize, Mem: MemoryStorage + Sync, Sc: Scalar + OrderedNumeric>(
+    store: &FieldStore<D, DOF, Mem, Sc>,
+    scratch: &Field<Sc, D, Mem>,
+) -> EnergyPartition {
+    let sum = |channel| ledger_reduce(store, scratch, channel, &store.geom.interior, 0.0, 0.0, LedgerReduce::Sum);
+    EnergyPartition {
+        energy: sum(LedgerChannel::Energy),
+        kinetic: sum(LedgerChannel::Kinetic),
+        angular_momentum: sum(LedgerChannel::AngularMomentum),
+    }
+}
+
+/// the lowest density and specific internal energy and their cells, reduced by the kernels: the
+/// minimum, then the first cell holding it with the row index slowest, the order the host scan
+/// visits. a non-finite value reports NaN at the first non-finite cell
+pub fn stage_extremes_kernels<const D: usize, const DOF: usize, Mem: MemoryStorage + Sync, Sc: Scalar + OrderedNumeric>(
+    store: &FieldStore<D, DOF, Mem, Sc>,
+    scratch: &Field<Sc, D, Mem>,
+) -> (Extreme, Extreme) {
+    let g = &store.geom;
+    let extreme = |low: LedgerChannel, locate: LedgerChannel| {
+        let value = ledger_reduce(store, scratch, low, &g.interior, 0.0, 0.0, LedgerReduce::Min);
+        if value == f64::INFINITY {
+            return Extreme::default();
+        }
+        let code = ledger_reduce(store, scratch, locate, &g.interior, value, 0.0, LedgerReduce::Min);
+        assert!(code.is_finite(), "ledger: no cell holds the reduced minimum {value:e}; the locate channel left its value");
+        let (j, i) = ((code / 65536.0).floor() as isize, (code % 65536.0) as isize);
+        let reported = if value == f64::NEG_INFINITY { f64::NAN } else { value };
+        Extreme { value: reported, cell: [i + g.index_offset[0], j + g.index_offset[1], 0] }
+    };
+    (
+        extreme(LedgerChannel::LowDensity, LedgerChannel::LocateDensity),
+        extreme(LedgerChannel::LowSpecific, LedgerChannel::LocateSpecific),
+    )
 }

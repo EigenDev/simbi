@@ -3659,6 +3659,10 @@ fn main() {
                 emit_gv(&out_dir, &format!("outward_wall_{axis}_{side}{sfx}_2d"), 2, &program);
             }
         }
+        // the conservation ledger's integrands, one kernel per channel
+        for channel in symbi_discretize::LedgerChannel::all() {
+            emit_gv(&out_dir, &format!("{}{sfx}_2d", channel.stem()), 2, &symbi_discretize::ledger_gv(coords, &geom.axes, channel));
+        }
         let feedback = body_feedback_gv(MAX_SOURCE_BODIES, coords, 2, ncomp, &geom.axes);
         emit_gv(&out_dir, &format!("body_feedback{sfx}_2d"), 2, &feedback);
         let source = body_source_iso_gv(MAX_SOURCE_BODIES, coords, 2, ncomp, &geom.axes);

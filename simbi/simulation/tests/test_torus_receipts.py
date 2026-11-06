@@ -12,6 +12,8 @@
 # - a restart continues the receipts bit for bit
 # rejected attempts stay out of the accepted totals: the step transaction's own tests in
 # symbi-sim/src/step_transaction.rs book receipts through a scripted retried step
+# - the host reference (SIMBI_LEDGER_REFERENCE=host) books receipts on the same evolved state as
+#   the kernel path, each closing at roundoff
 # - the frontend refuses the wall outside the planes it is baked for
 #
 # run: pytest -m simulation simbi/simulation/tests/test_torus_receipts.py
@@ -36,7 +38,7 @@ ORBIT = 2.0 * math.pi
 GRID = "run={run!r}, zones_per_decade=16, polar_zones=24, orbits={orbits}, snapshot_orbits=0.002"
 
 
-def _run(out: Path, run: str, orbits: float = 0.008, extra: str = "", checkpoint: Path | None = None) -> Path:
+def _run(out: Path, run: str, orbits: float = 0.008, extra: str = "", checkpoint: Path | None = None, env: dict | None = None) -> Path:
     restart = f", checkpoint_file={str(checkpoint)!r}" if checkpoint else ""
     snippet = (
         "import sys\n"
@@ -45,7 +47,7 @@ def _run(out: Path, run: str, orbits: float = 0.008, extra: str = "", checkpoint
         "from simbi.simulation import runner\n"
         f"runner.run(SpbTorus(data_directory=sys.argv[1], {GRID.format(run=run, orbits=orbits)}{extra}{restart}), compute_mode={ph.BACKEND!r})\n"
     )
-    ph.python(ph.snippet_args(snippet, str(out)), f"spb {run} {extra}")
+    ph.python(ph.snippet_args(snippet, str(out)), f"spb {run} {extra}", env=env)
     return out
 
 
@@ -123,6 +125,27 @@ def test_a_restart_continues_the_receipts_bit_for_bit(tmp_path: Path) -> None:
     ph.same_checkpoint(b_final, a_final, "the resumed state against the uninterrupted run", exclude=("body_diagnostics",), expect=("level_0",))
     # the final checkpoint carries the same receipts, so a restart from it continues them too
     assert str(read(resumed / "38x24.chkpt.final.h5")[2]["conservation_ledger"]) == str(meta_b["conservation_ledger"])
+
+
+def test_the_host_reference_books_the_same_receipts_on_the_same_state(tmp_path: Path) -> None:
+    import os
+
+    from spb_torus_analysis import read
+
+    kernel = _run(tmp_path / "kernel", "A")
+    host = _run(tmp_path / "host", "A", env={**os.environ, "SIMBI_LEDGER_REFERENCE": "host"})
+    finals = [sorted(p for p in d.glob("*.chkpt.*.h5") if ".final." not in p.name)[-1] for d in (kernel, host)]
+    # the receipts read the state; they leave it untouched under either path
+    ph.same_checkpoint(finals[1], finals[0], "the host reference's state against the kernel path's", exclude=("metadata", "body_diagnostics"),
+                       expect=("level_0",))
+    ledgers = [torus_receipts.ledger(read(p)[2]) for p in finals]
+    assert ledgers[0].stages == ledgers[1].stages > 0
+    for d in (kernel, host):
+        _, rows = torus_receipts.closure_series(d)
+        for row in rows[1:]:
+            dm, dl, de = torus_receipts.residuals(rows[0], row)
+            assert abs(dm) <= 1e-12 * rows[0].totals[0] and abs(dl) <= 1e-12 * rows[0].totals[1] and abs(de) <= 1e-12 * abs(rows[0].totals[2]), (d.name, dm, dl, de)
+    assert ledgers[0].viscous_heating > 0.0 and ledgers[1].viscous_heating > 0.0
 
 
 @pytest.mark.parametrize(

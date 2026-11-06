@@ -1057,6 +1057,60 @@ where
     dispatch_named(sim, pre, None, axis, &name, &plane, &[], &[]);
 }
 
+/// how a ledger channel's integrand reduces over its domain
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum LedgerReduce {
+    /// the exact sum, the same for every visit order and memory
+    Sum,
+    /// the minimum, exact in any order
+    Min,
+}
+
+/// one conservation-ledger channel (`symbi_discretize::ledger_gv`) on the axisymmetric plane with
+/// the azimuthal velocity: its integrand into `scratch` over `domain`, then the reduction where the
+/// data lives. `target` binds the locate channels' value and `sign` the wall's outward sign
+pub fn ledger_reduce<const D: usize, const DOF: usize, Mem, Sc>(
+    sim: &FieldStore<D, DOF, Mem, Sc>,
+    scratch: &Field<Sc, D, Mem>,
+    channel: symbi_discretize::LedgerChannel,
+    domain: &Domain<D>,
+    target: f64,
+    sign: f64,
+    op: LedgerReduce,
+) -> f64
+where
+    Mem: MemoryStorage + Sync,
+    Sc: Scalar + OrderedNumeric,
+{
+    use symbi_discretize::LedgerChannel as C;
+    let name = format!("{}{}_{D}d", channel.stem(), geom_suffix(sim.geom.coords, DOF, D));
+    let g = &sim.geom;
+    let (x_lo, dx) = kernel_geom(&g.x_lo, &g.dx, &g.maps, g.coords, 1.0);
+    let bodies = sim.immersed.as_ref().map(|im| &im.bodies);
+    let scalars = scalars_for(&name, |bind| {
+        Sc::from_f64(match bind {
+            ScalarBind::Spec(s) => match &**s {
+                "ledger_target" => target,
+                "outward_sign" => sign,
+                other => panic!("ledger kernel '{name}': unexpected scalar {other}"),
+            },
+            ScalarBind::Ref(ScalarRef::Body { idx, field }) => body_scalar::<D>(bodies, *idx, *field),
+            ScalarBind::Ref(sref) => geom_scalar(&x_lo, &dx, &g.maps, &g.index_offset, *sref)
+                .unwrap_or_else(|| panic!("ledger kernel '{name}': unexpected scalar {sref:?}")),
+        })
+    });
+    let axis = match channel {
+        C::WallMass { axis } | C::WallMassIn { axis } | C::WallEnergy { axis } | C::WallPotential { axis } | C::WallAngular { axis } => axis,
+        _ => 0,
+    };
+    dispatch_named(sim, &sim.fields.cons.den, Some(scratch), axis, &name, domain, &[], &scalars);
+    symbi_exec::engine::device_sync::<Mem>();
+    match op {
+        LedgerReduce::Sum => symbi_exec::engine::field_sum_exact(scratch, domain).value(),
+        LedgerReduce::Min => symbi_exec::engine::field_reduce(scratch, domain, symbi_ir::emit::ReductionOp::Min),
+    }
+}
+
 /// the body pass of a single static potential on an adiabatic axisymmetric plane: the momentum
 /// source of [`dispatch_body_source`] with gravity's energy work taken from this stage's face mass
 /// fluxes. reads `flux[d].den` on the cell's own faces, so the flux pass of the same stage precedes
