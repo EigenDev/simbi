@@ -45,9 +45,9 @@ fn assert_family(missing: &mut Vec<String>, name: String) {
     }
 }
 
-// the hydro godunov + wave-speed families. on a flat metric every hydro dispatch arm has DOF == D
-// (the azimuthal-momentum swirl lift, DOF > D, appears only on the curved-spacetime arms), so the
-// geometry suffix is coord-only (`geom_suffix(c, D, D)` = "" / "_sph" / "_cyl"). the godunov name
+// the hydro godunov + wave-speed families with DOF == D: the geometry suffix is coord-only
+// (`geom_suffix(c, D, D)` = "" / "_sph" / "_cyl"); the lifted planes (DOF = 3 on two axes) are
+// enumerated by `every_lifted_plane_kernel_is_emitted`. the godunov name
 // uses the regime prefix; the CFL wave-speed name uses "rhd" for rhd and "iso" for both adiabatic
 // (shares the cs map) and iso. rhd + adiabatic + iso reach cartesian / spherical / cylindrical 1-3D.
 #[test]
@@ -617,4 +617,49 @@ fn every_predictor_emf_kernel_an_mhd_arm_requests_is_emitted() {
         }
     }
     assert!(missing.is_empty(), "predictor EMF kernels the dispatch requests are NOT emitted:\n  {}", missing.join("\n  "));
+}
+
+// the newtonian planes with three velocity components on two axes (`geom_suffix(c, 3, 2)`: the
+// lifted cartesian plane, the (R, z) plane and the (r, theta) plane): the recovery, update,
+// snapshot, wave-speed and ghost families of both closures, and on the two axisymmetric planes the
+// azimuthal shear, the point-mass gravity with its face work, the outward-only walls and the
+// conservation ledger's channels. a run on these planes requests each name below.
+#[test]
+fn every_lifted_plane_kernel_is_emitted() {
+    let mut missing = Vec::new();
+    for coords in [Geometry::Cartesian, Geometry::Cylindrical, Geometry::Spherical] {
+        let sfx = geom_suffix(coords, 3, 2);
+        assert_family(&mut missing, format!("iso_wave_speed_map{sfx}_2d"));
+        assert_family(&mut missing, format!("iso_ghost_fill{sfx}_2d"));
+        for prefix in ["adiabatic", "iso"] {
+            assert_family(&mut missing, format!("{prefix}_c2p{sfx}_2d"));
+            assert_family(&mut missing, format!("{prefix}_godunov_stage{sfx}_2d"));
+            assert_family(&mut missing, format!("{prefix}_snapshot{sfx}_2d"));
+        }
+        if coords == Geometry::Cartesian {
+            continue;
+        }
+        for name in ["adiabatic", "iso", "rate", "boundary_torque", "boundary_work"] {
+            assert_family(&mut missing, format!("viscous_azimuthal_{name}{sfx}_2d"));
+        }
+        assert_family(&mut missing, format!("adiabatic_azimuthal_source_control_godunov_stage{sfx}_2d"));
+        for family in ["body_source", "body_source_face_work", "body_feedback", "body_source_iso", "body_feedback_iso"] {
+            assert_family(&mut missing, format!("{family}{sfx}_2d"));
+        }
+        for axis in 0..2 {
+            for side in ["low", "high"] {
+                assert_family(&mut missing, format!("outward_wall_{axis}_{side}{sfx}_2d"));
+            }
+        }
+        for channel in symbi_discretize::LedgerChannel::all() {
+            assert_family(&mut missing, format!("{}{sfx}_2d", channel.stem()));
+        }
+    }
+    assert!(
+        missing.is_empty(),
+        "{} lifted-plane kernel(s) the dispatch can request are NOT emitted and are not in \
+         KNOWN_UNBAKED (mid-run expect_kernel panic):\n  {}",
+        missing.len(),
+        missing.join("\n  ")
+    );
 }
