@@ -1152,6 +1152,10 @@ where
         receipt.converged
     }
 
+    fn recovery_status(&self, sim: &FieldStore<D, 3, Mem, Sc>) -> u8 {
+        crate::regimes::substrate_kernels::recovery_status(sim)
+    }
+
     fn c2p(&self, sim: &FieldStore<D, 3, Mem, Sc>) {
         // the primitives now hold a state recovered from the conserved fields; anything
         // reading prim.* outside the evolve loop checks this before trusting it.

@@ -618,6 +618,21 @@ where
         if span == StageSpan::FromCorrection && !reached_correction {
             continue;
         }
+        // a failed recovery leaves the stage without an admissible state. the first-order
+        // correction reads the recovery status itself; a kernel set without it decides here, at the
+        // correction's place, which the whole stage and the correction span each pass once after
+        // the recovery: the stage asks for a retry, with the failing stage, cell and values as the
+        // rejection's evidence
+        if ph.kind == PhaseKind::Fofc && !fofc {
+            let code = kernels.recovery_status(sim);
+            if code != 0 {
+                let detail = crate::hydro_ops::recovery_failure_detail(sim, args.stage, code);
+                sim.workspace.rejection_evidence.lock().expect("rejection evidence").push(detail);
+                #[cfg(debug_assertions)]
+                std::mem::forget(audit);
+                return (StageOutcome::RetryStep, 1);
+            }
+        }
         if !ph.gate.active(additive, bodies, fofc, chi) {
             continue;
         }

@@ -352,6 +352,10 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize, const
         dispatch_flux(sim, &self.pre, "iso", dir, ISO_GAMMA, self.flux_spec());
     }
 
+    fn recovery_status(&self, sim: &FieldStore<D, DOF, Mem, Sc>) -> u8 {
+        crate::regimes::substrate_kernels::recovery_status(sim)
+    }
+
     fn c2p(&self, sim: &FieldStore<D, DOF, Mem, Sc>) {
         // the primitives now hold a state recovered from the conserved fields; anything
         // reading prim.* outside the evolve loop checks this before trusting it.

@@ -232,6 +232,13 @@ pub fn take_root_step<A: RootAttempt>(
             break;
         }
         let evidence = attempt.evidence(ledger.rejections());
+        // an attempt with no captured entry holds the failed state and nothing restores it: its
+        // receipts are discarded and the run stops on that state as a crash, which a restart
+        // refuses, with the attempt's evidence
+        if !restorable {
+            discard_pending();
+            panic!("an inadmissible stage on a step with no retry entry at dt = {dt:e}: {}", evidence.join("; "));
+        }
         let refused = ledger.reject(guard, dt, evidence).err();
         discard_pending();
         attempt.restore()?;
@@ -277,6 +284,8 @@ mod tests {
         /// the attempt that panics after dirtying the state, and whether the march contains it
         panics_at: Option<usize>,
         contained: bool,
+        /// whether the march declares a retry source; by default, whether any attempt is rejected
+        retry_source: Option<bool>,
     }
 
     impl Scripted {
@@ -291,6 +300,7 @@ mod tests {
                 restorable: false,
                 panics_at: None,
                 contained: false,
+                retry_source: None,
             }
         }
     }
@@ -298,7 +308,7 @@ mod tests {
     impl RootAttempt for Scripted {
         type Error = String;
         fn rejectable(&mut self) -> bool {
-            !self.rejected.is_empty()
+            self.retry_source.unwrap_or(!self.rejected.is_empty())
         }
         fn capture(&mut self, dt: f64, restorable: bool) -> Result<(), String> {
             self.restorable = restorable;
@@ -388,6 +398,21 @@ mod tests {
         let (attempted, _) = crate::conservation_ledger::ledger_report();
         assert_eq!((accepted.outflow[0][1].mass, accepted.stages), (0.5, 1), "the rejected attempt's transport was accepted");
         assert_eq!((attempted.outflow[0][1].mass, attempted.stages), (1.5, 2), "the attempted totals hold both attempts");
+    }
+
+    #[test]
+    fn a_failed_attempt_with_no_retry_entry_stops_with_its_evidence_and_commits_nothing() {
+        let _guards = guard_ledger::open_scope();
+        let scope = crate::conservation_ledger::open_scope();
+        let mut march = Scripted::new(vec![1]);
+        march.retry_source = Some(false);
+        let failed = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| take_root_step(&mut march, &GUARD, 1.0, 0.0)));
+        let message = failed.expect_err("a failed attempt with no retry entry was committed");
+        let text = message.downcast_ref::<String>().cloned().unwrap_or_default();
+        assert!(text.contains("no retry entry") && text.contains("attempt 1 after 0"), "{text}");
+        assert_eq!(march.log, ["capture 1", "run 1"], "the failed attempt was restored or rerun");
+        assert_eq!(scope.accepted().stages, 0, "the failed attempt's receipts reached the accepted totals");
+        drop(scope);
     }
 
     #[test]

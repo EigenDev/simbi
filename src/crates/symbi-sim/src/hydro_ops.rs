@@ -23,6 +23,49 @@ pub(crate) fn host_read_barrier<Mem: MemorySpace>() {
     }
 }
 
+/// drain the device queue before a host read of a store whose storage the device may hold; no-op
+/// on host memory
+pub fn storage_read_barrier<Mem: symbi_xpu::MemoryStorage>() {
+    #[cfg(feature = "gpu")]
+    if Mem::IS_DEVICE_ACCESSIBLE {
+        symbi_xpu::ctx_sync();
+    }
+}
+
+/// the evidence of a failed stage recovery: the stage, the recovery code, and where the storage
+/// is host-readable the first failing decision cell with its conserved values, density, momenta,
+/// total energy and specific internal energy. a fatal-path report: it drains the queue
+pub fn recovery_failure_detail<const D: usize, const DOF: usize, Mem: symbi_xpu::MemoryStorage, Sc: Scalar + OrderedNumeric>(
+    sim: &FieldStore<D, DOF, Mem, Sc>,
+    stage: usize,
+    code: u8,
+) -> String {
+    storage_read_barrier::<Mem>();
+    let head = format!(
+        "recovery failed at step {} stage {stage}, t = {:e} (code {code}: {})",
+        sim.iteration,
+        sim.time,
+        symbi_hydro::c2p_result::ErrorCode(code).describe()
+    );
+    let Some(host) = sim.host() else {
+        return format!("{head}; the cell is on storage without host access");
+    };
+    let Some((coord, cell_code)) = first_c2p_error(host) else {
+        return format!("{head}; no decision cell holds the code on the host read");
+    };
+    let c = &host.fields.cons;
+    let den = c.den.view().at(coord).to_f64();
+    let mom: Vec<f64> = (0..DOF).map(|k| c.mom[k].view().at(coord).to_f64()).collect();
+    let nrg = c.nrg_field().map(|f| f.view().at(coord).to_f64());
+    let kinetic = 0.5 * mom.iter().map(|m| m * m).sum::<f64>() / den;
+    let specific = nrg.map(|e| (e - kinetic) / den);
+    let global: Vec<isize> = (0..D).map(|ax| coord[ax] + sim.geom.index_offset[ax]).collect();
+    format!(
+        "{head}; first cell {global:?} (code {}): rho {den:e}, momentum {mom:?}, total energy {nrg:?}, kinetic energy {kinetic:e}, specific internal energy {specific:?}",
+        cell_code.0
+    )
+}
+
 /// scan the c2p error field over the cells the run-wide decisions read (the interior less a
 /// covered core no evolved cell reads) and return the bitwise or of all error codes.
 /// zero = all cells clean. nonzero = at least one cell had a recovery.

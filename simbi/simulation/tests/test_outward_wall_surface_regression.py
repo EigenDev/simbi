@@ -7,10 +7,13 @@
 # production frontend:
 # - the restart file rebuilt from the fixture resumes the captured state bit for bit
 # - the run's method is the recorded one (solver, reconstruction, limiter, cfl, closure, walls)
-# - the regression: every accepted state through t = 9.62 stays admissible. the recorded run
-#   fails at step 2062990, t = 9.605410191424152, where two surface cells at r = 1.326,
-#   theta = 1.321 and 1.821 reach negative internal energy and the next cfl timestep is not
-#   positive; this gate fails there until that failure is resolved
+# - a failed recovery is never accepted: the run stops on the failing step's stage 0 with the
+#   clock at the step's entry, the crash file marked not restartable, the evidence naming the
+#   stage, the cell and its values, and the failed step's receipts left out of the accepted totals
+# - the regression: every accepted state through t = 9.62 stays admissible. the recorded run's
+#   stage 0 of step 2062989 (entry t = 9.605405683896917) leaves the surface cell [68, 18] at
+#   r = 1.326, theta = 1.321 with negative internal energy; this gate fails there until that
+#   failure is resolved
 #
 # run: pytest -m simulation simbi/simulation/tests/test_outward_wall_surface_regression.py
 # =============================================================================
@@ -32,8 +35,9 @@ REPO = Path(__file__).resolve().parents[3]
 FIXTURE = REPO / "src/crates/symbi/tests/fixtures/outward_wall_surface_n84_step2061947.bin"
 METHOD = json.loads(FIXTURE.with_suffix(".json").read_text())
 STEP = 2061947
-FAILED_STEP = 2062990
-FAILED_TIME = 9.605410191424152
+FAILED_STEP = 2062989
+FAILED_TIME = 9.605405683896917
+FAILED_EVIDENCE = ("recovery failed at step 2062989 stage 0", "first cell [68, 18]")
 T_END = 9.62
 CONSERVED = ("den", "m1", "m2", "m3", "nrg")
 PRIMITIVE = ("rho", "v1", "v2", "v3", "pre")
@@ -113,8 +117,29 @@ def test_the_outward_wall_torus_surface_stays_admissible_past_the_recorded_failu
     crashed = list((tmp_path / "window").glob("*.chkpt.crashed.h5"))
     if crashed:
         t_fail, it_fail, _, _ = _interior(crashed[0])
-        where = "the recorded failure" if (it_fail, t_fail) == (FAILED_STEP, FAILED_TIME) else "a failure other than the recorded one"
+        recorded = (it_fail, t_fail) == (FAILED_STEP, FAILED_TIME) and all(e in done.stderr for e in FAILED_EVIDENCE)
+        where = "the recorded failure" if recorded else "a failure other than the recorded one"
         pytest.fail(f"{where}: the run stopped at step {it_fail}, t = {t_fail!r}:\n{done.stderr[-1500:]}")
     assert done.returncode == 0, done.stderr[-2000:]
     t_last, _, _, _ = _interior(next((tmp_path / "window").glob("*.chkpt.final.h5")))
     assert t_last >= T_END, f"the window ended at t = {t_last}, short of t = {T_END}"
+
+
+def test_a_failed_recovery_stops_unadvanced_with_its_evidence_and_commits_no_receipts(tmp_path: Path) -> None:
+    resume = _restart_file(tmp_path)
+    done = _run(tmp_path / "window", FAILED_STEP + 20000, resume, check=False)
+    crashed = list((tmp_path / "window").glob("*.chkpt.crashed.h5"))
+    assert crashed, "the window stayed admissible: the failed recovery this gate exercises no longer occurs, so it checks nothing"
+    assert done.returncode != 0, "the run reported success over a failed recovery"
+    for evidence in FAILED_EVIDENCE + ("specific internal energy", "no retry entry"):
+        assert evidence in done.stderr, f"the stop does not report {evidence!r}:\n{done.stderr[-2000:]}"
+    t_fail, it_fail, _, meta = _interior(crashed[0])
+    # the clock and the step count stay at the failing step's entry
+    assert (it_fail, t_fail) == (FAILED_STEP, FAILED_TIME), (it_fail, t_fail)
+    assert str(meta["restartable"]).lower() in ("false", "0"), f"the failed attempt's state is marked restartable: {meta['restartable']}"
+    # the accepted receipts hold the steps from the fixture to the failing step's entry, two stages each
+    sys.path.insert(0, str(REPO / "scripts"))
+    import torus_receipts
+
+    ledger = torus_receipts.ledger(meta)
+    assert ledger is not None and ledger.stages == 2 * (FAILED_STEP - STEP), f"accepted stages {ledger and ledger.stages}"

@@ -346,9 +346,17 @@ fn replay(options: Options) -> Outcome {
                     _ => {}
                 },
             );
-            assert_eq!(stage_outcome, StageOutcome::Accepted, "this fixture has no retry path: step {}", sim.iteration);
             let output = output.expect("the stage reached its recovery");
             let (cell, specific) = lowest_internal(&output);
+            // the stage's recovery rejects exactly the inadmissible outputs: these planes carry no
+            // first-order correction, so a failed recovery returns the retry outcome
+            assert_eq!(
+                stage_outcome == StageOutcome::RetryStep,
+                !(specific > 0.0),
+                "step {} stage {}: outcome {stage_outcome:?} against the output's lowest specific internal energy {specific:e}",
+                sim.iteration,
+                spec.index
+            );
             lowest_stage = lowest_stage.min(specific);
             let through_walls = boundary_rates(flux.as_ref().expect("the stage's fluxes"));
             wall[0] += 0.5 * dt * through_walls[0];

@@ -692,6 +692,16 @@ where
         (0.0, 0.0)
     }
 
+    /// the stage recovery's status over the decision cells: zero when every cell recovered an
+    /// admissible primitive state, otherwise a nonzero recovery code. the default reads host
+    /// memory after the queue drains; a kernel set on device memory reduces the status where it
+    /// lives
+    fn recovery_status(&self, store: &FieldStore<NDIM, DOF, Mem, Sc>) -> u8 {
+        crate::hydro_ops::storage_read_barrier::<Mem>();
+        let host = store.host().expect("the recovery status of storage without host access needs the kernel set's reduction");
+        crate::hydro_ops::scan_c2p_errors(host).0
+    }
+
     /// the lowest density and specific internal energy of the stage output the conserved fields
     /// hold, with their cells
     fn stage_extremes(

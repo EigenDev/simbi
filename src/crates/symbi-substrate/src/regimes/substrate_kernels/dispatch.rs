@@ -1057,6 +1057,21 @@ where
     dispatch_named(sim, pre, None, axis, &name, &plane, &[], &[]);
 }
 
+/// the stage recovery's status over the store's decision cells, reduced where the status lives:
+/// the largest recovery code, zero when every cell recovered
+pub fn recovery_status<const D: usize, const DOF: usize, Mem, Sc>(sim: &FieldStore<D, DOF, Mem, Sc>) -> u8
+where
+    Mem: MemoryStorage,
+    Sc: Scalar + OrderedNumeric,
+{
+    symbi_exec::engine::device_sync::<Mem>();
+    sim.composite_ownership
+        .decision_regions(&sim.geom.interior)
+        .iter()
+        .map(|region| symbi_exec::engine::field_reduce(&sim.fields.c2p_error, region, symbi_ir::emit::ReductionOp::Max))
+        .fold(0.0, f64::max) as u8
+}
+
 /// how a ledger channel's integrand reduces over its domain
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum LedgerReduce {
