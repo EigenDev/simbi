@@ -321,6 +321,14 @@ impl<const NDIM: usize, const DOF: usize, Mem: MemorySpace> SlipCuts<NDIM, DOF, 
     }
 }
 
+/// the volume integrals a viscous receipt differences
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct EnergyPartition {
+    pub energy: f64,
+    pub kinetic: f64,
+    pub angular_momentum: f64,
+}
+
 pub trait KernelSet<const NDIM: usize, const DOF: usize, Mem, Sc>
 where
     Mem: MemoryStorage,
@@ -662,6 +670,35 @@ where
             self.excise_sweep(store);
         }
         self.excise_finalize(store);
+    }
+
+    /// the outward rates of mass, angular momentum and E + rho Phi through each domain wall the
+    /// store's interior touches, from the stage's stored fluxes; None where the kernel set does not
+    /// account its walls. a conservation ledger books them per stage
+    fn wall_transport(&self, _store: &FieldStore<NDIM, DOF, Mem, Sc>) -> Option<[[crate::conservation_ledger::Transport; 2]; 3]> {
+        None
+    }
+
+    /// the volume integrals of total energy, kinetic energy and angular momentum, which the viscous
+    /// operator's receipt differences across its application
+    fn energy_partition(&self, _store: &FieldStore<NDIM, DOF, Mem, Sc>) -> Option<EnergyPartition> {
+        None
+    }
+
+    /// the viscous operator's torque and stress work through the walls, time-integrated, accumulated
+    /// since the previous take, which resets the accumulation to zero. a take before and after one
+    /// application gives that application's amounts, rounded once whatever the run's history
+    fn take_viscous_wall_totals(&self) -> (f64, f64) {
+        (0.0, 0.0)
+    }
+
+    /// the lowest density and specific internal energy of the stage output the conserved fields
+    /// hold, with their cells
+    fn stage_extremes(
+        &self,
+        _store: &FieldStore<NDIM, DOF, Mem, Sc>,
+    ) -> Option<(crate::conservation_ledger::Extreme, crate::conservation_ledger::Extreme)> {
+        None
     }
 
     /// the number of fill passes the excision region needs (0 = excision inert).

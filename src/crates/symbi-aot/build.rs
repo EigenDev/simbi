@@ -3651,6 +3651,14 @@ fn main() {
         emit_gv(&out_dir, &format!("body_source{sfx}_2d"), 2, &source);
         let face_work = body_source_face_work_gv(coords, 2, ncomp, &geom.axes);
         emit_gv(&out_dir, &format!("body_source_face_work{sfx}_2d"), 2, &face_work);
+        // the outward-only wall on each face of the plane: the normal momentum is the slot of the
+        // coordinate the axis grids
+        for axis in 0..2usize {
+            for (high, side) in [(false, "low"), (true, "high")] {
+                let program = symbi_discretize::outward_wall_gv(2, ncomp, axis, high, geom.axes[axis]);
+                emit_gv(&out_dir, &format!("outward_wall_{axis}_{side}{sfx}_2d"), 2, &program);
+            }
+        }
         let feedback = body_feedback_gv(MAX_SOURCE_BODIES, coords, 2, ncomp, &geom.axes);
         emit_gv(&out_dir, &format!("body_feedback{sfx}_2d"), 2, &feedback);
         let source = body_source_iso_gv(MAX_SOURCE_BODIES, coords, 2, ncomp, &geom.axes);

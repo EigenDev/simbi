@@ -23,6 +23,7 @@ pub mod substrate_newton;
 pub mod substrate_newtonian_mhd;
 pub mod substrate_rhd;
 pub mod substrate_rmhd;
+pub mod wall_ledger;
 
 /// refuse a nonzero viscous coefficient on a kernel set that carries no viscous transport: the
 /// run would otherwise evolve as if the viscosity it configured were zero

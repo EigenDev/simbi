@@ -160,6 +160,12 @@ impl<Mem: MemorySpace, Sc: Scalar + OrderedNumeric, const D: usize>
     /// select the eos closure arm. the taub-mathews (synge-gas) closure is baked
     /// for the flat cartesian rhd family only — a curved spacetime or a
     /// non-cartesian chart refuses at dispatch. fluent.
+    /// the relativistic gas carries no outward-only wall; the frontend refuses one before this
+    pub fn with_outward_walls(self, walls: [[bool; 2]; 3]) -> Self {
+        assert!(walls.iter().flatten().all(|on| !on), "an outward-only wall on the relativistic gas");
+        self
+    }
+
     pub fn with_eos(mut self, eos: symbi_discretize::EosArm) -> Self {
         self.eos = eos;
         self

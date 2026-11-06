@@ -7891,6 +7891,10 @@ where
     // refined — so its scope opens unconditionally, and every tile's and level's
     // substages book into this thread's ledger.
     let guard_scope = symbi_sim::guard_ledger::open_scope();
+    // the conservation receipts book over the step transaction this single grid models; a restart
+    // continues the totals its checkpoint carried
+    let conservation_scope = (n == 1 && decomp.is_none() && tiles[0].levels.len() == 1)
+        .then(|| symbi_sim::conservation_ledger::open_scope_from(symbi_sim::conservation_ledger::take_restart_seed().unwrap_or_default()));
     // the run-owned diagnostics: the accepted totals read from this run's own
     // scopes. the projection scope opens only on the single grid; the guard scope
     // opens always. reading through the scopes binds the evidence to this run, so
@@ -7988,6 +7992,9 @@ where
             // the pending bucket before the scope closes.
             if ledger_scope.is_some() {
                 symbi_sim::projection_ledger::step_discard();
+            }
+            if conservation_scope.is_some() {
+                symbi_sim::conservation_ledger::step_discard();
             }
             // the crashed step never reached its accepted boundary, so its guard
             // acts describe a state that did not survive: discard the pending

@@ -165,6 +165,9 @@ pub enum RootStep {
 }
 
 fn discard_pending() {
+    if crate::conservation_ledger::scope_is_open() {
+        crate::conservation_ledger::step_discard();
+    }
     if crate::dual_energy_ledger::scope_is_open() {
         crate::dual_energy_ledger::step_discard();
     }
@@ -186,6 +189,9 @@ fn panic_message(payload: &(dyn std::any::Any + Send)) -> String {
 }
 
 fn commit_pending() {
+    if crate::conservation_ledger::scope_is_open() {
+        crate::conservation_ledger::step_commit();
+    }
     if crate::dual_energy_ledger::scope_is_open() {
         crate::dual_energy_ledger::step_commit();
     }
@@ -303,6 +309,12 @@ mod tests {
         fn run(&mut self, dt: f64) -> Result<bool, String> {
             self.attempts += 1;
             guard_ledger::record(&GuardReceipt::of_pass(1, 0, 0, 0));
+            if crate::conservation_ledger::scope_is_open() {
+                // a unit mass rate through the outer wall, at the attempt's timestep
+                let mut rates = [[crate::conservation_ledger::Transport::default(); 2]; 3];
+                rates[0][1].mass = 1.0;
+                crate::conservation_ledger::record_stage(&rates, dt);
+            }
             self.state += 100;
             self.log.push(format!("run {dt}"));
             if self.panics_at == Some(self.attempts) {
@@ -363,6 +375,30 @@ mod tests {
             1,
             "the rejected attempt's act was accepted"
         );
+    }
+
+    #[test]
+    fn a_rejected_attempt_leaves_the_conservation_receipts_and_the_accepted_attempt_commits_them() {
+        let _guards = guard_ledger::open_scope();
+        let scope = crate::conservation_ledger::open_scope();
+        let mut march = Scripted::new(vec![1]);
+        assert_eq!(take_root_step(&mut march, &GUARD, 1.0, 0.0).unwrap(), RootStep::Accepted { dt: 0.5 });
+        let accepted = scope.accepted();
+        drop(scope);
+        let (attempted, _) = crate::conservation_ledger::ledger_report();
+        assert_eq!((accepted.outflow[0][1].mass, accepted.stages), (0.5, 1), "the rejected attempt's transport was accepted");
+        assert_eq!((attempted.outflow[0][1].mass, attempted.stages), (1.5, 2), "the attempted totals hold both attempts");
+    }
+
+    #[test]
+    fn a_step_the_guard_refuses_commits_no_conservation_receipt() {
+        let _guards = guard_ledger::open_scope();
+        let scope = crate::conservation_ledger::open_scope();
+        let mut march = Scripted::new(vec![1, 2, 3]);
+        let step = take_root_step(&mut march, &GUARD, 1.0, 0.0).unwrap();
+        assert!(matches!(step, RootStep::Halted(StepHalt::Guard(_))), "{step:?}");
+        assert_eq!(scope.accepted().stages, 0, "a refused step reached the accepted receipts");
+        drop(scope);
     }
 
     #[test]

@@ -650,6 +650,12 @@ where
                 prof("chi_flux", || kernels.chi_flux(sim));
                 apply_unrecoverable(sim, args.stage, HookPoint::AfterFlux);
                 hook(HookPoint::AfterFlux);
+                // the stage's wall transport, at the weight its flux reaches the accepted step with
+                if crate::conservation_ledger::scope_is_open() {
+                    if let Some(rates) = kernels.wall_transport(sim) {
+                        crate::conservation_ledger::record_stage(&rates, args.dt * args.ac * args.injection_weight);
+                    }
+                }
             }
             PhaseKind::Efield => prof("efield", || kernels.efield(sim)),
             PhaseKind::Godunov => prof("godunov_stage", || {
@@ -667,6 +673,12 @@ where
             PhaseKind::C2p => {
                 apply_unrecoverable(sim, args.stage, HookPoint::BeforeC2p);
                 hook(HookPoint::BeforeC2p);
+                // the stage output's lowest density and specific internal energy, before its recovery
+                if crate::conservation_ledger::scope_is_open() {
+                    if let Some((density, specific)) = kernels.stage_extremes(sim) {
+                        crate::conservation_ledger::record_extremes(density, specific);
+                    }
+                }
                 prof("c2p", || kernels.c2p(sim));
             }
             PhaseKind::Fofc => {
@@ -943,8 +955,23 @@ where
                 if !(0..n).any(|k| phase.applies(stores[k], kernels[k])) {
                     continue;
                 }
+                // the operator's receipt: the wall torque and stress work it books, and its change of
+                // total energy, kinetic energy and angular momentum over the domain
+                let receipt = (crate::conservation_ledger::scope_is_open() && n == 1)
+                    .then(|| (kernels[0].energy_partition(stores[0]), kernels[0].take_viscous_wall_totals()));
                 for k in 0..n {
                     cx.on_tile(k, &mut || prof("viscous", || kernels[k].viscous(stores[k], dt)));
+                }
+                if let Some((Some(before), _)) = receipt {
+                    let after = kernels[0].energy_partition(stores[0]).expect("an energy partition before the operator and none after");
+                    let walls = kernels[0].take_viscous_wall_totals();
+                    crate::conservation_ledger::record_viscous(&crate::conservation_ledger::ViscousReceipt {
+                        torque_in: walls.0,
+                        work_in: walls.1,
+                        energy_change: after.energy - before.energy,
+                        kinetic_change: after.kinetic - before.kinetic,
+                        angular_momentum_change: after.angular_momentum - before.angular_momentum,
+                    });
                 }
                 if phase.recover == Recover::Primitives {
                     recover_primitives(phase, stores, kernels, cx)?;

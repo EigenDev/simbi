@@ -145,6 +145,8 @@ struct Config {
     velocity_components: Option<usize>,
     // the azimuthal shear model in place of the full stress, parsed from `viscous_stress`
     azimuthal_shear: Option<symbi_hydro::viscous::AzimuthalShear>,
+    /// the walls, by axis and side, that pass outflow and refuse inflow
+    outward_only_walls: [[bool; 2]; 3],
     viscosity: f64,
     /// the shakura-sunyaev alpha-disk coefficient, read from the `viscosity_alpha` key,
     /// not the bare `alpha` key: `alpha` is a generic name a problem may use for its own
@@ -804,6 +806,7 @@ struct KernelSettings<'c> {
     solver: Solver,
     ct_method: CtMethod,
     azimuthal_shear: Option<symbi_hydro::viscous::AzimuthalShear>,
+    outward_walls: [[bool; 2]; 3],
     viscosity: f64,
     alpha: f64,
     resistivity: f64,
@@ -826,6 +829,7 @@ impl<'c> KernelSettings<'c> {
             solver: cfg.solver,
             ct_method: cfg.ct_method,
             azimuthal_shear: cfg.azimuthal_shear,
+            outward_walls: cfg.outward_only_walls,
             viscosity: cfg.viscosity,
             alpha: cfg.alpha,
             resistivity: cfg.resistivity,
@@ -859,6 +863,7 @@ trait GasDoors: Sized + WithViscosity + WithResistivity + WithExcision + AttachR
     fn solve_with(self, solver: Solver) -> Result<Self, symbi_sim::state::ConfigError>;
     fn driven(self, built: symbi_source_compile::expr_bridge::BoundaryPrescription, params: Vec<f64>) -> Self;
     fn gradient_wall(self, wall: GradientBc) -> Self;
+    fn outward_walls(self, walls: [[bool; 2]; 3]) -> Self;
 }
 
 macro_rules! gas_doors {
@@ -890,6 +895,9 @@ macro_rules! gas_doors {
             fn gradient_wall(self, wall: GradientBc) -> Self {
                 $set::with_gradient_boundary(self, wall).0
             }
+            fn outward_walls(self, walls: [[bool; 2]; 3]) -> Self {
+                $set::with_outward_walls(self, walls)
+            }
         }
     };
 }
@@ -911,7 +919,8 @@ fn gas_kernels<K: GasDoors>(sub: K, settings: &KernelSettings, role: LevelRole) 
         .with_viscosity(settings.viscosity)
         .with_alpha(settings.alpha)
         .with_azimuthal_shear(settings.azimuthal_shear)
-        .with_resistivity(settings.resistivity);
+        .with_resistivity(settings.resistivity)
+        .outward_walls(settings.outward_walls);
     let ks = excised(ks, settings, role);
     let ks = attach_configured_sources(ks, settings.sources, settings.spec, &settings.law)?;
     let ks = attach_driven_boundaries(ks, settings.driven, settings.spec, |ks, built, params| ks.driven(built, params))?;
@@ -1499,6 +1508,7 @@ fn parse_config(dict: &Bound<'_, PyDict>) -> PyResult<Config> {
             .and_then(|v| v.extract::<Option<usize>>().ok())
             .flatten(),
         azimuthal_shear: parse_azimuthal_shear(dict)?,
+        outward_only_walls: parse_outward_only_walls(dict)?,
         viscosity: get_f64_or(dict, "viscosity", 0.0),
         alpha: get_f64_or(dict, "viscosity_alpha", 0.0),
         bare_alpha_key: dict.get_item("alpha").ok().flatten().is_some(),
@@ -1876,6 +1886,35 @@ struct BinaryCfg {
     eccentricity: f64,
     mass_ratio: f64,
     frame: symbi_ib::ReferenceFrame,
+}
+
+/// the walls a problem names in `outward_only_walls`: one flag per domain face, axis 0 low and high
+/// then axis 1 low and high. each set face passes outflow and refuses inflow. admitted for the
+/// adiabatic newtonian gas on the spherical (r, theta) and cylindrical (R, z) planes with three
+/// velocity components, the planes whose wall kernels are baked. those lifted planes carry no
+/// first-order flux correction, so the wall's flux reaches the update as written
+fn parse_outward_only_walls(dict: &Bound<'_, PyDict>) -> PyResult<[[bool; 2]; 3]> {
+    let Some(flags) = dict.get_item("outward_only_walls").ok().flatten().and_then(|v| v.extract::<Option<Vec<bool>>>().ok()).flatten() else {
+        return Ok([[false; 2]; 3]);
+    };
+    if !flags.iter().any(|on| *on) {
+        return Ok([[false; 2]; 3]);
+    }
+    let regime = enum_str_or(dict, "regime", "");
+    let coords = enum_str_or(dict, "coord_system", "");
+    let locally_isothermal = dict.get_item("locally_isothermal").ok().flatten().and_then(|v| v.extract::<bool>().ok()).unwrap_or(false);
+    let dims = get_usize(dict, "dimensionality").unwrap_or(0);
+    let components = dict.get_item("velocity_components").ok().flatten().and_then(|v| v.extract::<Option<usize>>().ok()).flatten();
+    if regime != "newtonian" || locally_isothermal || dims != 2 || !(coords == "spherical" || coords == "cylindrical") || components != Some(3) {
+        return Err(PyValueError::new_err(format!(
+            "outward_only_walls on the {regime} regime, {dims}D {coords}, velocity_components {components:?}: the wall is baked for \
+             the adiabatic newtonian gas on the spherical and cylindrical planes with three velocity components"
+        )));
+    }
+    if flags.len() != 4 {
+        return Err(PyValueError::new_err(format!("outward_only_walls names one flag per face of the plane, four; got {flags:?}")));
+    }
+    Ok([[flags[0], flags[1]], [flags[2], flags[3]], [false, false]])
 }
 
 /// the azimuthal shear model a problem names: `viscous_stress = "azimuthal_shear"`, the law's
@@ -10178,7 +10217,7 @@ fn checkpoint_metadata(cfg: &Config, checkpoint_index: u64) -> Metadata {
         })
         .collect::<Vec<_>>()
         .join(",");
-    Metadata::new()
+    with_conservation_ledger(Metadata::new()
         .with("build_git_sha", BUILD_GIT_SHA)
         .with("build_git_dirty", BUILD_GIT_DIRTY)
         .with("build_source_id", build_source_id())
@@ -10222,7 +10261,39 @@ fn checkpoint_metadata(cfg: &Config, checkpoint_index: u64) -> Metadata {
         // the edge EMF of a magnetized run: a scheme choice with no field of its own, so a run
         // resumed under the other scheme would continue the file's faces under a different
         // induction update. an empty string records a run without a staggered field.
-        .with("ct_method", ct_method_name(cfg))
+        .with("ct_method", ct_method_name(cfg)))
+}
+
+/// the conservation receipts a restart continues: the accepted totals its checkpoint carried, set
+/// on the run's thread for the driver's scope to open from
+fn seed_conservation_ledger(cfg: &Config) {
+    let Some(path) = cfg.restart_path.as_deref() else {
+        return;
+    };
+    let Ok(attrs) = symbi_io::read_attrs(std::path::Path::new(path), "metadata") else {
+        return;
+    };
+    if let Some((_, symbi_io::Attr::Str(text))) = attrs.iter().find(|(k, _)| k == "conservation_ledger") {
+        let values: Vec<f64> = text.split_whitespace().map(|w| f64::from_bits(u64::from_str_radix(w, 16).expect("a ledger word"))).collect();
+        symbi_sim::conservation_ledger::set_restart_seed(symbi_sim::conservation_ledger::from_values(&values));
+    }
+}
+
+/// the conservation receipts beside a checkpoint: the accepted totals, bit-exact, for a restart
+/// to continue, and the window minima since the previous checkpoint, readable
+fn with_conservation_ledger(meta: Metadata) -> Metadata {
+    // the final checkpoint follows the march, after the scope has closed on this run thread
+    if !symbi_sim::conservation_ledger::scope_was_opened() {
+        return meta;
+    }
+    let (attempted, accepted) = symbi_sim::conservation_ledger::ledger_report();
+    let hex = |l| symbi_sim::conservation_ledger::to_values(l).iter().map(|v: &f64| format!("{:016x}", v.to_bits())).collect::<Vec<_>>().join(" ");
+    let words = hex(&accepted);
+    // the attempted totals of this process, rejected attempts included; a restart starts them anew
+    let attempted_words = hex(&attempted);
+    let (density, specific) = symbi_sim::conservation_ledger::take_window();
+    let window: Vec<String> = [density, specific].iter().map(|e| format!("{:e} {} {}", e.value, e.cell[0], e.cell[1])).collect();
+    meta.with("conservation_ledger", words).with("conservation_attempted", attempted_words).with("conservation_window", window.join(" "))
 }
 
 /// the metadata of a checkpoint, with a crash file's mark: `Some(true)` where a halted step
@@ -11146,7 +11217,10 @@ fn run_simulation(
     // the solve is pure rust with no python access — release the gil so rayon
     // gets real parallelism (and python stays responsive).
     let diagnostics = py
-        .detach(|| on_run_stack(|| dispatch_and_run(&cfg, &prims, &bfields)))
+        .detach(|| on_run_stack(|| {
+            seed_conservation_ledger(&cfg);
+            dispatch_and_run(&cfg, &prims, &bfields)
+        }))
         .map_err(PyRuntimeError::new_err)?;
     Ok(NativeRunDiagnostics { inner: diagnostics })
 }

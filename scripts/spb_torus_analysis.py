@@ -66,6 +66,9 @@ class Grid:
         self.r = (b**4 - a**4) / 4.0 / ((b**3 - a**3) / 3.0)
         self.theta = 0.5 * (self.t_face[:-1] + self.t_face[1:])
         self.polar_weight = np.cos(self.t_face[:-1]) - np.cos(self.t_face[1:])
+        # the volume-weighted polar centroid, the one the kernels take a cell's lever arm at
+        lo, hi = self.t_face[:-1], self.t_face[1:]
+        self.theta_centroid = ((np.sin(hi) - hi * np.cos(hi)) - (np.sin(lo) - lo * np.cos(lo))) / self.polar_weight
         self.volume = np.outer(self.polar_weight, b**3 - a**3) * 2.0 * math.pi / 3.0
 
 

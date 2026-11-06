@@ -23,10 +23,16 @@
 # conditions, the poles the axis condition; the stress passes no torque through the inner
 # wall and the poles, and continues through the outer wall. time is in orbits at R_0, 2 pi.
 # the paper's run I' (A restarted with a rising stress) is outside this table.
+# `zones_per_decade` replaces the run's radial resolution, and `outward_outer` makes the outer
+# wall pass outflow and refuse inflow: its face takes the riemann flux where mass leaves and the
+# wall flux (pressure alone) where mass would enter. the paper's outer wall is a plain outflow
+# condition, which admits inflow; a run with `outward_outer` departs from the paper there.
 #
 # usage:
 #   simbi run simbi_configs/examples/newtonian/spb_torus.py --run A
 #   simbi run simbi_configs/examples/newtonian/spb_torus.py --run K --orbits 4
+#   simbi run simbi_configs/examples/newtonian/spb_torus.py --run N --orbits 3 \
+#       --zones-per-decade 32 --polar-zones 44 --outward-outer
 #   python scripts/spb_torus_analysis.py data/spb_torus/A --from-orbit 3.3
 # =============================================================================
 import math
@@ -104,6 +110,8 @@ class SpbTorus(SimbiProblem):
     orbits: Annotated[float | None, ProblemParam(None, cli=True, description="final time in orbits at R_0; the paper's by default")]
     polar_zones: Annotated[int, ProblemParam(192, cli=True, description="uniform zones in theta")]
     snapshot_orbits: Annotated[float, ProblemParam(0.01, cli=True, description="checkpoint interval in orbits")]
+    zones_per_decade: Annotated[int | None, ProblemParam(None, cli=True, description="radial zones per decade; the run's by default")]
+    outward_outer: Annotated[bool, ProblemParam(False, cli=True, description="the outer wall passes outflow and refuses inflow")]
     # placeholders the run's validator replaces
     resolution: tuple[int, int] = (168, 192)
     bounds: list[tuple[float, float]] = [(0.01, OUTER_RADIUS), (0.0, math.pi)]
@@ -140,6 +148,7 @@ class SpbTorus(SimbiProblem):
         """the grid, the closure, the clock and the stress of the named run"""
         assert self.run in RUNS, f"run {self.run!r}: the paper's runs are {', '.join(RUNS)}"
         scale, density_power, radius_power, per_decade, _, _, gamma, orbits, _ = RUNS[self.run]
+        per_decade = self.zones_per_decade if self.zones_per_decade is not None else per_decade
         # one zone past the rounded count per decade gives the paper's 168 and 334 radial zones
         self.resolution = (round(per_decade * math.log10(OUTER_RADIUS / self.inner_radius)) + 1, self.polar_zones)
         self.bounds = [(self.inner_radius, OUTER_RADIUS), (0.0, math.pi)]
@@ -148,6 +157,7 @@ class SpbTorus(SimbiProblem):
         self.checkpoint_interval = ORBIT * self.snapshot_orbits
         self.viscosity_density_power = density_power
         self.viscosity_radius_power = radius_power
+        self.outward_only_walls = [False, True, False, False] if self.outward_outer else None
         if scale == 0.0:
             self.viscous_stress = None
             self.viscous_boundaries = None

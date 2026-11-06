@@ -57,6 +57,7 @@ mod flux;
 pub(crate) mod geometry;
 mod ghost;
 mod godunov;
+mod outward_wall;
 mod sources;
 mod wavespeed;
 
@@ -66,6 +67,7 @@ pub use flux::*;
 pub use geometry::*;
 pub use ghost::*;
 pub use godunov::*;
+pub use outward_wall::*;
 pub use sources::*;
 pub use wavespeed::*;
 

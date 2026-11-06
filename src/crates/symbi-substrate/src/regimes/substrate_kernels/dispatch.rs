@@ -1034,6 +1034,29 @@ pub fn dispatch_body_source<const D: usize, const DOF: usize, Mem, Sc>(
     );
 }
 
+/// the outward-only wall on grid axis `axis`, the high wall when `high`, over its face plane, after
+/// the stage's flux on that axis. a tile whose interior stops short of the wall dispatches nothing
+pub fn dispatch_outward_wall<const D: usize, const DOF: usize, Mem, Sc>(sim: &FieldStore<D, DOF, Mem, Sc>, axis: usize, high: bool)
+where
+    Mem: MemoryStorage + Sync,
+    Sc: Scalar + OrderedNumeric,
+{
+    let g = &sim.geom;
+    let (lo, hi) = (g.interior.spaces[axis].lo, g.interior.spaces[axis].hi);
+    let whole = g.whole_interior(axis);
+    let face = if high { hi } else { lo };
+    let on_wall = if high { hi + g.index_offset[axis] == whole.1 } else { lo + g.index_offset[axis] == whole.0 };
+    if !on_wall {
+        return;
+    }
+    let mut plane = g.interior.clone();
+    plane.spaces[axis].lo = face;
+    plane.spaces[axis].hi = face + 1;
+    let name = format!("outward_wall_{axis}_{}{}_{D}d", if high { "high" } else { "low" }, geom_suffix(g.coords, DOF, D));
+    let pre = sim.fields.prim.pre_field().expect("the outward-only wall reads the adiabatic pressure");
+    dispatch_named(sim, pre, None, axis, &name, &plane, &[], &[]);
+}
+
 /// the body pass of a single static potential on an adiabatic axisymmetric plane: the momentum
 /// source of [`dispatch_body_source`] with gravity's energy work taken from this stage's face mass
 /// fluxes. reads `flux[d].den` on the cell's own faces, so the flux pass of the same stage precedes

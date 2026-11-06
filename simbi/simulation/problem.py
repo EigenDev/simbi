@@ -414,6 +414,17 @@ class SimbiProblem(BaseModel):
             ),
         ),
     ]
+    outward_only_walls: Annotated[
+        list[bool] | None,
+        ProblemParam(
+            None,
+            description=(
+                "one flag per domain face, axis 0 low and high then axis 1 low and high: a set face "
+                "passes outflow and refuses inflow (adiabatic newtonian, 2D spherical or cylindrical, "
+                "three velocity components)"
+            ),
+        ),
+    ]
     velocity_components: Annotated[
         int | None,
         ProblemParam(

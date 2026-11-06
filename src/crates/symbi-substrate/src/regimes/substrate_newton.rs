@@ -88,12 +88,16 @@ pub struct AdiabaticSubstrateKernelSet<
     /// a diagnostic control the replay tests alone set: the axisymmetric godunov stage with the
     /// azimuthal momentum in source form, against the torque form
     pub azimuthal_source_control: bool,
+    /// the walls, by axis and side, that pass outflow and refuse inflow (`outward_wall_gv`); the
+    /// others keep the flux the riemann solver gave
+    pub outward_only_walls: [[bool; 2]; 3],
     /// a diagnostic control the replay tests alone set: gravity's energy work from the cell momentum
     /// on a plane that admits the face mass flux's work
     pub cell_momentum_gravity_work: bool,
     /// the azimuthal shear model in place of the full stress, on an axisymmetric plane
     pub azimuthal_shear: Option<symbi_hydro::viscous::AzimuthalShear>,
-    /// the torque and the stress work entered through the continued domain faces this session
+    /// the torque and the stress work entered through the continued domain faces since the last
+    /// `take_viscous_wall_totals`, or since construction where nothing takes them
     pub viscous_boundary_ledger: std::sync::Mutex<(f64, f64)>,
     /// the theta-MC reconstruction compression (regime-generic; 1 == plain minmod).
     pub theta: f64,
@@ -186,6 +190,7 @@ impl<Mem: MemoryStorage, Sc: Scalar + OrderedNumeric, const D: usize>
             viscosity: 0.0,
             alpha: 0.0,
             azimuthal_source_control: false,
+            outward_only_walls: [[false; 2]; 3],
             cell_momentum_gravity_work: false,
             azimuthal_shear: None,
             viscous_boundary_ledger: std::sync::Mutex::new((0.0, 0.0)),
@@ -372,6 +377,12 @@ impl<Mem: MemoryStorage, Sc: Scalar + OrderedNumeric, const D: usize>
     /// eos closure selector. the newtonian family is gamma-law only — the synge
     /// (taub-mathews) closure is relativistic — so this validates rather than
     /// stores; a shared regime-generic build path may call it unconditionally.
+    /// the walls that pass outflow and refuse inflow, by axis and side
+    pub fn with_outward_walls(mut self, walls: [[bool; 2]; 3]) -> Self {
+        self.outward_only_walls = walls;
+        self
+    }
+
     pub fn with_eos(self, eos: symbi_discretize::EosArm) -> Self {
         assert!(
             eos == symbi_discretize::EosArm::IdealGamma,
@@ -421,6 +432,11 @@ impl<Mem: MemoryStorage + Sync, Sc: Scalar + OrderedNumeric, const D: usize, con
             .pre_field()
             .expect("Newtonian requires prim.pre");
         dispatch_flux(sim, pre, "adiabatic", dir, self.gamma, self.flux_spec());
+        for (side, &on) in self.outward_only_walls[dir].iter().enumerate() {
+            if on {
+                crate::regimes::substrate_kernels::dispatch_outward_wall(sim, dir, side == 1);
+            }
+        }
     }
 
     fn hydrostatic_balance(&self) -> bool {
@@ -571,6 +587,29 @@ impl<Mem: MemoryStorage + Sync, Sc: Scalar + OrderedNumeric, const D: usize, con
             self.cfl_number,
             min_physical_width,
         )
+    }
+
+    fn wall_transport(&self, sim: &FieldStore<D, DOF, Mem, Sc>) -> Option<[[symbi_sim::conservation_ledger::Transport; 2]; 3]> {
+        // a first-order flux correction rewrites troubled faces after this booking point
+        if KernelSet::<D, DOF, Mem, Sc>::fofc_active(self) {
+            return None;
+        }
+        crate::regimes::wall_ledger::wall_transport(sim)
+    }
+
+    fn energy_partition(&self, sim: &FieldStore<D, DOF, Mem, Sc>) -> Option<symbi_sim::substrate_seam::EnergyPartition> {
+        crate::regimes::wall_ledger::energy_partition(sim)
+    }
+
+    fn take_viscous_wall_totals(&self) -> (f64, f64) {
+        std::mem::take(&mut *self.viscous_boundary_ledger.lock().expect("viscous ledger"))
+    }
+
+    fn stage_extremes(
+        &self,
+        sim: &FieldStore<D, DOF, Mem, Sc>,
+    ) -> Option<(symbi_sim::conservation_ledger::Extreme, symbi_sim::conservation_ledger::Extreme)> {
+        crate::regimes::wall_ledger::stage_extremes(sim)
     }
 
     fn viscous(&self, sim: &FieldStore<D, DOF, Mem, Sc>, dt: f64) {
