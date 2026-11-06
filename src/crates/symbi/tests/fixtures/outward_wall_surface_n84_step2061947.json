@@ -1,0 +1,18 @@
+{
+ "boundary_conditions": "outflow,outflow,axis,axis",
+ "build_git_sha": "522054616227405e3c598c76c031c31bddd675d6",
+ "cfl": "0.1",
+ "coord_system": "spherical",
+ "dimensions": "2",
+ "eos": "ideal",
+ "gamma": "1.6666666666666667",
+ "plm_theta": "1.5",
+ "reconstruction": "plm",
+ "regime": "newtonian",
+ "solver": "hlle",
+ "spacetime": "minkowski",
+ "timestepping": "rk2",
+ "viscosity": "0.0",
+ "wb_reconstruction": "0",
+ "x1_spacing": "log"
+}

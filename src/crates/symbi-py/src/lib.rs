@@ -10264,7 +10264,10 @@ fn checkpoint_metadata(cfg: &Config, checkpoint_index: u64) -> Metadata {
         // the edge EMF of a magnetized run: a scheme choice with no field of its own, so a run
         // resumed under the other scheme would continue the file's faces under a different
         // induction update. an empty string records a run without a staggered field.
-        .with("ct_method", ct_method_name(cfg)))
+        .with("ct_method", ct_method_name(cfg))
+        // the walls that pass outflow and refuse inflow, one flag per face of the first two axes
+        // (axis 0 low and high, then axis 1), so a reader names the boundary method the file evolved
+        .with("outward_only_walls", outward_walls_text(cfg)))
 }
 
 /// the conservation receipts a restart continues: the accepted totals its checkpoint carried, set
@@ -10309,6 +10312,12 @@ fn failure_checkpoint_metadata(cfg: &Config, checkpoint_index: u64, crash_mark: 
         Some(restartable) => meta.with("restartable", restartable),
         None => meta,
     }
+}
+
+/// the outward-only wall flags as `"0,1,0,0"`: axis 0 low and high, then axis 1 low and high
+fn outward_walls_text(cfg: &Config) -> String {
+    let w = cfg.outward_only_walls;
+    [w[0][0], w[0][1], w[1][0], w[1][1]].map(|on| if on { "1" } else { "0" }).join(",")
 }
 
 /// the recorded edge-EMF name of a magnetized run, empty for a run without a staggered field
@@ -15667,6 +15676,7 @@ mod kernel_construction_tests {
             solver: Solver::Hllc,
             ct_method: CtMethod::Uct,
             azimuthal_shear: None,
+            outward_walls: [[false; 2]; 3],
             viscosity: 2.0e-3,
             alpha: 1.0e-2,
             resistivity: 3.0e-3,

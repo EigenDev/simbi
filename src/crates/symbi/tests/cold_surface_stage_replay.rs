@@ -39,7 +39,24 @@ use symbi_xpu::{CpuSpace, HostMemory};
 type Sim = SimStateGeneric<Newtonian, 2, 3, Spherical, IdealGas<f64>, CpuSpace, HostMemory>;
 type Kern = AdiabaticSubstrateKernelSet<HostMemory, f64, 2>;
 
-const FIXTURE: &[u8] = include_bytes!("fixtures/cold_surface_torus_84x44_step2000.bin");
+/// a captured state the replay starts from: the interior conserved fields, the step and the walls
+#[derive(Clone, Copy)]
+struct Fixture {
+    bytes: &'static [u8],
+    step: u64,
+    /// the layout: the time then the interior fields, or a header (time, step, halo, rows,
+    /// columns) then the haloed conserved and primitive fields
+    haloed: bool,
+    /// the outer radial wall passes outflow and refuses inflow
+    outward_outer: bool,
+}
+
+/// the cold surface torus at step 2000 (fixtures/capture_cold_surface.py)
+const COLD: Fixture = Fixture { bytes: include_bytes!("fixtures/cold_surface_torus_84x44_step2000.bin"), step: 2000, haloed: false, outward_outer: false };
+/// the inviscid SPB torus with the outward-only outer wall at step 2061947
+/// (fixtures/capture_outward_wall_surface.py)
+const OUTWARD: Fixture =
+    Fixture { bytes: include_bytes!("fixtures/outward_wall_surface_n84_step2061947.bin"), step: 2061947, haloed: true, outward_outer: true };
 const GAMMA: f64 = 5.0 / 3.0;
 const CFL: f64 = 0.1;
 const THETA: f64 = 1.5;
@@ -52,13 +69,28 @@ const SOFTENING: f64 = 0.009;
 /// past the frontend run's crash at t = 0.0110636
 const T_END: f64 = 0.0115;
 
-fn field_of(index: usize) -> impl Iterator<Item = f64> {
-    let start = 8 + index * NI * NJ * 8;
-    FIXTURE[start..start + NI * NJ * 8].chunks_exact(8).map(|b| f64::from_le_bytes(b.try_into().unwrap()))
+fn word(bytes: &[u8], k: usize) -> f64 {
+    f64::from_le_bytes(bytes[8 * k..8 * k + 8].try_into().unwrap())
 }
 
-fn captured() -> Sim {
-    assert_eq!(FIXTURE.len(), 8 + 5 * NI * NJ * 8, "the fixture's size");
+/// conserved field `index` (den, m1, m2, m3, nrg) of the fixture's interior, i fastest
+fn field_of(fx: &Fixture, index: usize) -> Vec<f64> {
+    if !fx.haloed {
+        return (0..NI * NJ).map(|c| word(fx.bytes, 1 + index * NI * NJ + c)).collect();
+    }
+    let (ng, rows, cols) = (word(fx.bytes, 2) as usize, word(fx.bytes, 3) as usize, word(fx.bytes, 4) as usize);
+    assert_eq!((rows, cols), (NJ + 2 * ng, NI + 2 * ng), "the fixture's haloed shape");
+    (0..NJ).flat_map(|j| (0..NI).map(move |i| (j, i))).map(|(j, i)| word(fx.bytes, 5 + index * rows * cols + (j + ng) * cols + i + ng)).collect()
+}
+
+fn captured(fx: &Fixture) -> Sim {
+    if fx.haloed {
+        let (ng, rows, cols) = (word(fx.bytes, 2) as usize, word(fx.bytes, 3) as usize, word(fx.bytes, 4) as usize);
+        assert_eq!(fx.bytes.len(), 8 * (5 + 10 * rows * cols), "the fixture's size");
+        assert_eq!((word(fx.bytes, 1) as u64, ng), (fx.step, 2), "the fixture's step and halo");
+    } else {
+        assert_eq!(fx.bytes.len(), 8 + 5 * NI * NJ * 8, "the fixture's size");
+    }
     let slope = (R_HI / R_LO).log10() / NI as f64;
     let dtheta = PI / NJ as f64;
     let walls = [[BoundaryType::Outflow, BoundaryType::Outflow], [BoundaryType::Axis, BoundaryType::Axis]];
@@ -77,10 +109,10 @@ fn captured() -> Sim {
         .with_bodies(BodyCollection::new().add(
             Body::gravitational(0, Tensor::zeros(), Tensor::zeros(), 1.0, 0.0, SOFTENING).with_softening_kind(SofteningKind::Compact),
         ));
-    let time = f64::from_le_bytes(FIXTURE[..8].try_into().unwrap());
+    let time = word(fx.bytes, 0);
     let cells: Vec<[isize; 2]> = (0..NJ as isize).flat_map(|j| (0..NI as isize).map(move |i| [i, j])).collect();
     let fill = |f: &symbi_grid::Field<f64, 2, HostMemory>, index| {
-        for (c, v) in cells.iter().zip(field_of(index)) {
+        for (c, v) in cells.iter().zip(field_of(fx, index)) {
             f.view_mut().set(*c, v);
         }
     };
@@ -90,7 +122,7 @@ fn captured() -> Sim {
     }
     fill(sim.fields.cons.nrg_field().expect("cons.nrg"), 4);
     sim.time = time;
-    sim.iteration = STEP0;
+    sim.iteration = fx.step;
     sim
 }
 
@@ -147,6 +179,7 @@ struct Frame {
 
 #[derive(Clone, Copy)]
 struct Options {
+    fixture: Fixture,
     theta: f64,
     dt_factor: f64,
     control: bool,
@@ -171,7 +204,7 @@ enum EnergyTerm {
 
 /// the update that fails on the captured state
 const PRODUCTION: Options =
-    Options { theta: THETA, dt_factor: 1.0, control: false, from_step: STEP0, t_end: T_END, energy: EnergyTerm::Kernel, cell_work: true };
+    Options { fixture: COLD, theta: THETA, dt_factor: 1.0, control: false, from_step: STEP0, t_end: T_END, energy: EnergyTerm::Kernel, cell_work: true };
 /// the kernels the failing configuration selects
 const ADMITTED: Options = Options { cell_work: false, ..PRODUCTION };
 
@@ -219,17 +252,18 @@ fn lowest_internal(c: &Cons) -> ([usize; 2], f64) {
     worst
 }
 
-fn kernels_for(sim: &Sim, theta: f64, control: bool, cell_work: bool) -> Kern {
-    let mut k = Kern::new(GAMMA, CFL, &sim.geom.allocated).theta(theta);
+fn kernels_for(sim: &Sim, theta: f64, control: bool, cell_work: bool, outward_outer: bool) -> Kern {
+    let mut k = Kern::new(GAMMA, CFL, &sim.geom.allocated).theta(theta).with_outward_walls([[false, outward_outer], [false, false], [false, false]]);
     k.azimuthal_source_control = control;
     k.cell_momentum_gravity_work = cell_work;
     k
 }
 
 fn replay(options: Options) -> Outcome {
-    let mut sim = captured();
-    let production = kernels_for(&sim, THETA, false, options.cell_work);
-    let chosen = kernels_for(&sim, options.theta, options.control, options.cell_work);
+    let mut sim = captured(&options.fixture);
+    let outward = options.fixture.outward_outer;
+    let production = kernels_for(&sim, THETA, false, options.cell_work, outward);
+    let chosen = kernels_for(&sim, options.theta, options.control, options.cell_work, outward);
     KernelSet::c2p(&production, &sim);
     KernelSet::ghost_fill(&production, &sim);
     let mut history = Vec::new();
@@ -1030,7 +1064,7 @@ fn the_energy_updates_beside_the_kernels_are_measured() {
 #[test]
 fn the_face_work_kernel_matches_its_evaluation_from_the_operands() {
     let offline = Options { energy: EnergyTerm::PotentialFlux, ..PRODUCTION };
-    let one_step = |o: Options| replay(Options { t_end: f64::from_le_bytes(FIXTURE[..8].try_into().unwrap()) + 1e-12, ..o });
+    let one_step = |o: Options| replay(Options { t_end: word(COLD.bytes, 0) + 1e-12, ..o });
     let (kernel, evaluated) = (one_step(ADMITTED), one_step(offline));
     assert_eq!(kernel.steps, 1, "the comparison window holds one step");
     let closeness = |a: &Cons, b: &Cons| -> f64 {
@@ -1168,4 +1202,105 @@ fn zero_theta_reconstructs_the_cell_states() {
     let kernel = frame.flux[0].den.at(i + 1, j);
     eprintln!("first order mass flux at the failing cell's outer face: kernel {kernel:.9e}, HLLE of the cell states {hlle:.9e}");
     assert!((kernel - hlle).abs() < 1e-3 * hlle.abs(), "kernel {kernel:e} against the cell-state flux {hlle:e}");
+}
+
+// ------------------------------- the outward-wall surface -------------------------------
+
+/// the frontend run's failure: the step whose stage left the admissible set ends at this clock,
+/// and the next step's cfl timestep is not positive
+const OUTWARD_FAILED_STEP: u64 = 2062990;
+const OUTWARD_FAILED_CLOCK: f64 = 9.605410191424152;
+/// the inviscid SPB torus with the outward-only outer wall, its face gravity work, from step
+/// 2061947 through t = 9.62
+const OUTWARD_RUN: Options = Options { fixture: OUTWARD, from_step: 2061947, t_end: 9.62, cell_work: false, ..PRODUCTION };
+
+/// a stage's update of one cell with the face gravity work, recomputed from the stored fluxes
+fn recomputed_face_work(frame: &Frame, i: usize, j: usize) -> [f64; 5] {
+    let mut u = recomputed(frame, i, j, true);
+    u[4] += potential_flux_update(frame, i, j);
+    u
+}
+
+#[test]
+fn the_outward_wall_surface_stays_admissible_through_its_window() {
+    let run = replay(OUTWARD_RUN);
+    if let Some((frame, cell, specific)) = &run.first {
+        panic!("step {} stage {} t = {}: cell {cell:?} holds specific internal energy {specific:e}", frame.step, frame.stage, frame.time);
+    }
+    assert!(run.time >= OUTWARD_RUN.t_end, "the replay stopped at {}", run.time);
+}
+
+#[test]
+fn the_outward_wall_surface_failure_accounts_for_every_term() {
+    let run = replay(OUTWARD_RUN);
+    let (frame, cell, specific) = run.first.as_ref().expect("the captured state no longer reaches an inadmissible stage; the audit is vacuous");
+    eprintln!(
+        "first inadmissible: step {} stage {}, t = {:.17e}, dt = {:.6e}, a0 {} ac {}, cell {cell:?}, specific e {specific:e}",
+        frame.step, frame.stage, frame.time, frame.dt, frame.a0, frame.ac
+    );
+    // the replay is the frontend run: the failing step and its clock
+    assert_eq!((frame.step + 1, frame.time + frame.dt), (OUTWARD_FAILED_STEP, OUTWARD_FAILED_CLOCK), "the replay left the frontend run");
+    // the independent recomputation from the stage's stored fluxes and the closed-form sources
+    let mut worst = [0.0f64; 5];
+    for j in 0..NJ {
+        for i in 0..NI {
+            let u = recomputed_face_work(frame, i, j);
+            let kernel = [frame.output.den.at(i, j), frame.output.mom[0].at(i, j), frame.output.mom[1].at(i, j), frame.output.mom[2].at(i, j), frame.output.nrg.at(i, j)];
+            let scale = [frame.input.den.at(i, j), kernel[0], kernel[0], kernel[0], frame.input.nrg.at(i, j)];
+            for c in 0..5 {
+                worst[c] = worst[c].max((u[c] - kernel[c]).abs() / scale[c].abs().max(f64::MIN_POSITIVE));
+            }
+        }
+    }
+    eprintln!("recomputation against the kernel, worst relative difference [den, m_r, m_t, m_p, nrg]: {}", sci(&worst));
+    assert!(worst.iter().all(|w| *w < 1e-9), "the recomputation does not reproduce the kernel: {worst:?}");
+    let [i, j] = *cell;
+    // the failing cell's stage: density, angular momentum, kinetic, total and internal energy,
+    // each from the stage input to the kernel's output and to the recomputation
+    let g = geometry(i, j);
+    let state = |c: [f64; 5]| {
+        let ke = 0.5 * (c[1] * c[1] + c[2] * c[2] + c[3] * c[3]) / c[0];
+        [c[0], c[3] * g.lever_c, ke, c[4], c[4] - ke]
+    };
+    let input = [frame.input.den.at(i, j), frame.input.mom[0].at(i, j), frame.input.mom[1].at(i, j), frame.input.mom[2].at(i, j), frame.input.nrg.at(i, j)];
+    let u_n = [frame.u_n.den.at(i, j), frame.u_n.mom[0].at(i, j), frame.u_n.mom[1].at(i, j), frame.u_n.mom[2].at(i, j), frame.u_n.nrg.at(i, j)];
+    let output = [frame.output.den.at(i, j), frame.output.mom[0].at(i, j), frame.output.mom[1].at(i, j), frame.output.mom[2].at(i, j), frame.output.nrg.at(i, j)];
+    eprintln!("cell [{i}, {j}] [rho, R m_phi, KE, E, E - KE]:");
+    eprintln!("  step entry   {}", sci(&state(u_n)));
+    eprintln!("  stage input  {}", sci(&state(input)));
+    eprintln!("  kernel       {}", sci(&state(output)));
+    eprintln!("  recomputed   {}", sci(&state(recomputed_face_work(frame, i, j))));
+    eprintln!(
+        "  internal-energy rate from the stored fluxes, torque form with face work {:.6e}; times ac dt {:.6e}",
+        internal_rate(frame, i, j, true, true),
+        frame.ac * frame.dt * internal_rate(frame, i, j, true, true)
+    );
+    print_cell("the inadmissible cell", frame, i, j);
+    print_cell("its inner radial neighbor", frame, i - 1, j);
+    print_cell("its outer radial neighbor", frame, i + 1, j);
+    print_cell("its polar neighbor toward the pole", frame, i, j - 1);
+    print_cell("its polar neighbor toward the equator", frame, i, j + 1);
+    print_inflow_budget(frame, i, j);
+    print_grid_budget(frame);
+    print_reconstructed_states(frame);
+}
+
+/// the failing step from the captured state at first order and at smaller timesteps, and the
+/// whole captured window at smaller timesteps and first order: whether the failure depends on the
+/// timestep a retry would take
+#[test]
+fn the_outward_wall_surface_failure_at_first_order_and_smaller_timesteps() {
+    let production = replay(OUTWARD_RUN);
+    let (frame, ..) = production.first.as_ref().expect("the captured state no longer fails; the sweep is vacuous");
+    report("production", &production);
+    let window = Options { from_step: frame.step, t_end: frame.time + frame.dt, ..OUTWARD_RUN };
+    report("the failing step at first order", &replay(Options { theta: 0.0, ..window }));
+    for factor in [0.5, 0.25, 0.125, 0.0625] {
+        report(&format!("the failing step at dt x {factor}"), &replay(Options { dt_factor: factor, ..window }));
+    }
+    let whole = Options { t_end: OUTWARD_FAILED_CLOCK + 1e-3, ..OUTWARD_RUN };
+    for factor in [0.5, 0.25] {
+        report(&format!("the window at dt x {factor}"), &replay(Options { dt_factor: factor, ..whole }));
+    }
+    report("the window at first order", &replay(Options { theta: 0.0, ..whole }));
 }
