@@ -3,7 +3,8 @@
 //
 // the host sums a conservation ledger books for the newtonian gas on a two-dimensional plane:
 // - the outward rates of mass, angular momentum and E + rho Phi through each domain wall the
-//   store's interior touches, from the stage's stored face fluxes and the walls' exact areas
+//   store's interior touches, from the stage's stored face fluxes and the walls' exact areas; an
+//   energy-free closure books mass and angular momentum
 // - the volume integrals of total energy, kinetic energy and angular momentum
 // - the lowest density and specific internal energy of the conserved state, with their cells
 // the geometry is the store's own: its maps or uniform spacing, its index offset and its
@@ -146,7 +147,8 @@ pub fn wall_transport_host<const D: usize, const DOF: usize, Mem: MemorySpace, S
     let mut out = [[Transport::default(); 2]; 3];
     for ax in 0..2 {
         let flux = &store.fields.flux[ax];
-        let (den, nrg) = (flux.den.view(), flux.nrg_field()?.view());
+        // an energy-free closure moves no energy: its wall receipt carries mass and angular momentum
+        let (den, nrg) = (flux.den.view(), flux.nrg_field().map(|f| f.view()));
         let phi_flux = slot.map(|k| flux.mom[k].view());
         let other = 1 - ax;
         for side in 0..2 {
@@ -168,7 +170,9 @@ pub fn wall_transport_host<const D: usize, const DOF: usize, Mem: MemorySpace, S
                 let mass = den.at(cell).to_f64();
                 sum.mass += sign * a * mass;
                 sum.mass_in += (-sign * a * mass).max(0.0);
-                sum.energy += sign * a * (nrg.at(cell).to_f64() + phi(radius) * mass);
+                if let Some(nrg) = &nrg {
+                    sum.energy += sign * a * (nrg.at(cell).to_f64() + phi(radius) * mass);
+                }
                 if let Some(view) = &phi_flux {
                     sum.angular_momentum += sign * a * lever * view.at(cell).to_f64();
                 }
