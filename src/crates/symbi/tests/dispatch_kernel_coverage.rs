@@ -621,7 +621,8 @@ fn every_predictor_emf_kernel_an_mhd_arm_requests_is_emitted() {
 
 // the newtonian planes with three velocity components on two axes (`geom_suffix(c, 3, 2)`: the
 // lifted cartesian plane, the (R, z) plane and the (r, theta) plane): the recovery, update,
-// snapshot, wave-speed and ghost families of both closures, and on the two axisymmetric planes the
+// snapshot, wave-speed and ghost families of both closures, the adiabatic first-order flux
+// correction, and on the two axisymmetric planes the
 // azimuthal shear, the point-mass gravity with its face work, the outward-only walls and the
 // conservation ledger's channels. a run on these planes requests each name below.
 #[test]
@@ -631,6 +632,12 @@ fn every_lifted_plane_kernel_is_emitted() {
         let sfx = geom_suffix(coords, 3, 2);
         assert_family(&mut missing, format!("iso_wave_speed_map{sfx}_2d"));
         assert_family(&mut missing, format!("iso_ghost_fill{sfx}_2d"));
+        // the adiabatic gas's first-order flux correction on the three momenta
+        assert_family(&mut missing, format!("adiabatic_fofc_restore{sfx}_2d"));
+        assert_family(&mut missing, format!("adiabatic_fofc_select{sfx}_2d"));
+        for dir in 0..2 {
+            assert_family(&mut missing, format!("adiabatic_fofc_splice{sfx}_2d_{dir}"));
+        }
         for prefix in ["adiabatic", "iso"] {
             assert_family(&mut missing, format!("{prefix}_c2p{sfx}_2d"));
             assert_family(&mut missing, format!("{prefix}_godunov_stage{sfx}_2d"));
@@ -643,7 +650,7 @@ fn every_lifted_plane_kernel_is_emitted() {
             assert_family(&mut missing, format!("viscous_azimuthal_{name}{sfx}_2d"));
         }
         assert_family(&mut missing, format!("adiabatic_azimuthal_source_control_godunov_stage{sfx}_2d"));
-        for family in ["body_source", "body_source_face_work", "body_feedback", "body_source_iso", "body_feedback_iso"] {
+        for family in ["body_source", "body_source_face_work", "body_feedback", "body_source_iso", "body_feedback_iso", "adiabatic_fofc_select_with_body"] {
             assert_family(&mut missing, format!("{family}{sfx}_2d"));
         }
         for axis in 0..2 {

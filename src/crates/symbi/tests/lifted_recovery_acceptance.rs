@@ -5,7 +5,8 @@
 // through the production single-hierarchy driver. every attempt of root step 2 has one cell's
 // stage output poisoned to an unrecoverable total energy before its recovery, more attempts than
 // the retry guard allows. whichever way the step ends, by a retry the guard finally refuses or by
-// a stop on an attempt no retry entry restores:
+// a stop on an attempt no retry entry restores (the lifted planes carry the first-order correction,
+// so the step retries until the correction's freeze limit halts it at the restored entry):
 // - the clock stays at the entry of root step 2
 // - the report names the failing stage and cell with its values
 // - the accepted conservation receipts hold root step 1 alone
@@ -77,8 +78,13 @@ macro_rules! gate {
         let (_, accepted) = symbi_sim::conservation_ledger::ledger_report();
         let crash = armed.crash.clone().expect("the armed run never stopped; a failed recovery was accepted");
         let report = crash.panic.clone().or_else(|| crash.halt.as_ref().map(|h| h.detail().to_string())).unwrap_or_default();
-        assert!(report.contains("recovery failed at step 1 stage 0"), "{}: the stop does not name the failing stage: {report}", $label);
-        assert!(report.contains("first cell [7, 3]") && report.contains("specific internal energy"), "{}: the stop does not name the cell and its values: {report}", $label);
+        // without the first-order correction the stop names the stage's failed recovery; with it the
+        // retries end at the correction's freeze limit, which names the cell's state
+        let named_stage = report.contains("recovery failed at step 1 stage 0") || report.contains("FOFC last-resort freeze");
+        assert!(named_stage, "{}: the stop does not name the failing stage: {report}", $label);
+        let named_cell = report.contains("first cell [7, 3]") || report.contains("coord=[7, 3]");
+        let named_values = report.contains("specific internal energy") || report.contains("cons=(den=");
+        assert!(named_cell && named_values, "{}: the stop does not name the cell and its values: {report}", $label);
         assert_eq!(crash.iter, 1, "{}: the stop is reported past the entry of root step 2", $label);
         assert_eq!(armed.levels[0].state.iteration, 1, "{}: the clock left the entry of root step 2", $label);
         assert_eq!(accepted.stages, 2, "{}: the accepted receipts hold {} stages, not root step 1's two", $label, accepted.stages);

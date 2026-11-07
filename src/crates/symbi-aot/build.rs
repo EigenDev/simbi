@@ -3603,6 +3603,9 @@ fn main() {
     // the newtonian closures with three velocity components on a 2-axis grid: the same builders on
     // each layout, the adiabatic and the isothermal family sharing their geometry and ghost fills
     for geom in [Geom::cart_lift(), cyl.clone(), Geom::sph_swirl()] {
+        // the first-order flux correction of the adiabatic gas with the three momenta: the
+        // stage-input restore, the freeze select and the face splice of every conserved component
+        gen_fofc_tagged(&out_dir, 2, "adiabatic", geom.suffix(), 3, true);
         gen_adiabatic_c2p(&out_dir, 2, geom.clone());
         let program = symbi_discretize::gv::iso_c2p_gv::<3>();
         emit_gv(&out_dir, &format!("iso_c2p{}_2d", geom.suffix()), 2, &program);
@@ -3665,6 +3668,9 @@ fn main() {
         }
         let feedback = body_feedback_gv(MAX_SOURCE_BODIES, coords, 2, ncomp, &geom.axes);
         emit_gv(&out_dir, &format!("body_feedback{sfx}_2d"), 2, &feedback);
+        // the correction's freeze parachute evolved by the point mass, on the three momenta
+        let parachute = fofc_select_with_body_gv(ncomp, MAX_SOURCE_BODIES, coords, 2, &geom.axes, true);
+        emit_gv(&out_dir, &format!("adiabatic_fofc_select_with_body{sfx}_2d"), 2, &parachute);
         let source = body_source_iso_gv(MAX_SOURCE_BODIES, coords, 2, ncomp, &geom.axes);
         emit_gv(&out_dir, &format!("body_source_iso{sfx}_2d"), 2, &source);
         let feedback = body_feedback_iso_gv(MAX_SOURCE_BODIES, coords, 2, ncomp, &geom.axes);

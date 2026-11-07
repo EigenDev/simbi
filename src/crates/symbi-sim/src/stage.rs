@@ -477,6 +477,21 @@ where
 /// fluxes, at the cell wherever the store holds it, halo included, so every tile sharing the cell
 /// restarts its redo from the same input; and into the stage output before the recovery, on the
 /// interior, where its entry is marked fired.
+/// the stage's wall transport from the fluxes its update used, after any first-order splice, at the
+/// weight the stage's flux reaches the accepted step with
+fn book_wall_transport<const D: usize, const DOF: usize, Mem, Sc, K>(sim: &FieldStore<D, DOF, Mem, Sc>, kernels: &K, args: &StageArgs)
+where
+    Mem: MemoryStorage,
+    Sc: Scalar + OrderedNumeric,
+    K: KernelSet<D, DOF, Mem, Sc> + ?Sized,
+{
+    if crate::conservation_ledger::scope_is_open() {
+        if let Some(rates) = kernels.wall_transport(sim) {
+            crate::conservation_ledger::record_stage(&rates, args.dt * args.ac * args.injection_weight);
+        }
+    }
+}
+
 fn apply_unrecoverable<const D: usize, const DOF: usize, Mem, Sc>(sim: &FieldStore<D, DOF, Mem, Sc>, stage: usize, point: HookPoint)
 where
     Mem: MemoryStorage,
@@ -632,6 +647,7 @@ where
                 std::mem::forget(audit);
                 return (StageOutcome::RetryStep, 1);
             }
+            book_wall_transport(sim, kernels, &args);
         }
         if !ph.gate.active(additive, bodies, fofc, chi) {
             continue;
@@ -665,12 +681,6 @@ where
                 prof("chi_flux", || kernels.chi_flux(sim));
                 apply_unrecoverable(sim, args.stage, HookPoint::AfterFlux);
                 hook(HookPoint::AfterFlux);
-                // the stage's wall transport, at the weight its flux reaches the accepted step with
-                if crate::conservation_ledger::scope_is_open() {
-                    if let Some(rates) = kernels.wall_transport(sim) {
-                        crate::conservation_ledger::record_stage(&rates, args.dt * args.ac * args.injection_weight);
-                    }
-                }
             }
             PhaseKind::Efield => prof("efield", || kernels.efield(sim)),
             PhaseKind::Godunov => prof("godunov_stage", || {
@@ -726,6 +736,7 @@ where
                 if report.decision() == crate::substrate_seam::FofcDecision::RetryStep {
                     return (StageOutcome::RetryStep, report.troubled());
                 }
+                book_wall_transport(sim, kernels, &args);
             }
             PhaseKind::ChiUpdate => prof("chi_update", || {
                 kernels.chi_update(sim, args.dt, args.a0, args.ac)

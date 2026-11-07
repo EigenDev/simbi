@@ -47,6 +47,13 @@ use symbi_sim::substrate_seam::{KernelSet, WithViscosity};
 /// a D-generic adiabatic (ideal-gas Euler) `KernelSet`, every method substrate-generated.
 // the adiabatic viscous operator books both the Navier-Stokes shear force and the viscous heating
 // (div(tau.v) onto the total energy); constant-nu, cartesian 2D.
+/// whether the first-order flux correction is baked for the adiabatic gas on this layout: every
+/// DOF == D chart, and the two-axis planes carrying three momenta (the lifted cartesian, (R, z) and
+/// (r, theta) planes)
+pub(crate) const fn fofc_baked<const D: usize, const DOF: usize>() -> bool {
+    DOF == D || (D == 2 && DOF == 3)
+}
+
 impl<Mem: MemoryStorage, Sc: Scalar + OrderedNumeric, const D: usize> WithViscosity
     for AdiabaticSubstrateKernelSet<Mem, Sc, D>
 {
@@ -377,6 +384,18 @@ impl<Mem: MemoryStorage, Sc: Scalar + OrderedNumeric, const D: usize>
     /// eos closure selector. the newtonian family is gamma-law only — the synge
     /// (taub-mathews) closure is relativistic — so this validates rather than
     /// stores; a shared regime-generic build path may call it unconditionally.
+    /// the outward-only walls on grid axis `dir`, over the face flux just computed
+    fn apply_outward_walls<const DOF: usize>(&self, sim: &FieldStore<D, DOF, Mem, Sc>, dir: usize)
+    where
+        Mem: Sync,
+    {
+        for (side, &on) in self.outward_only_walls[dir].iter().enumerate() {
+            if on {
+                crate::regimes::substrate_kernels::dispatch_outward_wall(sim, dir, side == 1);
+            }
+        }
+    }
+
     /// the walls that pass outflow and refuse inflow, by axis and side
     pub fn with_outward_walls(mut self, walls: [[bool; 2]; 3]) -> Self {
         self.outward_only_walls = walls;
@@ -432,11 +451,7 @@ impl<Mem: MemoryStorage + Sync, Sc: Scalar + OrderedNumeric, const D: usize, con
             .pre_field()
             .expect("Newtonian requires prim.pre");
         dispatch_flux(sim, pre, "adiabatic", dir, self.gamma, self.flux_spec());
-        for (side, &on) in self.outward_only_walls[dir].iter().enumerate() {
-            if on {
-                crate::regimes::substrate_kernels::dispatch_outward_wall(sim, dir, side == 1);
-            }
-        }
+        self.apply_outward_walls(sim, dir);
     }
 
     fn hydrostatic_balance(&self) -> bool {
@@ -594,10 +609,6 @@ impl<Mem: MemoryStorage + Sync, Sc: Scalar + OrderedNumeric, const D: usize, con
     }
 
     fn wall_transport(&self, sim: &FieldStore<D, DOF, Mem, Sc>) -> Option<[[symbi_sim::conservation_ledger::Transport; 2]; 3]> {
-        // a first-order flux correction rewrites troubled faces after this booking point
-        if KernelSet::<D, DOF, Mem, Sc>::fofc_active(self) {
-            return None;
-        }
         if crate::regimes::wall_ledger::kernels_baked(sim) {
             return crate::regimes::wall_ledger::wall_transport_kernels(sim, &self.cfl_scratch);
         }
@@ -874,9 +885,7 @@ impl<Mem: MemoryStorage + Sync, Sc: Scalar + OrderedNumeric, const D: usize, con
     }
 
     fn fofc_active(&self) -> bool {
-        // the first-order flux correction covers the DOF == D charts (the fofc select's momentum
-        // count is baked to ncomp = D).
-        DOF == D
+        fofc_baked::<D, DOF>()
     }
 
     fn freeze_streak(&self) -> u32 {
@@ -911,7 +920,7 @@ impl<Mem: MemoryStorage + Sync, Sc: Scalar + OrderedNumeric, const D: usize, con
     }
 
     fn fofc_mark(&self, sim: &FieldStore<D, DOF, Mem, Sc>) -> u64 {
-        if DOF != D {
+        if !fofc_baked::<D, DOF>() {
             return 0;
         }
         crate::regimes::fofc::fofc_mark(sim, 0.0)
@@ -930,10 +939,9 @@ impl<Mem: MemoryStorage + Sync, Sc: Scalar + OrderedNumeric, const D: usize, con
         stage: u8,
         redo_update: &mut dyn FnMut(),
     ) -> symbi_sim::substrate_seam::FofcReport {
-        // FOFC covers the DOF == D charts only (the fofc kernels are baked at ncomp = D). `fofc` is
-        // called unconditionally by the driver, so
-        // the gate lives here (fofc_active only guards the stage-input snapshot).
-        if DOF != D {
+        // `fofc` is called unconditionally by the driver, so the gate lives here (fofc_active only
+        // guards the stage-input snapshot)
+        if !fofc_baked::<D, DOF>() {
             return symbi_sim::substrate_seam::FofcReport::inactive();
         }
         // the first-order redo runs HLLE at theta = 0 (PCM) — the positivity-preserving Einfeldt
@@ -946,7 +954,8 @@ impl<Mem: MemoryStorage + Sync, Sc: Scalar + OrderedNumeric, const D: usize, con
         crate::regimes::fofc::fofc_orchestrate(
             sim,
             "adiabatic",
-            "", // the DOF != D early-return means this path is always DOF == D
+            // the lifted planes' kernels carry the chart's lift suffix; DOF == D carries none
+            symbi_discretize::kernel_slug::newtonian_lift_suffix(sim.geom.coords, DOF, D),
             0.0, // no excision on a newtonian background
             stage,
             <Self as KernelSet<D, DOF, Mem, Sc>>::has_additive_source(self),
@@ -959,7 +968,9 @@ impl<Mem: MemoryStorage + Sync, Sc: Scalar + OrderedNumeric, const D: usize, con
                     dir,
                     self.gamma,
                     self.flux_spec().first_order(),
-                )
+                );
+                // the first-order flux meets the same walls the high-order flux met
+                self.apply_outward_walls(sim, dir);
             },
             || self.c2p(sim),
             || self.godunov_stage(sim, dt, a0, ac),

@@ -7,13 +7,17 @@
 # production frontend:
 # - the restart file rebuilt from the fixture resumes the captured state bit for bit
 # - the run's method is the recorded one (solver, reconstruction, limiter, cfl, closure, walls)
-# - a failed recovery is never accepted: the run stops on the failing step's stage 0 with the
-#   clock at the step's entry, the crash file marked not restartable, the evidence naming the
-#   stage, the cell and its values, and the failed step's receipts left out of the accepted totals
-# - the regression: every accepted state through t = 9.62 stays admissible. the recorded run's
-#   stage 0 of step 2062989 (entry t = 9.605405683896917) leaves the surface cell [68, 18] at
-#   r = 1.326, theta = 1.321 with negative internal energy; this gate fails there until that
-#   failure is resolved
+# - the regression: the recorded run's stage 0 of step 2062989 (entry t = 9.605405683896917) left
+#   the surface cell [68, 18] at r = 1.326, theta = 1.321 with negative internal energy. on the
+#   production path the first-order flux correction repairs such stages: the window through
+#   t = 9.62 completes with every accepted stage admissible, the correction firing and freezing no
+#   cell, and mass, angular momentum and E + rho Phi closing against the receipts from the
+#   fixture's state
+# - a restart inside the window continues it bit for bit
+# - four host tiles, and four launched workers, cut through the faces of cell [68, 18] equal the
+#   single device bit for bit
+# a failed recovery's stop is gated on a planted unrecoverable cell in
+# src/crates/symbi/tests/lifted_recovery_acceptance.rs
 #
 # run: pytest -m simulation simbi/simulation/tests/test_outward_wall_surface_regression.py
 # =============================================================================
@@ -38,6 +42,7 @@ STEP = 2061947
 FAILED_STEP = 2062989
 FAILED_TIME = 9.605405683896917
 FAILED_EVIDENCE = ("recovery failed at step 2062989 stage 0", "first cell [68, 18]")
+WINDOW_STEPS = 4500
 T_END = 9.62
 CONSERVED = ("den", "m1", "m2", "m3", "nrg")
 PRIMITIVE = ("rho", "v1", "v2", "v3", "pre")
@@ -54,16 +59,22 @@ def _fixture() -> tuple[float, int, dict[str, np.ndarray]]:
     return time, int(step), arrays
 
 
-def _run(out: Path, max_steps: int, checkpoint: Path | None = None, check: bool = True):
+def _run(out: Path, max_steps: int, checkpoint: Path | None = None, check: bool = True, extra: str = "", devices: int = 1):
     restart = f", checkpoint_file={str(checkpoint)!r}" if checkpoint else ""
     snippet = (
-        "import sys\n"
+        "import sys, json, dataclasses\n"
         f"sys.path.insert(0, {str(REPO / 'simbi_configs/examples/newtonian')!r})\n"
         "from spb_torus import SpbTorus\n"
         "from simbi.simulation import runner\n"
-        f"runner.run(SpbTorus(data_directory=sys.argv[1], {SETUP}{restart}), compute_mode={ph.BACKEND!r}, max_steps={max_steps})\n"
+        f"result = runner.run(SpbTorus(data_directory=sys.argv[1], {SETUP}{restart}{extra}), compute_mode={ph.BACKEND!r}, max_steps={max_steps})\n"
+        "print('GUARDS ' + json.dumps(dataclasses.asdict(result.diagnostics.guards)))\n"
     )
-    return ph.python(ph.snippet_args(snippet, str(out)), f"outward-wall torus to step {max_steps}", check=check)
+    return ph.python(ph.snippet_args(snippet, str(out)), f"outward-wall torus to step {max_steps}", check=check, devices=devices)
+
+
+def _guards(done) -> dict:
+    line = next(l for l in done.stdout.splitlines() if l.startswith("GUARDS "))
+    return json.loads(line[len("GUARDS "):])
 
 
 def _restart_file(tmp_path: Path) -> Path:
@@ -113,7 +124,8 @@ def test_the_outward_wall_torus_surface_stays_admissible_past_the_recorded_failu
     assert str(meta["outward_only_walls"]) == "0,1,0,0", f"the walls the resumed run evolves: {meta['outward_only_walls']}"
 
     # the regression
-    done = _run(tmp_path / "window", FAILED_STEP + 20000, resume, check=False)
+    end = STEP + WINDOW_STEPS
+    done = _run(tmp_path / "window", end, resume, check=False)
     crashed = list((tmp_path / "window").glob("*.chkpt.crashed.h5"))
     if crashed:
         t_fail, it_fail, _, _ = _interior(crashed[0])
@@ -121,25 +133,68 @@ def test_the_outward_wall_torus_surface_stays_admissible_past_the_recorded_failu
         where = "the recorded failure" if recorded else "a failure other than the recorded one"
         pytest.fail(f"{where}: the run stopped at step {it_fail}, t = {t_fail!r}:\n{done.stderr[-1500:]}")
     assert done.returncode == 0, done.stderr[-2000:]
-    t_last, _, _, _ = _interior(next((tmp_path / "window").glob("*.chkpt.final.h5")))
-    assert t_last >= T_END, f"the window ended at t = {t_last}, short of t = {T_END}"
-
-
-def test_a_failed_recovery_stops_unadvanced_with_its_evidence_and_commits_no_receipts(tmp_path: Path) -> None:
-    resume = _restart_file(tmp_path)
-    done = _run(tmp_path / "window", FAILED_STEP + 20000, resume, check=False)
-    crashed = list((tmp_path / "window").glob("*.chkpt.crashed.h5"))
-    assert crashed, "the window stayed admissible: the failed recovery this gate exercises no longer occurs, so it checks nothing"
-    assert done.returncode != 0, "the run reported success over a failed recovery"
-    for evidence in FAILED_EVIDENCE + ("specific internal energy", "no retry entry"):
-        assert evidence in done.stderr, f"the stop does not report {evidence!r}:\n{done.stderr[-2000:]}"
-    t_fail, it_fail, _, meta = _interior(crashed[0])
-    # the clock and the step count stay at the failing step's entry
-    assert (it_fail, t_fail) == (FAILED_STEP, FAILED_TIME), (it_fail, t_fail)
-    assert str(meta["restartable"]).lower() in ("false", "0"), f"the failed attempt's state is marked restartable: {meta['restartable']}"
-    # the accepted receipts hold the steps from the fixture to the failing step's entry, two stages each
+    final = next((tmp_path / "window").glob("*.chkpt.final.h5"))
+    t_last, it_last, fields, meta = _interior(final)
+    assert t_last >= T_END and it_last == end, f"the window ended at step {it_last}, t = {t_last}"
+    guards = _guards(done)
+    assert guards["troubled_cells"]["total"] > 0, f"the correction never fired: {guards}"
+    assert guards["frozen_cells"]["total"] == 0, f"the correction froze cells, waiving their conservation: {guards}"
+    # the receipts from the fixture's state: the window's change of each total plus its wall outflow.
+    # each of the window's steps rounds the totals of 3696 cells at relative u, so the residual stays
+    # below the steps times 4 u of each total
     sys.path.insert(0, str(REPO / "scripts"))
     import torus_receipts
+    from spb_torus_analysis import Grid, geometry
 
+    grid = Grid(84, 44, *geometry(final))
+    interior = lambda a: {k: v[2:-2, 2:-2] for k, v in a.items()}
+    first, last = torus_receipts.totals(interior(arrays), grid), torus_receipts.totals(interior(fields), grid)
     ledger = torus_receipts.ledger(meta)
-    assert ledger is not None and ledger.stages == 2 * (FAILED_STEP - STEP), f"accepted stages {ledger and ledger.stages}"
+    assert ledger.stages == 2 * WINDOW_STEPS, ledger.stages
+    assert ledger.mass_in[1] == 0.0, f"{ledger.mass_in[1]} entered through the outward-only wall during the corrected window"
+    for k, (name, outflow) in enumerate([("mass", ledger.mass.sum()), ("angular momentum", ledger.angular_momentum.sum()), ("E + rho Phi", ledger.energy.sum())]):
+        residual = last[k] - first[k] + outflow
+        assert abs(residual) <= WINDOW_STEPS * 4 * 1.1e-16 * abs(first[k]), f"{name}: residual {residual:e}"
+
+
+def test_a_restart_inside_the_corrected_window_continues_it_bit_for_bit(tmp_path: Path) -> None:
+    resume = _restart_file(tmp_path)
+    end, middle = STEP + WINDOW_STEPS, FAILED_STEP + 200
+    _run(tmp_path / "whole", end, resume)
+    _run(tmp_path / "first", middle, resume)
+    _run(tmp_path / "second", end, next((tmp_path / "first").glob("*.chkpt.final.h5")))
+    whole, second = (next((tmp_path / d).glob("*.chkpt.final.h5")) for d in ("whole", "second"))
+    ph.same_checkpoint(second, whole, "the window resumed inside the correction against the uninterrupted window",
+                       exclude=("body_diagnostics",), expect=("level_0",))
+
+
+def test_tiles_cut_through_the_corrected_cell_equal_the_single_device(tmp_path: Path) -> None:
+    resume = _restart_file(tmp_path)
+    end = STEP + WINDOW_STEPS
+    single = _run(tmp_path / "single", end, resume)
+    # cuts on the cell's low radial and low polar faces: the corrected cell [68, 18] touches both
+    tiles = _run(tmp_path / "tiles", end, resume, extra=", gpus=4, decompose=[[68], [18]]", devices=4)
+    assert _guards(single)["troubled_cells"]["total"] > 0, "the correction never fired; the cut checks nothing"
+    a, b = (next((tmp_path / d).glob("*.chkpt.final.h5")) for d in ("tiles", "single"))
+    with h5py.File(a, "r") as fa, h5py.File(b, "r") as fb:
+        assert int(fa["level_0"].attrs["iteration"]) == int(fb["level_0"].attrs["iteration"]) == end
+        for name in CONSERVED:
+            x, y = fa[f"level_0/conserved/{name}"][()], fb[f"level_0/conserved/{name}"][()]
+            assert x.shape == y.shape and np.array_equal(x[2:-2, 2:-2].view(np.uint64), y[2:-2, 2:-2].view(np.uint64)), f"{name}: the tiles differ from the single device"
+
+
+def test_workers_cut_through_the_corrected_cell_equal_the_single_device(tmp_path: Path) -> None:
+    resume = _restart_file(tmp_path)
+    end = STEP + WINDOW_STEPS
+    single = _run(tmp_path / "single", end, resume)
+    assert _guards(single)["troubled_cells"]["total"] > 0, "the correction never fired; the cut checks nothing"
+    args = ["--run", "N", "--zones-per-decade", "32", "--polar-zones", "44", "--orbits", "3", "--snapshot-orbits", "0.001",
+            "--outward-outer", "--checkpoint", str(resume), "--max-steps", str(end)]
+    run = ph.launch(REPO / "simbi_configs/examples/newtonian/spb_torus.py", tmp_path / "workers", workers=4, cuts=[[68], [18]], args=args)
+    assert set(run.reports()) == {0, 1, 2, 3}, f"workers reporting: {run.reports()}"
+    a, b = run.final, next((tmp_path / "single").glob("*.chkpt.final.h5"))
+    with h5py.File(a, "r") as fa, h5py.File(b, "r") as fb:
+        assert int(fa["level_0"].attrs["iteration"]) == int(fb["level_0"].attrs["iteration"]) == end
+        for name in CONSERVED:
+            x, y = fa[f"level_0/conserved/{name}"][()], fb[f"level_0/conserved/{name}"][()]
+            assert x.shape == y.shape and np.array_equal(x[2:-2, 2:-2].view(np.uint64), y[2:-2, 2:-2].view(np.uint64)), f"{name}: the workers differ from the single device"

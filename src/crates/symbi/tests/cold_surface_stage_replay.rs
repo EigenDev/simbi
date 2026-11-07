@@ -190,6 +190,9 @@ struct Options {
     energy: EnergyTerm,
     /// the cell momentum's gravity work in place of the admitted face mass flux's
     cell_work: bool,
+    /// past a stage whose output the first-order correction repaired, keep marching; otherwise
+    /// the replay ends at the first inadmissible stage output
+    continue_corrected: bool,
 }
 
 /// the energy updates the replay can evaluate on a stage's own operands, outside the kernels
@@ -204,7 +207,17 @@ enum EnergyTerm {
 
 /// the update that fails on the captured state
 const PRODUCTION: Options =
-    Options { fixture: COLD, theta: THETA, dt_factor: 1.0, control: false, from_step: STEP0, t_end: T_END, energy: EnergyTerm::Kernel, cell_work: true };
+    Options {
+        fixture: COLD,
+        theta: THETA,
+        dt_factor: 1.0,
+        control: false,
+        from_step: STEP0,
+        t_end: T_END,
+        energy: EnergyTerm::Kernel,
+        cell_work: true,
+        continue_corrected: false,
+    };
 /// the kernels the failing configuration selects
 const ADMITTED: Options = Options { cell_work: false, ..PRODUCTION };
 
@@ -224,6 +237,12 @@ struct Outcome {
     /// the accumulated departure of (angular momentum, E + rho Phi) from their boundary fluxes,
     /// each over the initial magnitude
     drift: [f64; 2],
+    /// the stages whose inadmissible output the first-order correction repaired
+    corrected: u64,
+    /// a stage the production stage asked to retry, which this replay does not take
+    retried: Option<(u64, usize)>,
+    /// the first accepted stage whose corrected state stayed outside the admissible set
+    failed_after: Option<(u64, usize, [usize; 2], f64)>,
 }
 
 /// the cell with the lowest specific internal energy. a cell with a non-finite conserved value, a
@@ -272,6 +291,8 @@ fn replay(options: Options) -> Outcome {
     let mut wall = [0.0, 0.0];
     let mut lowest_stage = f64::INFINITY;
     let mut last_frames = Vec::new();
+    let mut first = None;
+    let mut corrected = 0;
     while sim.time < options.t_end {
         let active = sim.iteration >= options.from_step;
         let k: &Kern = if active { &chosen } else { &production };
@@ -293,6 +314,7 @@ fn replay(options: Options) -> Outcome {
             let pre = store(sim.fields.prim.pre_field().expect("pre"), NI, NJ);
             let mut flux = None;
             let mut output = None;
+            let mut redone = false;
             let store_ref: &FieldStore<2, 3, HostMemory, f64> = &sim;
             let stage_outcome = fold_stage(
                 store_ref,
@@ -341,22 +363,32 @@ fn replay(options: Options) -> Outcome {
                                 }
                             }
                         }
-                        output = Some(cons_of(&store_ref.fields.cons, NI, NJ));
+                        // the first call precedes the stage's recovery; a second is the first-order
+                        // correction's redo, whose state the stage then recovers
+                        if output.is_none() {
+                            output = Some(cons_of(&store_ref.fields.cons, NI, NJ));
+                        } else {
+                            redone = true;
+                        }
                     }
                     _ => {}
                 },
             );
             let output = output.expect("the stage reached its recovery");
             let (cell, specific) = lowest_internal(&output);
-            // the stage's recovery rejects exactly the inadmissible outputs: these planes carry no
-            // first-order correction, so a failed recovery returns the retry outcome
-            assert_eq!(
-                stage_outcome == StageOutcome::RetryStep,
-                !(specific > 0.0),
-                "step {} stage {}: outcome {stage_outcome:?} against the output's lowest specific internal energy {specific:e}",
-                sim.iteration,
-                spec.index
-            );
+            let rejected = stage_outcome == StageOutcome::RetryStep;
+            if !KernelSet::<2, 3, HostMemory, f64>::fofc_active(k) {
+                // without the first-order correction the recovery rejects exactly the inadmissible outputs
+                assert_eq!(
+                    rejected,
+                    !(specific > 0.0),
+                    "step {} stage {}: outcome {stage_outcome:?} against the output's lowest specific internal energy {specific:e}",
+                    sim.iteration,
+                    spec.index
+                );
+            }
+            // the state the accepted stage leaves, after any correction
+            let after = cons_of(&sim.fields.cons, NI, NJ);
             lowest_stage = lowest_stage.min(specific);
             let through_walls = boundary_rates(flux.as_ref().expect("the stage's fluxes"));
             wall[0] += 0.5 * dt * through_walls[0];
@@ -376,18 +408,42 @@ fn replay(options: Options) -> Outcome {
                 flux: flux.expect("the stage's fluxes"),
                 output,
             };
-            if !(specific > 0.0) {
-                let last_state = frame.output.clone();
-                return Outcome {
-                    first: Some((frame, cell, specific)),
-                    time: sim.time,
-                    steps,
-                    history,
-                    lowest_stage,
-                    last_frames,
-                    last_state,
-                    drift: [f64::NAN; 2],
+            macro_rules! stop {
+                ($first:expr, $retried:expr, $failed_after:expr, $last_state:expr) => {
+                    Outcome {
+                        first: $first,
+                        time: sim.time,
+                        steps,
+                        history,
+                        lowest_stage,
+                        last_frames,
+                        last_state: $last_state,
+                        drift: [f64::NAN; 2],
+                        corrected,
+                        retried: $retried,
+                        failed_after: $failed_after,
+                    }
                 };
+            }
+            if rejected {
+                let last_state = frame.output.clone();
+                let at = (frame.step, frame.stage);
+                return stop!(first.or(Some((frame, cell, specific))), Some(at), None, last_state);
+            }
+            if !(specific > 0.0) {
+                assert!(redone, "step {} stage {}: an inadmissible output was accepted without the correction's redo", frame.step, frame.stage);
+                corrected += 1;
+                if first.is_none() {
+                    first = Some((frame.clone(), cell, specific));
+                }
+                if !options.continue_corrected {
+                    return stop!(first, None, None, frame.output.clone());
+                }
+            }
+            let (after_cell, after_specific) = lowest_internal(&after);
+            if !(after_specific > 0.0) {
+                let at = (frame.step, frame.stage, after_cell, after_specific);
+                return stop!(first, None, Some(at), after);
             }
             last_frames.push(frame);
         }
@@ -400,7 +456,7 @@ fn replay(options: Options) -> Outcome {
     let last_state = cons_of(&sim.fields.cons, NI, NJ);
     let end = totals(&last_state);
     let drift = std::array::from_fn(|k| (end[k] - start[k] + wall[k]) / start[k].abs());
-    Outcome { first: None, time: sim.time, steps, history, lowest_stage, last_frames, last_state, drift }
+    Outcome { first, time: sim.time, steps, history, lowest_stage, last_frames, last_state, drift, corrected, retried: None, failed_after: None }
 }
 
 // ------------------------------- closed-form geometry -------------------------------
@@ -1229,13 +1285,24 @@ fn recomputed_face_work(frame: &Frame, i: usize, j: usize) -> [f64; 5] {
     u
 }
 
+/// the production stage through the window with its first-order correction: every accepted stage's
+/// corrected state admissible, no retry requested, the correction firing where the high-order
+/// output left the admissible set, and angular momentum and E + rho Phi closing against the wall
+/// fluxes. the window is about 4400 steps, each rounding the totals at relative 2.2e-16, so the
+/// drift stays below 2e-12
 #[test]
 fn the_outward_wall_surface_stays_admissible_through_its_window() {
-    let run = replay(OUTWARD_RUN);
-    if let Some((frame, cell, specific)) = &run.first {
-        panic!("step {} stage {} t = {}: cell {cell:?} holds specific internal energy {specific:e}", frame.step, frame.stage, frame.time);
+    let run = replay(Options { continue_corrected: true, ..OUTWARD_RUN });
+    if let Some((step, stage, cell, specific)) = run.failed_after {
+        panic!("step {step} stage {stage}: the corrected state leaves cell {cell:?} with specific internal energy {specific:e}");
     }
+    assert!(run.retried.is_none(), "the stage asked to retry at {:?}; the corrected path did not hold", run.retried);
     assert!(run.time >= OUTWARD_RUN.t_end, "the replay stopped at {}", run.time);
+    let (frame, ..) = run.first.as_ref().expect("no stage output left the admissible set; the correction was never exercised");
+    assert_eq!(frame.step + 1, OUTWARD_FAILED_STEP, "the first repaired stage is not the recorded failure's");
+    assert!(run.corrected > 0, "the correction never fired");
+    eprintln!("{} corrected stages; drift [L, E + rho Phi] {}", run.corrected, sci(&run.drift));
+    assert!(run.drift.iter().all(|d| d.abs() < 2e-12), "ledger drift {:?}", run.drift);
 }
 
 #[test]

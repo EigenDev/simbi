@@ -458,10 +458,9 @@ pub fn fofc_select_with_body<const D: usize, const DOF: usize, Mem, Sc>(
     Mem: MemoryStorage + Sync,
     Sc: Scalar + OrderedNumeric,
 {
-    let name = format!(
-        "{prefix}_fofc_select_with_body{}_{D}d",
-        coord_suffix(sim.geom.coords)
-    );
+    // the lifted planes carry the azimuthal momentum and bake their own parachute
+    let chart = if DOF > D { symbi_discretize::kernel_slug::newtonian_lift_suffix(sim.geom.coords, DOF, D) } else { coord_suffix(sim.geom.coords) };
+    let name = format!("{prefix}_fofc_select_with_body{chart}_{D}d");
     let scalars = resolve_body_scalars(sim, dt, gamma, &name);
     let u_stage = sim.stage_input();
     let cons = &sim.fields.cons;
