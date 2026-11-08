@@ -10283,6 +10283,18 @@ fn seed_conservation_ledger(cfg: &Config) {
         let values: Vec<f64> = text.split_whitespace().map(|w| f64::from_bits(u64::from_str_radix(w, 16).expect("a ledger word"))).collect();
         symbi_sim::conservation_ledger::set_restart_seed(symbi_sim::conservation_ledger::from_values(&values));
     }
+    // the per-cell correction counts as `i,j,k,n` entries separated by spaces
+    let counts = match attrs.iter().find(|(k, _)| k == "conservation_corrections") {
+        Some((_, symbi_io::Attr::Str(text))) => text
+            .split_whitespace()
+            .map(|entry| {
+                let v: Vec<i64> = entry.split(',').map(|x| x.parse().expect("a correction entry")).collect();
+                ([v[0] as isize, v[1] as isize, v[2] as isize], v[3] as u64)
+            })
+            .collect(),
+        _ => Vec::new(),
+    };
+    symbi_sim::conservation_ledger::set_corrections_seed(counts);
 }
 
 /// the conservation receipts beside a checkpoint: the accepted totals, bit-exact, for a restart
@@ -10299,7 +10311,13 @@ fn with_conservation_ledger(meta: Metadata) -> Metadata {
     let attempted_words = hex(&attempted);
     let (density, specific) = symbi_sim::conservation_ledger::take_window();
     let window: Vec<String> = [density, specific].iter().map(|e| format!("{:e} {} {}", e.value, e.cell[0], e.cell[1])).collect();
-    meta.with("conservation_ledger", words).with("conservation_attempted", attempted_words).with("conservation_window", window.join(" "))
+    // the accepted correction count per cell, `i,j,k,n` by whole-grid index
+    let corrections: Vec<String> =
+        symbi_sim::conservation_ledger::corrections_report().iter().map(|(c, n)| format!("{},{},{},{n}", c[0], c[1], c[2])).collect();
+    meta.with("conservation_ledger", words)
+        .with("conservation_attempted", attempted_words)
+        .with("conservation_window", window.join(" "))
+        .with("conservation_corrections", corrections.join(" "))
 }
 
 /// the metadata of a checkpoint, with a crash file's mark: `Some(true)` where a halted step

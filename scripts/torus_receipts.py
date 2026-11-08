@@ -38,7 +38,7 @@ import h5py
 import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from spb_torus_analysis import ORBIT, Grid, checkpoints, geometry, read  # noqa: E402
+from spb_torus_analysis import ORBIT, Grid, checkpoints, geometry, read  # noqa: E402,F401
 
 AMBIENT_DENSITY = 1.0e-4
 DENSE = 0.1
@@ -60,6 +60,8 @@ class Ledger:
     viscous_energy_change: float
     stages: int
     viscous_steps: int
+    corrected_cell_stages: int = 0
+    max_corrected_in_stage: int = 0
 
 
 def ledger(meta: dict, key: str = "conservation_ledger") -> Ledger | None:
@@ -71,11 +73,25 @@ def ledger(meta: dict, key: str = "conservation_ledger") -> Ledger | None:
     if isinstance(text, bytes):
         text = text.decode()
     values = np.array([np.uint64(int(w, 16)) for w in str(text).split()], dtype=np.uint64).view(np.float64)
-    assert values.size == 39, f"a conservation ledger holds 39 values; {values.size} found"
+    # a ledger written before the correction counts holds 39 values
+    assert values.size in (39, 41), f"a conservation ledger holds 41 values; {values.size} found"
     walls = values[:24].reshape(6, 4)[:4]
     rest = values[24:]
+    counts = (int(rest[15]), int(rest[16])) if values.size == 41 else (0, 0)
     return Ledger(walls[:, 0], walls[:, 1], walls[:, 2], walls[:, 3], float(rest[0]), float(rest[1]), float(rest[2]), float(rest[3]),
-                  int(rest[13]), int(rest[14]))
+                  int(rest[13]), int(rest[14]), *counts)
+
+
+def corrections(meta: dict) -> dict[tuple[int, int], int]:
+    """the accepted first-order correction count per cell (i radial, j polar), from the checkpoint"""
+    text = meta.get("conservation_corrections", "")
+    if isinstance(text, bytes):
+        text = text.decode()
+    out = {}
+    for entry in str(text).split():
+        i, j, _, n = (int(x) for x in entry.split(","))
+        out[(i, j)] = n
+    return out
 
 
 def totals(fields: dict[str, np.ndarray], grid: Grid) -> tuple[float, float, float]:
@@ -171,6 +187,18 @@ def main() -> int:
             g = row.regions
             print(f"| {row.time / ORBIT:.3f} | {row.max_density:.4f} | {g['dense'][0]:.4e} | {g['dense'][1]:.3e} | {g['surface'][0]:.4e} | {g['surface'][1]:.3e} | "
                   f"{g['ambient'][0]:.4e} | {g['ambient'][1]:.3e} |")
+        last = rows[-1]
+        if last.ledger is not None and last.ledger.corrected_cell_stages:
+            cells = grid.r.size * grid.theta.size
+            meta = read(sorted(p for p in run.glob("*.chkpt.*.h5") if "crashed" not in p.name)[-1])[2]
+            where = corrections(meta)
+            i = np.array([k[0] for k in where]); j = np.array([k[1] for k in where]); n = np.array(list(where.values()))
+            print(f"corrections: {last.ledger.corrected_cell_stages} cell-stages of {cells * last.ledger.stages} eligible "
+                  f"({last.ledger.corrected_cell_stages / (cells * last.ledger.stages):.3e}); largest in one stage "
+                  f"{last.ledger.max_corrected_in_stage} cells ({last.ledger.max_corrected_in_stage / cells:.3e} of the grid); "
+                  f"{len(where)} distinct cells, r {grid.r[i.min()]:.3f}-{grid.r[i.max()]:.3f}, theta {np.degrees(grid.theta[j.min()]):.1f}-"
+                  f"{np.degrees(grid.theta[j.max()]):.1f} deg; the 5 most corrected (r, theta deg, count): "
+                  + ", ".join(f"({grid.r[a]:.3f}, {np.degrees(grid.theta[b]):.1f}, {c})" for (a, b), c in sorted(where.items(), key=lambda kv: -kv[1])[:5]))
         print()
     return 0
 

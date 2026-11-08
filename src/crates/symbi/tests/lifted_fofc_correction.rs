@@ -6,8 +6,9 @@
 // stage has one cell raised troubled, so the correction splices the first-order flux of every
 // conserved component, the azimuthal momentum's included, onto that cell's faces, recomputes the
 // update and its face gravity work from the spliced fluxes, and recovers again:
-// - the correction fires: the accepted guard totals count the troubled cell, and the corrected
-//   run's state differs from the clean run's
+// - the correction fires: the accepted guard totals count the troubled cell, the receipts book the
+//   same count with the cell where it lies, and the corrected run's state differs from the clean
+//   run's
 // - every accepted stage is admissible (the run completes; a failed recovery stops it)
 // - mass, angular momentum about the axis and E + rho Phi close against the production receipts:
 //   the change of each volume total plus its wall outflow, at roundoff of the totals
@@ -116,6 +117,13 @@ macro_rules! gate {
         assert!(corrected.crash.is_none(), "{}: the corrected run stopped: {:?}", $label, corrected.crash);
         assert_eq!(corrected.levels[0].state.iteration, STEPS, "{}: the corrected run stopped short", $label);
         assert!(diagnostics.guards.troubled_cells.total > 0, "{}: the correction never counted a troubled cell", $label);
+        // the receipts book every corrected cell where it lies: the guard totals' count, the forced
+        // cell among them
+        assert_eq!(receipts.corrected_cell_stages, diagnostics.guards.troubled_cells.total, "{}: the receipts count other corrections than the guards", $label);
+        assert!(receipts.max_corrected_in_stage >= 1, "{}: no stage booked a corrected cell", $label);
+        let map = symbi_sim::conservation_ledger::corrections_report();
+        assert!(map.iter().any(|(c, _)| c[..2] == TROUBLED), "{}: the forced cell is missing from the correction map {map:?}", $label);
+        assert_eq!(map.iter().map(|(_, n)| n).sum::<u64>(), receipts.corrected_cell_stages, "{}: the map and the count disagree", $label);
         let mut clean = $clean;
         clean
             .evolve_with_callback(10.0, 1, |h| if h.levels[0].state.iteration >= STEPS { ControlFlow::Break(()) } else { ControlFlow::Continue(()) })

@@ -737,6 +737,12 @@ where
                     return (StageOutcome::RetryStep, report.troubled());
                 }
                 book_wall_transport(sim, kernels, &args);
+                // the cells this stage's correction corrected, by whole-grid index
+                if report.troubled() > 0 && crate::conservation_ledger::scope_is_open() {
+                    if let Some(cells) = crate::hydro_ops::flagged_cells(sim) {
+                        crate::conservation_ledger::record_correction(&cells);
+                    }
+                }
             }
             PhaseKind::ChiUpdate => prof("chi_update", || {
                 kernels.chi_update(sim, args.dt, args.a0, args.ac)

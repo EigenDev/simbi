@@ -10,6 +10,9 @@
 //   mass:              change + outflow = 0
 //   angular momentum:  change + advective outflow = viscous torque in
 //   E + rho Phi:       change + advective outflow = viscous stress work in
+// the first-order flux correction books the cells it corrected: their count summed over stages,
+// the largest count in one stage, and the count per cell (`take_corrections`), so a reader sees how
+// often and where the high-order update left the admissible set.
 // the viscous heating is internal conversion: the operator's change of internal energy, its total
 // energy change less its kinetic energy change. the operator's own total energy change equals the
 // stress work through the walls, and the ledger keeps both so a reader checks the identity.
@@ -100,6 +103,10 @@ pub struct ConservationLedger {
     pub lowest_specific_internal: Extreme,
     pub stages: u64,
     pub viscous_steps: u64,
+    /// the cells the first-order flux correction corrected, summed over stages
+    pub corrected_cell_stages: u64,
+    /// the largest number of cells the correction corrected in one stage
+    pub max_corrected_in_stage: u64,
 }
 
 impl ConservationLedger {
@@ -125,10 +132,12 @@ impl ConservationLedger {
         self.lowest_specific_internal.lower(&o.lowest_specific_internal);
         self.stages += o.stages;
         self.viscous_steps += o.viscous_steps;
+        self.corrected_cell_stages += o.corrected_cell_stages;
+        self.max_corrected_in_stage = self.max_corrected_in_stage.max(o.max_corrected_in_stage);
     }
 
     fn is_identity(&self) -> bool {
-        self.stages == 0 && self.viscous_steps == 0
+        self.stages == 0 && self.viscous_steps == 0 && self.corrected_cell_stages == 0
     }
 }
 
@@ -144,7 +153,15 @@ struct Book {
     window: (Extreme, Extreme),
 }
 
+/// the per-cell correction counts, pending for the open step and accepted for the run
+#[derive(Default)]
+struct CorrectionMap {
+    pending: std::collections::HashMap<[isize; 3], u64>,
+    accepted: std::collections::HashMap<[isize; 3], u64>,
+}
+
 thread_local! {
+    static CORRECTIONS: std::cell::RefCell<CorrectionMap> = std::cell::RefCell::new(CorrectionMap::default());
     static BOOK: Cell<Book> = Cell::new(Book::default());
     static RESTART_SEED: Cell<Option<ConservationLedger>> = const { Cell::new(None) };
 }
@@ -197,6 +214,7 @@ pub struct LedgerScope {
 
 /// open this thread's scope with a cleared book
 pub fn open_scope() -> LedgerScope {
+    CORRECTIONS.with(|c| *c.borrow_mut() = CorrectionMap::default());
     open_scope_from(ConservationLedger::default())
 }
 
@@ -206,6 +224,8 @@ pub fn open_scope_from(accepted: ConservationLedger) -> LedgerScope {
         assert!(!b.open, "conservation ledger scope already open on this thread");
         *b = Book { open: true, opened: true, accepted, ..Book::default() };
     });
+    // the accepted per-cell counts are the restart seed's, set before the scope opens
+    CORRECTIONS.with(|c| c.borrow_mut().pending.clear());
     LedgerScope { _single_thread: PhantomData }
 }
 
@@ -241,6 +261,42 @@ pub fn record_stage(rates: &[[Transport; 2]; 3], weight: f64) {
             }
             target.stages += 1;
         }
+    });
+}
+
+/// the cells one stage's first-order flux correction corrected, each by its whole-grid index
+pub fn record_correction(cells: &[[isize; 3]]) {
+    let count = cells.len() as u64;
+    with_book(|b| {
+        require_open(b, "record_correction");
+        for target in [&mut b.attempted, &mut b.pending] {
+            target.corrected_cell_stages += count;
+            target.max_corrected_in_stage = target.max_corrected_in_stage.max(count);
+        }
+    });
+    CORRECTIONS.with(|c| {
+        let mut c = c.borrow_mut();
+        for cell in cells {
+            *c.pending.entry(*cell).or_insert(0) += 1;
+        }
+    });
+}
+
+/// the accepted correction count per cell, sorted by cell
+pub fn corrections_report() -> Vec<([isize; 3], u64)> {
+    CORRECTIONS.with(|c| {
+        let mut v: Vec<_> = c.borrow().accepted.iter().map(|(k, n)| (*k, *n)).collect();
+        v.sort();
+        v
+    })
+}
+
+/// the accepted per-cell correction counts a restarted run continues, set before its scope opens
+pub fn set_corrections_seed(counts: Vec<([isize; 3], u64)>) {
+    CORRECTIONS.with(|c| {
+        let mut c = c.borrow_mut();
+        c.pending.clear();
+        c.accepted = counts.into_iter().collect();
     });
 }
 
@@ -280,6 +336,13 @@ pub fn step_commit() {
         b.window.1.lower(&pending.lowest_specific_internal);
         b.pending = ConservationLedger::default();
     });
+    CORRECTIONS.with(|c| {
+        let mut c = c.borrow_mut();
+        let pending = std::mem::take(&mut c.pending);
+        for (cell, n) in pending {
+            *c.accepted.entry(cell).or_insert(0) += n;
+        }
+    });
 }
 
 /// the retried step: its pending receipts describe a discarded state and leave the totals alone
@@ -288,6 +351,7 @@ pub fn step_discard() {
         require_open(b, "discard");
         b.pending = ConservationLedger::default();
     });
+    CORRECTIONS.with(|c| c.borrow_mut().pending.clear());
 }
 
 /// this thread's (attempted, accepted) totals, queryable during a run and after its scope closes
@@ -319,13 +383,14 @@ pub fn to_values(l: &ConservationLedger) -> Vec<f64> {
         out.push(e.value);
         out.extend(e.cell.map(|c| c as f64));
     }
-    out.extend([l.stages as f64, l.viscous_steps as f64]);
+    out.extend([l.stages as f64, l.viscous_steps as f64, l.corrected_cell_stages as f64, l.max_corrected_in_stage as f64]);
     out
 }
 
 /// the inverse of [`to_values`]
 pub fn from_values(v: &[f64]) -> ConservationLedger {
-    assert_eq!(v.len(), VALUES, "a conservation ledger holds {VALUES} values; {} given", v.len());
+    // a ledger written before the correction counts holds the 39 values that precede them
+    assert!(v.len() == VALUES || v.len() == VALUES - 2, "a conservation ledger holds {VALUES} values; {} given", v.len());
     let mut l = ConservationLedger::default();
     for (k, t) in l.outflow.iter_mut().flatten().enumerate() {
         *t = Transport { mass: v[4 * k], angular_momentum: v[4 * k + 1], energy: v[4 * k + 2], mass_in: v[4 * k + 3] };
@@ -341,11 +406,15 @@ pub fn from_values(v: &[f64]) -> ConservationLedger {
     l.lowest_specific_internal = extreme(9);
     l.stages = rest[13] as u64;
     l.viscous_steps = rest[14] as u64;
+    if v.len() == VALUES {
+        l.corrected_cell_stages = rest[15] as u64;
+        l.max_corrected_in_stage = rest[16] as u64;
+    }
     l
 }
 
 /// the length of [`to_values`]
-pub const VALUES: usize = 24 + 5 + 8 + 2;
+pub const VALUES: usize = 24 + 5 + 8 + 4;
 
 #[cfg(test)]
 mod tests {
@@ -406,6 +475,29 @@ mod tests {
         assert_eq!(resumed.accepted().outflow[0][1].mass, 0.25);
         assert_eq!(resumed.accepted().stages, 2);
         drop(resumed);
+    }
+
+    #[test]
+    fn a_retried_step_leaves_the_corrections_and_the_accepted_step_books_them() {
+        let scope = open_scope();
+        record_correction(&[[3, 4, 0], [5, 6, 0]]);
+        step_discard();
+        assert!(corrections_report().is_empty(), "a discarded step's corrections reached the accepted map");
+        record_correction(&[[3, 4, 0]]);
+        step_commit();
+        record_correction(&[[3, 4, 0], [7, 1, 0], [8, 1, 0]]);
+        step_commit();
+        let accepted = scope.accepted();
+        drop(scope);
+        assert_eq!((accepted.corrected_cell_stages, accepted.max_corrected_in_stage), (4, 3));
+        assert_eq!(corrections_report(), vec![([3, 4, 0], 2), ([7, 1, 0], 1), ([8, 1, 0], 1)]);
+        let (attempted, _) = ledger_report();
+        assert_eq!(attempted.corrected_cell_stages, 6, "the attempted totals hold the discarded correction");
+        // the flat form carries the counts, and a ledger written before them reads as zero
+        let back = from_values(&to_values(&accepted));
+        assert_eq!((back.corrected_cell_stages, back.max_corrected_in_stage), (4, 3));
+        let older = from_values(&to_values(&accepted)[..VALUES - 2]);
+        assert_eq!((older.corrected_cell_stages, older.stages), (0, accepted.stages));
     }
 
     #[test]

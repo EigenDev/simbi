@@ -66,6 +66,28 @@ pub fn recovery_failure_detail<const D: usize, const DOF: usize, Mem: symbi_xpu:
     )
 }
 
+/// the interior cells the first-order flux correction flagged troubled, by whole-grid index (the
+/// third index zero on a plane), read on the host after the queue drains; `None` on storage
+/// without host access
+pub fn flagged_cells<const D: usize, const DOF: usize, Mem: symbi_xpu::MemoryStorage, Sc: Scalar + OrderedNumeric>(
+    sim: &FieldStore<D, DOF, Mem, Sc>,
+) -> Option<Vec<[isize; 3]>> {
+    storage_read_barrier::<Mem>();
+    let host = sim.host()?;
+    let flag = host.workspace.fofc_flag.view();
+    let mut cells = Vec::new();
+    for coord in host.geom.interior.iter() {
+        if flag.at(coord).to_f64() > 0.0 {
+            let mut at = [0isize; 3];
+            for ax in 0..D.min(3) {
+                at[ax] = coord[ax] + sim.geom.index_offset[ax];
+            }
+            cells.push(at);
+        }
+    }
+    Some(cells)
+}
+
 /// scan the c2p error field over the cells the run-wide decisions read (the interior less a
 /// covered core no evolved cell reads) and return the bitwise or of all error codes.
 /// zero = all cells clean. nonzero = at least one cell had a recovery.
