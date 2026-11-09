@@ -629,92 +629,82 @@ fn host_identity_combine(op: ReductionOp) -> (f64, fn(f64, f64) -> f64) {
     }
 }
 
-/// cached reduction partials buffer. the CFL host-fold needs one
-/// `Sc` per block (typically ~1K-4K bytes for a 512^2 grid). a fresh
-/// `cuMemAllocManaged` for it on every step was the only per-step driver
-/// alloc cost left in the pipeline. one slot per precision (`f64` / `f32`),
-/// grow-only: when a larger grid needs more bytes the slot grows; otherwise
-/// the existing block is reused step after step. lives for the process
-/// lifetime — drop happens at exit.
-///
-/// the closure pattern holds the slot's mutex for the entire kernel launch +
-/// host fold, so concurrent reductions from multiple threads serialize on
-/// the cache and take the buffer one at a time. uncontended in the single-
-/// simulation case (the common one); cheap when contested.
+/// one reduction-scratch slot per logical device, each holding a grow-only managed block
+/// allocated in that device's context together with the device it was allocated on
+#[cfg(feature = "gpu")]
+type DeviceSlots = [std::sync::Mutex<Option<(i32, symbi_xpu::MemoryBlock<symbi_xpu::DeviceMemory>)>>; symbi_xpu::MAX_GPUS];
+
+#[cfg(feature = "gpu")]
+thread_local! {
+    /// the device whose context allocated the scratch slot this thread's last reduction used
+    static LAST_SCRATCH_DEVICE: std::cell::Cell<i32> = const { std::cell::Cell::new(-1) };
+}
+
+/// the device whose context allocated the reduction scratch this thread's last device reduction
+/// used; -1 before any
+#[cfg(feature = "gpu")]
+pub fn last_reduction_scratch_device() -> i32 {
+    LAST_SCRATCH_DEVICE.with(|c| c.get())
+}
+
+/// lend the current device's slot of `slots`, grown to at least `bytes` (to `round(bytes)` when it
+/// grows), for one complete launch, synchronization and read. each device reduces into its own
+/// block, and the slot's mutex serializes two reductions on one device alone
+#[cfg(feature = "gpu")]
+fn with_device_slot<R>(
+    slots: &'static std::sync::OnceLock<DeviceSlots>,
+    bytes: usize,
+    round: impl Fn(usize) -> usize,
+    what: &'static str,
+    f: impl FnOnce(*mut u8) -> R,
+) -> R {
+    let device = symbi_xpu::current_device();
+    let slots = slots.get_or_init(|| std::array::from_fn(|_| std::sync::Mutex::new(None)));
+    let mut guard = slots[device as usize].lock().unwrap();
+    if guard.as_ref().is_none_or(|(_, block)| block.bytes() < bytes) {
+        *guard = Some((device, symbi_xpu::MemoryBlock::<symbi_xpu::DeviceMemory>::new(round(bytes)).expect(what)));
+    }
+    let (owner, block) = guard.as_mut().unwrap();
+    LAST_SCRATCH_DEVICE.with(|c| c.set(*owner));
+    f(block.as_mut_ptr::<u8>())
+    // the guard drops after the closure consumed the pointer: launched, synchronized, read
+}
+
+/// the block partials of a device reduction, on the current device's grow-only slot (rounded to
+/// a power of two), reused step after step: a reduction allocates no managed memory once its
+/// slot has grown. the closure holds the slot for the whole launch and host fold, so two
+/// reductions on one device take the buffer one at a time
 #[cfg(feature = "gpu")]
 fn with_cached_partials<Sc: Scalar + OrderedNumeric, R>(
     bytes_needed: usize,
     f: impl FnOnce(*mut Sc) -> R,
 ) -> R {
-    use std::sync::{Mutex, OnceLock};
-    use symbi_xpu::DeviceMemory;
-    use symbi_xpu::MemoryBlock;
-
-    // one slot per precision. `is_f64` discriminates at compile time via
-    // size_of::<Sc>() so the lookup is monomorphized.
-    static F64_PARTIALS: OnceLock<Mutex<Option<MemoryBlock<DeviceMemory>>>> = OnceLock::new();
-    static F32_PARTIALS: OnceLock<Mutex<Option<MemoryBlock<DeviceMemory>>>> = OnceLock::new();
-    let slot = if std::mem::size_of::<Sc>() == std::mem::size_of::<f64>() {
-        F64_PARTIALS.get_or_init(|| Mutex::new(None))
-    } else {
-        F32_PARTIALS.get_or_init(|| Mutex::new(None))
-    };
-    let mut guard = slot.lock().unwrap();
-    let need_grow = match guard.as_ref() {
-        Some(blk) => blk.bytes() < bytes_needed,
-        None => true,
-    };
-    if need_grow {
-        // round up to next power of 2 to amortize future growths.
-        let alloc_bytes = bytes_needed.next_power_of_two().max(256);
-        *guard = Some(
-            MemoryBlock::<DeviceMemory>::new(alloc_bytes)
-                .expect("unified alloc for reduction partials"),
-        );
-    }
-    let ptr = guard.as_mut().unwrap().as_mut_ptr::<Sc>();
-    f(ptr)
-    // `guard` drops here — releases the mutex after the closure has consumed
-    // the pointer (kernel launched + ctx_sync'd + host-folded).
+    static F64_PARTIALS: std::sync::OnceLock<DeviceSlots> = std::sync::OnceLock::new();
+    static F32_PARTIALS: std::sync::OnceLock<DeviceSlots> = std::sync::OnceLock::new();
+    let slots = if std::mem::size_of::<Sc>() == std::mem::size_of::<f64>() { &F64_PARTIALS } else { &F32_PARTIALS };
+    with_device_slot(slots, bytes_needed, |b| b.next_power_of_two().max(256), "unified alloc for reduction partials", |p| f(p.cast::<Sc>()))
 }
 
-/// grow-only result storage for a segmented reduction.
-///
-/// A census used to allocate two managed blocks on every sample: one for the compact
-/// `segments * values` result and one for the dropped-cell counter.  Those allocations are
-/// pure driver overhead and are especially expensive at per-level cadence.  Keep one combined,
-/// suitably aligned block per precision and lend it to a complete seed/launch/readback cycle.
-/// Holding the mutex across the cycle prevents concurrent simulations from aliasing the slot.
+/// grow-only result storage for a segmented reduction: the compact `segments * values` result and
+/// the dropped-cell counter in one aligned block per precision on the current device's slot, lent
+/// to a complete seed, launch and readback cycle, so a sample allocates nothing and two
+/// reductions on one device never alias it.
 #[cfg(feature = "gpu")]
 fn with_cached_segmented_result<Sc: Scalar + OrderedNumeric, R>(
     n_slots: usize,
     f: impl FnOnce(*mut Sc, *mut u64) -> R,
 ) -> R {
-    use std::sync::{Mutex, OnceLock};
-    use symbi_xpu::{DeviceMemory, MemoryBlock};
-
-    static F64_RESULT: OnceLock<Mutex<Option<MemoryBlock<DeviceMemory>>>> = OnceLock::new();
-    static F32_RESULT: OnceLock<Mutex<Option<MemoryBlock<DeviceMemory>>>> = OnceLock::new();
-    let slot = if std::mem::size_of::<Sc>() == std::mem::size_of::<f64>() {
-        F64_RESULT.get_or_init(|| Mutex::new(None))
-    } else {
-        F32_RESULT.get_or_init(|| Mutex::new(None))
-    };
+    static F64_RESULT: std::sync::OnceLock<DeviceSlots> = std::sync::OnceLock::new();
+    static F32_RESULT: std::sync::OnceLock<DeviceSlots> = std::sync::OnceLock::new();
+    let slots = if std::mem::size_of::<Sc>() == std::mem::size_of::<f64>() { &F64_RESULT } else { &F32_RESULT };
     let acc_bytes = n_slots * std::mem::size_of::<Sc>();
     let dropped_offset = acc_bytes.next_multiple_of(std::mem::align_of::<u64>());
     let bytes_needed = dropped_offset + std::mem::size_of::<u64>();
-    let mut guard = slot.lock().unwrap();
-    if guard.as_ref().is_none_or(|blk| blk.bytes() < bytes_needed) {
-        let alloc_bytes = bytes_needed.next_power_of_two().max(256);
-        *guard = Some(
-            MemoryBlock::<DeviceMemory>::new(alloc_bytes)
-                .expect("unified alloc for segmented reduction result"),
-        );
-    }
-    let base = guard.as_mut().unwrap().as_mut_ptr::<u8>();
-    let acc = base.cast::<Sc>();
-    let dropped = unsafe { base.add(dropped_offset).cast::<u64>() };
-    f(acc, dropped)
+    with_device_slot(slots, bytes_needed, |b| b.next_power_of_two().max(256), "unified alloc for segmented reduction result", |base| {
+        let acc = base.cast::<Sc>();
+        let dropped = unsafe { base.add(dropped_offset).cast::<u64>() };
+        f(acc, dropped)
+    })
 }
 
 /// GPU reduction over `domain` of `field` via the substrate Reduce morphism: render
@@ -975,22 +965,14 @@ fn field_sums_exact_device<B: GpuBackend, Sc: Scalar + OrderedNumeric, Mem: Memo
     })
 }
 
-/// the grow-only words of the exact device sum, cached across sums; the closure holds the slot
-/// through the launches, the synchronization and the host read, so two sums never share it
+/// the grow-only words of the exact device sum on the current device's slot; the closure holds
+/// the slot through the launches, the synchronization and the host read, so two sums on one
+/// device never share it
 #[cfg(feature = "gpu")]
 fn with_cached_exact_words<R>(words: usize, f: impl FnOnce(*mut u64) -> R) -> R {
-    use std::sync::{Mutex, OnceLock};
-    use symbi_xpu::DeviceMemory;
-    use symbi_xpu::MemoryBlock;
-
-    static WORDS: OnceLock<Mutex<Option<MemoryBlock<DeviceMemory>>>> = OnceLock::new();
-    let mut guard = WORDS.get_or_init(|| Mutex::new(None)).lock().unwrap();
+    static WORDS: std::sync::OnceLock<DeviceSlots> = std::sync::OnceLock::new();
     let bytes = words * std::mem::size_of::<u64>();
-    if guard.as_ref().is_none_or(|blk| blk.bytes() < bytes) {
-        *guard = Some(MemoryBlock::<DeviceMemory>::new(bytes.next_power_of_two().max(1024)).expect("unified alloc for the exact sum words"));
-    }
-    let ptr = guard.as_mut().unwrap().as_mut_ptr::<u64>();
-    f(ptr)
+    with_device_slot(&WORDS, bytes, |b| b.next_power_of_two().max(1024), "unified alloc for the exact sum words", |p| f(p.cast::<u64>()))
 }
 
 /// GPU segmented reduction: render the privatized-bucket kernel for this

@@ -3732,7 +3732,21 @@ extern "C" __global__ void halo_scatter(
 // base pointer, `buf_ptr` the contiguous strip, and `idx_ptr` the per-cell flat offsets the
 // caller has already written. `n` cells, one thread each.
 #[cfg(feature = "gpu")]
+thread_local! {
+    /// strip kernel launches on this thread, by the logical device current at each launch
+    static STRIP_LAUNCHES: std::cell::RefCell<[u64; MAX_GPUS]> = const { std::cell::RefCell::new([0; MAX_GPUS]) };
+}
+
+/// the strip kernel launches this thread has made, by the logical device each ran on: the record
+/// of which device a halo transport executed its gathers and scatters on
+#[cfg(feature = "gpu")]
+pub fn strip_launches_by_device() -> [u64; MAX_GPUS] {
+    STRIP_LAUNCHES.with(|c| *c.borrow())
+}
+
+#[cfg(feature = "gpu")]
 fn launch_strip_kernel(source: &str, name: &str, key: &str, a: u64, b: u64, idx_ptr: u64, n: usize) {
+    STRIP_LAUNCHES.with(|c| c.borrow_mut()[symbi_xpu::current_device() as usize] += 1);
     let n_u32 = n as u32;
     let kernel = current_dispatcher().jit_kernel_keyed(source, key, name);
     let mut args = KernelArgs::new();
@@ -3797,8 +3811,11 @@ struct HaloStageBufs {
 
 #[cfg(feature = "gpu")]
 thread_local! {
-    static HALO_STAGE_BUFS: std::cell::RefCell<Option<HaloStageBufs>> =
-        const { std::cell::RefCell::new(None) };
+    /// one set per logical device, allocated in that device's context: a strip's source offsets
+    /// and contiguous buffer live on the device that gathers it, its destination offsets on the
+    /// device that scatters it
+    static HALO_STAGE_BUFS: std::cell::RefCell<[Option<HaloStageBufs>; MAX_GPUS]> =
+        const { std::cell::RefCell::new([const { None }; MAX_GPUS]) };
 }
 
 /// staged device transport: gather the strided strip into a contiguous device buffer, then
@@ -3806,8 +3823,9 @@ thread_local! {
 /// (gather then scatter, no move). across devices the contiguous buffer is exactly what a
 /// a peer copy over the intra-node device fabric moves between
 /// the two ranks -- so this validates the pack/unpack halves of the multi-gpu transport on
-/// a single card; only the move in the middle is added on real hardware. host fallback for
-/// a cpu backend.
+/// a single card; only the move in the middle is added on real hardware. the gather runs on the
+/// source tile's device and the scatter on the destination tile's, whatever device the caller
+/// has current. host fallback for a cpu backend.
 #[cfg(feature = "gpu")]
 pub struct StagedCopy;
 
@@ -3819,11 +3837,11 @@ impl HaloTransport for StagedCopy {
         src_region: &Domain<D>,
         dst: &Field<f64, D, M>,
         dst_region: &Domain<D>,
-        _src_dev: i32,
-        _dst_dev: i32,
+        src_dev: i32,
+        dst_dev: i32,
     ) {
         if !M::IS_DEVICE_ACCESSIBLE {
-            LocalCopy.copy_region(src, src_region, dst, dst_region, _src_dev, _dst_dev);
+            LocalCopy.copy_region(src, src_region, dst, dst_region, src_dev, dst_dev);
             return;
         }
         let n = src_region.volume();
@@ -3836,35 +3854,53 @@ impl HaloTransport for StagedCopy {
         let src_ptr = src.as_ptr() as u64;
         let dst_ptr = dst.as_mut_ptr() as u64;
 
-        HALO_STAGE_BUFS.with(|cell| {
-            let mut slot = cell.borrow_mut();
-            if slot.as_ref().map_or(true, |b| b.cap < n) {
-                *slot = Some(HaloStageBufs {
-                    sidx: MemoryBlock::<DeviceMemory>::for_elements::<u32>(n).expect("sidx alloc"),
-                    didx: MemoryBlock::<DeviceMemory>::for_elements::<u32>(n).expect("didx alloc"),
-                    buf: MemoryBlock::<DeviceMemory>::for_elements::<f64>(n).expect("stage alloc"),
-                    cap: n,
-                });
+        // the gather runs on the source tile's device and the scatter on the destination's, each
+        // synchronized on its own device before the pooled buffers serve the next strip. every
+        // exchange drains the tiles' devices before its first copy, so the gather reads finished
+        // data
+        let (sidx_ptr, didx_ptr, buf_ptr) = HALO_STAGE_BUFS.with(|cell| {
+            let mut pool = cell.borrow_mut();
+            for dev in [src_dev, dst_dev] {
+                let slot = &mut pool[dev as usize];
+                if slot.as_ref().map_or(true, |b| b.cap < n) {
+                    *slot = Some(with_device(dev, || HaloStageBufs {
+                        sidx: MemoryBlock::<DeviceMemory>::for_elements::<u32>(n).expect("sidx alloc"),
+                        didx: MemoryBlock::<DeviceMemory>::for_elements::<u32>(n).expect("didx alloc"),
+                        buf: MemoryBlock::<DeviceMemory>::for_elements::<f64>(n).expect("stage alloc"),
+                        cap: n,
+                    }));
+                }
             }
-            let bufs = slot.as_mut().unwrap();
-            // host writes into managed memory the previous copy's kernels read
+            let sp = pool[src_dev as usize].as_mut().unwrap().sidx.as_mut_ptr::<u32>();
+            let dp = pool[dst_dev as usize].as_mut().unwrap().didx.as_mut_ptr::<u32>();
             crate::driver::prof("halo_offsets", || {
-                write_region_offsets(&sdom, src_region, bufs.sidx.as_mut_ptr::<u32>());
-                write_region_offsets(&ddom, dst_region, bufs.didx.as_mut_ptr::<u32>());
+                write_region_offsets(&sdom, src_region, sp);
+                write_region_offsets(&ddom, dst_region, dp);
             });
-            let sidx_ptr = bufs.sidx.as_ptr::<u32>() as u64;
-            let didx_ptr = bufs.didx.as_ptr::<u32>() as u64;
-            let buf_ptr = bufs.buf.as_mut_ptr::<f64>() as u64;
-
-            crate::driver::prof("halo_launch", || {
-                launch_gather(src_ptr, buf_ptr, sidx_ptr, n);
-                // one device: the contiguous buffer IS the staging, so the strip goes straight back
-                // out. `PeerCopy` moves this same buffer across the fabric between the two halves.
-                launch_scatter(dst_ptr, buf_ptr, didx_ptr, n);
-            });
-            // drain before the pooled buffers are reused next call.
-            crate::driver::prof("halo_sync", ctx_sync);
+            let staged = pool[src_dev as usize].as_mut().unwrap();
+            (sp as u64, dp as u64, staged.buf.as_mut_ptr::<f64>() as u64)
         });
+        if src_dev == dst_dev {
+            with_device(src_dev, || {
+                crate::driver::prof("halo_launch", || {
+                    launch_gather(src_ptr, buf_ptr, sidx_ptr, n);
+                    // one device: the contiguous buffer is the staging, and the strip goes straight
+                    // back out. `PeerCopy` moves this same buffer across the fabric between the halves
+                    launch_scatter(dst_ptr, buf_ptr, didx_ptr, n);
+                });
+                crate::driver::prof("halo_sync", ctx_sync);
+            });
+        } else {
+            // two logical devices without a peer link: the destination reads the source's buffer
+            with_device(src_dev, || {
+                crate::driver::prof("halo_launch", || launch_gather(src_ptr, buf_ptr, sidx_ptr, n));
+                crate::driver::prof("halo_sync", ctx_sync);
+            });
+            with_device(dst_dev, || {
+                crate::driver::prof("halo_launch", || launch_scatter(dst_ptr, buf_ptr, didx_ptr, n));
+                crate::driver::prof("halo_sync", ctx_sync);
+            });
+        }
     }
 }
 
@@ -3926,6 +3962,35 @@ fn peer_ok(src: i32, dst: i32) -> bool {
     })
 }
 
+/// whether `PeerCopy` moves a strip from logical device `src` to `dst` over a direct peer link:
+/// two distinct logical devices whose physical gpus can peer. every other pair stages
+#[cfg(feature = "gpu")]
+pub fn peer_transport(src: i32, dst: i32) -> bool {
+    src != dst && peer_ok(src, dst)
+}
+
+/// the placement of a tiled run, one line per tile (its logical device and that device's pci
+/// address) and one per tile pair (the transport `PeerCopy` takes between them)
+#[cfg(feature = "gpu")]
+pub fn placement_record(devices: &[i32]) -> Vec<String> {
+    let mut lines: Vec<String> = devices
+        .iter()
+        .enumerate()
+        .map(|(tile, &dev)| {
+            let pci = with_device(dev, symbi_xpu::pci_bus_id).unwrap_or_else(|e| format!("unknown ({e:?})"));
+            format!("placement: tile {tile} on logical device {dev}, pci {pci}")
+        })
+        .collect();
+    for a in 0..devices.len() {
+        for b in a + 1..devices.len() {
+            let (da, db) = (devices[a], devices[b]);
+            let way = if peer_transport(da, db) { "peer" } else if da == db { "staged on one device" } else { "staged across devices" };
+            lines.push(format!("placement: tiles {a}-{b} (devices {da}-{db}) transport {way}"));
+        }
+    }
+    lines
+}
+
 /// enable bidirectional peer access for every directly-peerable pair among `devices`, once at
 /// setup. pairs that cannot peer (same card / no link) are skipped -- `PeerCopy` stages those.
 /// idempotent and best-effort: a failure to enable just means that pair stages its copies.
@@ -3980,7 +4045,7 @@ impl HaloTransport for PeerCopy {
         // fold onto the same physical gpu -> no peer -> staged), on a node whose devices can peer
         // (direct fast path), and on a node without peer access (staged) -- for any gpu count, no
         // machine-specific code. only a genuine cross-device link takes the peer path below.
-        if src_dev == dst_dev || !peer_ok(src_dev, dst_dev) {
+        if !peer_transport(src_dev, dst_dev) {
             StagedCopy.copy_region(src, src_region, dst, dst_region, src_dev, dst_dev);
             return;
         }

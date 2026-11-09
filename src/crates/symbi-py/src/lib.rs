@@ -6520,6 +6520,10 @@ where
     // open peer links once (no-op for pairs that can't peer; those stage).
     enable_peer_mesh(&devices);
     reporter.milestone("peer links opened");
+    #[cfg(feature = "gpu")]
+    for line in symbi::sim::decomp::placement_record(&devices) {
+        reporter.milestone(&line);
+    }
 
     // the universal transport: adaptive peer/staged. single-device builds compile the host arm
     // but never reach this fn (gpus>1 needs a gpu feature; validate_gpu_request enforces it).
@@ -6857,6 +6861,10 @@ where
     let mut reporter = DecomposedReporter::new(cfg, n_zones, &counts, &slabs);
     enable_peer_mesh(&devices);
     reporter.milestone("peer links opened");
+    #[cfg(feature = "gpu")]
+    for line in symbi::sim::decomp::placement_record(&devices) {
+        reporter.milestone(&line);
+    }
 
     #[cfg(feature = "gpu")]
     let transport = symbi::sim::decomp::PeerCopy;
