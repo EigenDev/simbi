@@ -1621,21 +1621,23 @@ pub fn exchange_trouble<const D: usize, const DOF: usize, M: MemorySpace, T: Hal
     devices: &[i32],
     transport: &T,
 ) -> Vec<Vec<Domain<D>>> {
-    let mut received = vec![Vec::new(); tiles.len()];
-    for axis in 0..D {
-        for leg in schedule.legs().iter().filter(|l| l.axis == axis) {
-            let (lo, hi) = (tiles[leg.lo], tiles[leg.hi]);
-            let lo_layout = FieldLayout::cell_band_of_geometry(&lo.geom, TROUBLE_REACH);
-            let hi_layout = FieldLayout::cell_band_of_geometry(&hi.geom, TROUBLE_REACH);
-            let r = leg_regions(&lo_layout, &hi_layout, leg, TROUBLE_REACH);
-            let (fl, fh) = (&lo.workspace.fofc_flag, &hi.workspace.fofc_flag);
-            transport.copy_region(fh, &r.hi_src, fl, &r.lo_ghost, devices[leg.hi], devices[leg.lo]);
-            transport.copy_region(fl, &r.lo_src, fh, &r.hi_ghost, devices[leg.lo], devices[leg.hi]);
-            received[leg.lo].push(r.lo_ghost);
-            received[leg.hi].push(r.hi_ghost);
+    crate::driver::prof("exchange_trouble", || {
+        let mut received = vec![Vec::new(); tiles.len()];
+        for axis in 0..D {
+            for leg in schedule.legs().iter().filter(|l| l.axis == axis) {
+                let (lo, hi) = (tiles[leg.lo], tiles[leg.hi]);
+                let lo_layout = FieldLayout::cell_band_of_geometry(&lo.geom, TROUBLE_REACH);
+                let hi_layout = FieldLayout::cell_band_of_geometry(&hi.geom, TROUBLE_REACH);
+                let r = leg_regions(&lo_layout, &hi_layout, leg, TROUBLE_REACH);
+                let (fl, fh) = (&lo.workspace.fofc_flag, &hi.workspace.fofc_flag);
+                transport.copy_region(fh, &r.hi_src, fl, &r.lo_ghost, devices[leg.hi], devices[leg.lo]);
+                transport.copy_region(fl, &r.lo_src, fh, &r.hi_ghost, devices[leg.lo], devices[leg.hi]);
+                received[leg.lo].push(r.lo_ghost);
+                received[leg.hi].push(r.hi_ghost);
+            }
         }
-    }
-    received
+        received
+    })
 }
 
 /// which process holds each tile. every transfer in a schedule has a source tile and a
@@ -1810,6 +1812,16 @@ pub fn exchange_grid_phase<
 }
 
 fn exchange_grid_set<const D: usize, const DOF: usize, M: MemorySpace, T: HaloTransport>(
+    tiles: &[&FieldStore<D, DOF, M>],
+    schedule: &Schedule<D>,
+    devices: &[i32],
+    transport: &T,
+    set: ExchangeSet,
+) {
+    crate::driver::prof("exchange", || exchange_grid_set_timed(tiles, schedule, devices, transport, set))
+}
+
+fn exchange_grid_set_timed<const D: usize, const DOF: usize, M: MemorySpace, T: HaloTransport>(
     tiles: &[&FieldStore<D, DOF, M>],
     schedule: &Schedule<D>,
     devices: &[i32],
@@ -3515,8 +3527,9 @@ where
         // global dt = min over tiles' cfl, clamped so the last step lands exactly on t_final.
         let dt = {
             let sh = shared!();
-            let candidates = (0..n).map(|i| symbi_xpu::with_device(devices[i], || kernels[i].cfl(sh[i])));
-            match crate::driver::agree_timestep(candidates, sh[0].max_dt, t_final - t, Ok::<f64, std::convert::Infallible>) {
+            let candidates: Vec<f64> =
+                crate::driver::prof("cfl", || (0..n).map(|i| symbi_xpu::with_device(devices[i], || kernels[i].cfl(sh[i]))).collect());
+            match crate::driver::agree_timestep(candidates.into_iter(), sh[0].max_dt, t_final - t, Ok::<f64, std::convert::Infallible>) {
                 Ok(agreed) => {
                     dt_prev = agreed.raw;
                     agreed.dt
@@ -3596,12 +3609,12 @@ where
             // exchange that publishes the excised state into the neighbors' halos. the pass
             // count is the largest any tile needs, so every tile runs the same number and the
             // tiled sequence stays bit-identical to the monolithic one.
-            drain_devices::<M>(devices);
+            crate::driver::prof("exchange_drain", || drain_devices::<M>(devices));
             // a slip run's drain belongs to its palindrome, which the single grid closes without
             // the post-step operators
             if !slip_runs {
                 let mut step = ScheduledStep { schedule: &schedule, devices, transport, kernels };
-                crate::stage::fold_post_step(&sh, kernels, dt, &mut step, |_| true)
+                crate::driver::prof("post_step", || crate::stage::fold_post_step(&sh, kernels, dt, &mut step, |_| true))
                     .unwrap_or_else(|e| panic!("{e}"));
             }
             let horizon = sh.first().and_then(|store| horizon_request(*store));
@@ -3625,7 +3638,7 @@ where
         }
         if has_bodies {
             let mut bodies = FlatTileBodies { stores: &mut *stores, kernels, schedule: &schedule, devices, transport };
-            let Ok::<_, std::convert::Infallible>(()) = crate::accepted_tail::flat_body_step(&mut bodies, dt);
+            let Ok::<_, std::convert::Infallible>(()) = crate::driver::prof("body_step", || crate::accepted_tail::flat_body_step(&mut bodies, dt));
         }
         // per-tile clocks + mesh-motion advance, in lockstep (identical law + identical dt on
         // every tile -> identical scale factors; the cuts sit at fixed comoving indices, so the
@@ -3641,7 +3654,7 @@ where
         // every tile records
         let census = {
             let sh = shared!();
-            crate::census::tile_census_partials(&sh, &sh[0].censuses, kernels, devices, 0, None, |_| None, sh[0].time)
+            crate::driver::prof("census", || crate::census::tile_census_partials(&sh, &sh[0].censuses, kernels, devices, 0, None, |_| None, sh[0].time))
         };
         if let Some(partials) = census {
             let now = stores[0].time;
