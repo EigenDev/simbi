@@ -775,7 +775,6 @@ macro_rules! gv_dim {
 // manifest.
 fn emit_gv(out_dir: &str, kernel_name: &str, ndim: u8, program: &symbi_ir::KernelProgram) {
     let k = program.kernel();
-    let device_preamble = symbi_discretize::kernel_device_preamble(kernel_name);
     let writes: &[symbi_ir::KernelWrite] = program.writes();
     assert!(
         !k.graph().has_errors(),
@@ -807,7 +806,7 @@ fn emit_gv(out_dir: &str, kernel_name: &str, ndim: u8, program: &symbi_ir::Kerne
             scalar_params: k.scalar_params(),
             field_writes: &writes,
             coord_components: k.coord_components(),
-            device_preamble: &device_preamble,
+            device_preamble: &[],
             tile_spec: tile_spec.as_ref(),
         },
         k.output_support(),
