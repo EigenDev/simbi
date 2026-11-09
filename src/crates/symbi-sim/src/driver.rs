@@ -156,6 +156,9 @@ pub fn downstream_injection_weight(stages: &[(f64, f64)], stage: usize) -> f64 {
 static PROFILE_ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
 static PHASE_MS: std::sync::Mutex<std::collections::BTreeMap<&'static str, f64>> =
     std::sync::Mutex::new(std::collections::BTreeMap::new());
+// the wall time some phase was open on a timing thread: the outermost intervals alone, so a phase
+// nested inside another counts once here however the per-phase rows overlap
+static COVERED_MS: std::sync::Mutex<f64> = std::sync::Mutex::new(0.0);
 fn profiling() -> bool {
     *PROFILE_ON.get_or_init(|| std::env::var("SYMBI_PROFILE").is_ok())
 }
@@ -191,18 +194,31 @@ fn timed_once<T>(name: &'static str, f: impl FnOnce() -> T) -> T {
             });
         }
     }
-    OPEN_PHASES.with(|open| open.borrow_mut().push(name));
+    let outermost = OPEN_PHASES.with(|open| {
+        let mut open = open.borrow_mut();
+        open.push(name);
+        open.len() == 1
+    });
     let open = Open(name);
     let t0 = std::time::Instant::now();
     let r = f();
     let ms = t0.elapsed().as_secs_f64() * 1e3;
     drop(open);
     *PHASE_MS.lock().unwrap().entry(name).or_insert(0.0) += ms;
+    if outermost {
+        *COVERED_MS.lock().unwrap() += ms;
+    }
     r
 }
 /// clear the per-phase profile accumulator (call after warmup).
 pub fn reset_profile() {
     PHASE_MS.lock().unwrap().clear();
+    *COVERED_MS.lock().unwrap() = 0.0;
+}
+/// the wall time, in milliseconds, inside at least one open phase: the window less this is the
+/// time no phase accounts for, and the rows' sum less this is their overlap
+pub fn report_covered() -> f64 {
+    *COVERED_MS.lock().unwrap()
 }
 /// drain the per-phase profile as (phase, milliseconds) pairs.
 pub fn report_profile() -> Vec<(&'static str, f64)> {

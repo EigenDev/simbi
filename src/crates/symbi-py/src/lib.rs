@@ -3673,11 +3673,15 @@ fn dump_profile_if_enabled(steps: u64, n_zones: u64, window_s: f64) {
         "TOTAL"
     );
     let window = window_s * 1e3;
+    let covered = symbi::sim::evolve::report_covered();
     eprintln!(
-        "  {:<18} {window:>8.1} ms  (run window: the loop, checkpoints included)\n  {:<18} {:>8.1} ms  (window less the instrumented phases)\n",
+        "  {:<18} {covered:>8.1} ms  (time inside at least one phase)\n  {:<18} {:>8.1} ms  (rows counted more than once: nested phases)\n  {:<18} {window:>8.1} ms  (run window: the loop, checkpoints included)\n  {:<18} {:>8.1} ms  (window less the covered time)\n",
+        "COVERED",
+        "OVERLAP",
+        total - covered,
         "WINDOW",
         "UNATTRIBUTED",
-        window - total
+        window - covered
     );
 }
 
@@ -9515,6 +9519,7 @@ impl DecomposedReporter {
         self.table.post_success(&summary);
         self.table.exit_frame(ExitKind::Success, &summary);
         let _ = self.live;
+        dump_profile_if_enabled(steps, self.n_zones as u64, wall);
     }
 
     fn fail(mut self, msg: &str) {

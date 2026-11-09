@@ -6708,7 +6708,7 @@ where
         let received = {
             let states: Vec<&FieldStore<NDIM, DOF, Mem, f64>> = order.iter().map(|&i| &*tiles[i].levels[level].state).collect();
             let schedule = schedule_of_tiles(&states, self.counts, &level_topology(tiles, level, order));
-            symbi_sim::decomp::exchange_trouble(&states, &schedule, devices, self.transport)
+            prof("exchange_trouble", || symbi_sim::decomp::exchange_trouble(&states, &schedule, devices, self.transport))
         };
         drain_devices::<Mem>(devices);
         Ok(order
@@ -6821,20 +6821,22 @@ fn exchange_level_halos<R, const NDIM: usize, const DOF: usize, M, E, S, Mem, K,
     K: KernelSet<NDIM, DOF, Mem, f64>,
     T: HaloTransport,
 {
-    drain_devices::<Mem>(devices);
+    prof("exchange_drain", || drain_devices::<Mem>(devices));
     {
         let states: Vec<&FieldStore<NDIM, DOF, Mem, f64>> = order
             .iter()
             .map(|&i| &*tiles[i].levels[level].state)
             .collect();
-        let schedule = schedule_of_tiles(&states, counts, &level_topology(tiles, level, order));
-        exchange_grid(&states, &schedule, devices, transport);
+        let schedule = prof("exchange_schedule", || schedule_of_tiles(&states, counts, &level_topology(tiles, level, order)));
+        prof("exchange_copy", || exchange_grid(&states, &schedule, devices, transport));
     }
-    for (k, &i) in order.iter().enumerate() {
-        symbi_xpu::with_device(devices[k], || {
-            tiles[i].fill_physical_ghosts(level)
-        });
-    }
+    prof("exchange_fill", || {
+        for (k, &i) in order.iter().enumerate() {
+            symbi_xpu::with_device(devices[k], || {
+                tiles[i].fill_physical_ghosts(level)
+            });
+        }
+    });
 }
 
 /// the cells of level `level` tile `tile` holds authoritatively, in whole-grid indices: its

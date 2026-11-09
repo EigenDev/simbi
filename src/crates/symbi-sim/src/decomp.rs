@@ -3834,18 +3834,23 @@ impl HaloTransport for StagedCopy {
                 });
             }
             let bufs = slot.as_mut().unwrap();
-            write_region_offsets(&sdom, src_region, bufs.sidx.as_mut_ptr::<u32>());
-            write_region_offsets(&ddom, dst_region, bufs.didx.as_mut_ptr::<u32>());
+            // host writes into managed memory the previous copy's kernels read
+            crate::driver::prof("halo_offsets", || {
+                write_region_offsets(&sdom, src_region, bufs.sidx.as_mut_ptr::<u32>());
+                write_region_offsets(&ddom, dst_region, bufs.didx.as_mut_ptr::<u32>());
+            });
             let sidx_ptr = bufs.sidx.as_ptr::<u32>() as u64;
             let didx_ptr = bufs.didx.as_ptr::<u32>() as u64;
             let buf_ptr = bufs.buf.as_mut_ptr::<f64>() as u64;
 
-            launch_gather(src_ptr, buf_ptr, sidx_ptr, n);
-            // one device: the contiguous buffer IS the staging, so the strip goes straight back
-            // out. `PeerCopy` moves this same buffer across the fabric between the two halves.
-            launch_scatter(dst_ptr, buf_ptr, didx_ptr, n);
+            crate::driver::prof("halo_launch", || {
+                launch_gather(src_ptr, buf_ptr, sidx_ptr, n);
+                // one device: the contiguous buffer IS the staging, so the strip goes straight back
+                // out. `PeerCopy` moves this same buffer across the fabric between the two halves.
+                launch_scatter(dst_ptr, buf_ptr, didx_ptr, n);
+            });
             // drain before the pooled buffers are reused next call.
-            ctx_sync();
+            crate::driver::prof("halo_sync", ctx_sync);
         });
     }
 }
@@ -3987,9 +3992,11 @@ impl HaloTransport for PeerCopy {
                 ensure_peer_bufs(&mut pool, dst_dev, n);
 
                 let sp = pool[src_dev as usize].as_mut().unwrap().idx.as_mut_ptr::<u32>();
-                write_region_offsets(&sdom, src_region, sp);
                 let dp = pool[dst_dev as usize].as_mut().unwrap().idx.as_mut_ptr::<u32>();
-                write_region_offsets(&ddom, dst_region, dp);
+                crate::driver::prof("halo_offsets", || {
+                    write_region_offsets(&sdom, src_region, sp);
+                    write_region_offsets(&ddom, dst_region, dp);
+                });
 
                 let s = pool[src_dev as usize].as_mut().unwrap();
                 let src_idx_ptr = s.idx.as_ptr::<u32>() as u64;
@@ -4002,24 +4009,20 @@ impl HaloTransport for PeerCopy {
 
             // stage 1: gather on the source device -- src_buf[i] = src[sidx[i]].
             with_device(src_dev, || {
-                launch_gather(src_ptr, src_buf_ptr, src_idx_ptr, n);
-                ctx_sync();
+                crate::driver::prof("halo_launch", || launch_gather(src_ptr, src_buf_ptr, src_idx_ptr, n));
+                crate::driver::prof("halo_sync", ctx_sync);
             });
 
             // stage 2: move the contiguous buffer across the link (synchronous).
-            memcpy_peer(
-                dst_buf_ptr,
-                dst_dev,
-                src_buf_ptr,
-                src_dev,
-                n * std::mem::size_of::<f64>(),
-            )
-            .expect("device peer copy failed");
+            crate::driver::prof("halo_peer_move", || {
+                memcpy_peer(dst_buf_ptr, dst_dev, src_buf_ptr, src_dev, n * std::mem::size_of::<f64>())
+                    .expect("device peer copy failed")
+            });
 
             // stage 3: scatter on the destination device -- dst[didx[i]] = dst_buf[i].
             with_device(dst_dev, || {
-                launch_scatter(dst_ptr, dst_buf_ptr, dst_idx_ptr, n);
-                ctx_sync();
+                crate::driver::prof("halo_launch", || launch_scatter(dst_ptr, dst_buf_ptr, dst_idx_ptr, n));
+                crate::driver::prof("halo_sync", ctx_sync);
             });
         });
     }

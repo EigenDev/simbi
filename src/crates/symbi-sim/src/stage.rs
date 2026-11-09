@@ -486,9 +486,11 @@ where
     K: KernelSet<D, DOF, Mem, Sc> + ?Sized,
 {
     if crate::conservation_ledger::scope_is_open() {
-        if let Some(rates) = kernels.wall_transport(sim) {
-            crate::conservation_ledger::record_stage(&rates, args.dt * args.ac * args.injection_weight);
-        }
+        prof("receipts", || {
+            if let Some(rates) = kernels.wall_transport(sim) {
+                crate::conservation_ledger::record_stage(&rates, args.dt * args.ac * args.injection_weight);
+            }
+        });
     }
 }
 
@@ -700,9 +702,11 @@ where
                 hook(HookPoint::BeforeC2p);
                 // the stage output's lowest density and specific internal energy, before its recovery
                 if crate::conservation_ledger::scope_is_open() {
-                    if let Some((density, specific)) = kernels.stage_extremes(sim) {
-                        crate::conservation_ledger::record_extremes(density, specific);
-                    }
+                    prof("receipts", || {
+                        if let Some((density, specific)) = kernels.stage_extremes(sim) {
+                            crate::conservation_ledger::record_extremes(density, specific);
+                        }
+                    });
                 }
                 prof("c2p", || kernels.c2p(sim));
             }
@@ -739,9 +743,11 @@ where
                 book_wall_transport(sim, kernels, &args);
                 // the cells this stage's correction corrected, by whole-grid index
                 if report.troubled() > 0 && crate::conservation_ledger::scope_is_open() {
-                    if let Some(cells) = crate::hydro_ops::flagged_cells(sim) {
-                        crate::conservation_ledger::record_correction(&cells);
-                    }
+                    prof("receipts", || {
+                        if let Some(cells) = crate::hydro_ops::flagged_cells(sim) {
+                            crate::conservation_ledger::record_correction(&cells);
+                        }
+                    });
                 }
             }
             PhaseKind::ChiUpdate => prof("chi_update", || {
@@ -990,13 +996,15 @@ where
                 // the operator's receipt: the wall torque and stress work it books, and its change of
                 // total energy, kinetic energy and angular momentum over the domain
                 let receipt = (crate::conservation_ledger::scope_is_open() && n == 1)
-                    .then(|| (kernels[0].energy_partition(stores[0]), kernels[0].take_viscous_wall_totals()));
+                    .then(|| prof("receipts", || (kernels[0].energy_partition(stores[0]), kernels[0].take_viscous_wall_totals())));
                 for k in 0..n {
                     cx.on_tile(k, &mut || prof("viscous", || kernels[k].viscous(stores[k], dt)));
                 }
                 if let Some((Some(before), _)) = receipt {
-                    let after = kernels[0].energy_partition(stores[0]).expect("an energy partition before the operator and none after");
-                    let walls = kernels[0].take_viscous_wall_totals();
+                    let (after, walls) = prof("receipts", || {
+                        let after = kernels[0].energy_partition(stores[0]).expect("an energy partition before the operator and none after");
+                        (after, kernels[0].take_viscous_wall_totals())
+                    });
                     crate::conservation_ledger::record_viscous(&crate::conservation_ledger::ViscousReceipt {
                         torque_in: walls.0,
                         work_in: walls.1,

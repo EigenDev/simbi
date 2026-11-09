@@ -29,7 +29,7 @@ use crate::sim::driver::{
     TimestepFailure, agree_timestep, prof, set_stage_motion, stage_schedule,
 };
 use symbi_sim::step_transaction::{RootAttempt, RootStep, take_root_step};
-pub use crate::sim::driver::{check_dt, report_profile, reset_profile};
+pub use crate::sim::driver::{check_dt, report_covered, report_profile, reset_profile};
 
 // =============================================================================
 // evolution driver
