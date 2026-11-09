@@ -12,6 +12,8 @@
 # - a restart continues the receipts bit for bit
 # rejected attempts stay out of the accepted totals: the step transaction's own tests in
 # symbi-sim/src/step_transaction.rs book receipts through a scripted retried step
+# - the batched kernels book the per-channel kernels' receipts bit for bit
+#   (SIMBI_LEDGER_REFERENCE=channels), on a bit-identical state
 # - the host reference (SIMBI_LEDGER_REFERENCE=host) books receipts on the same evolved state as
 #   the kernel path, each closing at roundoff
 # - the frontend refuses the wall outside the planes it is baked for
@@ -146,6 +148,25 @@ def test_the_host_reference_books_the_same_receipts_on_the_same_state(tmp_path: 
             dm, dl, de = torus_receipts.residuals(rows[0], row)
             assert abs(dm) <= 1e-12 * rows[0].totals[0] and abs(dl) <= 1e-12 * rows[0].totals[1] and abs(de) <= 1e-12 * abs(rows[0].totals[2]), (d.name, dm, dl, de)
     assert ledgers[0].viscous_heating > 0.0 and ledgers[1].viscous_heating > 0.0
+
+
+def test_the_batched_receipts_equal_the_per_channel_kernels_bit_for_bit(tmp_path: Path) -> None:
+    import os
+
+    from spb_torus_analysis import read
+
+    batched = _run(tmp_path / "batched", "A")
+    channels = _run(tmp_path / "channels", "A", env={**os.environ, "SIMBI_LEDGER_REFERENCE": "channels"})
+    finals = [sorted(p for p in d.glob("*.chkpt.*.h5") if ".final." not in p.name)[-1] for d in (batched, channels)]
+    ph.same_checkpoint(finals[1], finals[0], "the per-channel receipts' state against the batched path's", exclude=("metadata", "body_diagnostics"),
+                       expect=("level_0",))
+    metas = [read(p)[2] for p in finals]
+    assert torus_receipts.ledger(metas[0]).stages > 0, "the batched run booked no receipts"
+    for key in ("conservation_ledger", "conservation_attempted", "conservation_window", "conservation_corrections"):
+        if key == "conservation_ledger":
+            assert key in metas[0], "the checkpoint carries no receipts"
+        if key in metas[0] or key in metas[1]:
+            assert str(metas[0][key]) == str(metas[1][key]), f"{key}: the batched receipts differ from the per-channel kernels'"
 
 
 @pytest.mark.parametrize(

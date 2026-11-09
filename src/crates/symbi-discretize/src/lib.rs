@@ -124,5 +124,5 @@ pub fn kernel_coalesces_layout(kernel_name: &str) -> bool {
         || kernel_name.contains("adiabatic_face_flux")
         || kernel_name.contains("rhd_face_flux")
 }
-pub use gv_ledger::{LedgerChannel, ledger_gv};
+pub use gv_ledger::{LedgerBatch, LedgerChannel, ledger_batch_gv, ledger_gv};
 pub use gv_viscous_azimuthal::{AzimuthalChannel, viscous_azimuthal_gv};

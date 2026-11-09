@@ -661,6 +661,9 @@ fn every_lifted_plane_kernel_is_emitted() {
         for channel in symbi_discretize::LedgerChannel::all() {
             assert_family(&mut missing, format!("{}{sfx}_2d", channel.stem()));
         }
+        for batch in symbi_discretize::LedgerBatch::all() {
+            assert_family(&mut missing, format!("{}{sfx}_2d", batch.stem()));
+        }
     }
     assert!(
         missing.is_empty(),

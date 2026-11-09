@@ -13,12 +13,14 @@
 // cartesian plane. the potential is a single static point mass at the origin, the one the face
 // gravity work admits; a store with any other body gives no wall energy.
 //
-// two implementations share these definitions. on the axisymmetric planes with the azimuthal
-// velocity the production path evaluates each integrand in a kernel (`ledger_gv`) and reduces it
-// where the data lives, an exact sum or a minimum, so device memory needs no host access. the host
-// sums (`*_host`) read host memory after the device queue drains; they serve the other planes and
-// stand as the independent reference the kernel path is gated against. both run only while a
-// ledger scope is open.
+// three implementations share these definitions. on the axisymmetric planes with the azimuthal
+// velocity the production path evaluates the integrands in kernels and reduces them where the data
+// lives, an exact sum or a minimum, so device memory needs no host access: batched, several
+// channels per launch and one synchronization per group (`ledger_batch_gv`), or one kernel and one
+// reduction per channel (`ledger_gv`), the reference the batches equal bit for bit. the host sums
+// (`*_host`) read host memory after the device queue drains; they serve the other planes and stand
+// as the independent reference both kernel paths are gated against. all run only while a ledger
+// scope is open.
 // =============================================================================
 use std::f64::consts::PI;
 
@@ -268,14 +270,30 @@ use crate::regimes::substrate_kernels::{LedgerReduce, ledger_reduce};
 use symbi_discretize::LedgerChannel;
 use symbi_grid::Field;
 
-/// whether the receipts take the kernel path for this store: the two-axis spherical and
-/// cylindrical planes carrying the azimuthal velocity, whose ledger kernels are baked, unless the
-/// process selects the host reference with `SIMBI_LEDGER_REFERENCE=host`. the selection reads the
-/// receipts alone; the evolved state is the same under either
+/// the process's choice of receipt path, read once from `SIMBI_LEDGER_REFERENCE`: `host` selects
+/// the host sums, `channels` the per-channel kernels, and any other value or none the batched
+/// kernels. the selection reads the receipts alone; the evolved state is the same under each
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum LedgerPath {
+    Host,
+    Channels,
+    Batched,
+}
+
+pub fn ledger_path() -> LedgerPath {
+    static PATH: std::sync::OnceLock<LedgerPath> = std::sync::OnceLock::new();
+    *PATH.get_or_init(|| match std::env::var("SIMBI_LEDGER_REFERENCE").as_deref() {
+        Ok("host") => LedgerPath::Host,
+        Ok("channels") => LedgerPath::Channels,
+        _ => LedgerPath::Batched,
+    })
+}
+
+/// whether the receipts take a kernel path for this store: the two-axis spherical and cylindrical
+/// planes carrying the azimuthal velocity, whose ledger kernels are baked, unless the process
+/// selects the host reference
 pub fn kernels_baked<const D: usize, const DOF: usize, Mem: MemoryStorage, Sc: Scalar + OrderedNumeric>(store: &FieldStore<D, DOF, Mem, Sc>) -> bool {
-    static HOST_REFERENCE: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
-    let host = *HOST_REFERENCE.get_or_init(|| std::env::var("SIMBI_LEDGER_REFERENCE").is_ok_and(|v| v == "host"));
-    !host && D == 2 && DOF == 3 && matches!(store.geom.coords, Geometry::Spherical | Geometry::Cylindrical)
+    ledger_path() != LedgerPath::Host && D == 2 && DOF == 3 && matches!(store.geom.coords, Geometry::Spherical | Geometry::Cylindrical)
 }
 
 /// the outward wall rates from the stage's stored fluxes, each integrand reduced by the kernels
@@ -352,4 +370,116 @@ pub fn stage_extremes_kernels<const D: usize, const DOF: usize, Mem: MemoryStora
         extreme(LedgerChannel::LowDensity, LedgerChannel::LocateDensity),
         extreme(LedgerChannel::LowSpecific, LedgerChannel::LocateSpecific),
     )
+}
+
+// ------------------------------- the batched kernel path -------------------------------
+//
+// each batch evaluates several channels in one launch, each into its own slot, and the channels'
+// reductions run together with one synchronization: the wall sums of a stage as one group, the
+// partition as one, the extremes as two (the minima, then the cells holding them). every channel
+// shares its integrand with its per-channel kernel and reduces by the same exact sum or minimum,
+// so the receipts equal the per-channel path's bit for bit.
+
+use crate::regimes::substrate_kernels::ledger_batch_dispatch;
+use symbi_discretize::LedgerBatch;
+
+/// the receipt slots on the store's workspace: one set of `LedgerBatch::MAX_SLOTS` full-domain
+/// fields per plane axis, allocated on the first batched receipt and held for the store's life.
+/// a wall of axis `ax` writes set `ax`, so the walls of both axes evaluate before one reduction;
+/// the two walls of one axis write disjoint planes of the same set
+fn ledger_slots<const D: usize, const DOF: usize, Mem: MemoryStorage + Sync, Sc: Scalar + OrderedNumeric>(store: &FieldStore<D, DOF, Mem, Sc>) -> &[Field<Sc, D, Mem>] {
+    store.workspace.ledger_scratch.get_or_init(|| {
+        (0..2 * LedgerBatch::MAX_SLOTS)
+            .map(|_| Field::<Sc, D, Mem>::zeros(&store.geom.allocated).expect("receipt scratch allocation"))
+            .collect()
+    })
+}
+
+/// the outward wall rates from the stage's stored fluxes: every wall's channels in one launch per
+/// wall, all walls' sums in one reduction
+pub fn wall_transport_batched<const D: usize, const DOF: usize, Mem: MemoryStorage + Sync, Sc: Scalar + OrderedNumeric>(
+    store: &FieldStore<D, DOF, Mem, Sc>,
+) -> Option<[[Transport; 2]; 3]> {
+    let body = match store.immersed.as_ref() {
+        None => false,
+        Some(im) if crate::regimes::substrate_newton::admits_face_gravity_work(store.geom.coords, DOF, im.bodies.bodies()) => true,
+        Some(_) => return None,
+    };
+    let g = &store.geom;
+    let slots = ledger_slots(store);
+    let width = if body { 5 } else { 4 };
+    let mut walls = Vec::with_capacity(4);
+    for ax in 0..2 {
+        let (lo, hi) = (g.interior.spaces[ax].lo, g.interior.spaces[ax].hi);
+        let whole = g.whole_interior(ax);
+        for side in 0..2 {
+            let face = if side == 0 { lo } else { hi };
+            let on_wall = if side == 0 { lo + g.index_offset[ax] == whole.0 } else { hi + g.index_offset[ax] == whole.1 };
+            if !on_wall {
+                continue;
+            }
+            let mut plane = g.interior.clone();
+            plane.spaces[ax].lo = face;
+            plane.spaces[ax].hi = face + 1;
+            let sign = if side == 0 { -1.0 } else { 1.0 };
+            let set = &slots[ax * LedgerBatch::MAX_SLOTS..(ax + 1) * LedgerBatch::MAX_SLOTS];
+            ledger_batch_dispatch(store, set, LedgerBatch::Wall { axis: ax, body }, &plane, [0.0, 0.0], sign);
+            walls.push((ax, side, plane, sign));
+        }
+    }
+    let items: Vec<(&Field<Sc, D, Mem>, &symbi_algebra::Domain<D>)> = walls
+        .iter()
+        .flat_map(|(ax, _, plane, _)| (0..width).map(move |k| (&slots[ax * LedgerBatch::MAX_SLOTS + k], plane)))
+        .collect();
+    let sums: Vec<f64> = symbi_exec::engine::field_sums_exact(&items).iter().map(|s| s.value()).collect();
+    let mut out = [[Transport::default(); 2]; 3];
+    for (ww, (ax, side, _, sign)) in walls.iter().enumerate() {
+        // the slots in `LedgerBatch::Wall` channel order: mass, inflow, energy, angular, potential
+        let s = &sums[ww * width..(ww + 1) * width];
+        let potential = if body { s[4] } else { 0.0 };
+        out[*ax][*side] = Transport { mass: sign * s[0], angular_momentum: sign * s[3], energy: sign * (s[2] + potential), mass_in: s[1] };
+    }
+    Some(out)
+}
+
+/// the volume integrals of total energy, kinetic energy and angular momentum: one launch, one
+/// reduction
+pub fn energy_partition_batched<const D: usize, const DOF: usize, Mem: MemoryStorage + Sync, Sc: Scalar + OrderedNumeric>(store: &FieldStore<D, DOF, Mem, Sc>) -> EnergyPartition {
+    let slots = ledger_slots(store);
+    let interior = &store.geom.interior;
+    ledger_batch_dispatch(store, slots, LedgerBatch::Partition, interior, [0.0, 0.0], 0.0);
+    let sums = symbi_exec::engine::field_sums_exact(&[(&slots[0], interior), (&slots[1], interior), (&slots[2], interior)]);
+    EnergyPartition { energy: sums[0].value(), kinetic: sums[1].value(), angular_momentum: sums[2].value() }
+}
+
+/// the lowest density and specific internal energy and their cells, as [`stage_extremes_kernels`]
+/// reports them: both minima in one launch and one reduction, then both cells in one launch and
+/// one reduction
+pub fn stage_extremes_batched<const D: usize, const DOF: usize, Mem: MemoryStorage + Sync, Sc: Scalar + OrderedNumeric>(store: &FieldStore<D, DOF, Mem, Sc>) -> (Extreme, Extreme) {
+    use symbi_ir::emit::ReductionOp;
+    let g = &store.geom;
+    let slots = ledger_slots(store);
+    ledger_batch_dispatch(store, slots, LedgerBatch::Extremes, &g.interior, [0.0, 0.0], 0.0);
+    let values = symbi_exec::engine::field_reduces(&[(&slots[0], &g.interior), (&slots[1], &g.interior)], ReductionOp::Min);
+    if values.iter().all(|v| *v == f64::INFINITY) {
+        return (Extreme::default(), Extreme::default());
+    }
+    ledger_batch_dispatch(store, slots, LedgerBatch::Locate, &g.interior, [values[0], values[1]], 0.0);
+    let codes = symbi_exec::engine::field_reduces(&[(&slots[0], &g.interior), (&slots[1], &g.interior)], ReductionOp::Min);
+    let extreme = |value: f64, code: f64| {
+        if value == f64::INFINITY {
+            return Extreme::default();
+        }
+        assert!(code.is_finite(), "ledger: no cell holds the reduced minimum {value:e}; the locate channel left its value");
+        let (j, i) = ((code / 65536.0).floor() as isize, (code % 65536.0) as isize);
+        let reported = if value == f64::NEG_INFINITY { f64::NAN } else { value };
+        Extreme { value: reported, cell: [i + g.index_offset[0], j + g.index_offset[1], 0] }
+    };
+    (extreme(values[0], codes[0]), extreme(values[1], codes[1]))
+}
+
+/// the bytes of receipt scratch the store holds: the workspace's ledger fields once allocated
+pub fn scratch_bytes<const D: usize, const DOF: usize, Mem: MemoryStorage, Sc: Scalar + OrderedNumeric>(store: &FieldStore<D, DOF, Mem, Sc>) -> usize {
+    let cells: usize = (0..D).map(|ax| store.geom.allocated.spaces[ax].size() as usize).product();
+    store.workspace.ledger_scratch.get().map_or(0, |fields| fields.len() * cells * std::mem::size_of::<Sc>())
 }

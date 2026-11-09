@@ -103,43 +103,114 @@ fn azimuthal_slot(axes: &[usize]) -> u8 {
     (3 - axes[0] - axes[1]) as u8
 }
 
-pub fn ledger_gv(coords: Coords, axes: &[usize], channel: LedgerChannel) -> KernelProgram {
-    assert!(matches!(coords, Coords::Spherical | Coords::Cylindrical), "the ledger kernels live on the axisymmetric planes");
-    assert_eq!(axes.len(), NDIM, "the ledger kernels run on a two-axis plane");
-    let slot = azimuthal_slot(axes);
-    trace_kernel(|cx| {
-        let spacing = vec![Spacing::Uniform; NDIM];
-        let geo = cell_geometry_gv(cx, coords, &spacing, axes, NDIM);
-        let volume = Gv::ONE / geo.inv_volume;
-        // the distance from the axis of a point given by its two grid coordinates
-        fn lever<'t>(coords: Coords, x0: Gv<'t>, x1: Gv<'t>) -> Gv<'t> {
-            match coords {
-                Coords::Spherical => x0 * x1.sin(),
-                _ => x0,
+/// a group of channels one kernel evaluates together, each into its own scratch slot `lb_{k}` in
+/// the order `channels` lists them
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum LedgerBatch {
+    /// one wall's mass, gross inflow, energy and angular momentum fluxes, with the potential-energy
+    /// flux of the single static body when `body`
+    Wall { axis: usize, body: bool },
+    /// the lowest density and specific internal energy, as their reducible values
+    Extremes,
+    /// the cell codes holding the two minima, against the scalars `ledger_target_density` and
+    /// `ledger_target_specific`
+    Locate,
+    /// the volume integrands of total energy, kinetic energy and angular momentum
+    Partition,
+}
+
+impl LedgerBatch {
+    pub fn channels(self) -> Vec<LedgerChannel> {
+        match self {
+            Self::Wall { axis, body } => {
+                let mut v = vec![
+                    LedgerChannel::WallMass { axis },
+                    LedgerChannel::WallMassIn { axis },
+                    LedgerChannel::WallEnergy { axis },
+                    LedgerChannel::WallAngular { axis },
+                ];
+                if body {
+                    v.push(LedgerChannel::WallPotential { axis });
+                }
+                v
             }
+            Self::Extremes => vec![LedgerChannel::LowDensity, LedgerChannel::LowSpecific],
+            Self::Locate => vec![LedgerChannel::LocateDensity, LedgerChannel::LocateSpecific],
+            Self::Partition => vec![LedgerChannel::Energy, LedgerChannel::Kinetic, LedgerChannel::AngularMomentum],
         }
-        let cell = || {
-            let den = cx.field("den", FieldRef::cons_den());
-            let nrg = cx.field("nrg", FieldRef::cons_nrg());
-            let mom: Vec<Gv> = (0..NCOMP).map(|k| cx.field(&format!("mom_{k}"), FieldRef::cons_mom(k as u8))).collect();
-            let m2 = mom.iter().fold(Gv::ZERO, |acc, m| acc + *m * *m);
-            (den, nrg, mom, m2)
-        };
-        // fn items name the trace brand
-        fn low_density<'t>(den: Gv<'t>) -> Gv<'t> {
-            let infinity = Gv::from_f64(f64::INFINITY);
-            Gv::select(den.abs().cmp_lt(infinity), den, -infinity)
+    }
+
+    /// the kernel name stem, `ledger_batch_<group>` with the wall's axis and body appended
+    pub fn stem(self) -> String {
+        match self {
+            Self::Wall { axis, body } => format!("ledger_batch_wall{}_{axis}", if body { "_body" } else { "" }),
+            Self::Extremes => "ledger_batch_extremes".into(),
+            Self::Locate => "ledger_batch_locate".into(),
+            Self::Partition => "ledger_batch_partition".into(),
         }
-        fn low_specific<'t>(den: Gv<'t>, nrg: Gv<'t>, m2: Gv<'t>) -> Gv<'t> {
-            let infinity = Gv::from_f64(f64::INFINITY);
-            let e = (nrg - Gv::from_f64(0.5) * m2 / den) / den;
-            Gv::select(e.abs().cmp_lt(infinity), Gv::select(m2.abs().cmp_lt(infinity), e, -infinity), -infinity)
+    }
+
+    /// every batch of the family
+    pub fn all() -> Vec<LedgerBatch> {
+        let mut out = vec![Self::Extremes, Self::Locate, Self::Partition];
+        for axis in 0..NDIM {
+            out.extend([Self::Wall { axis, body: false }, Self::Wall { axis, body: true }]);
         }
-        fn located<'t>(value: Gv<'t>, target: Gv<'t>, code: Gv<'t>) -> Gv<'t> {
-            Gv::select(value.cmp_eq(target), code, Gv::from_f64(f64::INFINITY))
+        out
+    }
+
+    /// the most slots any batch writes
+    pub const MAX_SLOTS: usize = 5;
+}
+
+/// the scalar a locate channel compares its value with: `ledger_target` in its own kernel, the
+/// channel's named target inside a batch
+fn target_scalar(channel: LedgerChannel, batched: bool) -> &'static str {
+    match (channel, batched) {
+        (_, false) => "ledger_target",
+        (LedgerChannel::LocateDensity, true) => "ledger_target_density",
+        _ => "ledger_target_specific",
+    }
+}
+
+/// the integrand of each channel in one trace; the per-channel and the batched kernels both build
+/// their values here, so a channel's arithmetic is the same in either
+fn integrands<'t>(cx: symbi_ir::TraceCx<'t>, coords: Coords, axes: &[usize], channels: &[LedgerChannel], batched: bool) -> Vec<Gv<'t>> {
+    let slot = azimuthal_slot(axes);
+    let spacing = vec![Spacing::Uniform; NDIM];
+    let geo = cell_geometry_gv(cx, coords, &spacing, axes, NDIM);
+    let volume = Gv::ONE / geo.inv_volume;
+    // the distance from the axis of a point given by its two grid coordinates
+    fn lever<'t>(coords: Coords, x0: Gv<'t>, x1: Gv<'t>) -> Gv<'t> {
+        match coords {
+            Coords::Spherical => x0 * x1.sin(),
+            _ => x0,
         }
-        let code = || cx.coord(1) * Gv::from_f64(65536.0) + cx.coord(0) * Gv::ONE;
-        let value = match channel {
+    }
+    let cell = || {
+        let den = cx.field("den", FieldRef::cons_den());
+        let nrg = cx.field("nrg", FieldRef::cons_nrg());
+        let mom: Vec<Gv> = (0..NCOMP).map(|k| cx.field(&format!("mom_{k}"), FieldRef::cons_mom(k as u8))).collect();
+        let m2 = mom.iter().fold(Gv::ZERO, |acc, m| acc + *m * *m);
+        (den, nrg, mom, m2)
+    };
+    // fn items name the trace brand
+    fn low_density<'t>(den: Gv<'t>) -> Gv<'t> {
+        let infinity = Gv::from_f64(f64::INFINITY);
+        Gv::select(den.abs().cmp_lt(infinity), den, -infinity)
+    }
+    fn low_specific<'t>(den: Gv<'t>, nrg: Gv<'t>, m2: Gv<'t>) -> Gv<'t> {
+        let infinity = Gv::from_f64(f64::INFINITY);
+        let e = (nrg - Gv::from_f64(0.5) * m2 / den) / den;
+        Gv::select(e.abs().cmp_lt(infinity), Gv::select(m2.abs().cmp_lt(infinity), e, -infinity), -infinity)
+    }
+    fn located<'t>(value: Gv<'t>, target: Gv<'t>, code: Gv<'t>) -> Gv<'t> {
+        Gv::select(value.cmp_eq(target), code, Gv::from_f64(f64::INFINITY))
+    }
+    let code = || cx.coord(1) * Gv::from_f64(65536.0) + cx.coord(0) * Gv::ONE;
+    channels
+        .iter()
+        .map(|&channel| match channel {
             LedgerChannel::Energy => {
                 let (_, nrg, _, _) = cell();
                 nrg * volume
@@ -157,10 +228,10 @@ pub fn ledger_gv(coords: Coords, axes: &[usize], channel: LedgerChannel) -> Kern
                 let (den, nrg, _, m2) = cell();
                 low_specific(den, nrg, m2)
             }
-            LedgerChannel::LocateDensity => located(low_density(cell().0), cx.scalar("ledger_target"), code()),
+            LedgerChannel::LocateDensity => located(low_density(cell().0), cx.scalar(target_scalar(channel, batched)), code()),
             LedgerChannel::LocateSpecific => {
                 let (den, nrg, _, m2) = cell();
-                located(low_specific(den, nrg, m2), cx.scalar("ledger_target"), code())
+                located(low_specific(den, nrg, m2), cx.scalar(target_scalar(channel, batched)), code())
             }
             LedgerChannel::WallMass { axis }
             | LedgerChannel::WallMassIn { axis }
@@ -200,9 +271,31 @@ pub fn ledger_gv(coords: Coords, axes: &[usize], channel: LedgerChannel) -> Kern
                     }
                 }
             }
-        };
+        })
+        .collect()
+}
+
+pub fn ledger_gv(coords: Coords, axes: &[usize], channel: LedgerChannel) -> KernelProgram {
+    assert!(matches!(coords, Coords::Spherical | Coords::Cylindrical), "the ledger kernels live on the axisymmetric planes");
+    assert_eq!(axes.len(), NDIM, "the ledger kernels run on a two-axis plane");
+    trace_kernel(|cx| {
+        let value = integrands(cx, coords, axes, &[channel], false)[0];
         let mut writes = KernelWrites::new();
         writes.push(KernelWrite::new("scratch", FieldRef::Scratch, value.node()));
+        writes
+    })
+}
+
+/// the kernel of a batch: every channel's integrand into its scratch slot `lb_{k}`
+pub fn ledger_batch_gv(coords: Coords, axes: &[usize], batch: LedgerBatch) -> KernelProgram {
+    assert!(matches!(coords, Coords::Spherical | Coords::Cylindrical), "the ledger kernels live on the axisymmetric planes");
+    assert_eq!(axes.len(), NDIM, "the ledger kernels run on a two-axis plane");
+    trace_kernel(|cx| {
+        let values = integrands(cx, coords, axes, &batch.channels(), true);
+        let mut writes = KernelWrites::new();
+        for (k, value) in values.into_iter().enumerate() {
+            writes.push(KernelWrite::new(format!("lb_{k}_out"), format!("lb_{k}"), value.node()));
+        }
         writes
     })
 }

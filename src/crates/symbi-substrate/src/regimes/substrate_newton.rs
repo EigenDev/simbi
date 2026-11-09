@@ -610,14 +610,20 @@ impl<Mem: MemoryStorage + Sync, Sc: Scalar + OrderedNumeric, const D: usize, con
 
     fn wall_transport(&self, sim: &FieldStore<D, DOF, Mem, Sc>) -> Option<[[symbi_sim::conservation_ledger::Transport; 2]; 3]> {
         if crate::regimes::wall_ledger::kernels_baked(sim) {
-            return crate::regimes::wall_ledger::wall_transport_kernels(sim, &self.cfl_scratch);
+            return symbi_sim::driver::prof("receipts_wall", || match crate::regimes::wall_ledger::ledger_path() {
+                crate::regimes::wall_ledger::LedgerPath::Channels => crate::regimes::wall_ledger::wall_transport_kernels(sim, &self.cfl_scratch),
+                _ => crate::regimes::wall_ledger::wall_transport_batched(sim),
+            });
         }
         crate::regimes::wall_ledger::wall_transport(sim)
     }
 
     fn energy_partition(&self, sim: &FieldStore<D, DOF, Mem, Sc>) -> Option<symbi_sim::substrate_seam::EnergyPartition> {
         if crate::regimes::wall_ledger::kernels_baked(sim) {
-            return Some(crate::regimes::wall_ledger::energy_partition_kernels(sim, &self.cfl_scratch));
+            return Some(match crate::regimes::wall_ledger::ledger_path() {
+                crate::regimes::wall_ledger::LedgerPath::Channels => crate::regimes::wall_ledger::energy_partition_kernels(sim, &self.cfl_scratch),
+                _ => crate::regimes::wall_ledger::energy_partition_batched(sim),
+            });
         }
         crate::regimes::wall_ledger::energy_partition(sim)
     }
@@ -631,7 +637,10 @@ impl<Mem: MemoryStorage + Sync, Sc: Scalar + OrderedNumeric, const D: usize, con
         sim: &FieldStore<D, DOF, Mem, Sc>,
     ) -> Option<(symbi_sim::conservation_ledger::Extreme, symbi_sim::conservation_ledger::Extreme)> {
         if crate::regimes::wall_ledger::kernels_baked(sim) {
-            return Some(crate::regimes::wall_ledger::stage_extremes_kernels(sim, &self.cfl_scratch));
+            return Some(symbi_sim::driver::prof("receipts_extremes", || match crate::regimes::wall_ledger::ledger_path() {
+                crate::regimes::wall_ledger::LedgerPath::Channels => crate::regimes::wall_ledger::stage_extremes_kernels(sim, &self.cfl_scratch),
+                _ => crate::regimes::wall_ledger::stage_extremes_batched(sim),
+            }));
         }
         crate::regimes::wall_ledger::stage_extremes(sim)
     }

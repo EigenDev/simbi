@@ -3666,6 +3666,10 @@ fn main() {
         for channel in symbi_discretize::LedgerChannel::all() {
             emit_gv(&out_dir, &format!("{}{sfx}_2d", channel.stem()), 2, &symbi_discretize::ledger_gv(coords, &geom.axes, channel));
         }
+        // the same integrands in batches, several channels per launch
+        for batch in symbi_discretize::LedgerBatch::all() {
+            emit_gv(&out_dir, &format!("{}{sfx}_2d", batch.stem()), 2, &symbi_discretize::ledger_batch_gv(coords, &geom.axes, batch));
+        }
         let feedback = body_feedback_gv(MAX_SOURCE_BODIES, coords, 2, ncomp, &geom.axes);
         emit_gv(&out_dir, &format!("body_feedback{sfx}_2d"), 2, &feedback);
         // the correction's freeze parachute evolved by the point mass, on the three momenta

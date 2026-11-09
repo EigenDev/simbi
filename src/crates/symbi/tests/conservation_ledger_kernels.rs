@@ -12,6 +12,8 @@
 // the sums differ by reassociation alone: the kernel path sums exactly and rounds once, the host
 // folds in sequence, so for n terms of one sign they differ by at most (n + 1) u |sum|, u = 2^-53
 // (Higham 2002, eq. 4.4). the extremes agree bit for bit, cell for cell.
+// the batched kernels, several channels per launch and one reduction per group, equal the
+// per-channel kernels bit for bit in every receipt, extreme and cell.
 //
 // run: cargo test -p symbi --test conservation_ledger_kernels
 // =============================================================================
@@ -127,7 +129,43 @@ fn same_extreme(label: &str, kernel: Extreme, host: Extreme) {
     assert!(same_value && kernel.cell == host.cell, "{label}: kernel {kernel:?} against host {host:?}");
 }
 
+fn same_bits(label: &str, batched: f64, kernel: f64) {
+    assert_eq!(batched.to_bits(), kernel.to_bits(), "{label}: batched {batched:e} against per-channel {kernel:e}");
+}
+
+/// the batched receipts against the per-channel kernels, bit for bit
+fn compare_batched(label: &str, store: &Store, k: &Kern) {
+    let (kernel, batched) = (
+        wall_ledger::wall_transport_kernels(store, &k.cfl_scratch).expect("the kernel wall transport"),
+        wall_ledger::wall_transport_batched(store).expect("the batched wall transport"),
+    );
+    for ax in 0..2 {
+        for side in 0..2 {
+            let (a, b) = (batched[ax][side], kernel[ax][side]);
+            same_bits(&format!("{label} wall {ax}/{side} mass"), a.mass, b.mass);
+            same_bits(&format!("{label} wall {ax}/{side} mass in"), a.mass_in, b.mass_in);
+            same_bits(&format!("{label} wall {ax}/{side} angular momentum"), a.angular_momentum, b.angular_momentum);
+            same_bits(&format!("{label} wall {ax}/{side} energy"), a.energy, b.energy);
+        }
+    }
+    let (a, b) = (wall_ledger::energy_partition_batched(store), wall_ledger::energy_partition_kernels(store, &k.cfl_scratch));
+    same_bits(&format!("{label} energy"), a.energy, b.energy);
+    same_bits(&format!("{label} kinetic"), a.kinetic, b.kinetic);
+    same_bits(&format!("{label} angular momentum"), a.angular_momentum, b.angular_momentum);
+    compare_batched_extremes(label, store, k);
+    assert!(wall_ledger::scratch_bytes(store) > 0, "{label}: the batched receipts hold no scratch; they did not run");
+}
+
+fn compare_batched_extremes(label: &str, store: &Store, k: &Kern) {
+    let (a, b) = (wall_ledger::stage_extremes_batched(store), wall_ledger::stage_extremes_kernels(store, &k.cfl_scratch));
+    for (name, x, y) in [("density", a.0, b.0), ("specific internal energy", a.1, b.1)] {
+        same_extreme(&format!("{label} batched {name}"), x, y);
+        assert!(x.value.to_bits() == y.value.to_bits() || (x.value.is_nan() && y.value.is_nan()), "{label} batched {name}: {x:?} against {y:?}");
+    }
+}
+
 fn compare(label: &str, store: &Store, k: &Kern) {
+    compare_batched(label, store, k);
     let kernel = wall_ledger::wall_transport_kernels(store, &k.cfl_scratch).expect("the kernel wall transport");
     let host = wall_ledger::wall_transport_host(store).expect("the host wall transport");
     let mut booked = 0;
@@ -202,10 +240,12 @@ fn the_kernel_extremes_report_planted_cells_as_the_host_scan_does() {
     let (a, b) = (wall_ledger::stage_extremes_kernels(&*sim, &k.cfl_scratch), wall_ledger::stage_extremes_host(&*sim).expect("host"));
     assert!(b.1.value < 0.0 && b.1.cell == [5, 3, 0], "the planted negative energy is not the host's minimum: {:?}", b.1);
     same_extreme("negative energy", a.1, b.1);
+    compare_batched_extremes("negative energy", &sim, &k);
     plant(&sim, [9, 6], f64::NAN, 1.0);
     plant(&sim, [2, 4], f64::INFINITY, 1.0);
     let (a, b) = (wall_ledger::stage_extremes_kernels(&*sim, &k.cfl_scratch), wall_ledger::stage_extremes_host(&*sim).expect("host"));
     assert!(b.0.value.is_nan() && b.0.cell == [2, 4, 0], "the host scan's first non-finite density: {:?}", b.0);
     same_extreme("non-finite density", a.0, b.0);
     same_extreme("non-finite specific energy", a.1, b.1);
+    compare_batched_extremes("non-finite", &sim, &k);
 }

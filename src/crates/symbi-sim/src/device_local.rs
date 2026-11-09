@@ -203,6 +203,7 @@ pub fn mirror_store<Src: MemorySpace, Dst: MemoryStorage, const D: usize, const 
         troubled_once: Mutex::new(*w.troubled_once.lock().expect("the troubled-cell slot")),
         inadmissible_once: Mutex::new(*w.inadmissible_once.lock().expect("the inadmissible-candidate slot")),
         body_scratch: std::sync::OnceLock::new(),
+        ledger_scratch: std::sync::OnceLock::new(),
         #[cfg(debug_assertions)]
         stage_writes: Mutex::new(None),
         census_scratch: std::sync::OnceLock::new(),

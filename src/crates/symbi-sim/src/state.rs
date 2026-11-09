@@ -1162,6 +1162,9 @@ pub struct RkWorkspaceGeneric<
     /// fields, the combined curvilinear path MAX_SOURCE_BODIES*(D+5); a sim's geometry picks
     /// exactly one path for its lifetime.
     pub body_scratch: std::sync::OnceLock<Vec<Field<Sc, NDIM, M>>>,
+    /// the conservation receipts' integrand scratch: one full-domain field per batched channel,
+    /// allocated on the first receipt and reused by every stage after
+    pub ledger_scratch: std::sync::OnceLock<Vec<Field<Sc, NDIM, M>>>,
     /// the stage-local write ledger (debug builds only): the set of buffers a dispatch has
     /// written since the stage began, identified by address so the several wire names that alias
     /// one buffer (`prim.mag[k]` / `bcell[k]` / `cons.mag_k`, `flux.mag_k` / `bf_d_c`) collapse to
@@ -3496,6 +3499,7 @@ where
             troubled_once: std::sync::Mutex::new(None),
             inadmissible_once: std::sync::Mutex::new(None),
             body_scratch: std::sync::OnceLock::new(),
+            ledger_scratch: std::sync::OnceLock::new(),
             #[cfg(debug_assertions)]
             stage_writes: std::sync::Mutex::new(None),
             census_scratch: std::sync::OnceLock::new(),

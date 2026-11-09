@@ -1126,6 +1126,60 @@ where
     }
 }
 
+/// one batch of conservation-ledger channels (`symbi_discretize::ledger_batch_gv`) on the
+/// axisymmetric plane with the azimuthal velocity: every channel's integrand over `domain` into
+/// `slots[k]`, the scratch field of the batch's slot `lb_{k}`, in one launch. the launch enters the
+/// same in-order queue as the reductions that read the slots, so the reductions' own
+/// synchronization orders the host read after it. `targets` binds the locate channels' values and
+/// `sign` the wall's outward sign
+pub fn ledger_batch_dispatch<const D: usize, const DOF: usize, Mem, Sc>(
+    sim: &FieldStore<D, DOF, Mem, Sc>,
+    slots: &[Field<Sc, D, Mem>],
+    batch: symbi_discretize::LedgerBatch,
+    domain: &Domain<D>,
+    targets: [f64; 2],
+    sign: f64,
+) where
+    Mem: MemoryStorage,
+    Sc: Scalar + OrderedNumeric,
+{
+    use symbi_discretize::LedgerBatch as B;
+    let name = format!("{}{}_{D}d", batch.stem(), geom_suffix(sim.geom.coords, DOF, D));
+    let g = &sim.geom;
+    let (x_lo, dx) = kernel_geom(&g.x_lo, &g.dx, &g.maps, g.coords, 1.0);
+    let bodies = sim.immersed.as_ref().map(|im| &im.bodies);
+    let scalars = scalars_for(&name, |bind| {
+        Sc::from_f64(match bind {
+            ScalarBind::Spec(s) => match &**s {
+                "ledger_target_density" => targets[0],
+                "ledger_target_specific" => targets[1],
+                "outward_sign" => sign,
+                other => panic!("ledger kernel '{name}': unexpected scalar {other}"),
+            },
+            ScalarBind::Ref(ScalarRef::Body { idx, field }) => body_scalar::<D>(bodies, *idx, *field),
+            ScalarBind::Ref(sref) => geom_scalar(&x_lo, &dx, &g.maps, &g.index_offset, *sref)
+                .unwrap_or_else(|| panic!("ledger kernel '{name}': unexpected scalar {sref:?}")),
+        })
+    });
+    let axis = match batch {
+        B::Wall { axis, .. } => axis,
+        _ => 0,
+    };
+    assert!(slots.len() >= batch.channels().len(), "ledger kernel '{name}': {} slots for {} channels", slots.len(), batch.channels().len());
+    let (inputs, outputs) = bind_by_manifest(&name, |b| match b {
+        FieldBind::Ref(fref) => resolve_path(sim, Some(&sim.fields.cons.den), None, axis, *fref),
+        other => {
+            let slot = free_payload("ledger batch", other);
+            let k: usize = slot
+                .strip_prefix("lb_")
+                .and_then(|k| k.parse().ok())
+                .unwrap_or_else(|| panic!("ledger kernel '{name}': unknown manifest slot '{slot}'"));
+            &slots[k]
+        }
+    });
+    super::exec::dispatch_fields_each::<Sc, Mem, D>(&name, domain, &inputs, &outputs, &[], &scalars);
+}
+
 /// the body pass of a single static potential on an adiabatic axisymmetric plane: the momentum
 /// source of [`dispatch_body_source`] with gravity's energy work taken from this stage's face mass
 /// fluxes. reads `flux[d].den` on the cell's own faces, so the flux pass of the same stage precedes
