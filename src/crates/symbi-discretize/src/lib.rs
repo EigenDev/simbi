@@ -117,11 +117,19 @@ pub fn kernel_keeps_chain_rounding(kernel_name: &str) -> bool {
     kernel_name.starts_with("wb_band_encode") || kernel_name.starts_with("wb_band_decode")
 }
 
+/// the conservation receipts' integrand kernels, one channel per kernel or several per batch. a
+/// channel's integrand is the same trace in either, and a compiler free to fuse picks its fused
+/// products from the surrounding code, which differs between them; these kernels round each
+/// operation as written, so a receipt is one value on either path and equals the host's term
+pub fn kernel_keeps_receipt_rounding(kernel_name: &str) -> bool {
+    kernel_name.starts_with("ledger_")
+}
+
 /// the device compile directive of a kernel whose rounding must follow its source term by term.
 /// a pragma scopes the choice to the kernel's own compile unit; every other kernel keeps the
 /// compiler's default contraction
 pub fn kernel_device_preamble(kernel_name: &str) -> Vec<String> {
-    if kernel_keeps_chain_rounding(kernel_name) {
+    if kernel_keeps_chain_rounding(kernel_name) || kernel_keeps_receipt_rounding(kernel_name) {
         vec!["#pragma clang fp contract(off)".to_string()]
     } else {
         Vec::new()
