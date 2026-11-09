@@ -108,6 +108,26 @@ pub use gv_viscous::{
 pub use lattice::LatticeMap;
 pub use symbi_ir::{Gv, GvKernel};
 
+/// the conservation receipts' integrand kernels, one channel per kernel or several per batch. a
+/// channel's integrand is one trace in either, and a compiler free to fuse picks which products
+/// keep their rounding from the surrounding code, which differs between a channel's own kernel and
+/// its batch; these kernels round each operation as written, so a channel's integrand is one value
+/// at every face in either kernel
+pub fn kernel_keeps_receipt_rounding(kernel_name: &str) -> bool {
+    kernel_name.starts_with("ledger_")
+}
+
+/// the device compile directive of a kernel whose rounding follows its source term by term. a
+/// pragma scopes the choice to the kernel's own compile unit; every other kernel keeps the
+/// compiler's default contraction
+pub fn kernel_device_preamble(kernel_name: &str) -> Vec<String> {
+    if kernel_keeps_receipt_rounding(kernel_name) {
+        vec!["#pragma clang fp contract(off)".to_string()]
+    } else {
+        Vec::new()
+    }
+}
+
 /// whether a kernel's buffers all share one allocated layout, so the cell index
 /// can be computed once and shared across reads. true for the single-layout
 /// cell-centered kernels — c2p (cons<->prim), wave-speed maps (prim -> scalar
