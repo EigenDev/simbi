@@ -78,7 +78,8 @@ def _guards(done) -> dict:
 
 
 def _restart_file(tmp_path: Path) -> Path:
-    """a step-0 checkpoint of the same configuration carrying the fixture's state, time and step"""
+    """a step-0 checkpoint of the same configuration carrying the fixture's state, time and step,
+    on the level and in the metadata alike"""
     _run(tmp_path / "base", 1)
     target = tmp_path / "resume.h5"
     shutil.copy(next((tmp_path / "base").glob("*.chkpt.000_000.h5")), target)
@@ -91,6 +92,9 @@ def _restart_file(tmp_path: Path) -> Path:
             level[f"partition_0/hydro/primitives/{name}"][...] = arrays[name]
         level.attrs["time"] = time
         level.attrs["iteration"] = step
+        # the run clock a restart starts from: every driver resumes the fixture's time and step
+        f["metadata"].attrs["time"] = time
+        f["metadata"].attrs["iteration"] = np.uint64(step)
     return target
 
 
