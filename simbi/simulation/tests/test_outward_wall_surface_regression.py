@@ -15,7 +15,7 @@
 #   fixture's state
 # - a restart inside the window continues it bit for bit
 # - four host tiles, and four launched workers, cut through the faces of cell [68, 18] equal the
-#   single device bit for bit
+#   single device bit for bit, on the same final step and physical clock
 # a failed recovery's stop is gated on a planted unrecoverable cell in
 # src/crates/symbi/tests/lifted_recovery_acceptance.rs
 #
@@ -182,6 +182,10 @@ def test_tiles_cut_through_the_corrected_cell_equal_the_single_device(tmp_path: 
     a, b = (next((tmp_path / d).glob("*.chkpt.final.h5")) for d in ("tiles", "single"))
     with h5py.File(a, "r") as fa, h5py.File(b, "r") as fb:
         assert int(fa["level_0"].attrs["iteration"]) == int(fb["level_0"].attrs["iteration"]) == end
+        # the same physical clock: a run resumed onto another clock can end on the same step and fields
+        for group in ("level_0", "metadata"):
+            ta, tb = float(fa[group].attrs["time"]), float(fb[group].attrs["time"])
+            assert ta.hex() == tb.hex(), f"{group} time: the tiles end at t = {ta!r}, the single device at t = {tb!r}"
         for name in CONSERVED:
             x, y = fa[f"level_0/conserved/{name}"][()], fb[f"level_0/conserved/{name}"][()]
             assert x.shape == y.shape and np.array_equal(x[2:-2, 2:-2].view(np.uint64), y[2:-2, 2:-2].view(np.uint64)), f"{name}: the tiles differ from the single device"
@@ -199,6 +203,10 @@ def test_workers_cut_through_the_corrected_cell_equal_the_single_device(tmp_path
     a, b = run.final, next((tmp_path / "single").glob("*.chkpt.final.h5"))
     with h5py.File(a, "r") as fa, h5py.File(b, "r") as fb:
         assert int(fa["level_0"].attrs["iteration"]) == int(fb["level_0"].attrs["iteration"]) == end
+        # the same physical clock: a run resumed onto another clock can end on the same step and fields
+        for group in ("level_0", "metadata"):
+            ta, tb = float(fa[group].attrs["time"]), float(fb[group].attrs["time"])
+            assert ta.hex() == tb.hex(), f"{group} time: the workers end at t = {ta!r}, the single device at t = {tb!r}"
         for name in CONSERVED:
             x, y = fa[f"level_0/conserved/{name}"][()], fb[f"level_0/conserved/{name}"][()]
             assert x.shape == y.shape and np.array_equal(x[2:-2, 2:-2].view(np.uint64), y[2:-2, 2:-2].view(np.uint64)), f"{name}: the workers differ from the single device"
