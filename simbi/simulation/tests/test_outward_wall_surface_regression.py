@@ -14,6 +14,8 @@
 #   cell, and mass, angular momentum and E + rho Phi closing against the receipts from the
 #   fixture's state
 # - a restart inside the window continues it bit for bit
+# - a resume capped at its own step keeps the stored primitives on the single grid and on tiles
+#   alike, with one stored pressure planted one ulp off its recovered value
 # - four host tiles, and four launched workers, cut through the faces of cell [68, 18] equal the
 #   single device bit for bit, on the same final step and physical clock
 # a failed recovery's stop is gated on a planted unrecoverable cell in
@@ -170,6 +172,35 @@ def test_a_restart_inside_the_corrected_window_continues_it_bit_for_bit(tmp_path
     whole, second = (next((tmp_path / d).glob("*.chkpt.final.h5")) for d in ("whole", "second"))
     ph.same_checkpoint(second, whole, "the window resumed inside the correction against the uninterrupted window",
                        exclude=("body_diagnostics",), expect=("level_0",))
+
+
+def test_a_zero_step_resume_keeps_the_stored_primitives_on_every_driver(tmp_path: Path) -> None:
+    resume = _restart_file(tmp_path)
+    with h5py.File(resume, "r+") as f:
+        # the restart file keeps checkpoint index zero, the opening-checkpoint branch of a resume
+        index = int(f["metadata"].attrs["checkpoint_index"])
+        assert index == 0, f"the restart file carries checkpoint index {index}; the opening branch at index zero goes untested"
+        # one ulp on one stored pressure at the corrected cell: a recovery from the conserved state
+        # gives the unplanted value back, a resume that keeps the stored primitives gives this one
+        pre = f["level_0/partition_0/hydro/primitives/pre"]
+        planted = pre[()]
+        planted[2 + 18, 2 + 68] = np.nextafter(planted[2 + 18, 2 + 68], np.inf)
+        pre[...] = planted
+        stored = {name: f[f"level_0/partition_0/hydro/primitives/{name}"][()] for name in PRIMITIVE}
+        stored_conserved = {name: f[f"level_0/conserved/{name}"][()] for name in CONSERVED}
+    # a step cap at the resumed step evolves nothing on either driver
+    _run(tmp_path / "single", STEP, resume)
+    _run(tmp_path / "tiles", STEP, resume, extra=", gpus=4, decompose=[[68], [18]]", devices=4)
+    for driver in ("single", "tiles"):
+        with h5py.File(next((tmp_path / driver).glob("*.chkpt.final.h5")), "r") as f:
+            level = f["level_0"]
+            assert int(level.attrs["iteration"]) == STEP and float(level.attrs["time"]).hex() == float(_fixture()[0]).hex(), f"{driver}: the resume moved the clock"
+            for name in PRIMITIVE:
+                got = level[f"partition_0/hydro/primitives/{name}"][()][2:-2, 2:-2]
+                assert np.array_equal(got.view(np.uint64), stored[name][2:-2, 2:-2].view(np.uint64)), f"{driver}: {name} is not the stored primitive"
+            for name in CONSERVED:
+                got = level[f"conserved/{name}"][()][2:-2, 2:-2]
+                assert np.array_equal(got.view(np.uint64), stored_conserved[name][2:-2, 2:-2].view(np.uint64)), f"{driver}: {name} is not the stored state"
 
 
 def test_tiles_cut_through_the_corrected_cell_equal_the_single_device(tmp_path: Path) -> None:

@@ -6573,10 +6573,13 @@ where
     }
     // t=start initial condition. every device finishes its seeding before the staging reads.
     if cfg.checkpoint_index == 0 || cfg.start_time == 0.0 {
-        // the builders seed the conserved state; the initial checkpoint publishes the primitives
-        // the march starts from, recovered on every tile as the single grid's priming does
+        // the initial checkpoint publishes the primitives the march starts from: recovered from the
+        // seeded conserved state on a fresh tile, the stored ones on a tile its checkpoint loaded,
+        // as the single grid's priming does
         for (k, (s, kern)) in tiles.iter().enumerate() {
-            symbi::symbi_xpu::with_device(devices[k], || kern.c2p(&**s));
+            if !s.primitives_loaded {
+                symbi::symbi_xpu::with_device(devices[k], || kern.c2p(&**s));
+            }
         }
         symbi::sim::decomp::drain_devices::<Mem>(&devices);
         let sh: Vec<_> = tiles.iter().map(|(s, _)| &**s).collect();
